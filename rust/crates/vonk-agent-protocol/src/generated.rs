@@ -142,6 +142,7 @@ pub enum AgentClaimPayload {
     RecipeInstallPayload(RecipeInstallPayload),
     RecipeStartPayload(RecipeStartPayload),
     RecipeStopPayload(RecipeStopPayload),
+    RecipeReconcilePayload(RecipeReconcilePayload),
     RecipeUninstallPayload(RecipeUninstallPayload),
 }
 impl ::std::convert::From<RuntimePreflightRequest> for AgentClaimPayload {
@@ -192,6 +193,11 @@ impl ::std::convert::From<RecipeStartPayload> for AgentClaimPayload {
 impl ::std::convert::From<RecipeStopPayload> for AgentClaimPayload {
     fn from(value: RecipeStopPayload) -> Self {
         Self::RecipeStopPayload(value)
+    }
+}
+impl ::std::convert::From<RecipeReconcilePayload> for AgentClaimPayload {
+    fn from(value: RecipeReconcilePayload) -> Self {
+        Self::RecipeReconcilePayload(value)
     }
 }
 impl ::std::convert::From<RecipeUninstallPayload> for AgentClaimPayload {
@@ -344,6 +350,8 @@ pub enum AgentOperation {
     RecipeStop,
     #[serde(rename = "recipe.uninstall")]
     RecipeUninstall,
+    #[serde(rename = "recipe.reconcile")]
+    RecipeReconcile,
 }
 impl ::std::fmt::Display for AgentOperation {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
@@ -359,6 +367,7 @@ impl ::std::fmt::Display for AgentOperation {
             Self::RecipeJobRunV1 => f.write_str("recipe.job.run.v1"),
             Self::RecipeStop => f.write_str("recipe.stop"),
             Self::RecipeUninstall => f.write_str("recipe.uninstall"),
+            Self::RecipeReconcile => f.write_str("recipe.reconcile"),
         }
     }
 }
@@ -377,6 +386,7 @@ impl ::std::str::FromStr for AgentOperation {
             "recipe.job.run.v1" => Ok(Self::RecipeJobRunV1),
             "recipe.stop" => Ok(Self::RecipeStop),
             "recipe.uninstall" => Ok(Self::RecipeUninstall),
+            "recipe.reconcile" => Ok(Self::RecipeReconcile),
             _ => Err("invalid value".into()),
         }
     }
@@ -458,6 +468,7 @@ pub enum AgentResultResult {
     AgentInstallResult(AgentInstallResult),
     RecipeStartResult(RecipeStartResult),
     RecipeStopResult(RecipeStopResult),
+    RecipeReconcileResult(RecipeReconcileResult),
     RecipeUninstallResult(RecipeUninstallResult),
     RecipeBuildEvidence(RecipeBuildEvidence),
     RecipeBuildCleanupEvidence(RecipeBuildCleanupEvidence),
@@ -485,6 +496,11 @@ impl ::std::convert::From<RecipeStartResult> for AgentResultResult {
 impl ::std::convert::From<RecipeStopResult> for AgentResultResult {
     fn from(value: RecipeStopResult) -> Self {
         Self::RecipeStopResult(value)
+    }
+}
+impl ::std::convert::From<RecipeReconcileResult> for AgentResultResult {
+    fn from(value: RecipeReconcileResult) -> Self {
+        Self::RecipeReconcileResult(value)
     }
 }
 impl ::std::convert::From<RecipeUninstallResult> for AgentResultResult {
@@ -1922,6 +1938,8 @@ pub struct ExecuteContainerRuntimeRequestOperation {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub observation_identity_sha256: ::std::option::Option<::std::string::String>,
     pub operation_id: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
@@ -2307,6 +2325,8 @@ pub struct HostRuntimeGrantRequest {
     pub job_id: ::uuid::Uuid,
     pub node_id: ::std::string::String,
     pub operation_id: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
 }
 #[derive(
@@ -2401,6 +2421,8 @@ pub struct HostRuntimeRequest {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
     pub operation_id: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub schema_version: u8,
 }
 #[derive(
@@ -4346,6 +4368,7 @@ pub enum RecipeOperationRequestPayload {
     StartPayload(RecipeStartPayload),
     StopPayload(RecipeStopPayload),
     UninstallPayload(RecipeUninstallPayload),
+    ReconcilePayload(RecipeReconcilePayload),
 }
 impl ::std::convert::From<RecipeInstallPayload> for RecipeOperationRequestPayload {
     fn from(value: RecipeInstallPayload) -> Self {
@@ -4366,6 +4389,55 @@ impl ::std::convert::From<RecipeUninstallPayload> for RecipeOperationRequestPayl
     fn from(value: RecipeUninstallPayload) -> Self {
         Self::UninstallPayload(value)
     }
+}
+impl ::std::convert::From<RecipeReconcilePayload> for RecipeOperationRequestPayload {
+    fn from(value: RecipeReconcilePayload) -> Self {
+        Self::ReconcilePayload(value)
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RecipeReconcilePayload {
+    pub compiled_spec_canonical_sha256: ::std::string::String,
+    pub install_operation_id: ::uuid::Uuid,
+    pub install_operation_payload_sha256: ::std::string::String,
+    pub installation_id: ::uuid::Uuid,
+    pub node_id: ::std::string::String,
+    pub plan_digest: ::std::string::String,
+    pub recipe_content_sha256: ::std::string::String,
+    pub recipe_revision_id: ::uuid::Uuid,
+    pub schema_version: u8,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RecipeReconcileResult {
+    pub cleanup_receipt_sha256: ::std::string::String,
+    pub compiled_spec_canonical_sha256: ::std::string::String,
+    pub install_operation_id: ::uuid::Uuid,
+    pub install_operation_payload_sha256: ::std::string::String,
+    pub installation_id: ::uuid::Uuid,
+    pub node_id: ::std::string::String,
+    pub plan_digest: ::std::string::String,
+    pub recipe_content_sha256: ::std::string::String,
+    pub recipe_revision_id: ::uuid::Uuid,
+    pub reconciled: bool,
+    pub removed_bytes: u64,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RecipeReconciliationIdentity {
+    pub compiled_spec_canonical_sha256: ::std::string::String,
+    pub install_operation_id: ::uuid::Uuid,
+    pub install_operation_payload_sha256: ::std::string::String,
+    pub installation_id: ::uuid::Uuid,
+    pub node_id: ::std::string::String,
+    pub plan_digest: ::std::string::String,
+    pub recipe_content_sha256: ::std::string::String,
+    pub recipe_revision_id: ::uuid::Uuid,
+    pub schema_version: u8,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -6769,6 +6841,7 @@ impl AgentOperation {
             Self::RecipeJobRunV1 => "recipe.job.run.v1",
             Self::RecipeStop => "recipe.stop",
             Self::RecipeUninstall => "recipe.uninstall",
+            Self::RecipeReconcile => "recipe.reconcile",
         }
     }
 }
@@ -6828,6 +6901,8 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
             RecipeStop,
             #[serde(rename = "recipe.uninstall")]
             RecipeUninstall,
+            #[serde(rename = "recipe.reconcile")]
+            RecipeReconcile,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
@@ -6842,6 +6917,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
             Raw::RecipeJobRunV1 => Self::RecipeJobRunV1,
             Raw::RecipeStop => Self::RecipeStop,
             Raw::RecipeUninstall => Self::RecipeUninstall,
+            Raw::RecipeReconcile => Self::RecipeReconcile,
         })
     }
 }
@@ -8364,6 +8440,8 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub observation_identity_sha256: ::std::option::Option<::std::string::String>,
             pub operation_id: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
             #[serde(rename = "type")]
             pub type_: ::std::string::String,
@@ -8377,6 +8455,7 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             job_id: raw.job_id,
             observation_identity_sha256: raw.observation_identity_sha256,
             operation_id: raw.operation_id,
+            reconciliation_identity: raw.reconciliation_identity,
             request_sha256: raw.request_sha256,
             type_: raw.type_,
         })
@@ -8739,6 +8818,8 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             pub job_id: ::uuid::Uuid,
             pub node_id: ::std::string::String,
             pub operation_id: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -8751,6 +8832,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             job_id: raw.job_id,
             node_id: raw.node_id,
             operation_id: raw.operation_id,
+            reconciliation_identity: raw.reconciliation_identity,
             request_sha256: raw.request_sha256,
         })
     }
@@ -8803,6 +8885,8 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
             pub operation_id: ::uuid::Uuid,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub schema_version: u8,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -8815,6 +8899,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             job_id: raw.job_id,
             observation: raw.observation,
             operation_id: raw.operation_id,
+            reconciliation_identity: raw.reconciliation_identity,
             schema_version: raw.schema_version,
         })
     }
@@ -11211,6 +11296,109 @@ impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequest {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RecipeReconcilePayload {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeReconcilePayload", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub compiled_spec_canonical_sha256: ::std::string::String,
+            pub install_operation_id: ::uuid::Uuid,
+            pub install_operation_payload_sha256: ::std::string::String,
+            pub installation_id: ::uuid::Uuid,
+            pub node_id: ::std::string::String,
+            pub plan_digest: ::std::string::String,
+            pub recipe_content_sha256: ::std::string::String,
+            pub recipe_revision_id: ::uuid::Uuid,
+            pub schema_version: u8,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            compiled_spec_canonical_sha256: raw.compiled_spec_canonical_sha256,
+            install_operation_id: raw.install_operation_id,
+            install_operation_payload_sha256: raw.install_operation_payload_sha256,
+            installation_id: raw.installation_id,
+            node_id: raw.node_id,
+            plan_digest: raw.plan_digest,
+            recipe_content_sha256: raw.recipe_content_sha256,
+            recipe_revision_id: raw.recipe_revision_id,
+            schema_version: raw.schema_version,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeReconcileResult {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeReconcileResult", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub cleanup_receipt_sha256: ::std::string::String,
+            pub compiled_spec_canonical_sha256: ::std::string::String,
+            pub install_operation_id: ::uuid::Uuid,
+            pub install_operation_payload_sha256: ::std::string::String,
+            pub installation_id: ::uuid::Uuid,
+            pub node_id: ::std::string::String,
+            pub plan_digest: ::std::string::String,
+            pub recipe_content_sha256: ::std::string::String,
+            pub recipe_revision_id: ::uuid::Uuid,
+            pub reconciled: bool,
+            pub removed_bytes: u64,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            cleanup_receipt_sha256: raw.cleanup_receipt_sha256,
+            compiled_spec_canonical_sha256: raw.compiled_spec_canonical_sha256,
+            install_operation_id: raw.install_operation_id,
+            install_operation_payload_sha256: raw.install_operation_payload_sha256,
+            installation_id: raw.installation_id,
+            node_id: raw.node_id,
+            plan_digest: raw.plan_digest,
+            recipe_content_sha256: raw.recipe_content_sha256,
+            recipe_revision_id: raw.recipe_revision_id,
+            reconciled: raw.reconciled,
+            removed_bytes: raw.removed_bytes,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeReconciliationIdentity {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        crate::wire_schema::validate_and_materialize("RecipeReconciliationIdentity", &mut value)
+            .map_err(::serde::de::Error::custom)?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub compiled_spec_canonical_sha256: ::std::string::String,
+            pub install_operation_id: ::uuid::Uuid,
+            pub install_operation_payload_sha256: ::std::string::String,
+            pub installation_id: ::uuid::Uuid,
+            pub node_id: ::std::string::String,
+            pub plan_digest: ::std::string::String,
+            pub recipe_content_sha256: ::std::string::String,
+            pub recipe_revision_id: ::uuid::Uuid,
+            pub schema_version: u8,
+        }
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            compiled_spec_canonical_sha256: raw.compiled_spec_canonical_sha256,
+            install_operation_id: raw.install_operation_id,
+            install_operation_payload_sha256: raw.install_operation_payload_sha256,
+            installation_id: raw.installation_id,
+            node_id: raw.node_id,
+            plan_digest: raw.plan_digest,
+            recipe_content_sha256: raw.recipe_content_sha256,
+            recipe_revision_id: raw.recipe_revision_id,
+            schema_version: raw.schema_version,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RecipeRunInspectionBinding {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -13416,6 +13604,21 @@ impl From<&RecipeJobOutputManifest> for RecipeJobOutputManifestContent {
             files: value.files.clone(),
             schema_version: value.schema_version,
             total_bytes: value.total_bytes,
+        }
+    }
+}
+impl From<&RecipeReconcilePayload> for RecipeReconciliationIdentity {
+    fn from(value: &RecipeReconcilePayload) -> Self {
+        Self {
+            compiled_spec_canonical_sha256: value.compiled_spec_canonical_sha256.clone(),
+            install_operation_id: value.install_operation_id,
+            install_operation_payload_sha256: value.install_operation_payload_sha256.clone(),
+            installation_id: value.installation_id,
+            node_id: value.node_id.clone(),
+            plan_digest: value.plan_digest.clone(),
+            recipe_content_sha256: value.recipe_content_sha256.clone(),
+            recipe_revision_id: value.recipe_revision_id,
+            schema_version: value.schema_version,
         }
     }
 }

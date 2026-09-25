@@ -994,6 +994,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recipe/installations/{installation_id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Installation Reconciliation */
+        post: operations["applyRecipeInstallationReconciliation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recipe/installations/{installation_id}/reconcile/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Installation Reconciliation */
+        post: operations["previewRecipeInstallationReconciliation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recipe/library": {
         parameters: {
             query?: never;
@@ -1168,6 +1202,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/run-switch/operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Switch Operation */
+        get: operations["getRunSwitchOperation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1245,7 +1296,7 @@ export interface components {
          * AgentOperation
          * @enum {string}
          */
-        AgentOperation: "runtime.preflight.v1" | "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.build.cleanup.v1" | "recipe.image.import.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall";
+        AgentOperation: "runtime.preflight.v1" | "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.build.cleanup.v1" | "recipe.image.import.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall" | "recipe.reconcile";
         /** AgentOperationChange */
         AgentOperationChange: {
             /** Entity Id */
@@ -1535,6 +1586,67 @@ export interface components {
             min_files: number;
         };
         /**
+         * ArtifactStorageImpact
+         * @description Byte impact with unknown values preserved as unknown, never guessed.
+         */
+        ArtifactStorageImpact: {
+            /** Artifact Digests */
+            artifact_digests?: string[];
+            /** Artifact Set Bytes */
+            artifact_set_bytes?: number | null;
+            /** Artifact Set Sha256 */
+            artifact_set_sha256?: string | null;
+            /**
+             * Copied Bytes
+             * @default 0
+             */
+            copied_bytes: number;
+            /** Missing Nas Bytes */
+            missing_nas_bytes?: number | null;
+            /** Missing Spark Bytes */
+            missing_spark_bytes?: number | null;
+            /**
+             * Nas Coverage
+             * @enum {string}
+             */
+            nas_coverage: "complete" | "partial" | "unknown";
+            /**
+             * Reclaimable Bytes
+             * @default 0
+             */
+            reclaimable_bytes: number;
+            /** Reclaimable Digests */
+            reclaimable_digests?: string[];
+            /**
+             * Reclaimed Bytes
+             * @default 0
+             */
+            reclaimed_bytes: number;
+            /** Required Bytes */
+            required_bytes?: number | null;
+            /**
+             * Retention
+             * @enum {string}
+             */
+            retention: "retain-cached" | "reclaim-unreferenced";
+            /**
+             * Reused Bytes
+             * @default 0
+             */
+            reused_bytes: number;
+            /**
+             * Running Coverage
+             * @default unknown
+             * @enum {string}
+             */
+            running_coverage: "complete" | "partial" | "unknown";
+            /**
+             * Spark Coverage
+             * @enum {string}
+             */
+            spark_coverage: "complete" | "partial" | "unknown";
+        };
+        /**
          * ArtifactVerificationEvidence
          * @description One node's immutable artifact handoff evidence.
          */
@@ -1669,6 +1781,22 @@ export interface components {
             /** Value */
             value: string | number | boolean;
         };
+        /** BuildCompatibilityEvidence */
+        BuildCompatibilityEvidence: {
+            /** Detail */
+            detail?: string | null;
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /** Expected Architecture */
+            expected_architecture: string;
+            /** Observed Architecture */
+            observed_architecture?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "compatible" | "incompatible" | "unknown";
+        };
         /** BuildContext */
         BuildContext: {
             /** Path */
@@ -1688,6 +1816,18 @@ export interface components {
         BuildPatch: {
             /** Path */
             path: string;
+        };
+        /** BuildSourceEvidence */
+        BuildSourceEvidence: {
+            /** Detail */
+            detail?: string | null;
+            /** Source Bundle Sha256 */
+            source_bundle_sha256?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "missing" | "unknown";
         };
         /**
          * CacheRemovalAsset
@@ -1800,6 +1940,30 @@ export interface components {
         CancelRequest: {
             /** Reason */
             reason: string;
+        };
+        /**
+         * CapabilityEvidence
+         * @description One capability's declaration and evidence, kept separate by owner.
+         */
+        CapabilityEvidence: {
+            /** Declared */
+            declared: boolean | null;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Evidence
+             * @enum {string}
+             */
+            evidence: "tested" | "observed" | "not-tested" | "unknown";
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Support
+             * @enum {string}
+             */
+            support: "supported" | "unsupported" | "unknown";
         };
         /** CapacityReservations */
         CapacityReservations: {
@@ -3772,6 +3936,25 @@ export interface components {
              */
             received_at: string;
         };
+        /**
+         * InvocationMetadata
+         * @description Context for audit and tracing which has no decision-making authority.
+         */
+        InvocationMetadata: {
+            /** Context */
+            context?: {
+                [key: string]: string;
+            };
+            /** Correlation Id */
+            correlation_id?: string | null;
+            /**
+             * Origin
+             * @default operator
+             */
+            origin: string;
+            /** Reason */
+            reason?: string | null;
+        };
         /** JobChange */
         JobChange: {
             /** Entity Id */
@@ -4280,6 +4463,28 @@ export interface components {
             recipe_uri?: string | null;
             /** Release Version */
             release_version?: string | null;
+        };
+        /** MappingSelection */
+        MappingSelection: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reuse" | "create";
+            /** Mapping Generation */
+            mapping_generation?: number | null;
+            /** Mapping Id */
+            mapping_id: string | null;
+            /** Nodes */
+            nodes: components["schemas"]["SparkGroupNode"][];
+            /** Parameters */
+            parameters?: {
+                [key: string]: unknown;
+            };
+            /** Placement Digest */
+            placement_digest: string;
+            /** Topology Name */
+            topology_name: string;
         };
         /**
          * MemoryUsageUncertainty
@@ -5948,11 +6153,11 @@ export interface components {
             cancelled?: true | null;
             /** Launch Evidence */
             launch_evidence?: {
-                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /** Node Evidence */
             node_evidence?: {
-                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /** Reason */
             reason: string;
@@ -6124,6 +6329,37 @@ export interface components {
              * @enum {string}
              */
             state: "ready" | "blocked" | "unavailable";
+        };
+        /** RecipeReconcileResult */
+        RecipeReconcileResult: {
+            /** Cleanup Receipt Sha256 */
+            cleanup_receipt_sha256: string;
+            /** Compiled Spec Canonical Sha256 */
+            compiled_spec_canonical_sha256: string;
+            /** Install Operation Id */
+            install_operation_id: string;
+            /** Install Operation Payload Sha256 */
+            install_operation_payload_sha256: string;
+            /** Installation Id */
+            installation_id: string;
+            /** Node Id */
+            node_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Reconciled
+             * @constant
+             */
+            reconciled: true;
+            /**
+             * Removed Bytes
+             * @description Measured bytes in the removed agent-owned installation tree, excluding the exact helper-managed runtime-cache subtree. The helper separately confirms removal of that private cache without reporting its byte count.
+             */
+            removed_bytes: number;
         };
         /** RecipeRelease */
         RecipeRelease: {
@@ -6915,6 +7151,31 @@ export interface components {
             /** Warnings */
             warnings: components["schemas"]["RunSwitchReason"][];
         };
+        /** RunSwitchBuildEvidence */
+        RunSwitchBuildEvidence: {
+            /** Build Id */
+            build_id: string | null;
+            /** Build Input Sha256 */
+            build_input_sha256?: string | null;
+            /** Builder Node Id */
+            builder_node_id?: string | null;
+            compatibility: components["schemas"]["BuildCompatibilityEvidence"];
+            /** Detail */
+            detail?: string | null;
+            /** Image Bytes */
+            image_bytes?: number | null;
+            /** Image Digest */
+            image_digest: string | null;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256?: string | null;
+            runtime: components["schemas"]["RuntimeImageStorageImpact"];
+            source: components["schemas"]["BuildSourceEvidence"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "planned" | "building" | "failed" | "missing" | "incompatible" | "unknown";
+        };
         /** RunSwitchCachedTransferResult */
         RunSwitchCachedTransferResult: {
             /** Cached Nodes */
@@ -6989,6 +7250,54 @@ export interface components {
              */
             total_bytes_known: boolean;
         };
+        /** RunSwitchCleanupApplyRequest */
+        RunSwitchCleanupApplyRequest: {
+            /**
+             * Cleanup Mode
+             * @default uninstall
+             * @enum {string}
+             */
+            cleanup_mode: "uninstall" | "reconcile";
+            /** Installation Id */
+            installation_id: string;
+            invocation?: components["schemas"]["InvocationMetadata"];
+            /** Plan Digest */
+            plan_digest?: string | null;
+            /** Request Key */
+            request_key?: string | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * RunSwitchCleanupPreviewRequest
+         * @description Ask Run/Switch to remove one installation that is no longer desired.
+         *
+         *     Cleanup is authorized by the installation's own uninstall assessment, so it
+         *     never requires launch readiness: removing work must not depend on being able
+         *     to start work.  Run/Switch still owns the sequencing, the child reference
+         *     and the retry budget for the removal.
+         */
+        RunSwitchCleanupPreviewRequest: {
+            /**
+             * Cleanup Mode
+             * @default uninstall
+             * @enum {string}
+             */
+            cleanup_mode: "uninstall" | "reconcile";
+            /** Installation Id */
+            installation_id: string;
+            invocation?: components["schemas"]["InvocationMetadata"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
         /** RunSwitchCleanupResult */
         RunSwitchCleanupResult: {
             /** Nas Evicted */
@@ -7027,6 +7336,14 @@ export interface components {
              * @default 0
              */
             active_runs: number;
+            /**
+             * Cleanup Mode
+             * @default uninstall
+             * @enum {string}
+             */
+            cleanup_mode: "uninstall" | "reconcile";
+            /** Exact Reconciliation Receipts */
+            exact_reconciliation_receipts?: boolean | null;
             /** Final Verified */
             final_verified: boolean;
             /** Installation Id */
@@ -7038,6 +7355,10 @@ export interface components {
              * @constant
              */
             phase: "final_verify";
+            /** Reconciliation Receipts */
+            reconciliation_receipts?: components["schemas"]["RecipeReconcileResult"][];
+            /** Reconciliation Request Id */
+            reconciliation_request_id?: string | null;
             /** Removed */
             removed: boolean;
             /** Subphase */
@@ -7117,6 +7438,27 @@ export interface components {
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Unwithdrawn Routes */
             unwithdrawn_routes: number;
+        };
+        /** RunSwitchMemberProgress */
+        RunSwitchMemberProgress: {
+            /**
+             * Completed Bytes
+             * @default 0
+             */
+            completed_bytes: number;
+            /** Error */
+            error?: string | null;
+            /** Node Id */
+            node_id: string;
+            /** Phase */
+            phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify") | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "running" | "succeeded" | "failed" | "unknown";
+            /** Total Bytes */
+            total_bytes?: number | null;
         };
         /**
          * RunSwitchMemberReceipt
@@ -7214,6 +7556,47 @@ export interface components {
             /** Total Bytes */
             total_bytes?: number | null;
         };
+        /** RunSwitchOperation */
+        RunSwitchOperation: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "install" | "run" | "switch" | "stop" | "cleanup";
+            /** Cleanup Mode */
+            cleanup_mode?: ("uninstall" | "reconcile") | null;
+            /** Completed Phases */
+            completed_phases: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify")[];
+            /** Current Phase */
+            current_phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify") | null;
+            /** Installation Id */
+            installation_id?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "recipe.run-switch.v2" | "recipe.stop.v2" | "recipe.cleanup.v2";
+            /** Node Ids */
+            node_ids: string[];
+            /** Operation Id */
+            operation_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+            progress: components["schemas"]["RunSwitchProgress"];
+            /** Request Key */
+            request_key: string;
+            result?: components["schemas"]["RunSwitchOperationResult"] | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** State */
+            state: string;
+            /** Status Reason */
+            status_reason?: string | null;
+        };
         /**
          * RunSwitchOperationResult
          * @description Exact durable result tree stored in ``Job.result``.
@@ -7289,6 +7672,125 @@ export interface components {
             /** Workload Intent Ordinal */
             workload_intent_ordinal?: number | null;
         };
+        /** RunSwitchPhase */
+        RunSwitchPhase: {
+            /** Detail */
+            detail: string;
+            /** Index */
+            index: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify";
+            /** Node Ids */
+            node_ids?: string[];
+            /** Operation Digest */
+            operation_digest?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "retained" | "skipped" | "blocked";
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+        };
+        /** RunSwitchPlan */
+        RunSwitchPlan: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "install" | "run" | "switch" | "stop" | "cleanup";
+            /** Alias */
+            alias: string | null;
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers: components["schemas"]["RunSwitchReason"][];
+            build: components["schemas"]["RunSwitchBuildEvidence"];
+            /**
+             * Cleanup Disposition
+             * @default uninstall
+             * @enum {string}
+             */
+            cleanup_disposition: "uninstall" | "abandon";
+            /**
+             * Cleanup Mode
+             * @default uninstall
+             * @enum {string}
+             */
+            cleanup_mode: "uninstall" | "reconcile";
+            /** Conflicts */
+            conflicts: components["schemas"]["RunSwitchReason"][];
+            effective_settings?: components["schemas"]["EffectiveSettingsSelection"] | null;
+            fit: components["schemas"]["SparkFit"];
+            fit_after_stop: components["schemas"]["SparkFit"] | null;
+            fit_current: components["schemas"]["SparkFit"];
+            /** Freshness */
+            freshness?: components["schemas"]["FreshnessEvidence"][];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Image Digest */
+            image_digest: string | null;
+            /** Installation Id */
+            installation_id: string | null;
+            /** Installation State */
+            installation_state: string | null;
+            invocation: components["schemas"]["InvocationMetadata"];
+            mapping: components["schemas"]["MappingSelection"] | null;
+            /** Model Capabilities */
+            model_capabilities: components["schemas"]["CapabilityEvidence"][];
+            /** Model Content Sha256 */
+            model_content_sha256: string | null;
+            /** Phases */
+            phases: components["schemas"]["RunSwitchPhase"][];
+            /** Plan Digest */
+            plan_digest: string;
+            post_stop_memory_check?: components["schemas"]["ConditionalPostStopMemoryCheck"] | null;
+            preparation?: components["schemas"]["RolloutPreparation"] | null;
+            /** Recipe Build Id */
+            recipe_build_id: string | null;
+            /** Recipe Capabilities */
+            recipe_capabilities: components["schemas"]["CapabilityEvidence"][];
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id: string | null;
+            /** Reclaimed Bytes */
+            reclaimed_bytes: number;
+            reconciliation_authority?: components["schemas"]["RunSwitchReconciliationAuthority"] | null;
+            /** Run Id */
+            run_id: string | null;
+            runtime_storage: components["schemas"]["RuntimeImageStorageImpact"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            spark_group: components["schemas"]["SparkGroup"];
+            /** Start Plan Digest */
+            start_plan_digest: string | null;
+            /**
+             * Stop Before Prepare
+             * @default false
+             */
+            stop_before_prepare: boolean;
+            /**
+             * Stop Before Transfer
+             * @default false
+             */
+            stop_before_transfer: boolean;
+            /** Stops */
+            stops: components["schemas"]["StopImpact"][];
+            storage: components["schemas"]["ArtifactStorageImpact"];
+            /** Warnings */
+            warnings: components["schemas"]["RunSwitchReason"][];
+        };
         /** RunSwitchPreparedResult */
         RunSwitchPreparedResult: {
             /**
@@ -7306,6 +7808,38 @@ export interface components {
              * @constant
              */
             subphase: "runtime-plan";
+        };
+        /** RunSwitchProgress */
+        RunSwitchProgress: {
+            /**
+             * Completed Bytes
+             * @default 0
+             */
+            completed_bytes: number;
+            /** Members */
+            members: components["schemas"]["RunSwitchMemberProgress"][];
+            operation?: components["schemas"]["OperationProgress"] | null;
+            /** Phase */
+            phase: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify") | null;
+            /** Phase Count */
+            phase_count: number;
+            /** Phase Index */
+            phase_index: number;
+            /** Start Deadline */
+            start_deadline?: string | null;
+            /** Startup Budget Seconds */
+            startup_budget_seconds?: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+            /** Total Bytes */
+            total_bytes?: number | null;
+            /** Total Bytes Known */
+            total_bytes_known: boolean;
         };
         /** RunSwitchRankReceipt */
         RunSwitchRankReceipt: {
@@ -7343,6 +7877,72 @@ export interface components {
              * @default false
              */
             stale: boolean;
+        };
+        /**
+         * RunSwitchReconciliationAuthority
+         * @description Controller-owned identity and effect binding for installation repair.
+         *
+         *     The accepted installation plan remains opaque.  This authority records its
+         *     canonical fingerprint and binds each target to the successful original
+         *     ``recipe.install`` operation that supplied the persisted compiled spec.
+         *     It never claims that malformed launch metadata is executable.
+         */
+        RunSwitchReconciliationAuthority: {
+            /** Image Digest */
+            image_digest: string;
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Generation */
+            mapping_generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Model Content Sha256 */
+            model_content_sha256: string | null;
+            /** Original Plan Digest */
+            original_plan_digest: string;
+            /** Recipe Build Id */
+            recipe_build_id: string | null;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Stored Plan Canonical Sha256 */
+            stored_plan_canonical_sha256: string;
+            /** Targets */
+            targets: components["schemas"]["RunSwitchReconciliationTarget"][];
+        };
+        /**
+         * RunSwitchReconciliationTarget
+         * @description One exact rank and its current cleanup receipt state.
+         */
+        RunSwitchReconciliationTarget: {
+            /** Cleanup Receipt Sha256 */
+            cleanup_receipt_sha256?: string | null;
+            /** Compiled Spec Canonical Sha256 */
+            compiled_spec_canonical_sha256: string;
+            /** Install Operation Id */
+            install_operation_id: string;
+            /** Install Operation Payload Sha256 */
+            install_operation_payload_sha256: string;
+            /** Installed Bytes */
+            installed_bytes: number;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "reconciled";
         };
         /**
          * RunSwitchRuntimeImageReferenceIntent
@@ -7719,6 +8319,62 @@ export interface components {
              * @enum {string}
              */
             source: "published" | "controller-build";
+        };
+        /** RuntimeImageStorageImpact */
+        RuntimeImageStorageImpact: {
+            /** Build Id */
+            build_id: string | null;
+            /**
+             * Copied Bytes
+             * @default 0
+             */
+            copied_bytes: number;
+            /** Image Bytes */
+            image_bytes?: number | null;
+            /** Image Digest */
+            image_digest: string | null;
+            /** Missing Image Distribution Bytes */
+            missing_image_distribution_bytes?: number | null;
+            /** Missing Nas Bytes */
+            missing_nas_bytes?: number | null;
+            /** Missing Spark Bytes */
+            missing_spark_bytes?: number | null;
+            /**
+             * Nas Coverage
+             * @enum {string}
+             */
+            nas_coverage: "complete" | "partial" | "unknown";
+            /** Oci Layout Sha256 */
+            oci_layout_sha256?: string | null;
+            /** Preparation Required */
+            preparation_required: boolean;
+            /**
+             * Reclaimable Bytes
+             * @default 0
+             */
+            reclaimable_bytes: number;
+            /** Reclaimable Digests */
+            reclaimable_digests?: string[];
+            /** Registry Manifest Digest */
+            registry_manifest_digest?: string | null;
+            /** Required Bytes */
+            required_bytes?: number | null;
+            /**
+             * Reused Bytes
+             * @default 0
+             */
+            reused_bytes: number;
+            /**
+             * Running Coverage
+             * @default unknown
+             * @enum {string}
+             */
+            running_coverage: "complete" | "partial" | "unknown";
+            /**
+             * Spark Coverage
+             * @enum {string}
+             */
+            spark_coverage: "complete" | "partial" | "unknown";
         };
         /** RuntimePreflightFinding */
         RuntimePreflightFinding: {
@@ -12249,6 +12905,157 @@ export interface operations {
             };
         };
     };
+    applyRecipeInstallationReconciliation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                installation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSwitchCleanupApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchOperation"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    previewRecipeInstallationReconciliation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                installation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSwitchCleanupPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchPlan"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     listRecipeLibrary: {
         parameters: {
             query?: {
@@ -12985,6 +13792,64 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getRunSwitchOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchOperation"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

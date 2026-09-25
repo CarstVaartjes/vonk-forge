@@ -624,6 +624,7 @@ def test_operation_enum_contains_only_supported_operations() -> None:
         "recipe.job.run.v1",
         "recipe.stop",
         "recipe.uninstall",
+        "recipe.reconcile",
     }
 
 
@@ -639,6 +640,30 @@ def test_removed_package_operation_strings_are_not_protocol_claims() -> None:
     assert not schema("agent-job.schema.json").is_valid(raw)
     with pytest.raises(AgentProtocolError, match="operation"):
         AgentClaim.parse(raw)
+
+
+def test_reconciliation_claim_node_must_match_its_bound_identity() -> None:
+    payload = {
+        "schema_version": 1,
+        "node_id": "spk_" + "1" * 32,
+        "installation_id": "00000000-0000-4000-8000-000000000001",
+        "install_operation_id": "00000000-0000-4000-8000-000000000002",
+        "install_operation_payload_sha256": "a" * 64,
+        "plan_digest": "b" * 64,
+        "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
+        "recipe_content_sha256": "c" * 64,
+        "compiled_spec_canonical_sha256": "d" * 64,
+    }
+    valid = claim_for_operation("recipe.reconcile", payload)
+    valid["node_id"] = payload["node_id"]
+    valid["payload_digest"] = hashlib.sha256(
+        canonical_message(payload)
+    ).hexdigest()
+    AgentClaim.parse(valid)
+
+    mismatched = valid | {"node_id": "spk_" + "2" * 32}
+    with pytest.raises(AgentProtocolError, match="reconciliation node"):
+        AgentClaim.parse(mismatched)
 
 
 def schema(name: str) -> Draft202012Validator:

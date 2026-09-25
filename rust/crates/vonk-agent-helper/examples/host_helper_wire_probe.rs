@@ -34,34 +34,46 @@ fn main() {
         )
         .unwrap();
 
-    let vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
-        vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
-            action: ContainerRuntimeAction::RunInspect,
-            job_id: _,
-            operation_id: _,
-            attempt: _,
-            fence: _,
-            request_sha256,
-            observation_identity_sha256: Some(observation_identity_sha256),
-            ..
-        },
-    ) = &grant.claims.operation
-    else {
-        panic!("probe input is not an exact run inspection grant");
-    };
-    let signer = Ed25519KeyPair::from_seed_unchecked(&[23; 32]).unwrap();
-    let receipt = sign_observation_receipt(
-        &signer,
-        &grant.claims.node_id,
-        grant.claims.request_id,
-        request_sha256,
-        observation_identity_sha256,
-        RecipeRunObservationOutcome::Running,
-        now + 1,
-    )
-    .unwrap();
-    println!(
-        "{}",
-        String::from_utf8(canonical_json(&receipt).unwrap()).unwrap()
-    );
+    match &grant.claims.operation {
+        vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+            vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
+                action: ContainerRuntimeAction::RunInspect,
+                request_sha256,
+                observation_identity_sha256: Some(observation_identity_sha256),
+                ..
+            },
+        ) => {
+            let signer = Ed25519KeyPair::from_seed_unchecked(&[23; 32]).unwrap();
+            let receipt = sign_observation_receipt(
+                &signer,
+                &grant.claims.node_id,
+                grant.claims.request_id,
+                request_sha256,
+                observation_identity_sha256,
+                RecipeRunObservationOutcome::Running,
+                now + 1,
+            )
+            .unwrap();
+            println!(
+                "{}",
+                String::from_utf8(canonical_json(&receipt).unwrap()).unwrap()
+            );
+        }
+        vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+            vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
+                action: ContainerRuntimeAction::InstallationCleanup,
+                installation_id: Some(installation_id),
+                reconciliation_identity: Some(identity),
+                ..
+            },
+        ) if identity.node_id == grant.claims.node_id
+            && identity.installation_id == *installation_id =>
+        {
+            println!(
+                "{}",
+                String::from_utf8(canonical_json(&grant).unwrap()).unwrap()
+            );
+        }
+        _ => panic!("probe input is not a bound run inspection or reconciliation grant"),
+    }
 }

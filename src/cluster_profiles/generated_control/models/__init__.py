@@ -27,6 +27,11 @@ from .artifact_output_contract import ArtifactOutputContract
 from .artifact_output_file import ArtifactOutputFile
 from .artifact_output_limits import ArtifactOutputLimits
 from .artifact_slot_contract import ArtifactSlotContract
+from .artifact_storage_impact import ArtifactStorageImpact
+from .artifact_storage_impact_nas_coverage import ArtifactStorageImpactNasCoverage
+from .artifact_storage_impact_retention import ArtifactStorageImpactRetention
+from .artifact_storage_impact_running_coverage import ArtifactStorageImpactRunningCoverage
+from .artifact_storage_impact_spark_coverage import ArtifactStorageImpactSparkCoverage
 from .artifact_verification_evidence import ArtifactVerificationEvidence
 from .audit_event_response import AuditEventResponse
 from .audit_response import AuditResponse
@@ -35,10 +40,14 @@ from .availability_recovery_action import AvailabilityRecoveryAction
 from .boolean_parameter import BooleanParameter
 from .bounded_error_response import BoundedErrorResponse
 from .build_argument import BuildArgument
+from .build_compatibility_evidence import BuildCompatibilityEvidence
+from .build_compatibility_evidence_state import BuildCompatibilityEvidenceState
 from .build_context import BuildContext
 from .build_network import BuildNetwork
 from .build_network_mode import BuildNetworkMode
 from .build_patch import BuildPatch
+from .build_source_evidence import BuildSourceEvidence
+from .build_source_evidence_state import BuildSourceEvidenceState
 from .cache_removal_asset import CacheRemovalAsset
 from .cache_removal_asset_availability import CacheRemovalAssetAvailability
 from .cache_removal_asset_disposition import CacheRemovalAssetDisposition
@@ -50,6 +59,9 @@ from .cache_removal_finding_classification import CacheRemovalFindingClassificat
 from .cache_removal_review import CacheRemovalReview
 from .cache_removal_review_resource_kind import CacheRemovalReviewResourceKind
 from .cancel_request import CancelRequest
+from .capability_evidence import CapabilityEvidence
+from .capability_evidence_evidence import CapabilityEvidenceEvidence
+from .capability_evidence_support import CapabilityEvidenceSupport
 from .capacity_reservations import CapacityReservations
 from .catalog_problem import CatalogProblem
 from .compatibility_identity import CompatibilityIdentity
@@ -217,6 +229,8 @@ from .invalid_operation_evidence import InvalidOperationEvidence
 from .invalid_operation_evidence_document import InvalidOperationEvidenceDocument
 from .inventory_state import InventoryState
 from .inventory_state_freshness import InventoryStateFreshness
+from .invocation_metadata import InvocationMetadata
+from .invocation_metadata_context import InvocationMetadataContext
 from .job_change import JobChange
 from .job_detail_response import JobDetailResponse
 from .job_logs_response import JobLogsResponse
@@ -254,6 +268,9 @@ from .managed_catalog_sync_response import ManagedCatalogSyncResponse
 from .managed_catalog_sync_response_state import ManagedCatalogSyncResponseState
 from .managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
 from .managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
+from .mapping_selection import MappingSelection
+from .mapping_selection_action import MappingSelectionAction
+from .mapping_selection_parameters import MappingSelectionParameters
 from .memory_usage_uncertainty import MemoryUsageUncertainty
 from .model_access import ModelAccess
 from .model_access_authentication import ModelAccessAuthentication
@@ -410,6 +427,7 @@ from .recipe_provenance_source_kind import RecipeProvenanceSourceKind
 from .recipe_readiness import RecipeReadiness
 from .recipe_readiness_check import RecipeReadinessCheck
 from .recipe_readiness_check_state import RecipeReadinessCheckState
+from .recipe_reconcile_result import RecipeReconcileResult
 from .recipe_release import RecipeRelease
 from .recipe_release_change import RecipeReleaseChange
 from .recipe_release_change_kind import RecipeReleaseChangeKind
@@ -464,14 +482,21 @@ from .run_presence_rank_state import RunPresenceRankState
 from .run_presence_route_state import RunPresenceRouteState
 from .run_presence_run_state import RunPresenceRunState
 from .run_switch_assessment import RunSwitchAssessment
+from .run_switch_build_evidence import RunSwitchBuildEvidence
+from .run_switch_build_evidence_state import RunSwitchBuildEvidenceState
 from .run_switch_cached_transfer_result import RunSwitchCachedTransferResult
 from .run_switch_cached_transfer_result_cached_target_totals import RunSwitchCachedTransferResultCachedTargetTotals
 from .run_switch_cancellation import RunSwitchCancellation
 from .run_switch_child_progress import RunSwitchChildProgress
 from .run_switch_child_progress_phase_type_0 import RunSwitchChildProgressPhaseType0
+from .run_switch_cleanup_apply_request import RunSwitchCleanupApplyRequest
+from .run_switch_cleanup_apply_request_cleanup_mode import RunSwitchCleanupApplyRequestCleanupMode
+from .run_switch_cleanup_preview_request import RunSwitchCleanupPreviewRequest
+from .run_switch_cleanup_preview_request_cleanup_mode import RunSwitchCleanupPreviewRequestCleanupMode
 from .run_switch_cleanup_result import RunSwitchCleanupResult
 from .run_switch_cleanup_result_subphase_type_0 import RunSwitchCleanupResultSubphaseType0
 from .run_switch_cleanup_verify_result import RunSwitchCleanupVerifyResult
+from .run_switch_cleanup_verify_result_cleanup_mode import RunSwitchCleanupVerifyResultCleanupMode
 from .run_switch_cleanup_verify_result_subphase_type_0 import RunSwitchCleanupVerifyResultSubphaseType0
 from .run_switch_container_build_result import RunSwitchContainerBuildResult
 from .run_switch_container_build_result_state import RunSwitchContainerBuildResultState
@@ -479,21 +504,45 @@ from .run_switch_final_verify_result import RunSwitchFinalVerifyResult
 from .run_switch_final_verify_result_subphase_type_0 import RunSwitchFinalVerifyResultSubphaseType0
 from .run_switch_installation_verify_result import RunSwitchInstallationVerifyResult
 from .run_switch_installation_verify_result_subphase_type_0 import RunSwitchInstallationVerifyResultSubphaseType0
+from .run_switch_member_progress import RunSwitchMemberProgress
+from .run_switch_member_progress_phase_type_0 import RunSwitchMemberProgressPhaseType0
+from .run_switch_member_progress_state import RunSwitchMemberProgressState
 from .run_switch_member_receipt import RunSwitchMemberReceipt
 from .run_switch_member_receipt_phase_type_0 import RunSwitchMemberReceiptPhaseType0
 from .run_switch_member_receipt_state import RunSwitchMemberReceiptState
 from .run_switch_model_download_pending_result import RunSwitchModelDownloadPendingResult
 from .run_switch_model_download_result import RunSwitchModelDownloadResult
+from .run_switch_operation import RunSwitchOperation
+from .run_switch_operation_action import RunSwitchOperationAction
+from .run_switch_operation_cleanup_mode_type_0 import RunSwitchOperationCleanupModeType0
+from .run_switch_operation_completed_phases_item import RunSwitchOperationCompletedPhasesItem
+from .run_switch_operation_current_phase_type_0 import RunSwitchOperationCurrentPhaseType0
+from .run_switch_operation_kind import RunSwitchOperationKind
 from .run_switch_operation_result import RunSwitchOperationResult
 from .run_switch_operation_result_completed_phases_item import RunSwitchOperationResultCompletedPhasesItem
 from .run_switch_operation_result_failed_phase_type_0 import RunSwitchOperationResultFailedPhaseType0
 from .run_switch_operation_result_phase_type_0 import RunSwitchOperationResultPhaseType0
 from .run_switch_operation_result_subphase_type_0 import RunSwitchOperationResultSubphaseType0
+from .run_switch_phase import RunSwitchPhase
+from .run_switch_phase_kind import RunSwitchPhaseKind
+from .run_switch_phase_state import RunSwitchPhaseState
+from .run_switch_phase_subphase_type_0 import RunSwitchPhaseSubphaseType0
+from .run_switch_plan import RunSwitchPlan
+from .run_switch_plan_action import RunSwitchPlanAction
+from .run_switch_plan_cleanup_disposition import RunSwitchPlanCleanupDisposition
+from .run_switch_plan_cleanup_mode import RunSwitchPlanCleanupMode
 from .run_switch_prepared_result import RunSwitchPreparedResult
+from .run_switch_progress import RunSwitchProgress
+from .run_switch_progress_phase_type_0 import RunSwitchProgressPhaseType0
+from .run_switch_progress_state import RunSwitchProgressState
+from .run_switch_progress_subphase_type_0 import RunSwitchProgressSubphaseType0
 from .run_switch_rank_receipt import RunSwitchRankReceipt
 from .run_switch_reason import RunSwitchReason
 from .run_switch_reason_scope import RunSwitchReasonScope
 from .run_switch_reason_severity import RunSwitchReasonSeverity
+from .run_switch_reconciliation_authority import RunSwitchReconciliationAuthority
+from .run_switch_reconciliation_target import RunSwitchReconciliationTarget
+from .run_switch_reconciliation_target_state import RunSwitchReconciliationTargetState
 from .run_switch_runtime_image_reference_intent import RunSwitchRuntimeImageReferenceIntent
 from .run_switch_runtime_image_reference_intent_source import RunSwitchRuntimeImageReferenceIntentSource
 from .run_switch_runtime_image_result import RunSwitchRuntimeImageResult
@@ -515,6 +564,10 @@ from .runtime_image_identity import RuntimeImageIdentity
 from .runtime_image_preparation import RuntimeImagePreparation
 from .runtime_image_receipt import RuntimeImageReceipt
 from .runtime_image_receipt_source import RuntimeImageReceiptSource
+from .runtime_image_storage_impact import RuntimeImageStorageImpact
+from .runtime_image_storage_impact_nas_coverage import RuntimeImageStorageImpactNasCoverage
+from .runtime_image_storage_impact_running_coverage import RuntimeImageStorageImpactRunningCoverage
+from .runtime_image_storage_impact_spark_coverage import RuntimeImageStorageImpactSparkCoverage
 from .runtime_preflight_finding import RuntimePreflightFinding
 from .runtime_preflight_finding_status import RuntimePreflightFindingStatus
 from .runtime_preflight_result import RuntimePreflightResult
@@ -595,6 +648,11 @@ __all__ = (
     "ArtifactOutputFile",
     "ArtifactOutputLimits",
     "ArtifactSlotContract",
+    "ArtifactStorageImpact",
+    "ArtifactStorageImpactNasCoverage",
+    "ArtifactStorageImpactRetention",
+    "ArtifactStorageImpactRunningCoverage",
+    "ArtifactStorageImpactSparkCoverage",
     "ArtifactVerificationEvidence",
     "AuditEventResponse",
     "AuditResponse",
@@ -603,10 +661,14 @@ __all__ = (
     "BooleanParameter",
     "BoundedErrorResponse",
     "BuildArgument",
+    "BuildCompatibilityEvidence",
+    "BuildCompatibilityEvidenceState",
     "BuildContext",
     "BuildNetwork",
     "BuildNetworkMode",
     "BuildPatch",
+    "BuildSourceEvidence",
+    "BuildSourceEvidenceState",
     "CacheRemovalAsset",
     "CacheRemovalAssetAvailability",
     "CacheRemovalAssetDisposition",
@@ -618,6 +680,9 @@ __all__ = (
     "CacheRemovalReview",
     "CacheRemovalReviewResourceKind",
     "CancelRequest",
+    "CapabilityEvidence",
+    "CapabilityEvidenceEvidence",
+    "CapabilityEvidenceSupport",
     "CapacityReservations",
     "CatalogProblem",
     "CompatibilityIdentity",
@@ -785,6 +850,8 @@ __all__ = (
     "InvalidOperationEvidenceDocument",
     "InventoryState",
     "InventoryStateFreshness",
+    "InvocationMetadata",
+    "InvocationMetadataContext",
     "JobChange",
     "JobDetailResponse",
     "JobLogsResponse",
@@ -822,6 +889,9 @@ __all__ = (
     "ManagedCatalogSyncResponseState",
     "ManagedCatalogSyncResponseTrigger",
     "ManagedCatalogWithdrawnRecipe",
+    "MappingSelection",
+    "MappingSelectionAction",
+    "MappingSelectionParameters",
     "MemoryUsageUncertainty",
     "ModelAccess",
     "ModelAccessAuthentication",
@@ -978,6 +1048,7 @@ __all__ = (
     "RecipeReadiness",
     "RecipeReadinessCheck",
     "RecipeReadinessCheckState",
+    "RecipeReconcileResult",
     "RecipeRelease",
     "RecipeReleaseChange",
     "RecipeReleaseChangeKind",
@@ -1032,14 +1103,21 @@ __all__ = (
     "RunPresenceRouteState",
     "RunPresenceRunState",
     "RunSwitchAssessment",
+    "RunSwitchBuildEvidence",
+    "RunSwitchBuildEvidenceState",
     "RunSwitchCachedTransferResult",
     "RunSwitchCachedTransferResultCachedTargetTotals",
     "RunSwitchCancellation",
     "RunSwitchChildProgress",
     "RunSwitchChildProgressPhaseType0",
+    "RunSwitchCleanupApplyRequest",
+    "RunSwitchCleanupApplyRequestCleanupMode",
+    "RunSwitchCleanupPreviewRequest",
+    "RunSwitchCleanupPreviewRequestCleanupMode",
     "RunSwitchCleanupResult",
     "RunSwitchCleanupResultSubphaseType0",
     "RunSwitchCleanupVerifyResult",
+    "RunSwitchCleanupVerifyResultCleanupMode",
     "RunSwitchCleanupVerifyResultSubphaseType0",
     "RunSwitchContainerBuildResult",
     "RunSwitchContainerBuildResultState",
@@ -1047,21 +1125,45 @@ __all__ = (
     "RunSwitchFinalVerifyResultSubphaseType0",
     "RunSwitchInstallationVerifyResult",
     "RunSwitchInstallationVerifyResultSubphaseType0",
+    "RunSwitchMemberProgress",
+    "RunSwitchMemberProgressPhaseType0",
+    "RunSwitchMemberProgressState",
     "RunSwitchMemberReceipt",
     "RunSwitchMemberReceiptPhaseType0",
     "RunSwitchMemberReceiptState",
     "RunSwitchModelDownloadPendingResult",
     "RunSwitchModelDownloadResult",
+    "RunSwitchOperation",
+    "RunSwitchOperationAction",
+    "RunSwitchOperationCleanupModeType0",
+    "RunSwitchOperationCompletedPhasesItem",
+    "RunSwitchOperationCurrentPhaseType0",
+    "RunSwitchOperationKind",
     "RunSwitchOperationResult",
     "RunSwitchOperationResultCompletedPhasesItem",
     "RunSwitchOperationResultFailedPhaseType0",
     "RunSwitchOperationResultPhaseType0",
     "RunSwitchOperationResultSubphaseType0",
+    "RunSwitchPhase",
+    "RunSwitchPhaseKind",
+    "RunSwitchPhaseState",
+    "RunSwitchPhaseSubphaseType0",
+    "RunSwitchPlan",
+    "RunSwitchPlanAction",
+    "RunSwitchPlanCleanupDisposition",
+    "RunSwitchPlanCleanupMode",
     "RunSwitchPreparedResult",
+    "RunSwitchProgress",
+    "RunSwitchProgressPhaseType0",
+    "RunSwitchProgressState",
+    "RunSwitchProgressSubphaseType0",
     "RunSwitchRankReceipt",
     "RunSwitchReason",
     "RunSwitchReasonScope",
     "RunSwitchReasonSeverity",
+    "RunSwitchReconciliationAuthority",
+    "RunSwitchReconciliationTarget",
+    "RunSwitchReconciliationTargetState",
     "RunSwitchRuntimeImageReferenceIntent",
     "RunSwitchRuntimeImageReferenceIntentSource",
     "RunSwitchRuntimeImageResult",
@@ -1083,6 +1185,10 @@ __all__ = (
     "RuntimeImagePreparation",
     "RuntimeImageReceipt",
     "RuntimeImageReceiptSource",
+    "RuntimeImageStorageImpact",
+    "RuntimeImageStorageImpactNasCoverage",
+    "RuntimeImageStorageImpactRunningCoverage",
+    "RuntimeImageStorageImpactSparkCoverage",
     "RuntimePreflightFinding",
     "RuntimePreflightFindingStatus",
     "RuntimePreflightResult",

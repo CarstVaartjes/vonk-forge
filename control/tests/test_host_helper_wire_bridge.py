@@ -12,6 +12,7 @@ from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
+    RecipeReconciliationIdentity,
     RestartVonkUnitOperation,
     SignedHostHelperGrant,
     SignedRecipeRunObservationReceipt,
@@ -129,6 +130,7 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
             request_sha256: str,
             certificate_serial: str,
             installation_id: str | None = None,
+            reconciliation_identity: RecipeReconciliationIdentity | None = None,
             expires_in_seconds: int = 30,
         ) -> SignedHostHelperGrant:
             return issuer.issue_grant(
@@ -187,3 +189,56 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
     assert receipt.claims.request_id == grant.claims.request_id
     assert receipt.claims.request_sha256 == request["request_sha256"]
     assert receipt.claims.observation_identity_sha256 is not None
+
+
+def test_python_reconciliation_grant_is_verified_unchanged_by_rust(
+    host_helper_wire_probe: Path,
+) -> None:
+    identity = RecipeReconciliationIdentity(
+        schema_version=1,
+        node_id=NODE_A,
+        installation_id="70000000-0000-4000-8000-000000000007",
+        install_operation_id="80000000-0000-4000-8000-000000000008",
+        install_operation_payload_sha256="a" * 64,
+        plan_digest="b" * 64,
+        recipe_revision_id="90000000-0000-4000-8000-000000000009",
+        recipe_content_sha256="c" * 64,
+        compiled_spec_canonical_sha256="d" * 64,
+    )
+    issuer = HostHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.from_private_bytes(PRIVATE_SEED),
+        clock=lambda: datetime.fromtimestamp(2_100_000_000, UTC),
+        request_id_factory=lambda: "10000000-0000-4000-8000-000000000001",
+    )
+    grant = issuer.issue_grant(
+        node_id=NODE_A,
+        operation=ExecuteContainerRuntimeRequestOperation(
+            type="execute-container-runtime-request",
+            action="installation-cleanup",
+            job_id="20000000-0000-4000-8000-000000000002",
+            operation_id="30000000-0000-4000-8000-000000000003",
+            attempt=2,
+            fence="40000000-0000-4000-8000-000000000004",
+            request_sha256="e" * 64,
+            installation_id=identity.installation_id,
+            reconciliation_identity=identity,
+        ),
+        expires_in_seconds=60,
+    )
+    raw = canonical_message(grant)
+    verified = subprocess.run(
+        [str(host_helper_wire_probe)], input=raw, capture_output=True, check=False
+    )
+    assert verified.returncode == 0, verified.stderr.decode()
+    assert verified.stdout.rstrip(b"\n") == raw
+    tampered = json.loads(raw)
+    tampered["claims"]["operation"]["reconciliation_identity"][
+        "compiled_spec_canonical_sha256"
+    ] = "f" * 64
+    refused = subprocess.run(
+        [str(host_helper_wire_probe)],
+        input=canonical_message(tampered),
+        capture_output=True,
+        check=False,
+    )
+    assert refused.returncode != 0

@@ -327,7 +327,7 @@ def test_admin_schema_is_secret_free() -> None:
         "csr_pem",
         "grant_token",
         "management_address",
-        "operation_payload",
+        '"operation_payload":',
         "token_digest",
     ):
         assert forbidden not in serialized

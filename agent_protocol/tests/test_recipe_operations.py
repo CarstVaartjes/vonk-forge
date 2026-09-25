@@ -5,6 +5,8 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentProtocolError,
     RecipeOperationRequest,
+    RecipeReconcilePayload,
+    RecipeReconcileResult,
     RecipeStopResult,
     RecipeUninstallResult,
     parse_recipe_operation_result,
@@ -14,6 +16,18 @@ INSTALLATION_ID = "00000000-0000-4000-8000-000000000001"
 RUN_ID = "00000000-0000-4000-8000-000000000003"
 RECIPE_DIGEST = "a" * 64
 PLAN_DIGEST = "b" * 64
+NODE_ID = "spk_" + "c" * 32
+RECONCILE = {
+    "schema_version": 1,
+    "node_id": NODE_ID,
+    "installation_id": INSTALLATION_ID,
+    "install_operation_id": RUN_ID,
+    "install_operation_payload_sha256": "d" * 64,
+    "plan_digest": PLAN_DIGEST,
+    "recipe_revision_id": "00000000-0000-4000-8000-000000000004",
+    "recipe_content_sha256": RECIPE_DIGEST,
+    "compiled_spec_canonical_sha256": "e" * 64,
+}
 STOP = {
     "schema_version": 1,
     "run_id": RUN_ID,
@@ -35,6 +49,7 @@ UNINSTALL_WITH_MODEL_CLEANUP = UNINSTALL | {"cleanup_model_content_sha256": "f" 
         (AgentOperation.RECIPE_STOP, STOP),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL_WITH_MODEL_CLEANUP),
+        (AgentOperation.RECIPE_RECONCILE, RECONCILE),
     ],
 )
 def test_recipe_operation_payloads_are_typed_and_digest_bound(
@@ -70,6 +85,25 @@ def test_uninstall_cleanup_key_is_required_and_nullable() -> None:
     assert parsed.cleanup_model_content_sha256 is None
 
 
+def test_reconciliation_payload_requires_exact_node_and_original_install_identity() -> None:
+    parsed = RecipeOperationRequest.parse(AgentOperation.RECIPE_RECONCILE, RECONCILE)
+    assert isinstance(parsed.payload, RecipeReconcilePayload)
+    for change in (
+        {"node_id": "spk_" + "f" * 31},
+        {"install_operation_payload_sha256": "invalid"},
+        {"compiled_spec_canonical_sha256": "F" * 64},
+        {"installation_id": "bad-id"},
+    ):
+        with pytest.raises(AgentProtocolError):
+            RecipeOperationRequest.parse(
+                AgentOperation.RECIPE_RECONCILE, RECONCILE | change
+            )
+    with pytest.raises(AgentProtocolError):
+        RecipeOperationRequest.parse(
+            AgentOperation.RECIPE_UNINSTALL, RECONCILE
+        )
+
+
 @pytest.mark.parametrize(
     ("operation", "body", "result_type"),
     [
@@ -78,6 +112,20 @@ def test_uninstall_cleanup_key_is_required_and_nullable() -> None:
             AgentOperation.RECIPE_UNINSTALL,
             {"uninstalled": True, "removed_model_bytes": 0},
             RecipeUninstallResult,
+        ),
+        (
+            AgentOperation.RECIPE_RECONCILE,
+            {
+                "reconciled": True,
+                **{
+                    key: value
+                    for key, value in RECONCILE.items()
+                    if key != "schema_version"
+                },
+                "removed_bytes": 18,
+                "cleanup_receipt_sha256": "f" * 64,
+            },
+            RecipeReconcileResult,
         ),
     ],
 )

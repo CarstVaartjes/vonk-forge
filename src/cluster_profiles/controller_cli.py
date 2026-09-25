@@ -602,6 +602,33 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _action_flags(recipe_cancel, destructive=True, followable=True)
     recipe_cancel.add_argument("--reason", default="operator requested cancellation")
 
+    recipe_installation = recipe_actions.add_parser(
+        "installation",
+        help="Inspect and reconcile one installed recipe identity",
+    )
+    installation_actions = recipe_installation.add_subparsers(
+        dest="installation_action", required=True, parser_class=type(recipe)
+    )
+    installation_reconcile = installation_actions.add_parser(
+        "reconcile",
+        help="Review or reconcile one invalid stopped installation",
+    )
+    installation_reconcile.add_argument(
+        "installation_id", type=_uuid_argument, help="Exact installation UUID"
+    )
+    _action_flags(installation_reconcile, destructive=True, followable=True)
+    installation_reconcile.add_argument(
+        "--review",
+        action="store_true",
+        help="Show the exact reconciliation plan without submitting it",
+    )
+    installation_reconcile.add_argument(
+        "--review-digest",
+        type=_sha256_digest,
+        metavar="SHA256",
+        help="Exact reconciliation plan digest to accept with --yes",
+    )
+
     add_artifact_job_commands(
         recipe_actions, add_output=_add_output, watch_controls=_watch_controls
     )
@@ -2538,6 +2565,357 @@ def _model(
     raise ValueError(f"unsupported model action: {action}")
 
 
+def _run_switch_request_operation(
+    send_request: Callable[..., dict[str, object]],
+    request_key: str,
+    *,
+    installation_id: str,
+    expected_plan_digest: str | None,
+) -> dict[str, object] | None:
+    """Resolve one accepted Run/Switch request before considering a resubmit."""
+    page = validate_control_document(
+        "OperationsResponse",
+        send_request(
+            "GET",
+            "/api/operations",
+            query={"request_id": request_key, "limit": 100},
+        ),
+    )
+    operations = page.get("operations")
+    total = page.get("total")
+    next_cursor = page.get("next_cursor")
+    if (
+        not isinstance(operations, list)
+        or type(total) is not int
+        or next_cursor is not None
+        or total != len(operations)
+    ):
+        raise ControlMalformedResponse(
+            "request lookup returned an invalid operation page"
+        )
+    if total == 0 and not operations:
+        return None
+    summaries = [item for item in operations if isinstance(item, Mapping)]
+    if len(summaries) != len(operations):
+        raise ControlMalformedResponse("request lookup contains an invalid operation")
+    owners = [item.get("owner") for item in summaries]
+    if any(
+        not isinstance(owner, Mapping)
+        or owner.get("kind") != "job"
+        or owner.get("request_id") != request_key
+        or not isinstance(owner.get("id"), str)
+        for owner in owners
+    ):
+        raise ControlMalformedResponse("request lookup has no exact durable owner")
+    owner_ids = {cast(Mapping[str, object], owner).get("id") for owner in owners}
+    owner_id = next(iter(owner_ids)) if len(owner_ids) == 1 else None
+    parents = [
+        item
+        for item in summaries
+        if item.get("kind") == "recipe.cleanup.v2" and item.get("id") == owner_id
+    ]
+    if not isinstance(owner_id, str) or len(parents) != 1:
+        raise ControlConflict(409, "request UUID is already owned by another operation")
+    operation_id = owner_id
+    observed = validate_control_document(
+        "RunSwitchOperation",
+        send_request("GET", f"/api/run-switch/operations/{_quoted(operation_id)}"),
+    )
+    _validate_installation_reconcile_operation(
+        observed,
+        operation_id=operation_id,
+        request_key=request_key,
+        plan_digest=expected_plan_digest,
+        installation_id=installation_id,
+    )
+    return observed
+
+
+def _validate_installation_reconcile_operation(
+    value: Mapping[str, object],
+    *,
+    operation_id: str | None,
+    request_key: str,
+    plan_digest: str | None,
+    installation_id: str,
+) -> str:
+    if (
+        (operation_id is not None and value.get("operation_id") != operation_id)
+        or value.get("request_key") != request_key
+        or value.get("kind") != "recipe.cleanup.v2"
+        or value.get("action") != "cleanup"
+        or value.get("cleanup_mode") != "reconcile"
+        or value.get("installation_id") != installation_id
+        or (plan_digest is not None and value.get("plan_digest") != plan_digest)
+    ):
+        raise ControlMalformedResponse(
+            "reconciliation status identifies another request or reviewed plan"
+        )
+    returned_id = value.get("operation_id")
+    if not isinstance(returned_id, str) or not returned_id:
+        raise ControlMalformedResponse(
+            "reconciliation status has no operation identity"
+        )
+    return returned_id
+
+
+def _follow_installation_reconciliation(
+    client: ControllerClient,
+    operation: dict[str, object],
+    args: argparse.Namespace,
+    *,
+    request_key: str,
+    plan_digest: str,
+) -> dict[str, object]:
+    operation_id = _validate_installation_reconcile_operation(
+        operation,
+        operation_id=None,
+        request_key=request_key,
+        plan_digest=plan_digest,
+        installation_id=cast(str, args.installation_id),
+    )
+    if getattr(args, "detach", False):
+        return operation
+
+    def same_operation(observed: Mapping[str, object]) -> None:
+        _validate_installation_reconcile_operation(
+            observed,
+            operation_id=operation_id,
+            request_key=request_key,
+            plan_digest=plan_digest,
+            installation_id=cast(str, args.installation_id),
+        )
+
+    return _poll_path(
+        client,
+        f"/api/run-switch/operations/{_quoted(operation_id)}",
+        operation,
+        args,
+        validate=same_operation,
+    )
+
+
+def _recipe_installation_reconcile(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    installation_id = cast(str, args.installation_id)
+    preview_path = (
+        f"/api/recipe/installations/{_quoted(installation_id)}/reconcile/preview"
+    )
+    apply_path = f"/api/recipe/installations/{_quoted(installation_id)}/reconcile"
+    preview_body = {
+        "schema_version": 2,
+        "installation_id": installation_id,
+        "cleanup_mode": "reconcile",
+    }
+    if getattr(args, "review", False):
+        if (
+            getattr(args, "yes", False)
+            or getattr(args, "review_digest", None) is not None
+            or getattr(args, "request_key", None) is not None
+            or getattr(args, "detach", False)
+        ):
+            raise ValueError(
+                "installation reconcile --review cannot be combined with consent or request flags"
+            )
+        args.outcome_context = "read"
+        return validate_control_document(
+            "RunSwitchPlan", client.request("POST", preview_path, preview_body)
+        )
+    if not getattr(args, "yes", False):
+        raise ValueError(
+            "installation reconcile requires --yes; review with --review first"
+        )
+    reviewed_digest = getattr(args, "review_digest", None)
+    if not isinstance(reviewed_digest, str):
+        raise TypeError(
+            "installation reconcile requires --review-digest SHA256 and --yes"
+        )
+
+    key = _request_key(args, factory)
+    request_timeout = client.request_timeout_seconds
+    if not math.isfinite(request_timeout) or request_timeout <= 0:
+        raise ValueError("request timeout must be finite and positive")
+    submission = Submission(
+        key,
+        apply_path,
+        f"/api/operations?request_id={key}",
+        3 * request_timeout,
+        action="reconcile",
+    )
+    args.submission = submission
+    submission_deadline = time.monotonic() + submission.timeout_seconds
+    reconnect = shlex.join(
+        [
+            "vonkctl",
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--review-digest",
+            reviewed_digest,
+            "--request-key",
+            key,
+            "--yes",
+        ]
+    )
+    if not (args.global_json or getattr(args, "json", False)):
+        print(
+            f"Request key: {key}\nReconnect: {reconnect}", file=sys.stderr, flush=True
+        )
+
+    def request(
+        method: str,
+        path: str,
+        body: dict[str, object] | None = None,
+        *,
+        query: Mapping[str, object] | None = None,
+    ):
+        remaining = submission_deadline - time.monotonic()
+        if remaining <= 0:
+            raise ControlTransportError("installation reconciliation deadline reached")
+        return client.request(
+            method,
+            path,
+            body,
+            query=query,
+            timeout_seconds=min(request_timeout, remaining),
+        )
+
+    # A supplied UUID may already own a completed or in-flight cleanup. Resolve
+    # that exact owner before consulting mutable current evidence.
+    existing = _run_switch_request_operation(
+        request,
+        key,
+        installation_id=installation_id,
+        expected_plan_digest=reviewed_digest,
+    )
+    if existing is not None:
+        submission.acceptance = "accepted"
+        submission.operation_id = cast(str, existing["operation_id"])
+        return _follow_installation_reconciliation(
+            client,
+            existing,
+            args,
+            request_key=key,
+            plan_digest=reviewed_digest,
+        )
+
+    preview = validate_control_document(
+        "RunSwitchPlan", request("POST", preview_path, preview_body)
+    )
+    if (
+        preview.get("action") != "cleanup"
+        or preview.get("cleanup_mode") != "reconcile"
+        or preview.get("installation_id") != installation_id
+        or preview.get("plan_digest") != reviewed_digest
+    ):
+        raise ControlConflict(
+            409,
+            "installation reconciliation plan changed; review the current plan again",
+        )
+    if preview.get("allowed") is not True:
+        reasons = preview.get("blockers")
+        codes: list[str] = []
+        if isinstance(reasons, list):
+            for item in reasons:
+                if isinstance(item, Mapping):
+                    code = item.get("code")
+                    if isinstance(code, str):
+                        codes.append(code)
+        detail = "installation reconciliation is blocked" + (
+            f": {', '.join(codes[:6])}" if codes else "; review the current plan"
+        )
+        raise ControlConflict(409, detail)
+    body = {
+        **preview_body,
+        "plan_digest": reviewed_digest,
+        "request_key": key,
+    }
+
+    submission.acceptance = "unknown"
+    try:
+        raw = request("POST", apply_path, body)
+        operation = validate_control_document("RunSwitchOperation", raw)
+        operation_id = _validate_installation_reconcile_operation(
+            operation,
+            operation_id=None,
+            request_key=key,
+            plan_digest=reviewed_digest,
+            installation_id=installation_id,
+        )
+    except (ControlTransportError, ControlUnavailable, OSError) as error:
+        submission.failures.append({"stage": "submit", "error": type(error).__name__})
+        # A successful, fresh lookup is the only basis for either reconnecting
+        # to the old operation or replaying these exact bytes once.
+        existing = _run_switch_request_operation(
+            request,
+            key,
+            installation_id=installation_id,
+            expected_plan_digest=reviewed_digest,
+        )
+        if existing is not None:
+            operation = existing
+            operation_id = cast(str, existing["operation_id"])
+        else:
+            raw = request("POST", apply_path, body)
+            operation = validate_control_document("RunSwitchOperation", raw)
+            operation_id = _validate_installation_reconcile_operation(
+                operation,
+                operation_id=None,
+                request_key=key,
+                plan_digest=reviewed_digest,
+                installation_id=installation_id,
+            )
+    except ControlHTTPError as error:
+        if error.status_code < 500:
+            raise
+        submission.failures.append({"stage": "submit", "error": type(error).__name__})
+        existing = _run_switch_request_operation(
+            request,
+            key,
+            installation_id=installation_id,
+            expected_plan_digest=reviewed_digest,
+        )
+        if existing is not None:
+            operation = existing
+            operation_id = cast(str, existing["operation_id"])
+        else:
+            raw = request("POST", apply_path, body)
+            operation = validate_control_document("RunSwitchOperation", raw)
+            operation_id = _validate_installation_reconcile_operation(
+                operation,
+                operation_id=None,
+                request_key=key,
+                plan_digest=reviewed_digest,
+                installation_id=installation_id,
+            )
+    except (ControlMalformedResponse, ControlResponseTooLarge):
+        # Inspect only. A malformed receipt never licenses a resubmission.
+        existing = _run_switch_request_operation(
+            request,
+            key,
+            installation_id=installation_id,
+            expected_plan_digest=reviewed_digest,
+        )
+        if existing is None:
+            raise
+        operation = existing
+        operation_id = cast(str, existing["operation_id"])
+
+    submission.acceptance = "accepted"
+    submission.operation_id = operation_id
+    return _follow_installation_reconciliation(
+        client,
+        operation,
+        args,
+        request_key=key,
+        plan_digest=reviewed_digest,
+    )
+
+
 def _recipe(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -2600,6 +2978,10 @@ def _recipe(
             raise ValueError("recipe cancel requires --yes in noninteractive mode")
         result = _submit_recipe_cancellation(client, args, factory)
         return _follow_mutation(client, "recipe", result, args)
+    if action == "installation":
+        if getattr(args, "installation_action", None) != "reconcile":
+            raise ValueError("unsupported recipe installation action")
+        return _recipe_installation_reconcile(client, args, factory)
     raise ValueError(f"unsupported recipe action: {action}")
 
 

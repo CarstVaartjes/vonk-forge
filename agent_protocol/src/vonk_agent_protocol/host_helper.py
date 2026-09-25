@@ -122,6 +122,20 @@ class RecipeRunInspectionBinding(WireModel):
         return self
 
 
+class RecipeReconciliationIdentity(WireModel):
+    """Exact old install authority carried through the signed cleanup grant."""
+
+    schema_version: Literal[1]
+    node_id: NodeId
+    installation_id: Uuid4Text
+    install_operation_id: Uuid4Text
+    install_operation_payload_sha256: Digest
+    plan_digest: Digest
+    recipe_revision_id: Uuid4Text
+    recipe_content_sha256: Digest
+    compiled_spec_canonical_sha256: Digest
+
+
 class HostRuntimeRequest(WireModel):
     """The complete bytes hashed by the agent and admitted by the root helper."""
 
@@ -145,6 +159,9 @@ class HostRuntimeRequest(WireModel):
     installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    reconciliation_identity: RecipeReconciliationIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def bind_runtime_inspection(self) -> HostRuntimeRequest:
@@ -155,6 +172,11 @@ class HostRuntimeRequest(WireModel):
             self.action == "installation-cleanup"
         ):
             raise ValueError("runtime installation identity does not match the action")
+        if self.reconciliation_identity is not None and (
+            self.action != "installation-cleanup"
+            or self.installation_id != self.reconciliation_identity.installation_id
+        ):
+            raise ValueError("runtime reconciliation identity does not match the action")
         if self.observation is not None:
             import hashlib
 
@@ -236,6 +258,9 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    reconciliation_identity: RecipeReconciliationIdentity | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def observation_only_for_inspection(
@@ -250,6 +275,11 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
             self.action == "installation-cleanup"
         ):
             raise ValueError("container runtime installation identity is invalid")
+        if self.reconciliation_identity is not None and (
+            self.action != "installation-cleanup"
+            or self.installation_id != self.reconciliation_identity.installation_id
+        ):
+            raise ValueError("container runtime reconciliation identity is invalid")
         return self
 
 

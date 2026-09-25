@@ -132,6 +132,12 @@ impl HelperRejection {
             OperationError::RuntimeFabricFirewallRejected => {
                 ("runtime_fabric_firewall_rejected", None)
             }
+            OperationError::InstallationReconciliationBusy => {
+                ("installation_reconciliation_busy", None)
+            }
+            OperationError::InstallationReconciliationStorageUnavailable => {
+                ("installation_reconciliation_storage_unavailable", None)
+            }
             OperationError::InvalidOperation => ("operation_invalid", None),
             OperationError::UnsafePath => ("operation_unsafe_path", None),
             OperationError::InvalidArtifact => ("operation_invalid_artifact", None),
@@ -740,6 +746,7 @@ mod tests {
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
                 installation_id: None,
+                reconciliation_identity: None,
             },
         );
         let rejection = HelperRejection::for_operation(
@@ -903,6 +910,7 @@ mod tests {
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
                 installation_id: None,
+                reconciliation_identity: None,
             },
         );
         for (error, code) in [

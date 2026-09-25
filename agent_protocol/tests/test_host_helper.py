@@ -178,3 +178,63 @@ def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
     explicit_null = model.model_validate(ordinary | {"installation_id": None})
     assert canonical_message(omitted) == canonical_message(explicit_null)
     assert "installation_id" not in json.loads(canonical_message(explicit_null))
+
+
+def test_runtime_reconciliation_identity_is_bound_to_cleanup_request_and_grant() -> None:
+    from vonk_agent_protocol import RecipeReconciliationIdentity
+
+    identity = {
+        "schema_version": 1,
+        "node_id": "spk_" + "a" * 32,
+        "installation_id": "70000000-0000-4000-8000-000000000007",
+        "install_operation_id": "80000000-0000-4000-8000-000000000008",
+        "install_operation_payload_sha256": "b" * 64,
+        "plan_digest": "c" * 64,
+        "recipe_revision_id": "90000000-0000-4000-8000-000000000009",
+        "recipe_content_sha256": "d" * 64,
+        "compiled_spec_canonical_sha256": "e" * 64,
+    }
+    typed = RecipeReconciliationIdentity.model_validate(identity)
+    request = HostRuntimeRequest.model_validate(
+        {
+            "schema_version": 1,
+            "action": "installation-cleanup",
+            "job_id": "20000000-0000-4000-8000-000000000002",
+            "operation_id": "30000000-0000-4000-8000-000000000003",
+            "attempt": 2,
+            "fence": "40000000-0000-4000-8000-000000000004",
+            "arguments": [],
+            "installation_id": identity["installation_id"],
+            "reconciliation_identity": identity,
+        }
+    )
+    operation = ExecuteContainerRuntimeRequestOperation.model_validate(
+        {
+            "type": "execute-container-runtime-request",
+            "action": "installation-cleanup",
+            "job_id": "20000000-0000-4000-8000-000000000002",
+            "operation_id": "30000000-0000-4000-8000-000000000003",
+            "attempt": 2,
+            "fence": "40000000-0000-4000-8000-000000000004",
+            "request_sha256": "f" * 64,
+            "installation_id": identity["installation_id"],
+            "reconciliation_identity": identity,
+        }
+    )
+    assert request.reconciliation_identity == typed
+    assert operation.reconciliation_identity == typed
+    with pytest.raises(ValidationError, match="reconciliation identity"):
+        HostRuntimeRequest.model_validate(
+            {
+                "schema_version": 1,
+                "action": "installation-cleanup",
+                "job_id": "20000000-0000-4000-8000-000000000002",
+                "operation_id": "30000000-0000-4000-8000-000000000003",
+                "attempt": 2,
+                "fence": "40000000-0000-4000-8000-000000000004",
+                "arguments": [],
+                "installation_id": identity["installation_id"],
+                "reconciliation_identity": identity
+                | {"installation_id": "70000000-0000-4000-8000-000000000010"},
+            }
+        )

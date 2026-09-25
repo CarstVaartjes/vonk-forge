@@ -52,6 +52,7 @@ _AGENT_OPERATIONS = frozenset(
         "recipe.job.run.v1",
         "recipe.stop",
         "recipe.uninstall",
+        "recipe.reconcile",
     }
 )
 _VERSION_BUCKETS = frozenset({"supported", "old", "new", "incompatible"})

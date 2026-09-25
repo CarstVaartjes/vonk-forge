@@ -46,5 +46,7 @@ pub const CLAIM_CAPABILITIES: &[&str] = &[
     "recipe.run.inspect.receipt.v1",
     "recipe.stop",
     "recipe.uninstall",
+    "recipe.reconcile",
+    "recipe.reconcile.v1",
     "agent.lifecycle.resume.exact.v1",
 ];

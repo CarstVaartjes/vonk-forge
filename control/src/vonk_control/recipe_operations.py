@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
@@ -21,6 +21,8 @@ from vonk_agent_protocol import (
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeInstallPayload,
+    RecipeReconcilePayload,
+    RecipeReconcileResult,
     RecipeStartPayload,
     RecipeStopPayload,
     RecipeUninstallPayload,
@@ -44,6 +46,8 @@ from .admission_locking import (
     node_admission_key,
 )
 from .agent_jobs import (
+    EXACT_LIFECYCLE_RESUME_CAPABILITY,
+    RECIPE_RECONCILE_FEATURE_CAPABILITY,
     AgentJobService,
     _JsonFlagIsTrue,
     release_owned_reservations_in_session,
@@ -65,6 +69,7 @@ from .install_admission import (
     InstallAdmissionService,
     InstallPlan,
     InstallPreflightExpired,
+    installation_plan_digest_from_stored_document,
     refreshable_preflight_is_the_only_blocker,
 )
 from .logging import redact_text
@@ -75,6 +80,8 @@ from .models import (
     AgentPresence,
     ArtifactJob,
     CatalogDocumentRevision,
+    ClusterMapping,
+    ClusterMappingNode,
     InstallationNode,
     Job,
     NodeArtifact,
@@ -115,6 +122,7 @@ from .recipe_execution_contract import (
 )
 from .recipe_lifecycle_contract import (
     RecipeOperationCancellationResult,
+    RecipeOperationResult,
     parse_recipe_lifecycle_result,
     validate_recipe_lifecycle_terminal,
 )
@@ -197,6 +205,76 @@ class RecipeOperationConflict(RuntimeError):
     """A lifecycle request is stale, conflicting, or unsafe to execute."""
 
 
+class RecipeReconciliationBlocked(RecipeOperationConflict):
+    """A corrupt installation lacks exact, current cleanup authority."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        self.code = code
+        self.detail = detail
+        super().__init__(f"{code}: {detail}")
+
+
+@dataclass(frozen=True, slots=True)
+class InstallationReconciliationTarget:
+    """Exact source install request and local spec identity for one node."""
+
+    node_id: str
+    rank: int
+    role: str
+    installed_bytes: int
+    install_operation_id: str
+    install_operation_payload_sha256: str
+    compiled_spec_canonical_sha256: str
+    state: str
+    cleanup_receipt_sha256: str | None
+
+    def document(self) -> dict[str, object]:
+        return {
+            "node_id": self.node_id,
+            "rank": self.rank,
+            "role": self.role,
+            "installed_bytes": self.installed_bytes,
+            "install_operation_id": self.install_operation_id,
+            "install_operation_payload_sha256": self.install_operation_payload_sha256,
+            "compiled_spec_canonical_sha256": self.compiled_spec_canonical_sha256,
+            "state": self.state,
+            "cleanup_receipt_sha256": self.cleanup_receipt_sha256,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class InstallationReconciliationAuthority:
+    """Immutable identity-only teardown authority; never an execution plan."""
+
+    installation_id: str
+    original_plan_digest: str
+    recipe_revision_id: str
+    recipe_content_sha256: str
+    mapping_id: str
+    mapping_generation: int
+    recipe_build_id: str | None
+    image_digest: str
+    model_content_sha256: str | None
+    stored_plan_canonical_sha256: str
+    targets: tuple[InstallationReconciliationTarget, ...]
+
+    def document(self) -> dict[str, object]:
+        return {
+            "schema_version": 2,
+            "installation_id": self.installation_id,
+            "original_plan_digest": self.original_plan_digest,
+            "recipe_revision_id": self.recipe_revision_id,
+            "recipe_content_sha256": self.recipe_content_sha256,
+            "mapping_id": self.mapping_id,
+            "mapping_generation": self.mapping_generation,
+            "recipe_build_id": self.recipe_build_id,
+            "image_digest": self.image_digest,
+            "model_content_sha256": self.model_content_sha256,
+            "stored_plan_canonical_sha256": self.stored_plan_canonical_sha256,
+            "targets": [target.document() for target in self.targets],
+        }
+
+
 class RecipeArtifactJobCancellationPending(RecipeOperationConflict):
     """An issued one-shot job still needs its exact cancellation receipt."""
 
@@ -253,6 +331,7 @@ _EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
 _RECIPE_WIRE_PAYLOAD_MODELS = {
     "recipe.build.cleanup.v1": RecipeBuildCleanupRequest,
     "recipe.install": RecipeInstallPayload,
+    "recipe.reconcile": RecipeReconcilePayload,
     "recipe.start": RecipeStartPayload,
     "recipe.stop": RecipeStopPayload,
     "recipe.uninstall": RecipeUninstallPayload,
@@ -330,6 +409,7 @@ _WORKLOAD_INTENT_KINDS = frozenset(
         "recipe.start",
         "recipe.stop",
         "recipe.uninstall",
+        "recipe.reconcile",
         "recipe.image.import.v1",
         "recipe.job.run.v1",
     }
@@ -393,7 +473,7 @@ def _workload_owner_scope(
         if session.get(RecipeRun, owner_id) is None:
             raise RecipeOperationConflict("recipe run does not exist")
         statement = select(RunNode.node_id).where(RunNode.run_id == owner_id)
-    elif kind in {"recipe.install", "recipe.uninstall"}:
+    elif kind in {"recipe.install", "recipe.uninstall", "recipe.reconcile"}:
         if session.get(RecipeInstallation, owner_id) is None:
             raise RecipeOperationConflict("recipe installation does not exist")
         statement = select(InstallationNode.node_id).where(
@@ -620,9 +700,7 @@ class RecipeOperationService:
                         AdmissionRowLock(
                             "build-recipe-build",
                             RecipeBuild,
-                            select(RecipeBuild).where(
-                                RecipeBuild.id == plan.build_id
-                            ),
+                            select(RecipeBuild).where(RecipeBuild.id == plan.build_id),
                         ),
                     ),
                 )
@@ -989,6 +1067,18 @@ class RecipeOperationService:
             )
             if existing is not None:
                 return existing
+            reconciliation = session.scalar(
+                select(Job.id)
+                .where(
+                    Job.kind == "recipe.reconcile",
+                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.payload["owner_kind"].as_string() == "installation",
+                    Job.payload["owner_id"].as_string() == installation_id,
+                )
+                .limit(1)
+            )
+            if reconciliation is not None:
+                raise RecipeOperationConflict("recipe installation is being reconciled")
             if installation.state == "installed":
                 completed = session.scalar(
                     select(Job)
@@ -1502,8 +1592,8 @@ class RecipeOperationService:
             active_uninstall = session.scalar(
                 select(Job.id)
                 .where(
-                    Job.kind == "recipe.uninstall",
-                    Job.state.in_({"queued", "running"}),
+                    Job.kind.in_(("recipe.uninstall", "recipe.reconcile")),
+                    Job.state.in_({"queued", "running", "waiting-for-operator"}),
                     Job.payload["owner_kind"].as_string() == "installation",
                     Job.payload["owner_id"].as_string() == plan.installation_id,
                 )
@@ -2155,6 +2245,1016 @@ class RecipeOperationService:
         with self._sessions() as session:
             return self._uninstall_plan_in_session(session, installation_id, lock=False)
 
+    def preview_reconciliation_authority(
+        self,
+        installation_id: str,
+        *,
+        session: Session | None = None,
+        allow_active_reconciliation: bool = False,
+    ) -> InstallationReconciliationAuthority:
+        """Bind an explicit cleanup review to successful install provenance.
+
+        This path reads the admitted installation document only as opaque JSON.
+        It never converts the damaged launch specification into an executable
+        plan and it does not weaken the ordinary uninstall assessment.
+        """
+
+        if session is not None:
+            return self._reconciliation_authority_in_session(
+                session,
+                installation_id,
+                lock=False,
+                allow_active_reconciliation=allow_active_reconciliation,
+            )
+        with self._sessions() as owned_session:
+            return self._reconciliation_authority_in_session(
+                owned_session,
+                installation_id,
+                lock=False,
+                allow_active_reconciliation=allow_active_reconciliation,
+            )
+
+    def reconciliation_operation_receipts(
+        self,
+        request_id: str,
+        *,
+        expected_authority: Mapping[str, object],
+    ) -> tuple[RecipeReconcileResult, ...] | None:
+        """Return canonical receipts only after proving full topology completion."""
+
+        with self._sessions() as session:
+            job = session.scalar(
+                select(Job).where(
+                    Job.request_id == request_id,
+                    Job.kind == "recipe.reconcile",
+                )
+            )
+            if (
+                job is None
+                or job.state != "succeeded"
+                or canonical_message(job.payload.get("reconciliation_authority", {}))
+                != canonical_message(expected_authority)
+            ):
+                return None
+            children = tuple(
+                session.scalars(
+                    select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+                )
+            )
+            if not self._reconciliation_job_has_exact_receipts(session, job, children):
+                return None
+            result = job.result
+            evidence = (
+                result.get("node_evidence") if isinstance(result, Mapping) else None
+            )
+            if not isinstance(evidence, Mapping):
+                return None
+            targets = expected_authority.get("targets")
+            pending_ids = (
+                sorted(
+                    str(target.get("node_id"))
+                    for target in targets
+                    if isinstance(target, Mapping) and target.get("state") == "pending"
+                )
+                if isinstance(targets, list)
+                else []
+            )
+            if not pending_ids or set(evidence) != set(pending_ids):
+                return None
+            receipts: list[RecipeReconcileResult] = []
+            for node_id in pending_ids:
+                raw_receipt = evidence.get(node_id)
+                if not isinstance(raw_receipt, Mapping):
+                    return None
+                try:
+                    receipts.append(
+                        RecipeReconcileResult.model_validate_json(
+                            canonical_message(raw_receipt)
+                        )
+                    )
+                except (TypeError, ValueError):
+                    return None
+            return tuple(receipts)
+
+    @staticmethod
+    def _lock_reconciliation_rows_in_session(
+        session: Session, installation: RecipeInstallation
+    ) -> None:
+        """Acquire the complete reconciliation row set in canonical order."""
+
+        node_rows = tuple(
+            session.scalars(
+                select(InstallationNode)
+                .where(InstallationNode.installation_id == installation.id)
+                .order_by(InstallationNode.rank, InstallationNode.node_id)
+            )
+        )
+        node_ids = tuple(node.node_id for node in node_rows)
+        mapping_nodes = tuple(
+            session.scalars(
+                select(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == installation.mapping_id)
+                .order_by(ClusterMappingNode.rank, ClusterMappingNode.node_id)
+            )
+        )
+        runs = tuple(
+            session.scalars(
+                select(RecipeRun).where(RecipeRun.installation_id == installation.id)
+            )
+        )
+        run_ids = tuple(run.id for run in runs)
+        source_jobs = tuple(
+            session.scalars(
+                select(Job).where(
+                    Job.kind == "recipe.install",
+                    Job.state == "succeeded",
+                    Job.payload["owner_kind"].as_string() == "installation",
+                    Job.payload["owner_id"].as_string() == installation.id,
+                    Job.payload["plan_digest"].as_string() == installation.plan_digest,
+                )
+            )
+        )
+        reconciliation_jobs = tuple(
+            session.scalars(
+                select(Job).where(
+                    Job.kind == "recipe.reconcile",
+                    Job.payload["owner_kind"].as_string() == "installation",
+                    Job.payload["owner_id"].as_string() == installation.id,
+                )
+            )
+        )
+        active_jobs = tuple(
+            session.scalars(
+                select(Job).where(
+                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    Job.payload["owner_kind"].as_string() == "installation",
+                    Job.payload["owner_id"].as_string() == installation.id,
+                    Job.kind.in_(
+                        ("recipe.install", "recipe.uninstall", "recipe.reconcile")
+                    ),
+                )
+            )
+        )
+        active_run_jobs = (
+            tuple(
+                session.scalars(
+                    select(Job).where(
+                        Job.state.in_(("queued", "running", "waiting-for-operator")),
+                        Job.payload["owner_kind"].as_string() == "run",
+                        Job.payload["owner_id"].as_string().in_(run_ids),
+                        Job.kind.in_(("recipe.start", "recipe.stop")),
+                    )
+                )
+            )
+            if run_ids
+            else ()
+        )
+        job_ids = tuple(
+            sorted(
+                {
+                    job.id
+                    for job in (
+                        *source_jobs,
+                        *reconciliation_jobs,
+                        *active_jobs,
+                        *active_run_jobs,
+                    )
+                }
+            )
+        )
+        requests = (
+            AdmissionRowLock(
+                "reconcile-agent-nodes",
+                AgentNode,
+                select(AgentNode).where(AgentNode.node_id.in_(node_ids)),
+            ),
+            AdmissionRowLock(
+                "reconcile-recipe-revision",
+                CatalogDocumentRevision,
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id == installation.recipe_revision_id
+                ),
+            ),
+            AdmissionRowLock(
+                "reconcile-mapping",
+                ClusterMapping,
+                select(ClusterMapping).where(
+                    ClusterMapping.id == installation.mapping_id
+                ),
+            ),
+            AdmissionRowLock(
+                "reconcile-installation",
+                RecipeInstallation,
+                select(RecipeInstallation).where(
+                    RecipeInstallation.id == installation.id
+                ),
+            ),
+            AdmissionRowLock(
+                "reconcile-mapping-nodes",
+                ClusterMappingNode,
+                select(ClusterMappingNode).where(
+                    ClusterMappingNode.mapping_id == installation.mapping_id
+                ),
+            ),
+            AdmissionRowLock(
+                "reconcile-installation-nodes",
+                InstallationNode,
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation.id
+                ),
+            ),
+            AdmissionRowLock(
+                "reconcile-jobs",
+                Job,
+                select(Job).where(Job.id.in_(job_ids)),
+            ),
+            AdmissionRowLock(
+                "reconcile-agent-operations",
+                AgentOperation,
+                select(AgentOperation).where(AgentOperation.parent_job_id.in_(job_ids)),
+            ),
+        )
+        try:
+            locked = lock_admission_rows(session, requests)
+        except AdmissionLockBusy as error:
+            raise InstallAdmissionBusy("reconcile.capacity_busy") from error
+        locked_nodes = locked["reconcile-installation-nodes"]
+        locked_mapping_nodes = locked["reconcile-mapping-nodes"]
+        if tuple(
+            sorted((node.node_id, node.rank, node.role) for node in locked_nodes)
+        ) != tuple(
+            sorted((node.node_id, node.rank, node.role) for node in node_rows)
+        ) or tuple(
+            sorted(
+                (node.node_id, node.rank, node.role) for node in locked_mapping_nodes
+            )
+        ) != tuple(
+            sorted((node.node_id, node.rank, node.role) for node in mapping_nodes)
+        ):
+            raise InstallAdmissionBusy("reconcile.membership_changed")
+
+    def _reconciliation_authority_in_session(
+        self,
+        session: Session,
+        installation_id: str,
+        *,
+        lock: bool,
+        allow_active_reconciliation: bool = False,
+    ) -> InstallationReconciliationAuthority:
+        installation_statement = select(RecipeInstallation).where(
+            RecipeInstallation.id == installation_id
+        )
+        installation = session.scalar(installation_statement)
+        if installation is None:
+            raise KeyError(installation_id)
+
+        if lock:
+            self._lock_reconciliation_rows_in_session(session, installation)
+            # The helper refreshed every locked row after acquiring the full
+            # set in canonical table/primary-key order. Keep later reads free
+            # of ad-hoc locks that could invert that order.
+            lock = False
+            allow_active_reconciliation = False
+
+        def blocked(code: str, detail: str) -> NoReturn:
+            raise RecipeReconciliationBlocked(code, detail)
+
+        stored_plan = installation.plan
+        if not isinstance(stored_plan, Mapping):
+            blocked(
+                "reconcile.installation_identity_unavailable",
+                "The original installation identity is not a JSON object.",
+            )
+
+        revision_statement = select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.id == installation.recipe_revision_id,
+            CatalogDocumentRevision.kind == "recipe",
+        )
+        if lock:
+            revision_statement = revision_statement.with_for_update(
+                of=CatalogDocumentRevision
+            )
+        revision = session.scalar(revision_statement)
+        if (
+            revision is None
+            or revision.content_digest is None
+            or not isinstance(revision.document, Mapping)
+            or revision.content_digest != stored_plan.get("recipe_content_sha256")
+        ):
+            blocked(
+                "reconcile.recipe_revision_unavailable",
+                "The installation's exact accepted recipe revision is unavailable.",
+            )
+
+        # This is the immutable admitted document, read only as generic JSON.
+        # A failed current launch schema check is the reason for this explicit
+        # cleanup route and must not be converted into an executable fallback.
+        try:
+            stored_plan_digest = installation_plan_digest_from_stored_document(
+                stored_plan
+            )
+            stored_plan_sha256 = hashlib.sha256(
+                canonical_message(stored_plan)
+            ).hexdigest()
+        except (KeyError, TypeError, ValueError) as error:
+            blocked(
+                "reconcile.installation_identity_unavailable",
+                f"The original installation identity cannot be fingerprinted: {error}",
+            )
+        expected_top_level = {
+            "mapping_id": installation.mapping_id,
+            "mapping_generation": installation.mapping_generation,
+            "recipe_build_id": installation.recipe_build_id,
+            "image_digest": installation.image_digest,
+            "recipe_revision_id": installation.recipe_revision_id,
+            "recipe_content_sha256": revision.content_digest,
+            "plan_digest": installation.plan_digest,
+        }
+        if (
+            any(
+                stored_plan.get(key) != value
+                for key, value in expected_top_level.items()
+            )
+            or stored_plan_digest != installation.plan_digest
+        ):
+            blocked(
+                "reconcile.installation_identity_mismatch",
+                "The relational installation identity differs from its original admitted plan.",
+            )
+        try:
+            recipe_model_content_sha256, _ = _primary_model_identity(revision.document)
+        except RecipeOperationConflict as error:
+            blocked(
+                "reconcile.recipe_revision_unavailable",
+                f"The exact accepted recipe revision has no model identity: {error}",
+            )
+        if installation.model_content_sha256 not in {
+            None,
+            recipe_model_content_sha256,
+        }:
+            blocked(
+                "reconcile.installation_identity_mismatch",
+                "The relational model identity differs from the exact accepted recipe revision.",
+            )
+        if installation.state not in {"installed", "partial"}:
+            blocked(
+                "reconcile.installation_effect_unknown",
+                f"Installation state {installation.state} does not prove a complete installed effect.",
+            )
+
+        node_statement = (
+            select(InstallationNode)
+            .where(InstallationNode.installation_id == installation.id)
+            .order_by(InstallationNode.rank, InstallationNode.node_id)
+            .limit(_MAX_ACTION_NODES + 1)
+        )
+        if lock:
+            node_statement = node_statement.with_for_update(of=InstallationNode)
+        all_nodes = tuple(session.scalars(node_statement))
+        if not all_nodes or len(all_nodes) > _MAX_ACTION_NODES:
+            blocked(
+                "reconcile.rank_membership_changed",
+                "The installation has no bounded exact node membership.",
+            )
+        mapping_statement = select(ClusterMapping).where(
+            ClusterMapping.id == installation.mapping_id
+        )
+        if lock:
+            mapping_statement = mapping_statement.with_for_update(of=ClusterMapping)
+        mapping = session.scalar(mapping_statement)
+        mapping_nodes_statement = (
+            select(ClusterMappingNode)
+            .where(ClusterMappingNode.mapping_id == installation.mapping_id)
+            .order_by(ClusterMappingNode.rank, ClusterMappingNode.node_id)
+        )
+        if lock:
+            mapping_nodes_statement = mapping_nodes_statement.with_for_update(
+                of=ClusterMappingNode
+            )
+        mapping_nodes = tuple(session.scalars(mapping_nodes_statement))
+        actual_membership = tuple(
+            (node.node_id, node.rank, node.role) for node in all_nodes
+        )
+        mapping_membership = tuple(
+            (node.node_id, node.rank, node.role) for node in mapping_nodes
+        )
+        stored_nodes = stored_plan.get("nodes")
+        stored_membership = (
+            tuple(
+                (item.get("node_id"), item.get("rank"), item.get("role"))
+                for item in stored_nodes
+            )
+            if isinstance(stored_nodes, list)
+            and all(isinstance(item, Mapping) for item in stored_nodes)
+            else ()
+        )
+        if (
+            mapping is None
+            or mapping.recipe_revision_id != revision.id
+            or mapping.generation != installation.mapping_generation
+            or mapping.node_count != len(mapping_nodes)
+            or not mapping_nodes
+            or actual_membership != mapping_membership
+            or actual_membership != stored_membership
+            or tuple(node.rank for node in all_nodes) != tuple(range(len(all_nodes)))
+            or mapping.endpoint_owner_node_id
+            not in {node.node_id for node in mapping_nodes}
+        ):
+            blocked(
+                "reconcile.rank_membership_changed",
+                "The stored installation, relational membership, and saved mapping no longer identify the same exact ranks.",
+            )
+
+        active_runs_statement = select(RecipeRun).where(
+            RecipeRun.installation_id == installation.id
+        )
+        if lock:
+            active_runs_statement = active_runs_statement.with_for_update(of=RecipeRun)
+        installation_runs = tuple(session.scalars(active_runs_statement))
+        if any(
+            run.state != "stopped" or run.route_state != "withdrawn"
+            for run in installation_runs
+        ):
+            blocked(
+                "reconcile.active_effect_unknown",
+                "An installation run or route is active or has an unconfirmed effect.",
+            )
+
+        active_jobs_statement = select(Job).where(
+            Job.state.in_(("queued", "running", "waiting-for-operator")),
+            Job.payload["owner_kind"].as_string() == "installation",
+            Job.payload["owner_id"].as_string() == installation.id,
+            Job.kind.in_(("recipe.install", "recipe.uninstall", "recipe.reconcile")),
+        )
+        if lock:
+            active_jobs_statement = active_jobs_statement.with_for_update(of=Job)
+        active_jobs = tuple(session.scalars(active_jobs_statement))
+        run_ids = {run.id for run in installation_runs}
+        active_run_jobs = (
+            tuple(
+                session.scalars(
+                    select(Job).where(
+                        Job.state.in_(("queued", "running", "waiting-for-operator")),
+                        Job.payload["owner_kind"].as_string() == "run",
+                        Job.payload["owner_id"].as_string().in_(run_ids),
+                        Job.kind.in_(("recipe.start", "recipe.stop")),
+                    )
+                )
+            )
+            if run_ids
+            else ()
+        )
+        blocking_active_jobs = (
+            tuple(job for job in active_jobs if job.kind != "recipe.reconcile")
+            if allow_active_reconciliation
+            else active_jobs
+        )
+        if blocking_active_jobs or active_run_jobs:
+            blocked(
+                "reconcile.operation_active",
+                "An install, start, stop, uninstall, or reconciliation operation is still active or uncertain.",
+            )
+
+        install_jobs = tuple(
+            session.scalars(
+                select(Job)
+                .where(
+                    Job.kind == "recipe.install",
+                    Job.state == "succeeded",
+                    Job.payload["owner_kind"].as_string() == "installation",
+                    Job.payload["owner_id"].as_string() == installation.id,
+                    Job.payload["plan_digest"].as_string() == installation.plan_digest,
+                )
+                .order_by(Job.created_at, Job.id)
+                .limit(2)
+            )
+        )
+        if len(install_jobs) != 1:
+            blocked(
+                "reconcile.install_provenance_unavailable",
+                "Exactly one successful original install operation is required to identify the local specs.",
+            )
+        install_job = install_jobs[0]
+        if (
+            not isinstance(install_job.payload, Mapping)
+            or install_job.payload.get("schema_version") != 1
+            or install_job.payload.get("owner_kind") != "installation"
+            or install_job.payload.get("owner_id") != installation.id
+            or install_job.payload.get("plan_digest") != installation.plan_digest
+            or install_job.targets != sorted(node.node_id for node in all_nodes)
+            or install_job.authority_revision != revision.content_digest
+            or hashlib.sha256(canonical_message(install_job.payload)).hexdigest()
+            != install_job.payload_digest
+        ):
+            blocked(
+                "reconcile.install_provenance_mismatch",
+                "The successful original install job no longer matches the admitted installation identity.",
+            )
+        try:
+            install_result = parse_recipe_lifecycle_result(
+                "recipe.install", install_job.result
+            )
+        except (TypeError, ValueError) as error:
+            blocked(
+                "reconcile.install_provenance_unavailable",
+                f"The original successful install receipt cannot be validated: {error}",
+            )
+        if (
+            not isinstance(install_result, RecipeOperationResult)
+            or install_result.failed_nodes
+            or install_result.recovery_error is not None
+            or set(install_result.successful_nodes)
+            != {node.node_id for node in all_nodes}
+            or set(install_result.node_evidence) != {node.node_id for node in all_nodes}
+        ):
+            blocked(
+                "reconcile.install_provenance_unavailable",
+                "The original install receipt does not prove success on every exact node.",
+            )
+
+        operations = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == install_job.id)
+                .order_by(AgentOperation.node_id, AgentOperation.id)
+            )
+        )
+        if len(operations) != len(all_nodes) or {
+            operation.node_id for operation in operations
+        } != {node.node_id for node in all_nodes}:
+            blocked(
+                "reconcile.install_provenance_unavailable",
+                "The original install child operations do not match exact node membership.",
+            )
+
+        node_by_id = {node.node_id: node for node in all_nodes}
+        stored_compiled = stored_plan.get("compiled_execution_plans")
+        if not isinstance(stored_compiled, Mapping):
+            blocked(
+                "reconcile.installation_identity_unavailable",
+                "The opaque admitted plan has no exact per-node specification map.",
+            )
+        agent_nodes_statement = (
+            select(AgentNode)
+            .where(AgentNode.node_id.in_(node_by_id))
+            .order_by(AgentNode.node_id)
+        )
+        if lock:
+            agent_nodes_statement = agent_nodes_statement.with_for_update(of=AgentNode)
+        agent_nodes = tuple(session.scalars(agent_nodes_statement))
+        agent_node_by_id = {node.node_id: node for node in agent_nodes}
+        targets: list[InstallationReconciliationTarget] = []
+        for operation in operations:
+            node = node_by_id[operation.node_id]
+            agent_node = agent_node_by_id.get(operation.node_id)
+            if (
+                operation.kind != "recipe.install"
+                or operation.state != "succeeded"
+                or operation.current_attempt < 1
+                or operation.authority_revision != revision.content_digest
+                or not isinstance(operation.payload, Mapping)
+                or hashlib.sha256(canonical_message(operation.payload)).hexdigest()
+                != operation.payload_digest
+            ):
+                blocked(
+                    "reconcile.install_provenance_mismatch",
+                    f"The original install operation for {node.node_id} is not an exact successful source.",
+                )
+            payload = operation.payload
+            if (
+                payload.get("schema_version") != 2
+                or payload.get("installation_id") != installation.id
+                or payload.get("plan_digest") != installation.plan_digest
+                or payload.get("rank") != node.rank
+                or payload.get("role") != node.role
+                or payload.get("expected_bytes") != node.required_bytes
+            ):
+                blocked(
+                    "reconcile.install_provenance_mismatch",
+                    f"The original install payload for {node.node_id} differs from its exact installation row.",
+                )
+            compiled = payload.get("compiled_execution_plan")
+            stored_node_compiled = stored_compiled.get(node.node_id)
+            if (
+                not isinstance(compiled, Mapping)
+                or not isinstance(stored_node_compiled, Mapping)
+                or canonical_message(compiled)
+                != canonical_message(stored_node_compiled)
+            ):
+                blocked(
+                    "reconcile.spec_identity_mismatch",
+                    f"The original install payload and stored opaque specification differ for {node.node_id}.",
+                )
+            identity = compiled.get("identity")
+            runtime = compiled.get("runtime")
+            runtime_image = compiled.get("runtime_image")
+            placement = (
+                runtime.get("placement") if isinstance(runtime, Mapping) else None
+            )
+            if (
+                not isinstance(identity, Mapping)
+                or not isinstance(runtime, Mapping)
+                or not isinstance(runtime_image, Mapping)
+                or not isinstance(placement, Mapping)
+                or identity.get("recipe_revision_sha256") != revision.content_digest
+                or runtime.get("image_digest") != installation.image_digest
+                or runtime_image.get("image_digest") != installation.image_digest
+                or placement.get("rank") != node.rank
+                or placement.get("role") != node.role
+            ):
+                blocked(
+                    "reconcile.spec_identity_mismatch",
+                    f"The original specification for {node.node_id} is not bound to this recipe, image, and rank.",
+                )
+            evidence = install_result.node_evidence.get(node.node_id)
+            if not isinstance(evidence, Mapping):
+                blocked(
+                    "reconcile.install_provenance_unavailable",
+                    f"The original successful receipt for {node.node_id} is unavailable.",
+                )
+            current_attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+            )
+            if (
+                current_attempt is None
+                or current_attempt.state != "succeeded"
+                or not isinstance(current_attempt.result, Mapping)
+                or canonical_message(current_attempt.result)
+                != canonical_message(evidence)
+                or evidence.get("installed_bytes") != node.installed_bytes
+            ):
+                blocked(
+                    "reconcile.install_provenance_unavailable",
+                    f"The current successful install attempt does not match recorded bytes for {node.node_id}.",
+                )
+            if (
+                agent_node is None
+                or agent_node.state != "active"
+                or agent_node.revoked_at is not None
+            ):
+                blocked(
+                    "reconcile.agent_unavailable",
+                    f"Node {node.node_id} is not an active authorized target.",
+                )
+            capabilities = set(agent_node.capabilities or [])
+            required_reconciliation_capabilities = {
+                "recipe.reconcile",
+                RECIPE_RECONCILE_FEATURE_CAPABILITY,
+                EXACT_LIFECYCLE_RESUME_CAPABILITY,
+            }
+            if not required_reconciliation_capabilities <= capabilities:
+                blocked(
+                    "reconcile.agent_upgrade_required",
+                    f"Node {node.node_id} must advertise recipe.reconcile, recipe.reconcile.v1, and agent.lifecycle.resume.exact.v1 before safe reconciliation can be authorized.",
+                )
+            if not _lower_hex_digest(operation.payload_digest):
+                blocked(
+                    "reconcile.install_provenance_mismatch",
+                    f"The original install payload digest for {node.node_id} is invalid.",
+                )
+            targets.append(
+                self._reconciliation_target_in_session(
+                    session,
+                    installation=installation,
+                    revision=revision,
+                    node=node,
+                    install_operation_id=operation.id,
+                    install_operation_payload_sha256=operation.payload_digest,
+                    compiled_spec_canonical_sha256=hashlib.sha256(
+                        canonical_message(compiled)
+                    ).hexdigest(),
+                )
+            )
+
+        return InstallationReconciliationAuthority(
+            installation_id=installation.id,
+            original_plan_digest=installation.plan_digest,
+            recipe_revision_id=revision.id,
+            recipe_content_sha256=revision.content_digest,
+            mapping_id=mapping.id,
+            mapping_generation=mapping.generation,
+            recipe_build_id=installation.recipe_build_id,
+            image_digest=installation.image_digest,
+            model_content_sha256=recipe_model_content_sha256,
+            stored_plan_canonical_sha256=stored_plan_sha256,
+            targets=tuple(targets),
+        )
+
+    @staticmethod
+    def _reconciliation_target_in_session(
+        session: Session,
+        *,
+        installation: RecipeInstallation,
+        revision: CatalogDocumentRevision,
+        node: InstallationNode,
+        install_operation_id: str,
+        install_operation_payload_sha256: str,
+        compiled_spec_canonical_sha256: str,
+    ) -> InstallationReconciliationTarget:
+        """Carry forward only a prior receipt proven by its exact child op."""
+
+        expected = {
+            "installation_id": installation.id,
+            "install_operation_id": install_operation_id,
+            "install_operation_payload_sha256": install_operation_payload_sha256,
+            "plan_digest": installation.plan_digest,
+            "recipe_revision_id": revision.id,
+            "recipe_content_sha256": revision.content_digest,
+            "compiled_spec_canonical_sha256": compiled_spec_canonical_sha256,
+        }
+        reconciliation_jobs = tuple(
+            session.scalars(
+                select(Job)
+                .where(
+                    Job.kind == "recipe.reconcile",
+                    Job.payload["owner_kind"].as_string() == "installation",
+                    Job.payload["owner_id"].as_string() == installation.id,
+                )
+                .order_by(Job.created_at.desc(), Job.id.desc())
+            )
+        )
+        prior_receipt: RecipeReconcileResult | None = None
+        for job in reconciliation_jobs:
+            authority = job.payload.get("reconciliation_authority")
+            authority_targets = (
+                authority.get("targets") if isinstance(authority, Mapping) else None
+            )
+            target_authority = (
+                next(
+                    (
+                        target
+                        for target in authority_targets
+                        if isinstance(target, Mapping)
+                        and target.get("node_id") == node.node_id
+                    ),
+                    None,
+                )
+                if isinstance(authority_targets, list)
+                else None
+            )
+            if (
+                not isinstance(authority, Mapping)
+                or authority.get("schema_version") != 2
+                or authority.get("installation_id") != installation.id
+                or authority.get("original_plan_digest") != installation.plan_digest
+                or authority.get("recipe_revision_id") != revision.id
+                or authority.get("recipe_content_sha256") != revision.content_digest
+                or target_authority is None
+                or any(
+                    target_authority.get(key) != value
+                    for key, value in expected.items()
+                    if key
+                    not in {
+                        "installation_id",
+                        "plan_digest",
+                        "recipe_revision_id",
+                        "recipe_content_sha256",
+                    }
+                )
+            ):
+                continue
+            result = job.result
+            evidence_by_node = (
+                result.get("node_evidence") if isinstance(result, Mapping) else None
+            )
+            evidence = (
+                evidence_by_node.get(node.node_id)
+                if isinstance(evidence_by_node, Mapping)
+                else None
+            )
+            if not isinstance(evidence, Mapping):
+                continue
+            try:
+                receipt = RecipeReconcileResult.model_validate_json(
+                    canonical_message(evidence)
+                )
+            except (TypeError, ValueError):
+                continue
+            receipt_identity = {
+                "node_id": receipt.node_id,
+                "installation_id": receipt.installation_id,
+                "install_operation_id": receipt.install_operation_id,
+                "install_operation_payload_sha256": (
+                    receipt.install_operation_payload_sha256
+                ),
+                "plan_digest": receipt.plan_digest,
+                "recipe_revision_id": receipt.recipe_revision_id,
+                "recipe_content_sha256": receipt.recipe_content_sha256,
+                "compiled_spec_canonical_sha256": (
+                    receipt.compiled_spec_canonical_sha256
+                ),
+            }
+            if receipt_identity != {"node_id": node.node_id, **expected}:
+                continue
+            children = tuple(
+                session.scalars(
+                    select(AgentOperation).where(
+                        AgentOperation.parent_job_id == job.id,
+                        AgentOperation.node_id == node.node_id,
+                    )
+                )
+            )
+            if len(children) != 1:
+                continue
+            child = children[0]
+            try:
+                child_payload = RecipeReconcilePayload.model_validate_json(
+                    canonical_message(child.payload)
+                )
+            except (TypeError, ValueError):
+                continue
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == child.id,
+                    AgentOperationAttempt.attempt == child.current_attempt,
+                )
+            )
+            if (
+                child.kind != "recipe.reconcile"
+                or child.state != "succeeded"
+                or child.current_attempt < 1
+                or hashlib.sha256(canonical_message(child.payload)).hexdigest()
+                != child.payload_digest
+                or child_payload.node_id != node.node_id
+                or child_payload.installation_id != installation.id
+                or child_payload.install_operation_id != install_operation_id
+                or child_payload.install_operation_payload_sha256
+                != install_operation_payload_sha256
+                or child_payload.plan_digest != installation.plan_digest
+                or child_payload.recipe_revision_id != revision.id
+                or child_payload.recipe_content_sha256 != revision.content_digest
+                or child_payload.compiled_spec_canonical_sha256
+                != compiled_spec_canonical_sha256
+                or attempt is None
+                or attempt.state != "succeeded"
+                or not isinstance(attempt.result, Mapping)
+                or canonical_message(attempt.result) != canonical_message(evidence)
+            ):
+                continue
+            prior_receipt = receipt
+            break
+
+        if node.state == "uninstalled":
+            if (
+                prior_receipt is None
+                or prior_receipt.cleanup_receipt_sha256 != node.evidence_digest
+            ):
+                raise RecipeReconciliationBlocked(
+                    "reconcile.prior_effect_unproven",
+                    f"Node {node.node_id} is marked uninstalled without its exact durable reconciliation receipt.",
+                )
+            state = "reconciled"
+            cleanup_receipt_sha256 = prior_receipt.cleanup_receipt_sha256
+        elif prior_receipt is not None:
+            raise RecipeReconciliationBlocked(
+                "reconcile.prior_effect_mismatch",
+                f"Node {node.node_id} has a cleanup receipt that conflicts with its current installation state.",
+            )
+        else:
+            # `failed` or `installing` may be a stale SQL projection left by a
+            # cancelled attempt. The exact successful source install still
+            # authorizes a fresh identity-bound reconciliation; the agent
+            # checks its current local effects and tombstone before changing
+            # anything.
+            state = "pending"
+            cleanup_receipt_sha256 = None
+        return InstallationReconciliationTarget(
+            node_id=node.node_id,
+            rank=node.rank,
+            role=node.role,
+            installed_bytes=node.installed_bytes,
+            install_operation_id=install_operation_id,
+            install_operation_payload_sha256=install_operation_payload_sha256,
+            compiled_spec_canonical_sha256=compiled_spec_canonical_sha256,
+            state=state,
+            cleanup_receipt_sha256=cleanup_receipt_sha256,
+        )
+
+    def reconcile_installation(
+        self,
+        installation_id: str,
+        *,
+        expected_authority: Mapping[str, object],
+        run_switch_plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None = None,
+    ) -> RecipeOperationView:
+        """Queue exact managed cleanup under a current Run/Switch review."""
+
+        existing = self._idempotent(
+            request_id,
+            "recipe.reconcile",
+            run_switch_plan_digest,
+            owner_kind="installation",
+            owner_id=installation_id,
+        )
+        if existing is not None:
+            return existing
+        now = self._clock()
+        try:
+            with self._sessions.begin() as session:
+                target_nodes = tuple(
+                    session.scalars(
+                        select(InstallationNode.node_id)
+                        .where(InstallationNode.installation_id == installation_id)
+                        .order_by(InstallationNode.node_id)
+                    )
+                )
+                try:
+                    acquire_admission_keys(
+                        session,
+                        (
+                            job_request_key(request_id),
+                            *(node_admission_key(node_id) for node_id in target_nodes),
+                        ),
+                    )
+                except AdmissionLockBusy as error:
+                    raise InstallAdmissionBusy("reconcile.capacity_busy") from error
+                authority = self._reconciliation_authority_in_session(
+                    session, installation_id, lock=True
+                )
+                if canonical_message(authority.document()) != canonical_message(
+                    expected_authority
+                ):
+                    raise RecipeOperationConflict(
+                        "reconciliation authority changed after preview"
+                    )
+                existing = self._idempotent_in_session(
+                    session,
+                    request_id,
+                    "recipe.reconcile",
+                    run_switch_plan_digest,
+                    owner_kind="installation",
+                    owner_id=installation_id,
+                )
+                if existing is not None:
+                    return existing
+                pending_targets = tuple(
+                    target for target in authority.targets if target.state == "pending"
+                )
+                if not pending_targets:
+                    raise RecipeOperationConflict(
+                        "reconciliation has no pending targets but is not complete"
+                    )
+                payloads = tuple(
+                    (
+                        target.node_id,
+                        RecipeReconcilePayload(
+                            schema_version=1,
+                            node_id=target.node_id,
+                            installation_id=authority.installation_id,
+                            install_operation_id=target.install_operation_id,
+                            install_operation_payload_sha256=(
+                                target.install_operation_payload_sha256
+                            ),
+                            plan_digest=authority.original_plan_digest,
+                            recipe_revision_id=authority.recipe_revision_id,
+                            recipe_content_sha256=authority.recipe_content_sha256,
+                            compiled_spec_canonical_sha256=(
+                                target.compiled_spec_canonical_sha256
+                            ),
+                        ).model_dump(mode="json"),
+                    )
+                    for target in pending_targets
+                )
+                job = self._queue_in_session(
+                    session,
+                    kind="recipe.reconcile",
+                    owner_kind="installation",
+                    owner_id=installation_id,
+                    plan_digest=run_switch_plan_digest,
+                    actor=actor,
+                    request_id=request_id,
+                    node_payloads=payloads,
+                    authority_digest=authority.recipe_content_sha256,
+                    now=now,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    job_context={
+                        "reconciliation_authority": authority.document(),
+                    },
+                )
+        except AdmissionLockBusy as error:
+            raise InstallAdmissionBusy("reconcile.capacity_busy") from error
+        except IntegrityError as error:
+            raced = self._idempotent(
+                request_id,
+                "recipe.reconcile",
+                run_switch_plan_digest,
+                owner_kind="installation",
+                owner_id=installation_id,
+            )
+            if raced is not None:
+                return raced
+            raise RecipeOperationConflict(
+                "request key was already used differently"
+            ) from error
+        self._agent_jobs.notify_available()
+        return self.get(job.id)
+
     def uninstall(
         self,
         installation_id: str,
@@ -2641,7 +3741,7 @@ class RecipeOperationService:
                 raise RecipeOperationConflict("recipe cancellation was not requested")
             owner_id = _required_string(job.payload, "owner_id")
             now = self._clock()
-            if job.kind in {"recipe.install", "recipe.uninstall"}:
+            if job.kind in {"recipe.install", "recipe.uninstall", "recipe.reconcile"}:
                 node = session.scalar(
                     select(InstallationNode)
                     .where(
@@ -2711,6 +3811,7 @@ class RecipeOperationService:
         if state == "succeeded" and job.kind in {
             "recipe.stop",
             "recipe.uninstall",
+            "recipe.reconcile",
         }:
             try:
                 parsed_result = parse_recipe_operation_result(
@@ -2738,6 +3839,151 @@ class RecipeOperationService:
             evidence=raw_evidence,
             now=self._clock(),
         )
+
+    @staticmethod
+    def _reconciliation_job_has_exact_receipts(
+        session: Session, job: Job, children: Sequence[AgentOperation]
+    ) -> bool:
+        """Prove a full topology receipt before releasing its reservation."""
+
+        authority = job.payload.get("reconciliation_authority")
+        targets_value = (
+            authority.get("targets") if isinstance(authority, Mapping) else None
+        )
+        if (
+            not isinstance(authority, Mapping)
+            or authority.get("schema_version") != 2
+            or authority.get("installation_id") != job.payload.get("owner_id")
+            or not isinstance(targets_value, list)
+            or not targets_value
+            or not all(isinstance(target, Mapping) for target in targets_value)
+        ):
+            return False
+        targets = {str(target["node_id"]): target for target in targets_value}
+        if len(targets) != len(targets_value):
+            return False
+        pending = {
+            node_id: target
+            for node_id, target in targets.items()
+            if target.get("state") == "pending"
+        }
+        if (
+            not pending
+            or job.targets != sorted(pending)
+            or len(children) != len(pending)
+            or {child.node_id for child in children} != set(pending)
+            or any(child.state != "succeeded" for child in children)
+        ):
+            return False
+        result = job.result
+        evidence_by_node = (
+            result.get("node_evidence") if isinstance(result, Mapping) else None
+        )
+        if not isinstance(evidence_by_node, Mapping) or set(evidence_by_node) != set(
+            pending
+        ):
+            return False
+        installation_id = str(authority["installation_id"])
+        node_rows = tuple(
+            session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        if {node.node_id for node in node_rows} != set(targets):
+            return False
+        node_by_id = {node.node_id: node for node in node_rows}
+        for node_id, target in targets.items():
+            node = node_by_id[node_id]
+            if (
+                target.get("rank") != node.rank
+                or target.get("role") != node.role
+                or target.get("installed_bytes") != node.installed_bytes
+                or node.state != "uninstalled"
+            ):
+                return False
+            if target.get("state") == "reconciled":
+                receipt_sha256 = target.get("cleanup_receipt_sha256")
+            elif target.get("state") == "pending":
+                raw_evidence = evidence_by_node.get(node_id)
+                if not isinstance(raw_evidence, Mapping):
+                    return False
+                try:
+                    evidence = RecipeReconcileResult.model_validate_json(
+                        canonical_message(raw_evidence)
+                    )
+                except (TypeError, ValueError):
+                    return False
+                expected = {
+                    "node_id": node_id,
+                    "installation_id": installation_id,
+                    "install_operation_id": target.get("install_operation_id"),
+                    "install_operation_payload_sha256": target.get(
+                        "install_operation_payload_sha256"
+                    ),
+                    "plan_digest": authority.get("original_plan_digest"),
+                    "recipe_revision_id": authority.get("recipe_revision_id"),
+                    "recipe_content_sha256": authority.get("recipe_content_sha256"),
+                    "compiled_spec_canonical_sha256": target.get(
+                        "compiled_spec_canonical_sha256"
+                    ),
+                }
+                observed = evidence.model_dump(mode="json")
+                if any(observed.get(key) != value for key, value in expected.items()):
+                    return False
+                receipt_sha256 = evidence.cleanup_receipt_sha256
+                child = next(
+                    (item for item in children if item.node_id == node_id), None
+                )
+                if child is None or child.current_attempt < 1:
+                    return False
+                try:
+                    expected_payload = RecipeReconcilePayload(
+                        schema_version=1,
+                        node_id=node_id,
+                        installation_id=installation_id,
+                        install_operation_id=str(target["install_operation_id"]),
+                        install_operation_payload_sha256=str(
+                            target["install_operation_payload_sha256"]
+                        ),
+                        plan_digest=str(authority["original_plan_digest"]),
+                        recipe_revision_id=str(authority["recipe_revision_id"]),
+                        recipe_content_sha256=str(authority["recipe_content_sha256"]),
+                        compiled_spec_canonical_sha256=str(
+                            target["compiled_spec_canonical_sha256"]
+                        ),
+                    )
+                except (KeyError, TypeError, ValueError):
+                    return False
+                if (
+                    child.kind != "recipe.reconcile"
+                    or not isinstance(child.payload, Mapping)
+                    or canonical_message(child.payload)
+                    != canonical_message(expected_payload.model_dump(mode="json"))
+                    or hashlib.sha256(canonical_message(child.payload)).hexdigest()
+                    != child.payload_digest
+                ):
+                    return False
+                attempt = session.scalar(
+                    select(AgentOperationAttempt).where(
+                        AgentOperationAttempt.operation_id == child.id,
+                        AgentOperationAttempt.attempt == child.current_attempt,
+                    )
+                )
+                if (
+                    attempt is None
+                    or attempt.state != "succeeded"
+                    or not isinstance(attempt.result, Mapping)
+                    or canonical_message(attempt.result)
+                    != canonical_message(evidence.model_dump(mode="json"))
+                ):
+                    return False
+            else:
+                return False
+            if node.evidence_digest != receipt_sha256:
+                return False
+        return True
 
     def _project_node_result(
         self,
@@ -2959,6 +4205,101 @@ class RecipeOperationService:
                         started_node.observed_run_generation = None
                         started_node.observation_receipt_sha256 = None
                         started_node.observation_endpoint_ready = None
+        elif job.kind == "recipe.reconcile":
+            installation = session.get(RecipeInstallation, owner_id)
+            node = session.scalar(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == owner_id,
+                    InstallationNode.node_id == node_id,
+                )
+            )
+            if installation is None or node is None:
+                raise RecipeOperationConflict("reconciliation scope changed")
+            authority = job.payload.get("reconciliation_authority")
+            authority_targets = (
+                authority.get("targets") if isinstance(authority, Mapping) else None
+            )
+            target = (
+                next(
+                    (
+                        item
+                        for item in authority_targets
+                        if isinstance(item, Mapping) and item.get("node_id") == node_id
+                    ),
+                    None,
+                )
+                if isinstance(authority_targets, list)
+                else None
+            )
+            try:
+                expected = RecipeReconcilePayload.model_validate_json(
+                    canonical_message(operation.payload)
+                )
+            except (TypeError, ValueError) as error:
+                raise RecipeOperationConflict(
+                    "reconciliation operation payload is invalid"
+                ) from error
+            if (
+                not isinstance(authority, Mapping)
+                or authority.get("schema_version") != 2
+                or authority.get("installation_id") != owner_id
+                or authority.get("original_plan_digest") != expected.plan_digest
+                or authority.get("recipe_revision_id") != expected.recipe_revision_id
+                or authority.get("recipe_content_sha256")
+                != expected.recipe_content_sha256
+                or target is None
+                or target.get("state") != "pending"
+                or target.get("cleanup_receipt_sha256") is not None
+                or target.get("rank") != node.rank
+                or target.get("role") != node.role
+                or target.get("installed_bytes") != node.installed_bytes
+                or expected.node_id != node_id
+                or expected.installation_id != owner_id
+                or expected.install_operation_id != target.get("install_operation_id")
+                or expected.install_operation_payload_sha256
+                != target.get("install_operation_payload_sha256")
+                or expected.compiled_spec_canonical_sha256
+                != target.get("compiled_spec_canonical_sha256")
+                or not isinstance(authority_targets, list)
+                or job.targets
+                != sorted(
+                    str(item.get("node_id"))
+                    for item in authority_targets
+                    if isinstance(item, Mapping) and item.get("state") == "pending"
+                )
+            ):
+                raise RecipeOperationConflict(
+                    "reconciliation operation differs from its reviewed authority"
+                )
+            if succeeded:
+                try:
+                    receipt = RecipeReconcileResult.model_validate_json(
+                        canonical_message(evidence)
+                    )
+                except (TypeError, ValueError) as error:
+                    raise RecipeOperationConflict(
+                        "reconciliation receipt is invalid"
+                    ) from error
+                if (
+                    receipt.node_id != expected.node_id
+                    or receipt.installation_id != expected.installation_id
+                    or receipt.install_operation_id != expected.install_operation_id
+                    or receipt.install_operation_payload_sha256
+                    != expected.install_operation_payload_sha256
+                    or receipt.plan_digest != expected.plan_digest
+                    or receipt.recipe_revision_id != expected.recipe_revision_id
+                    or receipt.recipe_content_sha256 != expected.recipe_content_sha256
+                    or receipt.compiled_spec_canonical_sha256
+                    != expected.compiled_spec_canonical_sha256
+                ):
+                    raise RecipeOperationConflict(
+                        "reconciliation receipt does not match its exact authority"
+                    )
+                node.state = "uninstalled"
+                node.evidence_digest = receipt.cleanup_receipt_sha256
+            else:
+                node.state = "failed"
+            node.updated_at = now
         elif job.kind == "recipe.uninstall":
             node = session.scalar(
                 select(InstallationNode).where(
@@ -3059,6 +4400,27 @@ class RecipeOperationService:
             failed = sorted(
                 {child.node_id for child in children if child.state == "failed"}
             )
+            reconciliation_complete = False
+            reconciliation_error: str | None = None
+            if job.kind == "recipe.reconcile":
+                failed = sorted(
+                    set(failed)
+                    | {
+                        child.node_id
+                        for child in children
+                        if child.state != "succeeded"
+                    }
+                )
+                reconciliation_complete = (
+                    not failed
+                    and self._reconciliation_job_has_exact_receipts(
+                        session, job, children
+                    )
+                )
+                if not failed and not reconciliation_complete:
+                    reconciliation_error = (
+                        "complete topology cleanup lacks exact durable receipts"
+                    )
             if job.kind == "recipe.start" and recovery_error is None:
                 try:
                     _enforce_start_deadline(job.payload, now=now)
@@ -3066,7 +4428,12 @@ class RecipeOperationService:
                 except DistributedLifecycleError as error:
                     recovery_error = error
             start_failed = bool(failed) or recovery_error is not None
-            job.state = "failed" if start_failed else "succeeded"
+            job_failed = (
+                start_failed
+                or reconciliation_error is not None
+                or (job.kind == "recipe.reconcile" and not reconciliation_complete)
+            )
+            job.state = "failed" if job_failed else "succeeded"
             stored_result = job.result
             projected_result = (
                 dict(stored_result) if isinstance(stored_result, Mapping) else {}
@@ -3085,6 +4452,14 @@ class RecipeOperationService:
                     {
                         **(job.result or {}),
                         "recovery_error": str(recovery_error),
+                    },
+                )
+            elif reconciliation_error is not None:
+                job.result = _validated_result(
+                    job.kind,
+                    {
+                        **(job.result or {}),
+                        "recovery_error": reconciliation_error,
                     },
                 )
             if job.kind == "recipe.build.v1":
@@ -3271,6 +4646,15 @@ class RecipeOperationService:
                 installation.state = "failed" if failed else "uninstalled"
                 installation.updated_at = now
                 if not failed:
+                    self._release(session, "installation", owner_id, now)
+            elif job.kind == "recipe.reconcile":
+                installation = session.get(RecipeInstallation, owner_id)
+                assert installation is not None
+                installation.state = (
+                    "uninstalled" if reconciliation_complete else "partial"
+                )
+                installation.updated_at = now
+                if reconciliation_complete:
                     self._release(session, "installation", owner_id, now)
         else:
             job.state = "running"
@@ -4307,8 +5691,8 @@ class RecipeOperationService:
         operation_statement = (
             select(Job)
             .where(
-                Job.kind == "recipe.uninstall",
-                Job.state.in_({"queued", "running"}),
+                Job.kind.in_(("recipe.uninstall", "recipe.reconcile")),
+                Job.state.in_({"queued", "running", "waiting-for-operator"}),
                 Job.payload["owner_id"].as_string() == installation_id,
             )
             .order_by(Job.id)
@@ -4318,14 +5702,27 @@ class RecipeOperationService:
             operation_statement = operation_statement.with_for_update(of=Job)
         active_operation = session.scalar(operation_statement) is not None
         if active_operation and not lock:
+            active_reconciliation = session.scalar(
+                select(Job.id)
+                .where(
+                    Job.kind == "recipe.reconcile",
+                    Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                    Job.payload["owner_id"].as_string() == installation_id,
+                )
+                .limit(1)
+            )
             active_uninstalls = _active_owned_workload_jobs(
                 session, "recipe.uninstall", installation_id
             )
             scope = tuple(sorted(node.node_id for node in nodes))
-            if active_uninstalls and all(
-                tuple(sorted(job.targets)) == scope
-                and _unissued_workload_children(session, job) is not None
-                for job in active_uninstalls
+            if (
+                active_reconciliation is None
+                and active_uninstalls
+                and all(
+                    tuple(sorted(job.targets)) == scope
+                    and _unissued_workload_children(session, job) is not None
+                    for job in active_uninstalls
+                )
             ):
                 active_operation = False
 

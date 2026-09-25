@@ -55,6 +55,7 @@ const ACTION_LABELS: Record<string, string> = {
   "recipe.build": "Built recipe image",
   "recipe.image.distribute": "Distributed recipe image",
   "recipe.install": "Installed recipe",
+  "recipe.installation.reconcile": "Requested installation cleanup",
   "recipe.mapping.create": "Created recipe placement",
   "recipe.retry": "Retried recipe operation",
   "recipe.start": "Started recipe",

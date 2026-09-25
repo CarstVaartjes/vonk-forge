@@ -12,7 +12,11 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
-from vonk_agent_protocol import DistributionAssignment, OperationProgress
+from vonk_agent_protocol import (
+    DistributionAssignment,
+    OperationProgress,
+    RecipeReconcileResult,
+)
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 
@@ -223,12 +227,72 @@ class RunSwitchCleanupPreviewRequest(_StrictModel):
 
     schema_version: Literal[2] = 2
     installation_id: UuidId
+    cleanup_mode: Literal["uninstall", "reconcile"] = "uninstall"
     invocation: InvocationMetadata = Field(default_factory=InvocationMetadata)
 
 
 class RunSwitchCleanupApplyRequest(RunSwitchCleanupPreviewRequest):
     plan_digest: Digest | None = None
     request_key: UuidId | None = None
+
+
+class RunSwitchReconciliationTarget(_StrictModel):
+    """One exact rank and its current cleanup receipt state."""
+
+    node_id: NodeId
+    rank: int = Field(ge=0, le=31)
+    role: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    installed_bytes: int = Field(ge=0)
+    install_operation_id: UuidId
+    install_operation_payload_sha256: Digest
+    compiled_spec_canonical_sha256: Digest
+    state: Literal["pending", "reconciled"]
+    cleanup_receipt_sha256: Digest | None = None
+
+    @model_validator(mode="after")
+    def receipt_matches_state(self) -> RunSwitchReconciliationTarget:
+        if (self.state == "reconciled") != (self.cleanup_receipt_sha256 is not None):
+            raise ValueError("reconciliation receipt does not match target state")
+        return self
+
+
+class RunSwitchReconciliationAuthority(_StrictModel):
+    """Controller-owned identity and effect binding for installation repair.
+
+    The accepted installation plan remains opaque.  This authority records its
+    canonical fingerprint and binds each target to the successful original
+    ``recipe.install`` operation that supplied the persisted compiled spec.
+    It never claims that malformed launch metadata is executable.
+    """
+
+    schema_version: Literal[2] = 2
+    installation_id: UuidId
+    original_plan_digest: Digest
+    recipe_revision_id: UuidId
+    recipe_content_sha256: Digest
+    mapping_id: UuidId
+    mapping_generation: int = Field(ge=1)
+    recipe_build_id: UuidId | None
+    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    model_content_sha256: Digest | None
+    stored_plan_canonical_sha256: Digest
+    targets: list[RunSwitchReconciliationTarget] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def targets_are_exact_and_ordered(self) -> RunSwitchReconciliationAuthority:
+        keys = [(target.rank, target.node_id) for target in self.targets]
+        node_ids = [target.node_id for target in self.targets]
+        ranks = [target.rank for target in self.targets]
+        if (
+            len(set(node_ids)) != len(node_ids)
+            or len(set(ranks)) != len(ranks)
+            or sorted(ranks) != list(range(len(self.targets)))
+            or keys != sorted(keys)
+        ):
+            raise ValueError(
+                "reconciliation targets must have unique nodes and contiguous ranks"
+            )
+        return self
 
 
 class RunSwitchReason(_StrictModel):
@@ -567,6 +631,8 @@ class RunSwitchPlan(RunSwitchAssessment):
     # plan that never reached a node.  The assessment owns the decision; the
     # phase executor reads it here instead of re-deriving it from state.
     cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall"
+    cleanup_mode: Literal["uninstall", "reconcile"] = "uninstall"
+    reconciliation_authority: RunSwitchReconciliationAuthority | None = None
     recipe_build_id: UuidId | None
     image_digest: (
         Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
@@ -586,6 +652,45 @@ class RunSwitchPlan(RunSwitchAssessment):
     phases: list[RunSwitchPhase] = Field(min_length=1, max_length=16)
     invocation: InvocationMetadata
     plan_digest: Digest
+
+    @model_validator(mode="after")
+    def cleanup_authority_matches_effect(self) -> RunSwitchPlan:
+        if self.cleanup_mode == "uninstall":
+            if self.reconciliation_authority is not None:
+                raise ValueError(
+                    "ordinary cleanup cannot carry reconciliation authority"
+                )
+            return self
+        authority = self.reconciliation_authority
+        if self.action != "cleanup" or self.installation_id is None:
+            raise ValueError("reconciliation authority requires installation cleanup")
+        if self.cleanup_disposition != "uninstall":
+            raise ValueError("reconciliation cannot abandon an installation")
+        if self.allowed and authority is None:
+            raise ValueError("allowed reconciliation requires exact authority")
+        if authority is None:
+            return self
+        if (
+            authority.installation_id != self.installation_id
+            or authority.recipe_revision_id != self.recipe_revision_id
+            or authority.recipe_content_sha256 != self.recipe_content_sha256
+            or authority.mapping_id
+            != (self.mapping.mapping_id if self.mapping else None)
+            or authority.mapping_generation
+            != (self.mapping.mapping_generation if self.mapping else None)
+            or authority.image_digest != self.image_digest
+            or authority.model_content_sha256 != self.model_content_sha256
+        ):
+            raise ValueError("reconciliation authority differs from cleanup identity")
+        reviewed_targets = [
+            (node.node_id, node.rank, node.role) for node in self.spark_group.nodes
+        ]
+        authority_targets = [
+            (node.node_id, node.rank, node.role) for node in authority.targets
+        ]
+        if authority_targets != reviewed_targets:
+            raise ValueError("reconciliation authority differs from target membership")
+        return self
 
     def assessment(self) -> RunSwitchAssessment:
         return RunSwitchAssessment.model_validate(
@@ -921,10 +1026,40 @@ class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
     final_verified: bool
     installation_id: UuidId
     removed: bool
+    cleanup_mode: Literal["uninstall", "reconcile"] = "uninstall"
     active_runs: int = Field(default=0, ge=0)
     installation_state: (
         Annotated[str, StringConstraints(min_length=1, max_length=24)] | None
     ) = None
+    reconciliation_request_id: UuidId | None = None
+    exact_reconciliation_receipts: bool | None = None
+    reconciliation_receipts: list[RecipeReconcileResult] = Field(
+        default_factory=list, max_length=32
+    )
+
+    @model_validator(mode="after")
+    def cleanup_receipts_match_mode(self) -> RunSwitchCleanupVerifyResult:
+        if self.cleanup_mode == "uninstall":
+            if (
+                self.reconciliation_request_id is not None
+                or self.exact_reconciliation_receipts is not None
+                or self.reconciliation_receipts
+            ):
+                raise ValueError(
+                    "ordinary uninstall cannot carry reconciliation receipts"
+                )
+            return self
+        node_ids = [receipt.node_id for receipt in self.reconciliation_receipts]
+        if (
+            self.reconciliation_request_id is None
+            or self.exact_reconciliation_receipts is None
+            or node_ids != sorted(set(node_ids))
+            or (self.final_verified and not self.exact_reconciliation_receipts)
+            or (self.exact_reconciliation_receipts and not node_ids)
+            or (not self.exact_reconciliation_receipts and node_ids)
+        ):
+            raise ValueError("reconciliation completion lacks exact ordered receipts")
+        return self
 
 
 class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
@@ -1097,6 +1232,8 @@ class RunSwitchOperation(_StrictModel):
     state: Annotated[str, StringConstraints(min_length=1, max_length=32)]
     plan_digest: Digest
     request_key: UuidId
+    cleanup_mode: Literal["uninstall", "reconcile"] | None = None
+    installation_id: UuidId | None = None
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     current_phase: RunSwitchPhaseKind | None = None
     completed_phases: list[RunSwitchPhaseKind] = Field(max_length=16)
@@ -1106,6 +1243,11 @@ class RunSwitchOperation(_StrictModel):
 
     @model_validator(mode="after")
     def terminal_evidence_is_consistent(self) -> RunSwitchOperation:
+        if self.action == "cleanup":
+            if self.cleanup_mode is None or self.installation_id is None:
+                raise ValueError("cleanup operation requires its reviewed identity")
+        elif self.cleanup_mode is not None or self.installation_id is not None:
+            raise ValueError("non-cleanup operation cannot carry cleanup identity")
         if self.state == "succeeded":
             if self.result is None or not self.result.completed_phases:
                 raise ValueError(
@@ -1154,6 +1296,8 @@ __all__ = [
     "RunSwitchCachedTransferResult",
     "RunSwitchCapabilityEvidenceState",
     "RunSwitchChangeEffect",
+    "RunSwitchCleanupApplyRequest",
+    "RunSwitchCleanupPreviewRequest",
     "RunSwitchCleanupResult",
     "RunSwitchContainerBuildResult",
     "RunSwitchContainerBuildState",
@@ -1180,6 +1324,8 @@ __all__ = [
     "RunSwitchReason",
     "RunSwitchReasonScope",
     "RunSwitchReasonSeverity",
+    "RunSwitchReconciliationAuthority",
+    "RunSwitchReconciliationTarget",
     "RunSwitchRetention",
     "RunSwitchRetryRequest",
     "RunSwitchRuntimeImageReferenceIntent",

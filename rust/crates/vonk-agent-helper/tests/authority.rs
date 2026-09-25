@@ -186,6 +186,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
                 installation_id: None,
+                reconciliation_identity: None,
             },
         ),
     ];
@@ -492,9 +493,14 @@ impl CommandRunner for RecordingRunner {
                     } else {
                         String::new()
                     };
+                    let installation = if arguments[3].contains("installation-id") {
+                        "\tinstallation-1"
+                    } else {
+                        ""
+                    };
                     format!(
-                        "{prefix}{}\t{digest}\ttrue\t{run_id}\n",
-                        self.runtime_running.lock().unwrap()
+                        "{prefix}{}\t{digest}\ttrue\t{run_id}{installation}\n",
+                        self.runtime_running.lock().unwrap(),
                     )
                     .into_bytes()
                 }
@@ -623,6 +629,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
             request_sha256: digest,
             observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
             installation_id: request.installation_id,
+            reconciliation_identity: None,
         },
     )
 }
@@ -638,6 +645,7 @@ fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRun
         arguments,
         observation: None,
         installation_id: None,
+        reconciliation_identity: None,
     }
 }
 
@@ -976,7 +984,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     .unwrap();
 
     executor
-        .execute(&runtime_operation(&request, digest))
+        .execute(&runtime_operation(&request, digest.clone()))
         .unwrap();
     let private_tmp = outputs.join("tmp").join(run_id).join("private");
     fs::create_dir(&private_tmp).unwrap();
@@ -1002,10 +1010,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     // Even a pending cleanup request cannot erase an already active run.
     mark_fresh_start();
     executor
-        .execute(&runtime_operation(
-            &request,
-            hex_sha256(&canonical_json(&request).unwrap()),
-        ))
+        .execute(&runtime_operation(&request, digest.clone()))
         .unwrap();
     assert!(
         private_tmp.join("old-engine-state").is_file(),

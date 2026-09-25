@@ -14,6 +14,7 @@ from vonk_control.install_admission import (
     InstallAdmissionService,
     InstallPlanConflict,
     InstallPreflightExpired,
+    installation_plan_digest_from_stored_document,
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -711,6 +712,10 @@ def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> 
         )
         assert stored_plan.nodes[0].required_bytes == plan.nodes[0].required_bytes
         assert stored_plan.plan_digest == plan.plan_digest
+        assert (
+            installation_plan_digest_from_stored_document(installation.plan)
+            == plan.plan_digest
+        )
 
 
 def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) -> None:

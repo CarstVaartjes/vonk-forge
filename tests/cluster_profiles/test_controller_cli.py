@@ -122,6 +122,16 @@ class FakeClient:
             r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/cancel",
             path,
         )
+        installation_reconcile_path = re.fullmatch(
+            r"/api/recipe/installations/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/reconcile(?:/preview)?",
+            path,
+        )
+        run_switch_operation_path = re.fullmatch(
+            r"/api/run-switch/operations/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            path,
+        )
         known_get = {
             "/api/fleet",
             "/api/model",
@@ -145,6 +155,8 @@ class FakeClient:
             or selector_path is not None
             or operation_path is not None
             or model_cancel_path is not None
+            or installation_reconcile_path is not None
+            or run_switch_operation_path is not None
         )
         known = (
             known or re.fullmatch(r"/api/fleet/[^/]+(?:/loginfo)?", path) is not None
@@ -215,6 +227,8 @@ class FakeClient:
                     "node_id",
                     "request_id",
                 }
+            elif run_switch_operation_path is not None:
+                assert query is None
             else:
                 assert query is None
             return
@@ -230,7 +244,10 @@ class FakeClient:
             assert payload == {"disposition": "resume"}
             return
         if path.endswith("/preview"):
-            assert profile_path is not None and payload is None
+            if installation_reconcile_path is not None:
+                validate_control_document("RunSwitchCleanupPreviewRequest", payload)
+            else:
+                assert profile_path is not None and payload is None
         elif path.endswith("/load"):
             assert profile_path is not None
             validate_control_document("FleetProfileLoadRequest", payload)
@@ -241,6 +258,8 @@ class FakeClient:
                 type(payload["profile_number"]) is int and payload["profile_number"] > 0
             )
             uuid.UUID(payload["request_key"])
+        elif installation_reconcile_path is not None and path.endswith("/reconcile"):
+            validate_control_document("RunSwitchCleanupApplyRequest", payload)
         elif selector_path is not None and selector_path.group(2) in {
             "download",
             "remove",
@@ -328,6 +347,394 @@ def run(argv: tuple[str, ...], client: FakeClient) -> tuple[int, dict[str, objec
             request_id_factory=lambda: "11111111-1111-4111-8111-111111111111",
         )
     return status, json.loads(output.getvalue())
+
+
+def _reconciliation_plan(
+    installation_id: str = "22222222-2222-4222-8222-222222222222",
+    digest: str = _REVIEW_DIGEST,
+    *,
+    allowed: bool = True,
+) -> dict[str, object]:
+    return {
+        "action": "cleanup",
+        "allowed": allowed,
+        "blockers": [],
+        "cleanup_mode": "reconcile",
+        "installation_id": installation_id,
+        "plan_digest": digest,
+    }
+
+
+def _reconciliation_operation(
+    request_key: str,
+    installation_id: str = "22222222-2222-4222-8222-222222222222",
+    digest: str = _REVIEW_DIGEST,
+) -> dict[str, object]:
+    node_id = "spk_" + "2" * 32
+    return {
+        "schema_version": 2,
+        "operation_id": "33333333-3333-4333-8333-333333333333",
+        "kind": "recipe.cleanup.v2",
+        "action": "cleanup",
+        "state": "queued",
+        "plan_digest": digest,
+        "request_key": request_key,
+        "cleanup_mode": "reconcile",
+        "installation_id": installation_id,
+        "node_ids": [node_id],
+        "current_phase": None,
+        "completed_phases": [],
+        "progress": {
+            "operation": None,
+            "startup_budget_seconds": None,
+            "start_deadline": None,
+            "phase_index": 0,
+            "phase_count": 2,
+            "phase": None,
+            "state": "queued",
+            "completed_bytes": 0,
+            "total_bytes": None,
+            "total_bytes_known": False,
+            "subphase": None,
+            "members": [
+                {
+                    "node_id": node_id,
+                    "phase": None,
+                    "state": "pending",
+                    "completed_bytes": 0,
+                    "total_bytes": None,
+                    "error": None,
+                }
+            ],
+        },
+        "status_reason": None,
+        "result": None,
+    }
+
+
+def _operation_owner_page(request_key: str) -> dict[str, object]:
+    operation_id = "33333333-3333-4333-8333-333333333333"
+    node_id = "spk_" + "2" * 32
+    owner = {"kind": "job", "id": operation_id, "request_id": request_key}
+    return {
+        "schema_version": 2,
+        "operations": [
+            {
+                "id": operation_id,
+                "node_ids": [node_id],
+                "kind": "recipe.cleanup.v2",
+                "state": "queued",
+                "attempt": 1,
+                "created_at": "2026-09-25T09:00:00Z",
+                "owner": owner,
+            },
+            {
+                "id": "44444444-4444-4444-8444-444444444444",
+                "parent_id": operation_id,
+                "node_ids": [node_id],
+                "kind": "recipe.reconcile",
+                "state": "running",
+                "attempt": 1,
+                "created_at": "2026-09-25T09:00:01Z",
+                "owner": owner,
+            },
+        ],
+        "next_cursor": None,
+        "total": 2,
+    }
+
+
+def _allow_minimal_reconciliation_plan(monkeypatch) -> None:
+    original = controller_cli.validate_control_document
+
+    def validate(contract: str, value: object) -> dict[str, object]:
+        if contract == "RunSwitchPlan":
+            assert isinstance(value, dict)
+            return value
+        return original(contract, value)
+
+    monkeypatch.setattr(controller_cli, "validate_control_document", validate)
+
+
+def test_recipe_installation_reconcile_review_uses_typed_preview_route(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    path = f"/api/recipe/installations/{installation_id}/reconcile/preview"
+    plan = _reconciliation_plan(installation_id)
+    client = FakeClient({("POST", path): plan})
+
+    _allow_minimal_reconciliation_plan(monkeypatch)
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--review",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result == plan
+    assert client.calls == [
+        (
+            "POST",
+            path,
+            {
+                "schema_version": 2,
+                "installation_id": installation_id,
+                "cleanup_mode": "reconcile",
+            },
+            None,
+        )
+    ]
+
+
+def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    apply = f"/api/recipe/installations/{installation_id}/reconcile"
+    preview = f"{apply}/preview"
+    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    client = FakeClient(
+        {
+            ("GET", "/api/operations"): empty,
+            ("POST", preview): _reconciliation_plan(
+                "55555555-5555-4555-8555-555555555555"
+            ),
+        }
+    )
+    _allow_minimal_reconciliation_plan(monkeypatch)
+
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--review-digest",
+            _REVIEW_DIGEST,
+            "--request-key",
+            key,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    assert "plan changed" in str(result["error"]).lower()
+    assert all(call[1] != apply for call in client.calls)
+
+    client.responses[("POST", preview)] = _reconciliation_plan(
+        installation_id, allowed=False
+    )
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--review-digest",
+            _REVIEW_DIGEST,
+            "--request-key",
+            key,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 2
+    assert "blocked" in str(result["error"]).lower()
+    assert all(call[1] != apply for call in client.calls)
+
+
+def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity_rows(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    operation_id = "33333333-3333-4333-8333-333333333333"
+    operation_path = f"/api/run-switch/operations/{operation_id}"
+    operation = _reconciliation_operation(key, installation_id)
+    client = FakeClient(
+        {
+            ("GET", "/api/operations"): _operation_owner_page(key),
+            ("GET", operation_path): operation,
+        }
+    )
+
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--review-digest",
+            _REVIEW_DIGEST,
+            "--request-key",
+            key,
+            "--yes",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result["operation_id"] == operation_id
+    assert [(call[0], call[1]) for call in client.calls] == [
+        ("GET", "/api/operations"),
+        ("GET", operation_path),
+    ]
+    assert client.calls[0][3] == {"request_id": key, "limit": 100}
+    assert all(call[0] != "POST" for call in client.calls)
+
+
+def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_deadline(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    operation_id = "33333333-3333-4333-8333-333333333333"
+
+    class BoundedClient(FakeClient):
+        def __init__(self):
+            super().__init__(
+                {
+                    ("GET", "/api/operations"): _operation_owner_page(key),
+                    (
+                        "GET",
+                        f"/api/run-switch/operations/{operation_id}",
+                    ): _reconciliation_operation(key, installation_id),
+                }
+            )
+            self.timeouts: list[float | None] = []
+
+        def request(
+            self,
+            method,
+            path,
+            payload=None,
+            *,
+            extra_headers=None,
+            query=None,
+            timeout_seconds=None,
+        ):
+            self.timeouts.append(timeout_seconds)
+            return super().request(
+                method,
+                path,
+                payload,
+                extra_headers=extra_headers,
+                query=query,
+                timeout_seconds=timeout_seconds,
+            )
+
+    ticks = iter((100.0, 120.0, 135.0))
+    monkeypatch.setattr(controller_cli.time, "monotonic", lambda: next(ticks))
+    client = BoundedClient()
+
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--review-digest",
+            _REVIEW_DIGEST,
+            "--request-key",
+            key,
+            "--yes",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result["operation_id"] == operation_id
+    assert client.timeouts == [15.0, 10.0]
+
+
+def test_recipe_installation_reconcile_does_not_replay_after_uncertain_lookup() -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    client = FakeClient(
+        {("GET", "/api/operations"): ControlUnavailable(503, "temporary outage")}
+    )
+
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--review-digest",
+            _REVIEW_DIGEST,
+            "--request-key",
+            key,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 2
+    assert result["error_type"] == "control_api"
+    assert [call[0] for call in client.calls] == ["GET"]
+
+
+def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identity(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    apply = f"/api/recipe/installations/{installation_id}/reconcile"
+    preview = f"{apply}/preview"
+    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    operation = _reconciliation_operation(key, installation_id)
+    client = FakeClient(
+        {
+            ("GET", "/api/operations"): [empty, empty],
+            ("POST", preview): _reconciliation_plan(installation_id),
+            ("POST", apply): [
+                ControlTransportError("acceptance response was lost"),
+                operation,
+            ],
+        }
+    )
+    _allow_minimal_reconciliation_plan(monkeypatch)
+
+    status, result = run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--review-digest",
+            _REVIEW_DIGEST,
+            "--request-key",
+            key,
+            "--yes",
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+
+    assert status == 0 and result["operation_id"] == operation["operation_id"]
+    posts = [call[2] for call in client.calls if call[0] == "POST" and call[1] == apply]
+    assert len(posts) == 2 and posts[0] == posts[1]
+    assert posts[0] == {
+        "schema_version": 2,
+        "installation_id": installation_id,
+        "cleanup_mode": "reconcile",
+        "plan_digest": _REVIEW_DIGEST,
+        "request_key": key,
+    }
 
 
 def _model_detail(selector: str = "qwen") -> tuple[dict[str, object], str]:
