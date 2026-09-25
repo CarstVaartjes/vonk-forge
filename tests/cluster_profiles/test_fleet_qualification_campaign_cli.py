@@ -10,8 +10,11 @@ import subprocess
 import tarfile
 from argparse import Namespace
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
+from threading import Barrier, Lock
+from types import SimpleNamespace
 from typing import cast
 from urllib.parse import unquote
 
@@ -49,7 +52,7 @@ def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
     )
     reviewed_authority = json.loads(
         (
-            library_root / "qualification/authorities/nl-sequential-2c118a99.json"
+            library_root / "qualification/authorities/nl-family-aware-20260924.json"
         ).read_text(encoding="utf-8")
     )
     reviewed_catalog = json.loads(
@@ -128,9 +131,64 @@ def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
 
     selected_row = json.loads(json.dumps(selected_row))
     selected_row["sequence"] = 1
+    selected_row.setdefault("runtime_stack_sha256", "b" * 64)
+    selected_row.setdefault("topology_sha256", "c" * 64)
+    selected_row["recovery_coverage_refs"] = []
+    recovery_coverage: list[dict[str, object]] = []
+    failure_modes = (
+        ["single-host-restart"]
+        if selected_row["node_count"] == 1
+        else ["dual-rank-loss-recovery", "dual-host-restart"]
+    )
+    for failure_mode in failure_modes:
+        coverage_without_id: dict[str, object] = {
+            "failure_mode": failure_mode,
+            "representative_recipe": selected_row["key"],
+            "members": [
+                {
+                    "recipe": selected_row["key"],
+                    "recipe_content_sha256": selected_row["content_sha256"],
+                    "package_sha256": selected_row["package"]["sha256"],
+                    "model_content_sha256s": sorted(
+                        {
+                            item["content_sha256"]
+                            for item in selected_row["model_license_refs"]
+                        }
+                    ),
+                    "runtime_stack_sha256": selected_row["runtime_stack_sha256"],
+                    "topology_sha256": selected_row["topology_sha256"],
+                }
+            ],
+            "shared": False,
+            "equivalence_rationale": "Dedicated exact recipe recovery fixture.",
+            "invalidated_by": [
+                "recipe_content_sha256",
+                "package_sha256",
+                "model_content_sha256s",
+                "runtime_stack_sha256",
+                "topology_sha256",
+                "coverage_membership",
+                "runtime_image_digest",
+                "platform_build_sha256",
+                "agent_build_sha256",
+                "target_node_ids",
+                "smoke_receipt_sha256",
+            ],
+        }
+        coverage_id = campaign_cli._contract_digest(coverage_without_id)
+        recovery_coverage.append({"coverage_id": coverage_id, **coverage_without_id})
+        selected_row["recovery_coverage_refs"].append(
+            {
+                "coverage_id": coverage_id,
+                "failure_mode": failure_mode,
+                "representative_recipe": selected_row["key"],
+                "role": "dedicated",
+            }
+        )
+    batch_mode = "single" if selected_row["node_count"] == 1 else "exclusive-dual"
 
     authority = {
-        "schema_version": 3,
+        "schema_version": 4,
         "authority_id": "test-authority",
         "catalog": {
             "repository": reviewed_authority["catalog"]["repository"],
@@ -147,6 +205,21 @@ def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
             "excluded_topology_recipe_keys": [alternate_row["key"]],
         },
         "recipes": [selected_row],
+        "batches": [
+            {
+                "sequence": 1,
+                "id": "batch-001",
+                "mode": batch_mode,
+                "assignments": [
+                    {
+                        "recipe": selected_row["key"],
+                        "lane": 1,
+                        "node_count": selected_row["node_count"],
+                    }
+                ],
+            }
+        ],
+        "recovery_coverage": recovery_coverage,
     }
     authority_path = root / "qualification" / "authorities" / "test.json"
     authority_path.parent.mkdir(parents=True, exist_ok=True)
@@ -252,7 +325,46 @@ def _rebind_package_digests(root: Path, payload: bytes) -> None:
     authority["catalog"]["catalog_index_sha256"] = hashlib.sha256(
         catalog_raw
     ).hexdigest()
+    _rebind_authority_coverage_identity(authority)
     authority_path.write_text(json.dumps(authority), encoding="utf-8")
+
+
+def _rebind_authority_coverage_identity(authority: dict[str, object]) -> None:
+    rows = authority["recipes"]
+    coverage_rows = authority["recovery_coverage"]
+    assert isinstance(rows, list) and isinstance(coverage_rows, list)
+    rows_by_key = {str(row["key"]): row for row in rows}
+    for raw_coverage in coverage_rows:
+        coverage = cast(dict[str, object], raw_coverage)
+        old_id = str(coverage["coverage_id"])
+        members = coverage["members"]
+        assert isinstance(members, list)
+        for raw_member in members:
+            member = cast(dict[str, object], raw_member)
+            row = rows_by_key[str(member["recipe"])]
+            package = cast(dict[str, object], row["package"])
+            model_refs = cast(list[dict[str, object]], row["model_license_refs"])
+            member.update(
+                {
+                    "recipe_content_sha256": row["content_sha256"],
+                    "package_sha256": package["sha256"],
+                    "model_content_sha256s": sorted(
+                        {str(model["content_sha256"]) for model in model_refs}
+                    ),
+                    "runtime_stack_sha256": row["runtime_stack_sha256"],
+                    "topology_sha256": row["topology_sha256"],
+                }
+            )
+        unsigned = {
+            key: value for key, value in coverage.items() if key != "coverage_id"
+        }
+        coverage_id = campaign_cli._contract_digest(unsigned)
+        coverage["coverage_id"] = coverage_id
+        for row in rows:
+            references = cast(list[dict[str, object]], row["recovery_coverage_refs"])
+            for reference in references:
+                if reference["coverage_id"] == old_id:
+                    reference["coverage_id"] = coverage_id
 
 
 def _row(
@@ -272,6 +384,9 @@ def _row(
         "qualification_inputs": [],
         "smoke_cases": ["health"],
         "review_gates": [dict(gate) for gate in review_gates],
+        "runtime_stack_sha256": "b" * 64,
+        "topology_sha256": "c" * 64,
+        "recovery_coverage_refs": [],
     }
     return campaign_cli.RecipeAuthorityRow(
         sequence=1,
@@ -287,6 +402,9 @@ def _row(
         model_license_refs=(),
         qualification_inputs=(),
         smoke_cases=("health",),
+        runtime_stack_sha256="b" * 64,
+        topology_sha256="c" * 64,
+        recovery_coverage_refs=(),
         raw=raw,
     )
 
@@ -743,62 +861,102 @@ def test_fresh_profile_preview_persists_replacement_evidence_in_campaign_ledger(
     assert interruption["profile_plan_digest"] == raw_preview["plan_digest"]
 
 
-def test_campaign_parser_accepts_exact_replacement_ack_for_preview_and_apply() -> None:
+def test_campaign_parser_binds_batch_selection_and_explicit_recovery_consent() -> None:
+    common = [
+        "--manifest",
+        "campaign.json",
+        "--library-root",
+        "recipes",
+        "--ledger",
+        "evidence.jsonl",
+        "--profile-number",
+        "7",
+        "--batch",
+        "batch-001",
+    ]
+    replacements = ["--replace-run-id", RUN_ID, "--replace-run-id", "other-run"]
     preview = campaign_cli._arguments(
         [
-            "--manifest",
-            "campaign.json",
-            "--library-root",
-            "recipes",
-            "--ledger",
-            "evidence.jsonl",
-            "--profile-number",
-            "7",
+            *common,
             "--spark",
             NODE_A,
-            "--replace-run-id",
-            RUN_ID,
+            "--spark",
+            NODE_B,
+            *replacements,
         ]
     )
-    assert preview.replace_run_id == RUN_ID
+    assert preview.batch == "batch-001"
+    assert preview.spark == [NODE_A, NODE_B]
+    assert preview.replace_run_id == [RUN_ID, "other-run"]
 
     apply = campaign_cli._arguments(
         [
-            "--manifest",
-            "campaign.json",
-            "--library-root",
-            "recipes",
-            "--ledger",
-            "evidence.jsonl",
-            "--profile-number",
-            "7",
+            *common,
             "--spark",
             NODE_A,
-            "--replace-run-id",
-            RUN_ID,
+            "--spark",
+            NODE_B,
+            *replacements,
             "--apply",
             "--campaign-digest",
             "a" * 64,
         ]
     )
-    assert apply.replace_run_id == RUN_ID
+    assert apply.replace_run_id == [RUN_ID, "other-run"]
 
-    with pytest.raises(SystemExit):
-        campaign_cli._arguments(
-            [
-                "--manifest",
-                "campaign.json",
-                "--library-root",
-                "recipes",
-                "--ledger",
-                "evidence.jsonl",
-                "--profile-number",
-                "7",
-                "--observe",
-                "--replace-run-id",
-                RUN_ID,
-            ]
-        )
+    observe = campaign_cli._arguments([*common, "--observe"])
+    assert observe.observe is True
+    assert observe.spark == []
+
+    recovery_preview = campaign_cli._arguments([*common, "--recover-lane", "2"])
+    assert recovery_preview.recover_lane == 2
+    assert recovery_preview.spark == []
+    recovery_apply = campaign_cli._arguments(
+        [
+            *common,
+            "--recover-lane",
+            "2",
+            "--apply",
+            "--campaign-digest",
+            "b" * 64,
+        ]
+    )
+    assert recovery_apply.recover_lane == 2
+    assert recovery_apply.apply is True
+    cleanup_preview = campaign_cli._arguments([*common, "--cleanup-lane", "1"])
+    assert cleanup_preview.cleanup_lane == 1
+    cleanup_apply = campaign_cli._arguments(
+        [
+            *common,
+            "--cleanup-lane",
+            "1",
+            "--apply",
+            "--campaign-digest",
+            "e" * 64,
+        ]
+    )
+    assert cleanup_apply.cleanup_lane == 1
+    assert cleanup_apply.apply is True
+
+    for invalid in (
+        [*common, "--observe", "--recover-lane", "2"],
+        [*common, "--recover-lane", "2", "--cleanup-lane", "1"],
+        [
+            "--manifest",
+            "campaign.json",
+            "--library-root",
+            "recipes",
+            "--ledger",
+            "evidence.jsonl",
+            "--profile-number",
+            "7",
+            "--recover-lane",
+            "2",
+        ],
+        [*common, "--recover-lane", "2", "--spark", NODE_A],
+    ):
+        with pytest.raises(SystemExit):
+            campaign_cli._arguments(invalid)
 
 
 class _MissingEndpoint:
@@ -838,6 +996,114 @@ def test_manifest_loads_confined_parent_references_and_binds_all_local_inputs(
     )
 
 
+def test_manifest_uses_canonical_default_for_omitted_operation_timeout(
+    tmp_path: Path,
+) -> None:
+    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
+
+    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
+
+    assert manifest.operation_timeout_seconds == 86_400
+
+
+@pytest.mark.parametrize(
+    "field", ["operation_timeout_seconds", "poll_interval_seconds"]
+)
+def test_manifest_rejects_integral_float_for_strict_integer_option(
+    field: str, tmp_path: Path
+) -> None:
+    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
+    document = json.loads(campaign_path.read_text(encoding="utf-8"))
+    document["options"][field] = 1.0
+    campaign_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(QualificationError):
+        campaign_cli.load_manifest(campaign_path, tmp_path)
+
+
+def test_shared_recovery_group_requires_one_runtime_topology_identity(
+    tmp_path: Path,
+) -> None:
+    library_root = Path(os.environ["VONK_RECIPE_LIBRARY_ROOT"]).resolve()
+    authority_path = (
+        library_root / "qualification/authorities/nl-family-aware-20260924.json"
+    )
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    single_rows = sorted(
+        (row for row in authority["recipes"] if row["node_count"] == 1),
+        key=lambda row: row["key"],
+    )
+    members = single_rows[:2]
+    assert (
+        members[0]["runtime_stack_sha256"],
+        members[0]["topology_sha256"],
+    ) != (
+        members[1]["runtime_stack_sha256"],
+        members[1]["topology_sha256"],
+    )
+    coverage = authority["recovery_coverage"]
+    old_ids: set[str] = set()
+    original = next(
+        item for item in coverage if item["failure_mode"] == "single-host-restart"
+    )
+    shared_definition = dict(original)
+    shared_definition["shared"] = True
+    shared_definition["representative_recipe"] = members[0]["key"]
+    shared_definition["equivalence_rationale"] = (
+        "Adversarial grouping with individually correct but incompatible member identities."
+    )
+    shared_definition["members"] = [
+        {
+            "recipe": row["key"],
+            "recipe_content_sha256": row["content_sha256"],
+            "package_sha256": row["package"]["sha256"],
+            "model_content_sha256s": sorted(
+                {item["content_sha256"] for item in row["model_license_refs"]}
+            ),
+            "runtime_stack_sha256": row["runtime_stack_sha256"],
+            "topology_sha256": row["topology_sha256"],
+        }
+        for row in members
+    ]
+    for row in members:
+        old_reference = next(
+            reference
+            for reference in row["recovery_coverage_refs"]
+            if reference["failure_mode"] == "single-host-restart"
+        )
+        old_ids.add(old_reference["coverage_id"])
+    authority["recovery_coverage"] = [
+        item for item in coverage if item["coverage_id"] not in old_ids
+    ]
+    unsigned_definition = {
+        key: value for key, value in shared_definition.items() if key != "coverage_id"
+    }
+    shared_definition["coverage_id"] = campaign_cli._contract_digest(
+        unsigned_definition
+    )
+    authority["recovery_coverage"].append(shared_definition)
+    for row in members:
+        row["recovery_coverage_refs"] = [
+            reference
+            for reference in row["recovery_coverage_refs"]
+            if reference["failure_mode"] != "single-host-restart"
+        ] + [
+            {
+                "coverage_id": shared_definition["coverage_id"],
+                "failure_mode": "single-host-restart",
+                "representative_recipe": members[0]["key"],
+                "role": "representative"
+                if row["key"] == members[0]["key"]
+                else "shared-member",
+            }
+        ]
+    mutated_authority = tmp_path / authority_path.name
+    mutated_authority.write_text(json.dumps(authority), encoding="utf-8")
+
+    with pytest.raises(QualificationError):
+        campaign_cli._load_authority(mutated_authority)
+
+
 def test_repository_binding_rejects_a_swapped_valid_recipe_package(
     tmp_path: Path,
 ) -> None:
@@ -856,6 +1122,7 @@ def test_repository_binding_rejects_a_swapped_valid_recipe_package(
         field: alternate_entry["package"][field]
         for field in ("path", "sha256", "expected_bytes", "media_type")
     }
+    _rebind_authority_coverage_identity(authority)
     authority_path.write_text(json.dumps(authority), encoding="utf-8")
 
     manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
@@ -1106,6 +1373,9 @@ def test_exact_fixture_cases_are_derived_from_the_reviewed_registry() -> None:
         model_license_refs=row.model_license_refs,
         qualification_inputs=(),
         smoke_cases=("health",),
+        runtime_stack_sha256=row.runtime_stack_sha256,
+        topology_sha256=row.topology_sha256,
+        recovery_coverage_refs=row.recovery_coverage_refs,
         raw=row.raw,
     )
 
@@ -1753,21 +2023,7 @@ def _append_single_recipe_evidence(
         plan_digest=CAMPAIGN_ID,
         recipe=RECIPE_KEY,
         payload={
-            "authority_row": {
-                "sequence": 1,
-                "key": RECIPE_KEY,
-                "content_sha256": CONTENT_SHA,
-                "node_count": 1,
-                "interface": "openai-service",
-                "recipe_version": "1.0.0",
-                "package": {},
-                "disposition": "actionable",
-                "operator_acceptance_required": False,
-                "model_license_refs": [],
-                "qualification_inputs": [],
-                "smoke_cases": ["health"],
-                "review_gates": [],
-            },
+            "authority_row": dict(_row().raw),
             "controller_recipe_identity": {
                 "content_sha256": CONTENT_SHA,
                 "recipe_revision_id": REVISION_ID,
@@ -2155,6 +2411,9 @@ def test_review_gates_must_be_acknowledged_for_the_exact_recipe() -> None:
         model_license_refs=(),
         qualification_inputs=(),
         smoke_cases=("health",),
+        runtime_stack_sha256="b" * 64,
+        topology_sha256="c" * 64,
+        recovery_coverage_refs=(),
         raw={},
     )
     preview = campaign_cli._arguments(
@@ -2171,24 +2430,24 @@ def test_review_gates_must_be_acknowledged_for_the_exact_recipe() -> None:
             NODE_A,
         ]
     )
-    campaign_cli._operator_gate(preview, row)
+    campaign_cli._operator_gate(preview, [row])
     with pytest.raises(QualificationError, match="accept-operator-gate"):
         campaign_cli._operator_gate(
             Namespace(apply=True, accept_operator_gate=[], accept_capacity_review=[]),
-            row,
+            [row],
         )
     missing_capacity = Namespace(
         apply=True, accept_operator_gate=[RECIPE_KEY], accept_capacity_review=[]
     )
     with pytest.raises(QualificationError, match="accept-capacity-review"):
-        campaign_cli._operator_gate(missing_capacity, row)
+        campaign_cli._operator_gate(missing_capacity, [row])
 
     accepted = Namespace(
         apply=True,
         accept_operator_gate=[RECIPE_KEY],
         accept_capacity_review=[RECIPE_KEY],
     )
-    campaign_cli._operator_gate(accepted, row)
+    campaign_cli._operator_gate(accepted, [row])
 
 
 def test_profile_ledger_label_fits_the_current_contract(tmp_path: Path) -> None:
@@ -2221,3 +2480,781 @@ def test_profile_campaign_lock_rejects_roster_change() -> None:
 
     with pytest.raises(QualificationError, match="Fleet membership changed"):
         campaign_cli._require_locked_fleet_roster(fleet, [NODE_A, NODE_B])
+
+
+PAIRED_PROFILE_ID = "12345678-1234-4123-8123-123456789abc"
+PAIRED_PROFILE_DIGEST = "d" * 64
+PAIRED_PLAN_DIGEST = "e" * 64
+PAIRED_FIXTURE_DIGEST = "f" * 64
+
+
+def _paired_batch_inputs(
+    node_order: tuple[str, str] = (NODE_A, NODE_B),
+) -> tuple[campaign_cli.CampaignBatch, tuple[campaign_cli.BatchLane, ...]]:
+    base = _row()
+    lanes: list[campaign_cli.BatchLane] = []
+    assignments: list[campaign_cli.BatchAssignment] = []
+    for lane_number, (slug, content_digest, package_digest, node_id) in enumerate(
+        (
+            ("first", "1" * 64, "2" * 64, node_order[0]),
+            ("second", "3" * 64, "4" * 64, node_order[1]),
+        ),
+        start=1,
+    ):
+        recipe = f"vonk-forge/test-{slug}-lane"
+        assignment = campaign_cli.BatchAssignment(recipe, lane_number, 1)
+        raw = {
+            **dict(base.raw),
+            "sequence": lane_number,
+            "key": recipe,
+            "content_sha256": content_digest,
+            "package": {"sha256": package_digest},
+        }
+        row = replace(
+            base,
+            sequence=lane_number,
+            key=recipe,
+            content_sha256=content_digest,
+            package={"sha256": package_digest},
+            raw=raw,
+        )
+        alias = f"paired-{lane_number}"
+        lanes.append(
+            campaign_cli.BatchLane(
+                assignment=assignment,
+                row=row,
+                node_ids=(node_id,),
+                alias=alias,
+                smoke_kind="openai-service",
+                detail={"identity": {"recipe_id": f"controller-recipe-{lane_number}"}},
+                smoke_preview={
+                    "available": True,
+                    "endpoint_alias": alias,
+                    "fixture_manifest_sha256": PAIRED_FIXTURE_DIGEST,
+                    "recipe_content_sha256": content_digest,
+                    "cases": [{"case_id": "health"}],
+                },
+            )
+        )
+        assignments.append(assignment)
+    batch_raw: dict[str, object] = {
+        "sequence": 1,
+        "id": "batch-001",
+        "mode": "paired-single",
+        "assignments": [
+            {
+                "recipe": item.recipe,
+                "lane": item.lane,
+                "node_count": item.node_count,
+            }
+            for item in assignments
+        ],
+    }
+    batch = campaign_cli.CampaignBatch(
+        sequence=1,
+        batch_id="batch-001",
+        mode="paired-single",
+        assignments=tuple(assignments),
+        raw=batch_raw,
+    )
+    return batch, tuple(lanes)
+
+
+def _paired_preview(
+    lanes: Sequence[campaign_cli.BatchLane],
+) -> dict[str, object]:
+    return {
+        "profile_id": PAIRED_PROFILE_ID,
+        "profile_digest": PAIRED_PROFILE_DIGEST,
+        "plan_digest": PAIRED_PLAN_DIGEST,
+        "scope": {"node_ids": sorted(node for lane in lanes for node in lane.node_ids)},
+        "assignments": [
+            {
+                "assignment_id": f"assignment-{lane.assignment.lane}",
+                "node_ids": list(lane.node_ids),
+                "desired_state": "running",
+            }
+            for lane in lanes
+        ],
+        "lane_revision_ids": {
+            lane.row.key: f"recipe-revision-{lane.assignment.lane}" for lane in lanes
+        },
+        "exact_preparations": {lane.row.key: {} for lane in lanes},
+    }
+
+
+def _paired_manifest(
+    rows: Sequence[campaign_cli.RecipeAuthorityRow],
+    batches: Sequence[campaign_cli.CampaignBatch],
+) -> campaign_cli.CampaignManifest:
+    authority = campaign_cli.CampaignAuthority(
+        authority_id="paired-test-authority",
+        sha256="a" * 64,
+        catalog={"recipe_count": len(rows)},
+        max_node_count=2,
+        excluded_topology_recipe_keys=(),
+        rows=tuple(rows),
+        batches=tuple(batches),
+        recovery_coverage=(),
+        raw={},
+    )
+    return campaign_cli.CampaignManifest(
+        path=Path("paired-campaign.json"),
+        sha256="b" * 64,
+        authority=authority,
+        fixture_manifest=Path("qualification-index.json"),
+        cleanup="stop",
+        operation_timeout_seconds=5.0,
+        poll_interval_seconds=0.01,
+    )
+
+
+def _paired_fleet(
+    lanes: Sequence[campaign_cli.BatchLane],
+) -> dict[str, object]:
+    nodes: list[dict[str, object]] = []
+    for lane in lanes:
+        lane_number = lane.assignment.lane
+        node_id = lane.node_ids[0]
+        nodes.append(
+            _node(
+                node_id,
+                loaded=[
+                    {
+                        "alias": lane.alias,
+                        "expected_rank_count": 1,
+                        "group_state": "healthy",
+                        "healthy": True,
+                        "installation_id": f"installation-{lane_number}",
+                        "member_node_ids": [node_id],
+                        "present_ranks": [0],
+                        "rank": 0,
+                        "rank_age_seconds": 1.0,
+                        "rank_fresh": True,
+                        "rank_state": "running",
+                        "recipe_id": f"controller-recipe-{lane_number}",
+                        "recipe_revision_id": f"recipe-revision-{lane_number}",
+                        "role": "rank-0",
+                        "route_state": "published",
+                        "run_id": f"run-{lane_number}",
+                        "run_state": "running",
+                        "title": f"Paired lane {lane_number}",
+                    }
+                ],
+            )
+        )
+    return {"nodes": nodes}
+
+
+def _paired_lane_finals(
+    lanes: Sequence[campaign_cli.BatchLane],
+) -> dict[str, Mapping[str, object]]:
+    return {
+        lane.row.key: {
+            "run_id": f"run-{lane.assignment.lane}",
+            "recipe_revision_id": f"recipe-revision-{lane.assignment.lane}",
+            "ranks": [{"node_id": lane.node_ids[0], "rank": 0}],
+        }
+        for lane in lanes
+    }
+
+
+def _paired_final_application(
+    lanes: Sequence[campaign_cli.BatchLane],
+    *,
+    wrong_revision_lane: int | None = None,
+    wrong_node_lane: int | None = None,
+    duplicate_run_id: bool = False,
+) -> tuple[dict[str, object], dict[str, object]]:
+    preview = _paired_preview(lanes)
+    assignment_ids = [f"assignment-{lane.assignment.lane}" for lane in lanes]
+    intended_assignments: list[dict[str, object]] = []
+    children: list[dict[str, object]] = []
+    for lane in lanes:
+        lane_number = lane.assignment.lane
+        revision_id = f"recipe-revision-{lane_number}"
+        if wrong_revision_lane == lane_number:
+            revision_id = "another-recipe-revision"
+        intended_assignments.append(
+            {
+                "id": f"assignment-{lane_number}",
+                "recipe_revision_id": revision_id,
+                "nodes": [{"node_id": lane.node_ids[0]}],
+            }
+        )
+        rank_node_id = lane.node_ids[0]
+        if wrong_node_lane == lane_number:
+            rank_node_id = NODE_A if rank_node_id == NODE_B else NODE_B
+        run_id = f"run-{lane_number}"
+        if duplicate_run_id and lane_number == 2:
+            run_id = "run-1"
+        children.append(
+            {
+                "kind": "run",
+                "result": {
+                    "run_switch": {
+                        "item_index": lane_number - 1,
+                        "profile_application_id": "paired-application",
+                        "phase": "final_verify",
+                        "run_id": run_id,
+                        "final_verified": True,
+                        "healthy": True,
+                        "state": "running",
+                        "route_state": "published",
+                        "ranks": [{"node_id": rank_node_id, "rank": 0}],
+                    }
+                },
+            }
+        )
+    application = {
+        "id": "paired-application",
+        "progress": {
+            "intended_profile": {"assignments": intended_assignments},
+            "step_results": {
+                "profile.switch": {
+                    "result": {"assignment_ids": assignment_ids, "children": children}
+                }
+            },
+        },
+    }
+    return application, preview
+
+
+def _paired_application_identity(
+    batch: campaign_cli.CampaignBatch,
+) -> dict[str, object]:
+    request_key = campaign_cli._request_key(CAMPAIGN_ID, batch.batch_id, "load")
+    return {
+        "id": "paired-application",
+        "profile_id": PAIRED_PROFILE_ID,
+        "profile_digest": PAIRED_PROFILE_DIGEST,
+        "plan_digest": campaign_cli._application_plan_digest(
+            PAIRED_PLAN_DIGEST, request_key
+        ),
+        "request_key": request_key,
+    }
+
+
+def test_generated_family_authority_is_consumable_with_complete_scope_accounting() -> (
+    None
+):
+    library_root = Path(os.environ["VONK_RECIPE_LIBRARY_ROOT"]).resolve()
+    authority_path = (
+        library_root / "qualification/authorities/nl-family-aware-20260924.json"
+    )
+    authority = campaign_cli._load_authority(authority_path)
+
+    assert authority.sha256 == hashlib.sha256(authority_path.read_bytes()).hexdigest()
+    assert len(authority.rows) == authority.raw["scope"]["recipe_count"]
+    assert authority.raw["catalog"]["recipe_count"] == (
+        len(authority.rows) + len(authority.excluded_topology_recipe_keys)
+    )
+    assignment_recipes = [
+        assignment.recipe
+        for batch in authority.batches
+        for assignment in batch.assignments
+    ]
+    assert len(assignment_recipes) == len(authority.rows)
+    assert set(assignment_recipes) == {row.key for row in authority.rows}
+    assert len(set(assignment_recipes)) == len(assignment_recipes)
+    paired_batch = next(
+        batch for batch in authority.batches if batch.mode == "paired-single"
+    )
+    assert [item.lane for item in paired_batch.assignments] == [1, 2]
+    assert [item.node_count for item in paired_batch.assignments] == [1, 1]
+
+
+def test_generated_family_authority_rejects_unreferenced_recovery_definition(
+    tmp_path: Path,
+) -> None:
+    library_root = Path(os.environ["VONK_RECIPE_LIBRARY_ROOT"]).resolve()
+    authority_path = (
+        library_root / "qualification/authorities/nl-family-aware-20260924.json"
+    )
+    authority = json.loads(authority_path.read_text(encoding="utf-8"))
+    recovery_definitions = authority["recovery_coverage"]
+    extra_definition = dict(recovery_definitions[0])
+    extra_definition["equivalence_rationale"] = (
+        "A second valid but unreferenced recovery definition."
+    )
+    unsigned_definition = {
+        key: value for key, value in extra_definition.items() if key != "coverage_id"
+    }
+    extra_definition["coverage_id"] = campaign_cli._contract_digest(unsigned_definition)
+    recovery_definitions.append(extra_definition)
+    mutated_authority = tmp_path / authority_path.name
+    mutated_authority.write_text(json.dumps(authority), encoding="utf-8")
+
+    with pytest.raises(
+        QualificationError,
+        match="recovery definition includes a member with no exact row reference",
+    ):
+        campaign_cli._load_authority(mutated_authority)
+
+
+def test_repeated_spark_ids_bind_to_ordered_disjoint_batch_lanes() -> None:
+    batch, lanes = _paired_batch_inputs()
+    selected = campaign_cli._exact_batch_nodes(
+        object(),
+        {"nodes": [_node(NODE_A), _node(NODE_B)]},
+        batch,
+        [NODE_B, NODE_A],
+        {lane.row.key: lane.row for lane in lanes},
+    )
+
+    assert selected == {lanes[0].row.key: (NODE_B,), lanes[1].row.key: (NODE_A,)}
+    with pytest.raises(QualificationError, match="exactly 2 distinct --spark IDs"):
+        campaign_cli._exact_batch_nodes(
+            object(),
+            {"nodes": [_node(NODE_A), _node(NODE_B)]},
+            batch,
+            [NODE_A, NODE_A],
+            {lane.row.key: lane.row for lane in lanes},
+        )
+
+
+def test_batch_plan_digest_changes_when_lane_spark_mapping_changes() -> None:
+    batch, lanes = _paired_batch_inputs()
+    manifest = _paired_manifest([lane.row for lane in lanes], [batch])
+    fixtures = SimpleNamespace(manifest_sha256=PAIRED_FIXTURE_DIGEST)
+    profile = {"id": PAIRED_PROFILE_ID, "profile_digest": PAIRED_PROFILE_DIGEST}
+    preview = _paired_preview(lanes)
+    digest = campaign_cli._batch_preview_digest(
+        manifest=manifest,
+        fixtures=cast(FixtureRegistry, fixtures),
+        batch=batch,
+        lanes=lanes,
+        profile=profile,
+        preview=preview,
+        profile_number=7,
+        failure_node_id=None,
+    )
+    swapped = (
+        replace(lanes[0], node_ids=(NODE_B,)),
+        replace(lanes[1], node_ids=(NODE_A,)),
+    )
+    swapped_digest = campaign_cli._batch_preview_digest(
+        manifest=manifest,
+        fixtures=cast(FixtureRegistry, fixtures),
+        batch=batch,
+        lanes=swapped,
+        profile=profile,
+        preview=preview,
+        profile_number=7,
+        failure_node_id=None,
+    )
+
+    assert digest != swapped_digest
+
+
+def test_stale_batch_digest_blocks_load_for_every_lane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    batch, lanes = _paired_batch_inputs()
+    fleet = _paired_fleet(lanes)
+    fixtures = cast(FixtureRegistry, SimpleNamespace())
+    fixture_path = tmp_path / "qualification-index.json"
+    fixture_path.write_text("{}", encoding="utf-8")
+    manifest = replace(
+        _paired_manifest([lane.row for lane in lanes], [batch]),
+        path=tmp_path / "campaign.json",
+        fixture_manifest=fixture_path,
+    )
+    ledger_path = tmp_path / "stale-batch.jsonl"
+    fresh_metadata = {"campaign_digest": "c" * 64, "profile": {}}
+    load_calls: list[str] = []
+
+    monkeypatch.setattr(campaign_cli, "load_manifest", lambda *_args: manifest)
+    monkeypatch.setattr(FixtureRegistry, "load", lambda _path: fixtures)
+    monkeypatch.setattr(campaign_cli, "_bind_repository_inputs", lambda *_args: None)
+    monkeypatch.setattr(
+        campaign_cli, "_resolve_ledger_path", lambda *_args: ledger_path
+    )
+    monkeypatch.setattr(
+        campaign_cli, "_make_campaign_id", lambda *_args: (CAMPAIGN_ID, "ledger-id")
+    )
+    monkeypatch.setattr(campaign_cli, "_typed_fleet", lambda _client: fleet)
+    monkeypatch.setattr(campaign_cli, "node_locks", lambda _nodes: nullcontext())
+    monkeypatch.setattr(
+        campaign_cli,
+        "_fresh_batch_preview",
+        lambda **_kwargs: (lanes, _paired_preview(lanes), fresh_metadata),
+    )
+    monkeypatch.setattr(campaign_cli, "_operator_gate", lambda *_args: None)
+
+    def load_batch(**_kwargs: object) -> object:
+        load_calls.append("submitted")
+        pytest.fail("a stale whole-batch digest must stop before any lane load")
+
+    monkeypatch.setattr(campaign_cli, "_load_batch_and_smoke", load_batch)
+
+    with pytest.raises(
+        QualificationError,
+        match="campaign-digest no longer matches the live exact batch preview",
+    ):
+        campaign_cli.run(
+            [
+                "--manifest",
+                str(manifest.path),
+                "--library-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger_path),
+                "--profile-number",
+                "7",
+                "--batch",
+                batch.batch_id,
+                "--spark",
+                NODE_A,
+                "--spark",
+                NODE_B,
+                "--apply",
+                "--campaign-digest",
+                "d" * 64,
+            ],
+            client_factory=lambda: object(),
+        )
+
+    assert load_calls == []
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        ("wrong-revision", "changed a lane revision or Spark group"),
+        ("wrong-node", "changed an exact lane"),
+        ("duplicate-run", "duplicate run identity"),
+    ],
+)
+def test_batch_application_rejects_wrong_recipe_or_node_receipts(
+    tamper: str, message: str
+) -> None:
+    _batch, lanes = _paired_batch_inputs()
+    application, preview = _paired_final_application(
+        lanes,
+        wrong_revision_lane=2 if tamper == "wrong-revision" else None,
+        wrong_node_lane=2 if tamper == "wrong-node" else None,
+        duplicate_run_id=tamper == "duplicate-run",
+    )
+
+    with pytest.raises(QualificationError, match=message):
+        campaign_cli._lane_final_verifications(application, lanes, preview)
+
+
+def test_paired_preview_refuses_competing_whole_fleet_runs_before_profile_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    batch, lanes = _paired_batch_inputs()
+    fleet = _paired_fleet(lanes)
+    fleet_nodes = cast(list[dict[str, object]], fleet["nodes"])
+    foreign_load = dict(cast(list[dict[str, object]], fleet_nodes[0]["loaded"])[0])
+    foreign_load.update(
+        {
+            "alias": "foreign-service",
+            "installation_id": "foreign-installation",
+            "recipe_id": "foreign-recipe",
+            "recipe_revision_id": "foreign-revision",
+            "run_id": "foreign-run",
+            "title": "Unrelated whole-Fleet workload",
+        }
+    )
+    fleet = {
+        "nodes": [
+            _node(NODE_A, loaded=[foreign_load]),
+            _node(NODE_B),
+        ]
+    }
+    manifest = _paired_manifest([lane.row for lane in lanes], [batch])
+    fixtures = SimpleNamespace(
+        manifest_sha256=PAIRED_FIXTURE_DIGEST,
+        service_recipes={
+            lane.row.key: SimpleNamespace(alias=lane.alias) for lane in lanes
+        },
+    )
+    profile_writes: list[str] = []
+
+    class PreviewAdapter:
+        def __init__(self, _fixtures: object) -> None:
+            pass
+
+        def preview(
+            self,
+            _definition: object,
+            alias: str,
+            **_kwargs: object,
+        ) -> dict[str, object]:
+            return {
+                "available": True,
+                "endpoint_alias": alias,
+                "fixture_manifest_sha256": PAIRED_FIXTURE_DIGEST,
+            }
+
+    monkeypatch.setattr(
+        campaign_cli,
+        "_fixture_bindings",
+        lambda _row, _fixtures: ("openai-service", {}),
+    )
+    monkeypatch.setattr(
+        campaign_cli,
+        "_validate_current_recipe",
+        lambda _client, row: (
+            {"identity": {"recipe_id": f"recipe-{row.sequence}"}},
+            {},
+        ),
+    )
+    monkeypatch.setattr(campaign_cli, "ServiceSmokeAdapter", PreviewAdapter)
+    monkeypatch.setattr(campaign_cli, "_typed_fleet", lambda _client: fleet)
+
+    def record_profile_write(**_kwargs: object) -> dict[str, object]:
+        profile_writes.append("write")
+        pytest.fail("a competing whole-Fleet run must stop before profile mutation")
+
+    monkeypatch.setattr(campaign_cli, "_prepare_batch_profile", record_profile_write)
+    selected = {lane.row.key: lane.node_ids for lane in lanes}
+
+    with pytest.raises(QualificationError, match="loaded run is present"):
+        campaign_cli._fresh_batch_preview(
+            client=object(),
+            manifest=manifest,
+            fixtures=cast(FixtureRegistry, fixtures),
+            batch=batch,
+            selected_nodes=selected,
+            library_root=tmp_path,
+            profile_number=7,
+            authority_id=manifest.authority.authority_id,
+            ledger_id="ledger-id",
+            campaign_id=CAMPAIGN_ID,
+            ledger=EvidenceLedger(tmp_path / "competing.jsonl"),
+            expected_fleet_node_ids=[NODE_A, NODE_B],
+            replace_run_ids=[],
+            failure_node_id=None,
+        )
+
+    assert profile_writes == []
+
+
+def test_next_batch_waits_for_whole_fleet_cleanup_after_a_local_lane_failure(
+    tmp_path: Path,
+) -> None:
+    first_batch, lanes = _paired_batch_inputs()
+    third_base = lanes[1].row
+    third_key = "vonk-forge/next-model"
+    third_raw = {**dict(third_base.raw), "sequence": 3, "key": third_key}
+    third_row = replace(
+        third_base,
+        sequence=3,
+        key=third_key,
+        raw=third_raw,
+    )
+    second_batch = campaign_cli.CampaignBatch(
+        sequence=2,
+        batch_id="batch-002",
+        mode="single",
+        assignments=(campaign_cli.BatchAssignment(third_key, 1, 1),),
+        raw={
+            "sequence": 2,
+            "id": "batch-002",
+            "mode": "single",
+            "assignments": [{"recipe": third_key, "lane": 1, "node_count": 1}],
+        },
+    )
+    manifest = _paired_manifest(
+        [lanes[0].row, lanes[1].row, third_row], [first_batch, second_batch]
+    )
+    ledger = EvidenceLedger(tmp_path / "batch-cleanup.jsonl")
+    ledger.append(
+        "recipe.failed",
+        plan_digest=CAMPAIGN_ID,
+        recipe=lanes[0].row.key,
+        payload={"error": "lane-local smoke failed after retry policy was exhausted"},
+    )
+    ledger.append(
+        "recipe.spark-accepted",
+        plan_digest=CAMPAIGN_ID,
+        recipe=lanes[1].row.key,
+        payload={"status": "spark-accepted"},
+    )
+
+    with pytest.raises(QualificationError, match="no whole-Fleet cleanup receipt"):
+        campaign_cli._current_batch(
+            manifest, ledger, CAMPAIGN_ID, second_batch.batch_id
+        )
+
+    ledger.append(
+        "batch.cleanup.completed",
+        plan_digest=CAMPAIGN_ID,
+        payload={
+            "batch_id": first_batch.batch_id,
+            "all_batch_runs_absent": True,
+            "all_batch_routes_absent": True,
+            "profile_assignments_empty": True,
+        },
+    )
+    assert (
+        campaign_cli._current_batch(
+            manifest, ledger, CAMPAIGN_ID, second_batch.batch_id
+        )
+        == second_batch
+    )
+
+
+def test_paired_smoke_is_concurrent_and_replay_keeps_partner_receipt_without_second_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    batch, lanes = _paired_batch_inputs()
+    preview = _paired_preview(lanes)
+    application_identity = _paired_application_identity(batch)
+    fleet = _paired_fleet(lanes)
+    lane_finals = _paired_lane_finals(lanes)
+    options = _paired_manifest([lane.row for lane in lanes], [batch])
+    client = _PairedLoadClient(application_identity)
+    ledger = EvidenceLedger(tmp_path / "paired-replay.jsonl")
+    barrier = Barrier(2)
+    smoke_calls: list[str] = []
+    smoke_lock = Lock()
+    fail_alias = lanes[1].alias
+    should_fail_once = True
+
+    class ConcurrentSmokeAdapter:
+        def __init__(self, _fixtures: object) -> None:
+            pass
+
+        def run(
+            self,
+            _client: object,
+            alias: str,
+            smoke_preview: Mapping[str, object],
+        ) -> dict[str, object]:
+            nonlocal should_fail_once
+            with smoke_lock:
+                call_number = len(smoke_calls)
+                smoke_calls.append(alias)
+            if call_number < 2:
+                barrier.wait(timeout=5)
+            with smoke_lock:
+                fail_now = alias == fail_alias and should_fail_once
+                if fail_now:
+                    should_fail_once = False
+            if fail_now:
+                raise QualificationError("lane-local fixture smoke failed")
+            return {
+                "endpoint_alias": alias,
+                "fixture_manifest_sha256": smoke_preview["fixture_manifest_sha256"],
+                "recipe_content_sha256": smoke_preview["recipe_content_sha256"],
+                "cases": [{"case_id": "health", "status": "passed"}],
+            }
+
+    monkeypatch.setattr(campaign_cli, "_typed_fleet", lambda _client: fleet)
+    monkeypatch.setattr(
+        campaign_cli,
+        "_lane_final_verifications",
+        lambda _application, _lanes, _preview: lane_finals,
+    )
+    monkeypatch.setattr(
+        campaign_cli,
+        "_await_application",
+        lambda _client, accepted, **_kwargs: {
+            **application_identity,
+            "id": accepted["id"],
+            "state": "succeeded",
+        },
+    )
+    monkeypatch.setattr(campaign_cli, "ServiceSmokeAdapter", ConcurrentSmokeAdapter)
+
+    def apply_once() -> tuple[
+        Mapping[str, object],
+        dict[str, Mapping[str, object]],
+        dict[str, str],
+    ]:
+        return campaign_cli._load_batch_and_smoke(
+            client=client,
+            batch=batch,
+            lanes=lanes,
+            fixtures=cast(FixtureRegistry, None),
+            preview=preview,
+            profile_number=7,
+            campaign_id=CAMPAIGN_ID,
+            campaign_digest="9" * 64,
+            ledger=ledger,
+            options=options,
+            failure_node_id=None,
+            clock=lambda: 0.0,
+            sleeper=lambda _delay: None,
+        )
+
+    first_application, first_receipts, first_errors = apply_once()
+    assert first_application["id"] == "paired-application"
+    assert set(first_errors) == {lanes[1].row.key}
+    assert set(first_receipts) == {lanes[0].row.key}
+    assert set(smoke_calls[:2]) == {lane.alias for lane in lanes}
+    first_lane_events = ledger.recipe_records(CAMPAIGN_ID, lanes[0].row.key)
+    second_lane_events = ledger.recipe_records(CAMPAIGN_ID, lanes[1].row.key)
+    completed = next(
+        record["payload"]
+        for record in first_lane_events
+        if record["event"] == "canary.completed"
+    )
+    failed = next(
+        record["payload"]
+        for record in second_lane_events
+        if record["event"] == "canary.failed"
+    )
+    assert completed["batch_id"] == failed["batch_id"] == batch.batch_id
+    assert completed["lane_id"] == lanes[0].assignment.lane
+    assert failed["lane_id"] == lanes[1].assignment.lane
+    assert completed["run_id"] == "run-1"
+    assert failed["run_id"] == "run-2"
+    assert completed["recipe_revision_id"] == "recipe-revision-1"
+    assert failed["recipe_revision_id"] == "recipe-revision-2"
+    assert completed["alias"] == lanes[0].alias
+    assert failed["alias"] == lanes[1].alias
+    assert completed["node_ids"] == list(lanes[0].node_ids)
+    assert failed["node_ids"] == list(lanes[1].node_ids)
+    assert completed["node_to_rank"] == {lanes[0].node_ids[0]: 0}
+    assert failed["node_to_rank"] == {lanes[1].node_ids[0]: 0}
+    assert completed["smoke"]["endpoint_alias"] == lanes[0].alias
+    assert failed["smoke_status"] == "failed"
+    assert client.load_posts == 1
+
+    replay_application, replay_receipts, replay_errors = apply_once()
+    assert replay_application["id"] == "paired-application"
+    assert replay_errors == {}
+    assert set(replay_receipts) == {lane.row.key for lane in lanes}
+    assert len(smoke_calls) == 3
+    assert client.load_posts == 1
+    for lane in lanes:
+        submitted = [
+            record
+            for record in ledger.recipe_records(CAMPAIGN_ID, lane.row.key)
+            if record["event"] == "profile.load.submitted"
+        ]
+        assert len(submitted) == 1
+        assert submitted[0]["payload"]["application_id"] == "paired-application"
+
+
+class _PairedLoadClient:
+    def __init__(self, application: Mapping[str, object]) -> None:
+        self.application = dict(application)
+        self.load_posts = 0
+        self.committed = False
+        self.calls: list[tuple[str, str, object]] = []
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        payload: object = None,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        self.calls.append((method, path, payload))
+        if method == "GET" and "/requests/" in path:
+            if self.committed:
+                return dict(self.application)
+            raise campaign_cli.ControlNotFound(404, "request has not been accepted")
+        if method == "POST" and path == "/api/profile/7/load":
+            self.load_posts += 1
+            self.committed = True
+            raise campaign_cli.ControlTransportError(
+                "accepted request response was lost"
+            )
+        raise AssertionError(f"unexpected Controller request: {method} {path}")
