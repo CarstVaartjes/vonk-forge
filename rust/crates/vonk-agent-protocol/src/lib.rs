@@ -2649,11 +2649,11 @@ mod host_helper_reconciliation_identity_tests {
         RecipeReconciliationIdentity {
             schema_version: 1,
             node_id: node_id.to_owned(),
-            installation_id: Uuid::from_u128(1),
-            install_operation_id: Uuid::from_u128(2),
+            installation_id: Uuid::new_v4(),
+            install_operation_id: Uuid::new_v4(),
             install_operation_payload_sha256: "a".repeat(64),
             plan_digest: "b".repeat(64),
-            recipe_revision_id: Uuid::from_u128(3),
+            recipe_revision_id: Uuid::new_v4(),
             recipe_content_sha256: "c".repeat(64),
             compiled_spec_canonical_sha256: "d".repeat(64),
         }
@@ -2663,7 +2663,7 @@ mod host_helper_reconciliation_identity_tests {
         HostHelperGrantClaims {
             schema_version: 1,
             authority: HOST_HELPER_AUTHORITY.to_owned(),
-            request_id: Uuid::from_u128(4),
+            request_id: Uuid::new_v4(),
             node_id: identity.node_id.clone(),
             issued_at: 2_100_000_000,
             expires_at: 2_100_000_060,
@@ -2671,10 +2671,10 @@ mod host_helper_reconciliation_identity_tests {
                 generated::ExecuteContainerRuntimeRequestOperation {
                     type_: "execute-container-runtime-request".into(),
                     action: HostHelperContainerRuntimeAction::InstallationCleanup,
-                    job_id: Uuid::from_u128(5),
-                    operation_id: Uuid::from_u128(6),
+                    job_id: Uuid::new_v4(),
+                    operation_id: Uuid::new_v4(),
                     attempt: 1,
-                    fence: Uuid::from_u128(7),
+                    fence: Uuid::new_v4(),
                     request_sha256: "e".repeat(64),
                     observation_identity_sha256: None,
                     installation_id: Some(identity.installation_id),
