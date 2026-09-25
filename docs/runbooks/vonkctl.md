@@ -265,6 +265,7 @@ vonkctl recipe remove qwen-code --keep-model --review
 vonkctl recipe remove qwen-code --with-model --review
 vonkctl recipe remove qwen-code --keep-model
 vonkctl recipe remove qwen-code --with-model
+vonkctl recipe installation reconcile INSTALLATION_UUID --review
 ```
 
 Recipe removal requires an explicit `--keep-model` or `--with-model` choice.
@@ -287,6 +288,25 @@ the exact reviewed model-removal child and completes only after that child
 settles. Shared model files needed by retained cache entries are preserved.
 Use `recipe progress --request-key REQUEST_UUID --follow` to reconnect to the
 same operation and inspect a waiting dependency or failure.
+
+Installation reconciliation targets one exact stopped installation whose
+stored identity or installed-node state is invalid. It checks the original
+successful install receipts and previews the current per-node cleanup effects;
+it does not select a recipe by name or remove Controller cache assets. Review
+the plan, then pass its digest and a retained request UUID to accept it:
+
+```bash
+REVIEW=$(vonkctl --json recipe installation reconcile INSTALLATION_UUID --review)
+REVIEWED_DIGEST=$(printf '%s' "$REVIEW" | jq -r .plan_digest)
+vonkctl --json recipe installation reconcile INSTALLATION_UUID \
+  --review-digest "$REVIEWED_DIGEST" --yes --request-key REQUEST_UUID --detach
+```
+
+The Controller rechecks the exact installation identity and plan digest before
+accepting cleanup. The same request UUID reconnects to an accepted operation,
+including after a lost response; a failed lookup does not authorize a new
+request. Follow the typed Run/Switch operation receipt with the returned
+operation ID or rerun the same command with its original request UUID.
 
 Recipe names (`publisher/slug` or an unambiguous slug) and logical recipe IDs
 select the current accepted revision. Use an exact revision ID or content digest

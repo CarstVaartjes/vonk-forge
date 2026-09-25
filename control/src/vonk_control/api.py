@@ -83,6 +83,9 @@ from .fleet_projection import (
 )
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
+from .installation_reconciliation_api import (
+    install_installation_reconciliation_routes,
+)
 from .library_assessment import LibraryAssessment
 from .logging import JobLogCorruptError
 from .metrics import MetricsRegistry, runnable_job_ages
@@ -887,6 +890,12 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         service=recipe_image_availability,
+        audits=audits,
+    )
+    install_installation_reconciliation_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        operations=run_switch_operations,
         audits=audits,
     )
 
