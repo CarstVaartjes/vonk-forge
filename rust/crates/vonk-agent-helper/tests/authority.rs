@@ -493,9 +493,14 @@ impl CommandRunner for RecordingRunner {
                     } else {
                         String::new()
                     };
+                    let installation = if arguments[3].contains("installation-id") {
+                        "\tinstallation-1"
+                    } else {
+                        ""
+                    };
                     format!(
-                        "{prefix}{}\t{digest}\ttrue\t{run_id}\tinstallation-1\n",
-                        self.runtime_running.lock().unwrap()
+                        "{prefix}{}\t{digest}\ttrue\t{run_id}{installation}\n",
+                        self.runtime_running.lock().unwrap(),
                     )
                     .into_bytes()
                 }
