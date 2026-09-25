@@ -61,7 +61,7 @@ On a host with the configured `vonk-nas-compose` helper:
 ```sh
 vonk-nas-compose status
 vonk-nas-compose plan
-vonk-nas-compose redeploy
+vonk-nas-compose redeploy --release-json /path/to/release.json --release-signature /path/to/release.sig
 ```
 
 `plan` uses Compose dry-run mode. `redeploy` applies the existing configured
@@ -76,7 +76,25 @@ upgrade. A timeout requires inspecting actual state before deciding to retry;
 it does not prove the deployment stopped or rolled back.
 
 After application, verify container health, Controller version/readiness and
-fleet state. Keep dry-run, deployment, and physical Spark acceptance separate.
+fleet state. The configured helper captures deployment provenance after Compose
+succeeds. It passes the reviewed release and minimal Docker identity fields to
+the packaged `vonk_control.capture_deployment_observation` module. The module
+verifies the existing installer signature, running container and immutable image
+digest against the accepted release, then records the Controller observation in
+the `deployment-observations` named volume. It never consumes Docker environment
+variables. The release signature input is its existing base64 text; only the raw
+release JSON needs base64 encoding for the collector's stdin contract.
+
+The observation is bound to the actual container hostname/ID and embedded source
+commit. Its original capture time remains visible; a matching active instance
+retains current identity evidence, while a replaced container requires capture
+again. If capture fails after Compose succeeds, deployment and capture have
+different outcomes. Inspect health and retry only the observation with
+`vonk-nas-compose capture-provenance --release-json /path/to/release.json
+--release-signature /path/to/release.sig`; do not infer rollback or reapply the
+whole project merely because the observation response was lost.
+
+Keep dry-run, deployment, and physical Spark acceptance separate.
 Routine Spark package upgrades continue through `vonkctl fleet upgrade` and its
 Controller authorization, not through the NAS host session.
 

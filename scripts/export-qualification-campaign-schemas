@@ -30,13 +30,17 @@ def main() -> None:
         "recovery-coverage-use-v1.schema.json": recovery_coverage_use_json_schema(),
     }
     for name, schema in schemas.items():
-        output = ROOT / "src/cluster_profiles/schemas" / name
         content = json.dumps(schema, sort_keys=True, indent=2) + "\n"
-        if args.check:
-            if not output.is_file() or output.read_text(encoding="utf-8") != content:
-                raise SystemExit(f"Stale qualification campaign schema: {output}")
-        else:
-            output.write_text(content, encoding="utf-8")
+        for directory in ("src/cluster_profiles/schemas", "schemas"):
+            output = ROOT / directory / name
+            if args.check:
+                if (
+                    not output.is_file()
+                    or output.read_text(encoding="utf-8") != content
+                ):
+                    raise SystemExit(f"Stale qualification campaign schema: {output}")
+            else:
+                output.write_text(content, encoding="utf-8")
 
 
 if __name__ == "__main__":

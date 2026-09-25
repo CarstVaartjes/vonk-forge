@@ -1,0 +1,65 @@
+{
+  "$defs": {
+    "QualificationCampaignOptions": {
+      "additionalProperties": false,
+      "description": "Bounded polling and cleanup settings for the runner.",
+      "properties": {
+        "cleanup": {
+          "const": "stop",
+          "default": "stop",
+          "title": "Cleanup",
+          "type": "string"
+        },
+        "operation_timeout_seconds": {
+          "default": 86400,
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Operation Timeout Seconds",
+          "type": "integer"
+        },
+        "poll_interval_seconds": {
+          "default": 5,
+          "maximum": 60,
+          "minimum": 1,
+          "title": "Poll Interval Seconds",
+          "type": "integer"
+        }
+      },
+      "title": "QualificationCampaignOptions",
+      "type": "object"
+    }
+  },
+  "$id": "https://api.vonkforge.ai/contracts/qualification-campaign-manifest-v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The small manifest joining an authority and fixture registry.",
+  "properties": {
+    "fixture_manifest": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Fixture Manifest",
+      "type": "string"
+    },
+    "options": {
+      "$ref": "#/$defs/QualificationCampaignOptions"
+    },
+    "qualification_authority": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Qualification Authority",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "qualification_authority",
+    "fixture_manifest"
+  ],
+  "title": "QualificationCampaignManifest",
+  "type": "object"
+}

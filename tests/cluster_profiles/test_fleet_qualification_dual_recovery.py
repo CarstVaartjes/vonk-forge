@@ -1324,7 +1324,9 @@ def test_failed_dual_cleanup_rejects_duplicate_or_unknown_typed_stop_ranks(
 
     def cleanup(request: Mapping[str, object]) -> Mapping[str, object]:
         result = _failed_cleanup_result(target, request, idle)
-        stop_receipt = result["stop_receipts"][0]
+        stop_receipts = result["stop_receipts"]
+        assert isinstance(stop_receipts, list)
+        stop_receipt = stop_receipts[0]
         assert isinstance(stop_receipt, Mapping)
         final_observation = stop_receipt["final_observation"]
         assert isinstance(final_observation, dict)

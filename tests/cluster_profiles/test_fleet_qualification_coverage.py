@@ -8,12 +8,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from cluster_profiles.fleet_qualification_dual_recovery import (
-    DualRecoveryTarget,
-    apply_dual_cleanup,
-    observe_dual_batch,
-    review_dual_cleanup,
-)
 from vonk_forge_contracts.qualification_authority import (
     RecoveryCoverageDefinition,
     RecoveryCoverageReceiptEnvelope,
@@ -27,6 +21,12 @@ from cluster_profiles.fleet_qualification_coverage import (
     _normalize_receipt_for_hash,
     build_recovery_coverage_receipt,
     validate_recovery_coverage_receipt,
+)
+from cluster_profiles.fleet_qualification_dual_recovery import (
+    DualRecoveryTarget,
+    apply_dual_cleanup,
+    observe_dual_batch,
+    review_dual_cleanup,
 )
 
 _RECIPE = "acme/small-model"

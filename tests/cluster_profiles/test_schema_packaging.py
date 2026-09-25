@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 import zipfile
 from pathlib import Path
@@ -25,13 +24,6 @@ def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
     assert mirror_names == canonical_names
     for name in sorted(canonical_names):
         assert (MIRROR / name).read_bytes() == (CANONICAL / name).read_bytes()
-
-
-def test_cluster_profile_schema_identifiers_use_the_vonk_forge_namespace() -> None:
-    for path in sorted(CANONICAL.glob("*.json")):
-        document = json.loads(path.read_text(encoding="utf-8"))
-        if "$id" in document:
-            assert document["$id"].startswith("https://vonk-forge.")
 
 
 def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:

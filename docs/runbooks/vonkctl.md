@@ -576,9 +576,15 @@ whole-fleet snapshot, resource fit, and a `plan_digest`. The CLI submits that
 digest with the load request, and the Controller rejects the request if the
 preview no longer describes the current plan.
 
-### Sequential recipe qualification
+### Batched recipe qualification
 
-`vonk-fleet-qualify-campaign` executes one reviewed authority row at a time.
+`vonk-fleet-qualify-campaign` executes one reviewed authority batch at a time.
+Two single-Spark recipes share one whole-fleet profile and one application;
+their smoke suites retain separate recipe, node, run and result identities.
+Dual-Spark recipes occupy an exclusive batch. A completed lane never permits
+replacing its partner: both results and cleanup must be reconciled before the
+next batch. The runner consumes the current generated campaign contract and
+rejects retired sequential authorities.
 Use the campaign manifest and recipe checkout named by the current qualification
 plan, plus a durable ledger outside that checkout. Reserve a dedicated profile
 with `installation_policy=keep-cached` and labels
@@ -593,8 +599,10 @@ the reviewed recipe repository before running; the runner never fetches code
 implicitly during validation.
 
 Preview requires `--manifest`, `--library-root`, `--ledger`, `--profile-number`,
-`--recipe`, and the exact Controller `--spark` IDs for that row. It saves the
-recipe assignment in this dedicated profile and records the reviewed preview;
+`--batch`, and the exact Controller `--spark` IDs for that batch. Supply Sparks
+in authority assignment order: each single-Spark assignment consumes one ID,
+and an exclusive dual assignment consumes two. It saves all batch assignments
+in this dedicated profile and records the reviewed preview;
 it does not load the profile. Every profile covers the full enrolled fleet,
 including Sparks left idle. A dual-Spark row also requires `--failure-spark`
 to identify its later recovery checkpoint.
@@ -602,20 +610,39 @@ to identify its later recovery checkpoint.
 Prepare missing NAS assets through `vonkctl recipe download` before preview.
 Spark-local copies may be cold: the accepted plan owns their transfer. If a
 healthy workload already occupies the fleet, both preview and apply require
-`--replace-run-id` naming that exact run. Its observed membership and planned
-interruption become part of the reviewed campaign digest.
+a repeated `--replace-run-id` naming every acknowledged run. Their observed
+memberships and planned interruptions become part of the reviewed campaign
+digest.
 
 To execute, repeat the reviewed selection with `--apply --campaign-digest DIGEST`.
 Add `--accept-operator-gate RECIPE` and `--accept-capacity-review RECIPE` only for
-the gates declared by that row. Preview provides the evidence for these apply
-acknowledgements. A changed plan or run requires a fresh preview.
+the gates declared by each recipe in the batch. Preview provides the evidence
+for these apply acknowledgements. A changed plan or run requires a fresh preview.
 
-Use `--observe` with the same manifest, library, ledger, profile and recipe to
+Use `--observe` with the same manifest, library, ledger, profile and batch to
 reconcile an interrupted submission or advance a recorded physical checkpoint.
-Observe takes no Spark selection or acknowledgement flags. Follow its reported
-checkpoint instructions for rank loss and host restart; those physical actions
-are operator-run. A passing initial smoke is not complete physical acceptance.
-Cleanup stops the campaign workload and retains verified cached assets.
+Observe takes no Spark selection or acknowledgement flags. After paired smoke,
+preview each exclusive recovery transition with `--recover-lane N`, using the
+durable lane selection rather than new `--spark` arguments. This preview records
+its intent before saving the one-lane profile, and returns a fresh campaign
+digest. Repeat with `--apply --recover-lane N --campaign-digest DIGEST` to accept
+that exact transition. The preview names the partner workload it will stop and
+any exact lane workload it must reactivate. Changed or foreign replacement
+effects require a new review; plain observation does not accept a transition.
+
+Follow the reported checkpoint instructions for rank loss and host restart.
+Those physical actions are operator-run and happen after other lanes have stopped
+and their release is observed. A passing initial smoke is not complete physical
+acceptance. The current authority requires dedicated recovery evidence for each
+recipe; the runner records canonical coverage receipts bound to the observed
+builds, nodes and checkpoints. Preview cleanup with `--cleanup-lane N`, then
+accept the exact returned digest with
+`--apply --cleanup-lane N --campaign-digest DIGEST`.
+The batch advances only after cleanup receipts and fresh Fleet observations
+prove release. The explicit cleanup apply records final acceptance or failure
+and releases the batch; repeat that same accepted cleanup apply after a lost
+response. Observation alone does not finalize or release a batch. Cleanup
+retains verified cached assets.
 
 The preview identifies each endpoint/run it will keep or stop, each installation
 it will retain or remove, complete distributed Spark groups, and pending orders
