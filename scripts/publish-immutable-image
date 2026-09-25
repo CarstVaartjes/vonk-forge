@@ -42,7 +42,7 @@ source_digest=$(skopeo inspect --format '{{.Digest}}' \
 if observed=$(skopeo inspect --format '{{.Digest}}' \
   "docker://$image:$immutable_tag" 2>"$inspect_error"); then
   if [[ "$observed" != "$expected" ]]; then
-    echo "refusing to overwrite immutable $role image tag" >&2
+    echo "refusing to overwrite immutable $role image tag: existing=$observed expected=$expected" >&2
     exit 1
   fi
 else
