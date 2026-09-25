@@ -15459,6 +15459,9 @@
                         "$ref": "#/components/schemas/RecipeUninstallResult"
                       },
                       {
+                        "$ref": "#/components/schemas/RecipeReconcileResult"
+                      },
+                      {
                         "$ref": "#/components/schemas/RemovedRecipeNodeResult"
                       },
                       {
@@ -15513,6 +15516,9 @@
                       },
                       {
                         "$ref": "#/components/schemas/RecipeUninstallResult"
+                      },
+                      {
+                        "$ref": "#/components/schemas/RecipeReconcileResult"
                       },
                       {
                         "$ref": "#/components/schemas/RemovedRecipeNodeResult"
@@ -16095,6 +16101,83 @@
           "state"
         ],
         "title": "RecipeReadinessCheck",
+        "type": "object"
+      },
+      "RecipeReconcileResult": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup_receipt_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Cleanup Receipt Sha256",
+            "type": "string"
+          },
+          "compiled_spec_canonical_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Compiled Spec Canonical Sha256",
+            "type": "string"
+          },
+          "install_operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Install Operation Id",
+            "type": "string"
+          },
+          "install_operation_payload_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Install Operation Payload Sha256",
+            "type": "string"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "reconciled": {
+            "const": true,
+            "title": "Reconciled",
+            "type": "boolean"
+          },
+          "removed_bytes": {
+            "description": "Measured bytes in the removed agent-owned installation tree, excluding the exact helper-managed runtime-cache subtree. The helper separately confirms removal of that private cache without reporting its byte count.",
+            "maximum": 17592186044416.0,
+            "minimum": 0.0,
+            "title": "Removed Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reconciled",
+          "node_id",
+          "installation_id",
+          "install_operation_id",
+          "install_operation_payload_sha256",
+          "plan_digest",
+          "recipe_revision_id",
+          "recipe_content_sha256",
+          "compiled_spec_canonical_sha256",
+          "removed_bytes",
+          "cleanup_receipt_sha256"
+        ],
+        "title": "RecipeReconcileResult",
         "type": "object"
       },
       "RecipeRelease": {
@@ -18915,6 +18998,26 @@
             "title": "Active Runs",
             "type": "integer"
           },
+          "cleanup_mode": {
+            "default": "uninstall",
+            "enum": [
+              "uninstall",
+              "reconcile"
+            ],
+            "title": "Cleanup Mode",
+            "type": "string"
+          },
+          "exact_reconciliation_receipts": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exact Reconciliation Receipts"
+          },
           "final_verified": {
             "title": "Final Verified",
             "type": "boolean"
@@ -18941,6 +19044,26 @@
             "const": "final_verify",
             "title": "Phase",
             "type": "string"
+          },
+          "reconciliation_receipts": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeReconcileResult"
+            },
+            "maxItems": 32,
+            "title": "Reconciliation Receipts",
+            "type": "array"
+          },
+          "reconciliation_request_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciliation Request Id"
           },
           "removed": {
             "title": "Removed",

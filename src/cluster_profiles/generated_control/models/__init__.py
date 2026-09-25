@@ -427,6 +427,7 @@ from .recipe_provenance_source_kind import RecipeProvenanceSourceKind
 from .recipe_readiness import RecipeReadiness
 from .recipe_readiness_check import RecipeReadinessCheck
 from .recipe_readiness_check_state import RecipeReadinessCheckState
+from .recipe_reconcile_result import RecipeReconcileResult
 from .recipe_release import RecipeRelease
 from .recipe_release_change import RecipeReleaseChange
 from .recipe_release_change_kind import RecipeReleaseChangeKind
@@ -495,6 +496,7 @@ from .run_switch_cleanup_preview_request_cleanup_mode import RunSwitchCleanupPre
 from .run_switch_cleanup_result import RunSwitchCleanupResult
 from .run_switch_cleanup_result_subphase_type_0 import RunSwitchCleanupResultSubphaseType0
 from .run_switch_cleanup_verify_result import RunSwitchCleanupVerifyResult
+from .run_switch_cleanup_verify_result_cleanup_mode import RunSwitchCleanupVerifyResultCleanupMode
 from .run_switch_cleanup_verify_result_subphase_type_0 import RunSwitchCleanupVerifyResultSubphaseType0
 from .run_switch_container_build_result import RunSwitchContainerBuildResult
 from .run_switch_container_build_result_state import RunSwitchContainerBuildResultState
@@ -1046,6 +1048,7 @@ __all__ = (
     "RecipeReadiness",
     "RecipeReadinessCheck",
     "RecipeReadinessCheckState",
+    "RecipeReconcileResult",
     "RecipeRelease",
     "RecipeReleaseChange",
     "RecipeReleaseChangeKind",
@@ -1114,6 +1117,7 @@ __all__ = (
     "RunSwitchCleanupResult",
     "RunSwitchCleanupResultSubphaseType0",
     "RunSwitchCleanupVerifyResult",
+    "RunSwitchCleanupVerifyResultCleanupMode",
     "RunSwitchCleanupVerifyResultSubphaseType0",
     "RunSwitchContainerBuildResult",
     "RunSwitchContainerBuildResultState",

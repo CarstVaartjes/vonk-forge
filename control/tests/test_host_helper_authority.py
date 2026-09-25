@@ -695,7 +695,7 @@ def reconciliation_identity() -> RecipeReconciliationIdentity:
 
 
 def reconciliation_service(
-    *, cancel_requested: bool = False, lease_seconds: int = 60
+    *, cancel_requested: bool = False, lease_seconds: int = 60, node_intent: int = 1
 ) -> HostRuntimeAuthorityService:
     identity = reconciliation_identity()
     service = runtime_service(
@@ -703,6 +703,7 @@ def reconciliation_service(
         operation_payload=json.loads(canonical_message(identity)),
         cancel_requested=cancel_requested,
         lease_seconds=lease_seconds,
+        node_intent=node_intent,
     )
     with service._sessions.begin() as session:
         operation = session.get(AgentOperation, "30000000-0000-4000-8000-000000000003")
@@ -821,4 +822,10 @@ def test_ordinary_uninstall_cannot_supply_reconciliation_authority() -> None:
         operation_payload=json.loads(canonical_message(payload)),
     )
     with pytest.raises(HostHelperAuthorityError):
+        service.issue_grant(**reconciliation_grant_arguments(reconciliation_identity()))
+
+
+def test_reconciliation_grant_refuses_superseded_node_intent() -> None:
+    service = reconciliation_service(node_intent=2)
+    with pytest.raises(HostHelperAuthorityError, match="stale"):
         service.issue_grant(**reconciliation_grant_arguments(reconciliation_identity()))

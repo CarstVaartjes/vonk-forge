@@ -6153,11 +6153,11 @@ export interface components {
             cancelled?: true | null;
             /** Launch Evidence */
             launch_evidence?: {
-                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /** Node Evidence */
             node_evidence?: {
-                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /** Reason */
             reason: string;
@@ -6329,6 +6329,37 @@ export interface components {
              * @enum {string}
              */
             state: "ready" | "blocked" | "unavailable";
+        };
+        /** RecipeReconcileResult */
+        RecipeReconcileResult: {
+            /** Cleanup Receipt Sha256 */
+            cleanup_receipt_sha256: string;
+            /** Compiled Spec Canonical Sha256 */
+            compiled_spec_canonical_sha256: string;
+            /** Install Operation Id */
+            install_operation_id: string;
+            /** Install Operation Payload Sha256 */
+            install_operation_payload_sha256: string;
+            /** Installation Id */
+            installation_id: string;
+            /** Node Id */
+            node_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Reconciled
+             * @constant
+             */
+            reconciled: true;
+            /**
+             * Removed Bytes
+             * @description Measured bytes in the removed agent-owned installation tree, excluding the exact helper-managed runtime-cache subtree. The helper separately confirms removal of that private cache without reporting its byte count.
+             */
+            removed_bytes: number;
         };
         /** RecipeRelease */
         RecipeRelease: {
@@ -7305,6 +7336,14 @@ export interface components {
              * @default 0
              */
             active_runs: number;
+            /**
+             * Cleanup Mode
+             * @default uninstall
+             * @enum {string}
+             */
+            cleanup_mode: "uninstall" | "reconcile";
+            /** Exact Reconciliation Receipts */
+            exact_reconciliation_receipts?: boolean | null;
             /** Final Verified */
             final_verified: boolean;
             /** Installation Id */
@@ -7316,6 +7355,10 @@ export interface components {
              * @constant
              */
             phase: "final_verify";
+            /** Reconciliation Receipts */
+            reconciliation_receipts?: components["schemas"]["RecipeReconcileResult"][];
+            /** Reconciliation Request Id */
+            reconciliation_request_id?: string | null;
             /** Removed */
             removed: boolean;
             /** Subphase */
