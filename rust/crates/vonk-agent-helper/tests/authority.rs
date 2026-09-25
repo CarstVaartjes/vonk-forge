@@ -979,7 +979,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     .unwrap();
 
     executor
-        .execute(&runtime_operation(&request, digest))
+        .execute(&runtime_operation(&request, digest.clone()))
         .unwrap();
     let private_tmp = outputs.join("tmp").join(run_id).join("private");
     fs::create_dir(&private_tmp).unwrap();
