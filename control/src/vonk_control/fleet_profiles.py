@@ -3362,6 +3362,9 @@ class FleetProfileService:
                     if retry_delay is None:
                         raise
                     time.sleep(retry_delay)
+            raise FleetProfileAdmissionBusy(
+                "Profile admission retry schedule was exhausted"
+            )
         except (FleetProfileConflict, KeyError):
             # Another identical submission can commit after our first lookup.
             # Its accepted receipt wins over a newly stale preview or a busy
