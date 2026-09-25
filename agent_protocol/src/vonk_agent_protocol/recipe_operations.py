@@ -225,7 +225,13 @@ class RecipeReconcileResult(_StrictPayload):
     recipe_revision_id: CanonicalUuid
     recipe_content_sha256: Digest
     compiled_spec_canonical_sha256: Digest
-    removed_bytes: ByteCount
+    removed_bytes: ByteCount = Field(
+        description=(
+            "Measured bytes in the removed agent-owned installation tree, excluding "
+            "the exact helper-managed runtime-cache subtree. The helper separately "
+            "confirms removal of that private cache without reporting its byte count."
+        )
+    )
     cleanup_receipt_sha256: Digest
 
 
@@ -400,11 +406,11 @@ __all__ = [
     "RECIPE_OPERATIONS",
     "RecipeInstallPayload",
     "RecipeOperationRequest",
+    "RecipeReconcilePayload",
+    "RecipeReconcileResult",
     "RecipeStartPayload",
     "RecipeStopPayload",
     "RecipeStopResult",
-    "RecipeReconcilePayload",
-    "RecipeReconcileResult",
     "RecipeUninstallPayload",
     "RecipeUninstallResult",
     "parse_recipe_operation_result",
