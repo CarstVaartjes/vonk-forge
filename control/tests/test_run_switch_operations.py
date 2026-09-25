@@ -2777,9 +2777,7 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     uncertainty = current_node.memory_usage_uncertainty
     assert uncertainty is not None
     sample = next(
-        item
-        for item in plan.freshness
-        if item.source == f"spark:{node_id}:inventory"
+        item for item in plan.freshness if item.source == f"spark:{node_id}:inventory"
     )
     assert uncertainty.source == "aggregate_inventory_without_run_usage"
     assert uncertainty.inventory_observed_at == sample.observed_at
@@ -2803,9 +2801,7 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
     assert "0..7800 bytes" in uncertain_reason.detail
     assert "leaves -" not in uncertain_reason.detail
     round_tripped = RunSwitchPlan.model_validate_json(plan.model_dump_json())
-    assert (
-        round_tripped.fit_current.nodes[0].memory_usage_uncertainty == uncertainty
-    )
+    assert round_tripped.fit_current.nodes[0].memory_usage_uncertainty == uncertainty
     bad_stop = plan.model_dump(mode="python")
     bad_stop["post_stop_memory_check"] = {"stop_run_ids": [str(uuid.uuid4())]}
     with pytest.raises(ValidationError, match="exact reviewed stops"):
@@ -4488,8 +4484,7 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_s
             agent_node = session.get(AgentNode, node_id)
             assert agent_node is not None
             agent_node.capabilities = sorted(
-                set(agent_node.capabilities or [])
-                | {"agent.lifecycle.resume.exact.v1"}
+                set(agent_node.capabilities or []) | {"agent.lifecycle.resume.exact.v1"}
             )
 
     plan = service.preview_cleanup(
@@ -4507,16 +4502,17 @@ def test_reconcile_review_binds_opaque_invalid_launch_spec_and_keeps_uninstall_s
         nodes
     )
     assert all(
-        target.state == "pending"
-        and target.cleanup_receipt_sha256 is None
+        target.state == "pending" and target.cleanup_receipt_sha256 is None
         for target in plan.reconciliation_authority.targets
     )
-    with pytest.raises(RecipeOperationConflict, match="stored installation plan is invalid"):
+    with pytest.raises(
+        RecipeOperationConflict, match="stored installation plan is invalid"
+    ):
         lifecycle.preview_uninstall(installation.owner_id)
     with sessions() as session:
-        assert session.scalar(
-            select(Job.id).where(Job.kind == "recipe.reconcile")
-        ) is None
+        assert (
+            session.scalar(select(Job.id).where(Job.kind == "recipe.reconcile")) is None
+        )
 
 
 def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts(
@@ -4548,7 +4544,9 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
         ),
         actor="admin",
     )
-    assert preview.allowed, [(reason.code, reason.detail) for reason in preview.blockers]
+    assert preview.allowed, [
+        (reason.code, reason.detail) for reason in preview.blockers
+    ]
 
     operation = service.apply_cleanup(
         RunSwitchCleanupApplyRequest(
@@ -4587,9 +4585,7 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
                 plan_digest=payload.plan_digest,
                 recipe_revision_id=payload.recipe_revision_id,
                 recipe_content_sha256=payload.recipe_content_sha256,
-                compiled_spec_canonical_sha256=(
-                    payload.compiled_spec_canonical_sha256
-                ),
+                compiled_spec_canonical_sha256=(payload.compiled_spec_canonical_sha256),
                 removed_bytes=1,
                 cleanup_receipt_sha256=hashlib.sha256(
                     f"cleanup:{child.node_id}".encode()
@@ -4597,9 +4593,7 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
             )
             evidence = receipt.model_dump(mode="json")
             receipts[child.node_id] = evidence
-            source_operation = session.get(
-                AgentOperation, payload.install_operation_id
-            )
+            source_operation = session.get(AgentOperation, payload.install_operation_id)
             assert source_operation is not None
             source_attempt = session.scalar(
                 select(AgentOperationAttempt).where(

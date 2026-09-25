@@ -1045,7 +1045,9 @@ class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
                 or self.exact_reconciliation_receipts is not None
                 or self.reconciliation_receipts
             ):
-                raise ValueError("ordinary uninstall cannot carry reconciliation receipts")
+                raise ValueError(
+                    "ordinary uninstall cannot carry reconciliation receipts"
+                )
             return self
         node_ids = [receipt.node_id for receipt in self.reconciliation_receipts]
         if (

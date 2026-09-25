@@ -1759,9 +1759,7 @@ class RecipeLifecyclePhaseExecutor:
                 self._lifecycle.reconcile_superseded_unissued(
                     "recipe.reconcile", installation_id, ordinal
                 )
-                self._observe_older_issued(
-                    "recipe.reconcile", installation_id, ordinal
-                )
+                self._observe_older_issued("recipe.reconcile", installation_id, ordinal)
                 try:
                     value = self._lifecycle.reconcile_installation(
                         installation_id,
@@ -1783,9 +1781,7 @@ class RecipeLifecyclePhaseExecutor:
                     raise RunSwitchOperationConflict(
                         f"run-switch.reconciliation-start-failed: {error}"
                     ) from error
-                return PhaseExecution(
-                    value.id, {"installation_id": installation_id}
-                )
+                return PhaseExecution(value.id, {"installation_id": installation_id})
             if plan.cleanup_disposition == "abandon":
                 # The installation's own assessment proved the plan never
                 # reached a node, so no agent order is queued.  The lifecycle
@@ -2062,15 +2058,13 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     "run-switch.reconciliation-authority-unavailable"
                 )
-            reconcile_request_id = str(
-                uuid.uuid5(uuid.UUID(request_key), "reconcile")
-            )
+            reconcile_request_id = str(uuid.uuid5(uuid.UUID(request_key), "reconcile"))
             verified_receipts = self._lifecycle.reconciliation_operation_receipts(
-                    reconcile_request_id,
-                    expected_authority=plan.reconciliation_authority.model_dump(
-                        mode="json"
-                    ),
-                )
+                reconcile_request_id,
+                expected_authority=plan.reconciliation_authority.model_dump(
+                    mode="json"
+                ),
+            )
             exact_reconciliation_receipts = verified_receipts is not None
             if verified_receipts is not None:
                 reconciliation_receipts = [
@@ -2092,16 +2086,12 @@ class RecipeLifecyclePhaseExecutor:
                     )
                 )
             )
-            active_runs = (
-                sum(
-                    run.state != "stopped" or run.route_state != "withdrawn"
-                    for run in runs
-                )
+            active_runs = sum(
+                run.state != "stopped" or run.route_state != "withdrawn" for run in runs
             )
         if plan.cleanup_mode == "reconcile":
             expected_members = {
-                (node.node_id, node.rank, node.role)
-                for node in plan.spark_group.nodes
+                (node.node_id, node.rank, node.role) for node in plan.spark_group.nodes
             }
             exact_members = {
                 (node.node_id, node.rank, node.role) for node in members
@@ -7485,7 +7475,9 @@ class RunSwitchOperationService:
             plan_digest=plan.plan_digest,
             request_key=job.request_id,
             cleanup_mode=(plan.cleanup_mode if plan.action == "cleanup" else None),
-            installation_id=(plan.installation_id if plan.action == "cleanup" else None),
+            installation_id=(
+                plan.installation_id if plan.action == "cleanup" else None
+            ),
             node_ids=list(job.targets),
             current_phase=current_phase,
             completed_phases=completed,

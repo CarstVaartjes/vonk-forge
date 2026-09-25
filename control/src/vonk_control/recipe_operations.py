@@ -700,9 +700,7 @@ class RecipeOperationService:
                         AdmissionRowLock(
                             "build-recipe-build",
                             RecipeBuild,
-                            select(RecipeBuild).where(
-                                RecipeBuild.id == plan.build_id
-                            ),
+                            select(RecipeBuild).where(RecipeBuild.id == plan.build_id),
                         ),
                     ),
                 )
@@ -1080,9 +1078,7 @@ class RecipeOperationService:
                 .limit(1)
             )
             if reconciliation is not None:
-                raise RecipeOperationConflict(
-                    "recipe installation is being reconciled"
-                )
+                raise RecipeOperationConflict("recipe installation is being reconciled")
             if installation.state == "installed":
                 completed = session.scalar(
                     select(Job)
@@ -2296,22 +2292,16 @@ class RecipeOperationService:
             if (
                 job is None
                 or job.state != "succeeded"
-                or canonical_message(
-                    job.payload.get("reconciliation_authority", {})
-                )
+                or canonical_message(job.payload.get("reconciliation_authority", {}))
                 != canonical_message(expected_authority)
             ):
                 return None
             children = tuple(
                 session.scalars(
-                    select(AgentOperation).where(
-                        AgentOperation.parent_job_id == job.id
-                    )
+                    select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
                 )
             )
-            if not self._reconciliation_job_has_exact_receipts(
-                session, job, children
-            ):
+            if not self._reconciliation_job_has_exact_receipts(session, job, children):
                 return None
             result = job.result
             evidence = (
@@ -2369,9 +2359,7 @@ class RecipeOperationService:
         )
         runs = tuple(
             session.scalars(
-                select(RecipeRun).where(
-                    RecipeRun.installation_id == installation.id
-                )
+                select(RecipeRun).where(RecipeRun.installation_id == installation.id)
             )
         )
         run_ids = tuple(run.id for run in runs)
@@ -2398,9 +2386,7 @@ class RecipeOperationService:
         active_jobs = tuple(
             session.scalars(
                 select(Job).where(
-                    Job.state.in_(
-                        ("queued", "running", "waiting-for-operator")
-                    ),
+                    Job.state.in_(("queued", "running", "waiting-for-operator")),
                     Job.payload["owner_kind"].as_string() == "installation",
                     Job.payload["owner_id"].as_string() == installation.id,
                     Job.kind.in_(
@@ -2413,9 +2399,7 @@ class RecipeOperationService:
             tuple(
                 session.scalars(
                     select(Job).where(
-                        Job.state.in_(
-                            ("queued", "running", "waiting-for-operator")
-                        ),
+                        Job.state.in_(("queued", "running", "waiting-for-operator")),
                         Job.payload["owner_kind"].as_string() == "run",
                         Job.payload["owner_id"].as_string().in_(run_ids),
                         Job.kind.in_(("recipe.start", "recipe.stop")),
@@ -2487,9 +2471,7 @@ class RecipeOperationService:
             AdmissionRowLock(
                 "reconcile-agent-operations",
                 AgentOperation,
-                select(AgentOperation).where(
-                    AgentOperation.parent_job_id.in_(job_ids)
-                ),
+                select(AgentOperation).where(AgentOperation.parent_job_id.in_(job_ids)),
             ),
         )
         try:
@@ -2498,20 +2480,16 @@ class RecipeOperationService:
             raise InstallAdmissionBusy("reconcile.capacity_busy") from error
         locked_nodes = locked["reconcile-installation-nodes"]
         locked_mapping_nodes = locked["reconcile-mapping-nodes"]
-        if (
-            tuple(
-                sorted((node.node_id, node.rank, node.role) for node in locked_nodes)
+        if tuple(
+            sorted((node.node_id, node.rank, node.role) for node in locked_nodes)
+        ) != tuple(
+            sorted((node.node_id, node.rank, node.role) for node in node_rows)
+        ) or tuple(
+            sorted(
+                (node.node_id, node.rank, node.role) for node in locked_mapping_nodes
             )
-            != tuple(sorted((node.node_id, node.rank, node.role) for node in node_rows))
-            or tuple(
-                sorted(
-                    (node.node_id, node.rank, node.role)
-                    for node in locked_mapping_nodes
-                )
-            )
-            != tuple(
-                sorted((node.node_id, node.rank, node.role) for node in mapping_nodes)
-            )
+        ) != tuple(
+            sorted((node.node_id, node.rank, node.role) for node in mapping_nodes)
         ):
             raise InstallAdmissionBusy("reconcile.membership_changed")
 
@@ -2575,7 +2553,9 @@ class RecipeOperationService:
             stored_plan_digest = installation_plan_digest_from_stored_document(
                 stored_plan
             )
-            stored_plan_sha256 = hashlib.sha256(canonical_message(stored_plan)).hexdigest()
+            stored_plan_sha256 = hashlib.sha256(
+                canonical_message(stored_plan)
+            ).hexdigest()
         except (KeyError, TypeError, ValueError) as error:
             blocked(
                 "reconcile.installation_identity_unavailable",
@@ -2591,7 +2571,10 @@ class RecipeOperationService:
             "plan_digest": installation.plan_digest,
         }
         if (
-            any(stored_plan.get(key) != value for key, value in expected_top_level.items())
+            any(
+                stored_plan.get(key) != value
+                for key, value in expected_top_level.items()
+            )
             or stored_plan_digest != installation.plan_digest
         ):
             blocked(
@@ -2599,9 +2582,7 @@ class RecipeOperationService:
                 "The relational installation identity differs from its original admitted plan.",
             )
         try:
-            recipe_model_content_sha256, _ = _primary_model_identity(
-                revision.document
-            )
+            recipe_model_content_sha256, _ = _primary_model_identity(revision.document)
         except RecipeOperationConflict as error:
             blocked(
                 "reconcile.recipe_revision_unavailable",
@@ -2688,9 +2669,7 @@ class RecipeOperationService:
             RecipeRun.installation_id == installation.id
         )
         if lock:
-            active_runs_statement = active_runs_statement.with_for_update(
-                of=RecipeRun
-            )
+            active_runs_statement = active_runs_statement.with_for_update(of=RecipeRun)
         installation_runs = tuple(session.scalars(active_runs_statement))
         if any(
             run.state != "stopped" or run.route_state != "withdrawn"
@@ -2705,9 +2684,7 @@ class RecipeOperationService:
             Job.state.in_(("queued", "running", "waiting-for-operator")),
             Job.payload["owner_kind"].as_string() == "installation",
             Job.payload["owner_id"].as_string() == installation.id,
-            Job.kind.in_(
-                ("recipe.install", "recipe.uninstall", "recipe.reconcile")
-            ),
+            Job.kind.in_(("recipe.install", "recipe.uninstall", "recipe.reconcile")),
         )
         if lock:
             active_jobs_statement = active_jobs_statement.with_for_update(of=Job)
@@ -2788,8 +2765,7 @@ class RecipeOperationService:
             or install_result.recovery_error is not None
             or set(install_result.successful_nodes)
             != {node.node_id for node in all_nodes}
-            or set(install_result.node_evidence)
-            != {node.node_id for node in all_nodes}
+            or set(install_result.node_evidence) != {node.node_id for node in all_nodes}
         ):
             blocked(
                 "reconcile.install_provenance_unavailable",
@@ -2803,11 +2779,9 @@ class RecipeOperationService:
                 .order_by(AgentOperation.node_id, AgentOperation.id)
             )
         )
-        if (
-            len(operations) != len(all_nodes)
-            or {operation.node_id for operation in operations}
-            != {node.node_id for node in all_nodes}
-        ):
+        if len(operations) != len(all_nodes) or {
+            operation.node_id for operation in operations
+        } != {node.node_id for node in all_nodes}:
             blocked(
                 "reconcile.install_provenance_unavailable",
                 "The original install child operations do not match exact node membership.",
@@ -2826,9 +2800,7 @@ class RecipeOperationService:
             .order_by(AgentNode.node_id)
         )
         if lock:
-            agent_nodes_statement = agent_nodes_statement.with_for_update(
-                of=AgentNode
-            )
+            agent_nodes_statement = agent_nodes_statement.with_for_update(of=AgentNode)
         agent_nodes = tuple(session.scalars(agent_nodes_statement))
         agent_node_by_id = {node.node_id: node for node in agent_nodes}
         targets: list[InstallationReconciliationTarget] = []
@@ -2866,7 +2838,8 @@ class RecipeOperationService:
             if (
                 not isinstance(compiled, Mapping)
                 or not isinstance(stored_node_compiled, Mapping)
-                or canonical_message(compiled) != canonical_message(stored_node_compiled)
+                or canonical_message(compiled)
+                != canonical_message(stored_node_compiled)
             ):
                 blocked(
                     "reconcile.spec_identity_mismatch",
@@ -2875,7 +2848,9 @@ class RecipeOperationService:
             identity = compiled.get("identity")
             runtime = compiled.get("runtime")
             runtime_image = compiled.get("runtime_image")
-            placement = runtime.get("placement") if isinstance(runtime, Mapping) else None
+            placement = (
+                runtime.get("placement") if isinstance(runtime, Mapping) else None
+            )
             if (
                 not isinstance(identity, Mapping)
                 or not isinstance(runtime, Mapping)
@@ -2907,7 +2882,8 @@ class RecipeOperationService:
                 current_attempt is None
                 or current_attempt.state != "succeeded"
                 or not isinstance(current_attempt.result, Mapping)
-                or canonical_message(current_attempt.result) != canonical_message(evidence)
+                or canonical_message(current_attempt.result)
+                != canonical_message(evidence)
                 or evidence.get("installed_bytes") != node.installed_bytes
             ):
                 blocked(
@@ -3006,15 +2982,19 @@ class RecipeOperationService:
             authority_targets = (
                 authority.get("targets") if isinstance(authority, Mapping) else None
             )
-            target_authority = next(
-                (
-                    target
-                    for target in authority_targets
-                    if isinstance(target, Mapping)
-                    and target.get("node_id") == node.node_id
-                ),
-                None,
-            ) if isinstance(authority_targets, list) else None
+            target_authority = (
+                next(
+                    (
+                        target
+                        for target in authority_targets
+                        if isinstance(target, Mapping)
+                        and target.get("node_id") == node.node_id
+                    ),
+                    None,
+                )
+                if isinstance(authority_targets, list)
+                else None
+            )
             if (
                 not isinstance(authority, Mapping)
                 or authority.get("schema_version") != 2
@@ -3026,7 +3006,13 @@ class RecipeOperationService:
                 or any(
                     target_authority.get(key) != value
                     for key, value in expected.items()
-                    if key not in {"installation_id", "plan_digest", "recipe_revision_id", "recipe_content_sha256"}
+                    if key
+                    not in {
+                        "installation_id",
+                        "plan_digest",
+                        "recipe_revision_id",
+                        "recipe_content_sha256",
+                    }
                 )
             ):
                 continue
@@ -3208,9 +3194,7 @@ class RecipeOperationService:
                 if existing is not None:
                     return existing
                 pending_targets = tuple(
-                    target
-                    for target in authority.targets
-                    if target.state == "pending"
+                    target for target in authority.targets if target.state == "pending"
                 )
                 if not pending_targets:
                     raise RecipeOperationConflict(
@@ -3863,12 +3847,13 @@ class RecipeOperationService:
         """Prove a full topology receipt before releasing its reservation."""
 
         authority = job.payload.get("reconciliation_authority")
-        targets_value = authority.get("targets") if isinstance(authority, Mapping) else None
+        targets_value = (
+            authority.get("targets") if isinstance(authority, Mapping) else None
+        )
         if (
             not isinstance(authority, Mapping)
             or authority.get("schema_version") != 2
-            or authority.get("installation_id")
-            != job.payload.get("owner_id")
+            or authority.get("installation_id") != job.payload.get("owner_id")
             or not isinstance(targets_value, list)
             or not targets_value
             or not all(isinstance(target, Mapping) for target in targets_value)
@@ -3894,9 +3879,8 @@ class RecipeOperationService:
         evidence_by_node = (
             result.get("node_evidence") if isinstance(result, Mapping) else None
         )
-        if (
-            not isinstance(evidence_by_node, Mapping)
-            or set(evidence_by_node) != set(pending)
+        if not isinstance(evidence_by_node, Mapping) or set(evidence_by_node) != set(
+            pending
         ):
             return False
         installation_id = str(authority["installation_id"])
@@ -3940,9 +3924,7 @@ class RecipeOperationService:
                     ),
                     "plan_digest": authority.get("original_plan_digest"),
                     "recipe_revision_id": authority.get("recipe_revision_id"),
-                    "recipe_content_sha256": authority.get(
-                        "recipe_content_sha256"
-                    ),
+                    "recipe_content_sha256": authority.get("recipe_content_sha256"),
                     "compiled_spec_canonical_sha256": target.get(
                         "compiled_spec_canonical_sha256"
                     ),
@@ -3967,9 +3949,7 @@ class RecipeOperationService:
                         ),
                         plan_digest=str(authority["original_plan_digest"]),
                         recipe_revision_id=str(authority["recipe_revision_id"]),
-                        recipe_content_sha256=str(
-                            authority["recipe_content_sha256"]
-                        ),
+                        recipe_content_sha256=str(authority["recipe_content_sha256"]),
                         compiled_spec_canonical_sha256=str(
                             target["compiled_spec_canonical_sha256"]
                         ),
@@ -4239,14 +4219,18 @@ class RecipeOperationService:
             authority_targets = (
                 authority.get("targets") if isinstance(authority, Mapping) else None
             )
-            target = next(
-                (
-                    item
-                    for item in authority_targets
-                    if isinstance(item, Mapping) and item.get("node_id") == node_id
-                ),
-                None,
-            ) if isinstance(authority_targets, list) else None
+            target = (
+                next(
+                    (
+                        item
+                        for item in authority_targets
+                        if isinstance(item, Mapping) and item.get("node_id") == node_id
+                    ),
+                    None,
+                )
+                if isinstance(authority_targets, list)
+                else None
+            )
             try:
                 expected = RecipeReconcilePayload.model_validate_json(
                     canonical_message(operation.payload)
@@ -4271,13 +4255,14 @@ class RecipeOperationService:
                 or target.get("installed_bytes") != node.installed_bytes
                 or expected.node_id != node_id
                 or expected.installation_id != owner_id
-                or expected.install_operation_id
-                != target.get("install_operation_id")
+                or expected.install_operation_id != target.get("install_operation_id")
                 or expected.install_operation_payload_sha256
                 != target.get("install_operation_payload_sha256")
                 or expected.compiled_spec_canonical_sha256
                 != target.get("compiled_spec_canonical_sha256")
-                or job.targets != sorted(
+                or not isinstance(authority_targets, list)
+                or job.targets
+                != sorted(
                     str(item.get("node_id"))
                     for item in authority_targets
                     if isinstance(item, Mapping) and item.get("state") == "pending"
@@ -4303,8 +4288,7 @@ class RecipeOperationService:
                     != expected.install_operation_payload_sha256
                     or receipt.plan_digest != expected.plan_digest
                     or receipt.recipe_revision_id != expected.recipe_revision_id
-                    or receipt.recipe_content_sha256
-                    != expected.recipe_content_sha256
+                    or receipt.recipe_content_sha256 != expected.recipe_content_sha256
                     or receipt.compiled_spec_canonical_sha256
                     != expected.compiled_spec_canonical_sha256
                 ):
@@ -5731,10 +5715,14 @@ class RecipeOperationService:
                 session, "recipe.uninstall", installation_id
             )
             scope = tuple(sorted(node.node_id for node in nodes))
-            if active_reconciliation is None and active_uninstalls and all(
-                tuple(sorted(job.targets)) == scope
-                and _unissued_workload_children(session, job) is not None
-                for job in active_uninstalls
+            if (
+                active_reconciliation is None
+                and active_uninstalls
+                and all(
+                    tuple(sorted(job.targets)) == scope
+                    and _unissued_workload_children(session, job) is not None
+                    for job in active_uninstalls
+                )
             ):
                 active_operation = False
 
