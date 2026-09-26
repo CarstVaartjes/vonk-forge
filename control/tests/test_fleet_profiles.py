@@ -1153,6 +1153,49 @@ def test_parked_profile_load_rechecks_fencing_after_ordinal_is_bound(
     assert adapter.cancellations == [((_node_id(1),), 1), ((_node_id(1),), 1)]
 
 
+def test_newer_parked_profile_load_retires_older_parked_intent(
+    monkeypatch,
+) -> None:
+    """A newer parked intent must stop an older retry loop from starving it."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+
+    def stay_busy(self, reviewed, **kwargs):
+        raise FleetProfileAdmissionBusy("test admission owner")
+
+    monkeypatch.setattr(FleetProfileService, "_queue_application", stay_busy)
+    first = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(976),
+        actor="admin",
+    )
+    assert first.state == "waiting-for-operator"
+    assert service.tick() is True
+    first = service.application(first.id)
+    assert first.progress.workload_intent_ordinal == 1
+
+    second = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(977),
+        actor="admin",
+    )
+    assert second.state == "waiting-for-operator"
+    assert service.tick() is True
+    first = service.application(first.id)
+    second = service.application(second.id)
+    assert first.state == "cancelled"
+    assert "later scoped intent" in (first.status_reason or "")
+    assert second.progress.workload_intent_ordinal == 2
+
+
 @pytest.mark.parametrize("old_state", ["failed", "queued", "running"])
 def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) -> None:
     """A history parser failure must not veto a fresh authorized workload."""
