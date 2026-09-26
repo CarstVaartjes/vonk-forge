@@ -69,6 +69,20 @@ def _release_document(*, source: str = SOURCE, digest: str = IMAGE_DIGEST):
     }
 
 
+def _development_release_document(*, source: str, image_source: str, digest: str):
+    document = _release_document(source=source, digest=digest)
+    document["channel"] = "dev"
+    document["version"] = "0.1.0~dev.1+g" + source[:12]
+    document["images"] = {
+        role: (
+            f"ghcr.io/carstvaartjes/vonk-forge-{role}:dev-sha-{image_source}"
+            f"@sha256:{digest if role == 'api' else '4' * 64}"
+        )
+        for role in ("api", "worker", "hermes", "litellm")
+    }
+    return document
+
+
 def _signed_request(private_key, *, release=None, repo_digest=IMAGE_DIGEST):
     document = release or _release_document()
     release_raw = (
@@ -218,6 +232,34 @@ def test_verified_release_identity_mismatch_clears_only_controller(
     assert stored.repository == previous.repository
     assert stored.publication == previous.publication
     assert stored.physical_acceptance == previous.physical_acceptance
+
+
+def test_development_release_accepts_an_attested_reused_ancestor_image(
+    tmp_path, release_signer
+):
+    private_key, public_key_path = release_signer
+    path = tmp_path / "observations.json"
+    image_source = "9" * 40
+    release_source = "8" * 40
+    build_path = tmp_path / "controller-build.json"
+    build_path.write_text(json.dumps({"source_commit": image_source}))
+    request = _signed_request(
+        private_key,
+        release=_development_release_document(
+            source=release_source, image_source=image_source, digest=IMAGE_DIGEST
+        ),
+    )
+
+    result = capture(
+        request,
+        observation_path=path,
+        build_metadata_path=build_path,
+        public_key_path=public_key_path,
+        runtime_hostname=CONTAINER_ID[:12],
+    )
+
+    assert result.source_commit == image_source
+    assert result.image_digest == "sha256:" + IMAGE_DIGEST
 
 
 def test_unrelated_or_unhealthy_container_cannot_replace_observation(
