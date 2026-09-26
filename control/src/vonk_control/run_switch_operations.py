@@ -1771,6 +1771,13 @@ class RecipeLifecyclePhaseExecutor:
                         request_id=reconcile_request_id,
                         workload_intent_ordinal=ordinal,
                     )
+                except RunAdmissionBusy:
+                    # A competing capacity writer is recoverable.  Preserve
+                    # the exact phase checkpoint so the outer service parks
+                    # this operation and retries after the writer releases
+                    # its rows instead of turning it into a terminal
+                    # reconciliation conflict.
+                    raise
                 except InstallAdmissionBusy:
                     raise
                 except (
@@ -1832,6 +1839,12 @@ class RecipeLifecyclePhaseExecutor:
                     request_id=uninstall_request_id,
                     workload_intent_ordinal=ordinal,
                 )
+            except RunAdmissionBusy:
+                # Capacity contention is a retryable admission outcome.  Do
+                # not wrap it as uninstall-start-failed; the parent service
+                # will release its transaction and schedule the same exact
+                # uninstall attempt again.
+                raise
             except (
                 KeyError,
                 RecipeOperationConflict,
