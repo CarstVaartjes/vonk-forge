@@ -76,7 +76,12 @@ PLATFORMS = ("linux-arm64",)
 # so a well-behaved operation converges in seconds and these diagnostic bounds
 # stay far below the product's. Waiting out the product budget only delays the
 # diagnosis and hides the cause behind a timeout.
-_CANARY_CONVERGENCE_SECONDS = 120
+# A cold source-build canary includes an exact arm64 base-image pull and the
+# first build on a clean Spark.  Keep the bound finite, but leave enough room
+# for that legitimate first attempt to finish before declaring the durable
+# operation stuck.  The operation itself remains restart-safe and reports its
+# own retry state while we wait.
+_CANARY_CONVERGENCE_SECONDS = 300
 _CANARY_ROUTE_SECONDS = 60
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -2601,8 +2606,30 @@ class SparkLifecycle:
         deadline = time.monotonic() + _CANARY_CONVERGENCE_SECONDS
         while typed.state in {"queued", "running", "partial"}:
             if time.monotonic() >= deadline:
+                evidence = {
+                    "state": typed.state,
+                    "attempt": typed.attempt,
+                    "progress": typed.progress.model_dump(
+                        mode="json", exclude_none=True
+                    ),
+                    "failure": (
+                        None
+                        if typed.failure is None
+                        else typed.failure.model_dump(mode="json", exclude_none=True)
+                    ),
+                    "children": [
+                        child.model_dump(mode="json", exclude_none=True)
+                        for child in typed.children
+                    ],
+                    "actions": list(typed.actions),
+                    "updated_at": typed.updated_at,
+                }
                 raise LifecycleError(
-                    "synthetic canary recipe download did not converge"
+                    "synthetic canary recipe download did not converge: "
+                    + self._redact_diagnostics(
+                        json.dumps(evidence, sort_keys=True, separators=(",", ":")),
+                        limit=4_000,
+                    )
                 )
             time.sleep(1)
             _, payload = self.control.request(
