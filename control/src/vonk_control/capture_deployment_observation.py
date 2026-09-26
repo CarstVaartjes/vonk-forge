@@ -60,8 +60,10 @@ MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_OBSERVATIONS_BYTES = 1024 * 1024
 API_REPOSITORY = "ghcr.io/carstvaartjes/vonk-forge-api"
 _RELEASE_IMAGE = re.compile(
-    re.escape(API_REPOSITORY) + r":[^@ ]+@sha256:([a-f0-9]{64})\Z"
+    re.escape(API_REPOSITORY)
+    + r":(?P<tag>[A-Za-z0-9][A-Za-z0-9._-]*)@sha256:(?P<digest>[a-f0-9]{64})\Z"
 )
+_DEV_IMAGE_SOURCE = re.compile(r"dev-sha-(?P<source>[a-f0-9]{40})\Z")
 _CONTAINER_ID = re.compile(r"[a-f0-9]{64}\Z")
 _IMAGE_ID = re.compile(r"sha256:[a-f0-9]{64}\Z")
 
@@ -140,11 +142,40 @@ def _verify_release(
     except InvalidSignature as error:
         raise CaptureError("accepted release signature is invalid") from error
     image = release.images.get("api")
-    if not isinstance(image, str) or _RELEASE_IMAGE.fullmatch(image) is None:
+    image_match = _RELEASE_IMAGE.fullmatch(image) if isinstance(image, str) else None
+    if image_match is None:
         raise CaptureError("accepted release API image identity is invalid")
+    if (
+        release.channel == "dev"
+        and _DEV_IMAGE_SOURCE.fullmatch(image_match.group("tag")) is None
+    ):
+        raise CaptureError("accepted development API image source identity is invalid")
     if not re.fullmatch(r"[a-f0-9]{64}", release.generation):
         raise CaptureError("accepted release generation is invalid")
     return release
+
+
+def _expected_image_source(release: PublishedRelease, expected_image: str) -> str:
+    """Return the source that produced the exact API image in this release.
+
+    Development publication may reuse an accepted ancestor image when its
+    inputs are unchanged. Its immutable image tag carries that producer source
+    (``dev-sha-<commit>``), while the release source identifies the complete
+    installer generation. Stable images are version-tagged and are built from
+    the release source.
+    """
+
+    match = _RELEASE_IMAGE.fullmatch(expected_image)
+    if match is None:
+        raise CaptureError("accepted release API image identity is invalid")
+    if release.channel == "dev":
+        source_match = _DEV_IMAGE_SOURCE.fullmatch(match.group("tag"))
+        if source_match is None:
+            raise CaptureError(
+                "accepted development API image source identity is invalid"
+            )
+        return source_match.group("source")
+    return release.source_sha
 
 
 def _load_observations(path: Path) -> DeploymentObservations:
@@ -229,7 +260,11 @@ def capture(
     )
     release = _verify_release(release_raw, signature_bytes, public_key_path)
     expected_image = release.images["api"]
-    expected_digest = expected_image.rsplit("@", 1)[1]
+    image_match = _RELEASE_IMAGE.fullmatch(expected_image)
+    if image_match is None:
+        raise CaptureError("accepted release API image identity is invalid")
+    expected_digest = "sha256:" + image_match.group("digest")
+    expected_source = _expected_image_source(release, expected_image)
 
     container = request.container
     image = request.image
@@ -279,7 +314,7 @@ def capture(
         )
     if (
         matching_repository_digest not in actual_repository_digests
-        or build.source_commit != release.source_sha
+        or build.source_commit != expected_source
     ):
         _clear_controller(observation_path)
         raise CaptureError(
