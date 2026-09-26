@@ -59,9 +59,6 @@ def test_active_profile_cannot_starve_a_recovered_parked_parent(
         assert row is not None
         row.state = "waiting-for-operator"
         row.status_reason = "Waiting for exact interrupted-effect reconciliation"
-        # Keep the unrelated application first in the runnable queue, so the
-        # assertion proves parked observation does not consume its work unit.
-        row.created_at = NOW + timedelta(seconds=1)
 
     other_input = _input(revision_id, name="Unrelated node")
     other_input.assignments[0].spark_ids = [_node_id(2)]
@@ -72,6 +69,13 @@ def test_active_profile_cannot_starve_a_recovered_parked_parent(
         actor="admin",
         expected_plan_digest=service.preview(active_profile.id).plan_digest,
     )
+    with sessions.begin() as session:
+        parked_row = session.get(FleetProfileApplication, parked.id)
+        assert parked_row is not None
+        # Keep the unrelated active application first in the runnable queue;
+        # apply this queue-order fixture only after logical receipt chronology
+        # has been assigned by the service.
+        parked_row.created_at = active.created_at + timedelta(seconds=1)
     assert service.tick()
     active_child_id = service.application(active.id).current_operation_id
     assert active_child_id is not None

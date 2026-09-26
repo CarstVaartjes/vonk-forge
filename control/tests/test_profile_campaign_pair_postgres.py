@@ -7,9 +7,13 @@ from threading import Barrier
 from uuid import uuid4
 
 import pytest
+from httpx import Response
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileApplicationView,
     FleetProfileAssignment,
     FleetProfileChildOperation,
     FleetProfileSwitchAdapterResult,
@@ -222,54 +226,78 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     with monkeypatch.context() as scoped:
         scoped.setattr(FleetProfileService, "preview", synchronize_review)
 
-        lost_response_keys: list[str] = []
+        lost_responses: dict[str, FleetProfileApplicationView] = {}
 
         def submit(body: dict[str, str]):
             response = api.post(path, headers=headers, json=body)
             if response.status_code == 202:
-                # The API committed the application, but its response is lost
-                # before the caller can observe it.
-                lost_response_keys.append(body["request_key"])
+                # The receipt is durable even though the caller loses its reply.
+                lost_responses[body["request_key"]] = (
+                    FleetProfileApplicationView.model_validate_json(
+                        response.content, strict=True
+                    )
+                )
                 raise ConnectionError("simulated lost load response")
-            return response
+            return body["request_key"], response
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [
-                pool.submit(submit, body)
-                for body in request_bodies
-            ]
-            responses = []
+            futures = [pool.submit(submit, body) for body in request_bodies]
+            responses: list[tuple[str, Response]] = []
             for future in futures:
                 try:
                     responses.append(future.result(timeout=15))
                 except ConnectionError as error:
                     assert str(error) == "simulated lost load response"
 
-    assert len(lost_response_keys) == 1
-    assert [response.status_code for response in responses] == [409]
-    rejected = responses[0]
-    accepted_key = lost_response_keys[0]
+    assert 1 <= len(lost_responses) <= 2
+    assert len(lost_responses) + len(responses) == 2
+    rejected = dict(responses)
+    assert all(response.status_code == 409 for response in rejected.values())
+
+    with sessions() as session:
+        rows = list(session.scalars(select(FleetProfileApplication)))
+    rows_by_key = {row.request_key: row for row in rows}
+    assert set(rows_by_key) == set(lost_responses)
+    live_rows = [
+        row
+        for row in rows
+        if row.state in {"queued", "running", "waiting-for-operator"}
+    ]
+    assert len(live_rows) == 1
+    active = live_rows[0]
+    accepted_key = active.request_key
     accepted_body = request_bodies[request_keys.index(accepted_key)]
+    application_id = active.id
+    active_progress = FleetProfileApplicationProgress.model_validate_json(
+        canonical_message(active.progress), strict=True
+    )
+    assert active_progress.intended_profile is not None
+    assert active_progress.intended_profile.scope.node_ids == [NODE_1, NODE_2]
+    for key, original_receipt in lost_responses.items():
+        replay = api.post(
+            path,
+            headers=headers,
+            json=request_bodies[request_keys.index(key)],
+        )
+        assert replay.status_code == 202, replay.text
+        replayed_receipt = FleetProfileApplicationView.model_validate_json(
+            replay.content, strict=True
+        )
+        # A later accepted request may cancel the earlier receipt, but retrying
+        # either lost response must resolve to that exact durable identity.
+        assert replayed_receipt.id == original_receipt.id
+        assert replayed_receipt.request_key == key
+        assert replayed_receipt.plan_digest == original_receipt.plan_digest
+        assert replayed_receipt.id == rows_by_key[key].id
+
     accepted = api.post(path, headers=headers, json=accepted_body)
     assert accepted.status_code == 202, accepted.text
-    assert rejected.headers["x-vonk-error-code"] in {
-        "controller.conflict",
-        "profile.stale_plan",
-    }
+    assert accepted.json()["id"] == application_id
     assert accepted.json()["request_key"] == accepted_key
-    application_id = accepted.json()["id"]
     assert accepted.json()["progress"]["intended_profile"]["scope"]["node_ids"] == [
         NODE_1,
         NODE_2,
     ]
-
-    with sessions() as session:
-        rows = list(session.scalars(select(FleetProfileApplication)))
-        assert len(rows) == 1
-        assert rows[0].id == application_id
-        assert rows[0].request_key == accepted_key
-
-    # Replaying the accepted key after a lost response must recover this pair.
     replayed = api.post(path, headers=headers, json=accepted_body)
     assert replayed.status_code == 202, replayed.text
     assert replayed.json() == accepted.json()
@@ -353,12 +381,15 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     assert stale.headers["x-vonk-error-code"] == "profile.stale_plan"
     with sessions() as session:
         rows = list(session.scalars(select(FleetProfileApplication)))
-        assert len(rows) == 1
-        assert session.scalar(
-            select(FleetProfileApplication.id).where(
-                FleetProfileApplication.request_key == stale_key
+        assert {row.request_key for row in rows} == set(lost_responses)
+        assert (
+            session.scalar(
+                select(FleetProfileApplication.id).where(
+                    FleetProfileApplication.request_key == stale_key
+                )
             )
-        ) is None
+            is None
+        )
     original = api.post(path, headers=headers, json=accepted_body)
     assert original.status_code == 202, original.text
     assert original.json()["id"] == application_id

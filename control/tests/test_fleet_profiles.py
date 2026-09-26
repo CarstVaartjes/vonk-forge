@@ -1045,13 +1045,14 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
     assert step_result.result.verified is True
 
 
-def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> None:
+def test_new_profile_load_supersedes_older_queued_scope_by_acceptance_order() -> None:
     """A pending whole-fleet load cannot veto a later authorized profile."""
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+        sessions, clock=lambda: now[0], switch_adapter=_SwitchAdapter()
     )
     first_profile = service.create(_input(revision_id), actor="admin")
     second_profile = service.create(
@@ -1073,7 +1074,7 @@ def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> N
         actor="admin",
     )
     assert first.state == second.state == "queued"
-    assert first.created_at == second.created_at
+    assert first.created_at < second.created_at
     assert first.progress.workload_intent_ordinal == 1
     assert second.progress.workload_intent_ordinal == 2
     # Admission cancels the older logical order even if the worker selects
@@ -1160,8 +1161,9 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+        sessions, clock=lambda: now[0], switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
     preview = service.preview(profile.id)
@@ -1526,8 +1528,9 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+        sessions, clock=lambda: now[0], switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
     first = service.load(
@@ -1578,8 +1581,9 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
 def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+        sessions, clock=lambda: now[0], switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
     first = service.load(

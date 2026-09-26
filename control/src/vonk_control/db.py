@@ -2,6 +2,7 @@
 
 import sys
 import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -211,40 +212,84 @@ def _schema_difference_label(difference: tuple[object, ...]) -> str:
     return f"{qualifier} {object_name}".strip()
 
 
-def _missing_check_constraints(connection: Connection) -> list[str]:
-    """Report declared CHECK constraints the live catalog does not enforce.
+def _check_constraint_differences(connection: Connection) -> list[str]:
+    """Compare checks using PostgreSQL's own canonical expression rendering.
 
-    Autogenerate does not compare CHECK constraints at all, so this covers the
-    one constraint kind a metadata comparison would otherwise miss.  Only
-    declared names are compared; the expression text is the model's business.
+    Alembic omits CHECK expressions. Parse the declared checks on empty,
+    connection-local temporary tables so casts, IN/ANY and parentheses receive
+    the same normalization as the live catalog. PostgreSQL query planning then
+    folds equivalent literal-array casts (which vary across server versions).
+    No application rows are read. No durable schema is changed.
     """
-
-    from sqlalchemy import inspect
+    from sqlalchemy import CheckConstraint, Column, MetaData, Table, inspect
+    from sqlalchemy.schema import CreateTable, DropTable
 
     from .models import Base
 
     inspector = inspect(connection)
     live_tables = set(inspector.get_table_names())
-    missing: list[str] = []
+    differences: list[str] = []
     for table_name, table in sorted(Base.metadata.tables.items()):
         declared = {
-            constraint.name
+            constraint.name: constraint
             for constraint in table.constraints
-            if type(constraint).__name__ == "CheckConstraint"
+            if isinstance(constraint, CheckConstraint)
             and isinstance(constraint.name, str)
         }
         if not declared or table_name not in live_tables:
             continue
         reflected = {
-            constraint["name"]
+            constraint["name"]: constraint["sqltext"]
             for constraint in inspector.get_check_constraints(table_name)
             if isinstance(constraint.get("name"), str)
         }
-        missing.extend(
+        differences.extend(
             f"missing check constraint {table_name}.{name}"
-            for name in sorted(declared - reflected)
+            for name in sorted(declared.keys() - reflected.keys())
         )
-    return missing
+        if connection.dialect.name != "postgresql":
+            continue
+        temporary = Table(
+            "vonk_schema_check_" + uuid.uuid4().hex,
+            MetaData(),
+            *(Column(column.name, column.type) for column in table.columns),
+            *(
+                CheckConstraint(
+                    str(
+                        check.sqltext.compile(
+                            dialect=connection.dialect,
+                            compile_kwargs={"literal_binds": True},
+                        )
+                    ),
+                    name=name,
+                )
+                for name, check in declared.items()
+            ),
+            prefixes=["TEMPORARY"],
+        )
+        connection.execute(CreateTable(temporary))
+        try:
+            expected = {
+                check["name"]: check["sqltext"]
+                for check in inspect(connection).get_check_constraints(temporary.name)
+            }
+
+            def normalized(expression: str, table_name: str = temporary.name) -> object:
+                quoted_table = connection.dialect.identifier_preparer.quote(table_name)
+                plan = connection.exec_driver_sql(
+                    f"EXPLAIN (VERBOSE, FORMAT JSON) SELECT ({expression}) FROM {quoted_table}"
+                ).scalar_one()
+                return plan[0]["Plan"]["Output"]
+
+            differences.extend(
+                f"changed check constraint {table_name}.{name}"
+                for name in sorted(declared.keys() & reflected.keys())
+                if expected[name] != reflected[name]
+                and normalized(expected[name]) != normalized(reflected[name])
+            )
+        finally:
+            connection.execute(DropTable(temporary))
+    return differences
 
 
 def verify_schema_is_current(connection: Connection) -> None:
@@ -255,8 +300,8 @@ def verify_schema_is_current(connection: Connection) -> None:
     left behind by an earlier baseline into an immediate, actionable startup
     refusal instead of a mysterious failure deep inside an operation.
 
-    CHECK constraint *expressions* are not compared (declared names only),
-    because autogenerate does not diff CHECK constraints.
+    PostgreSQL CHECK expressions are compared through its own parser because
+    autogenerate does not diff them.
     """
 
     from alembic.autogenerate import compare_metadata
@@ -274,7 +319,7 @@ def verify_schema_is_current(connection: Connection) -> None:
     ]
     labels = sorted(
         {_schema_difference_label(difference) for difference in unexpected}
-        | set(_missing_check_constraints(connection))
+        | set(_check_constraint_differences(connection))
     )
     if not labels:
         return

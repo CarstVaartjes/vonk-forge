@@ -245,3 +245,47 @@ def test_postgres_schema_gate_refuses_the_retired_receipt_column(
     assert "unexpected column runtime_image_authorizations.receipt_id" in str(
         caught.value
     )
+
+
+def test_postgres_schema_gate_refuses_changed_check_expression(postgres_engine) -> None:
+    """A same-named old check must not pass startup and poison profile retries."""
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE resource_reservations DROP CONSTRAINT ck_reservations_state"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE resource_reservations ADD CONSTRAINT ck_reservations_state CHECK (state IN ('active','released','expired') AND amount_bytes>=0)"
+            )
+        )
+    with (
+        postgres_engine.connect() as connection,
+        pytest.raises(
+            RuntimeError,
+            match="changed check constraint resource_reservations.ck_reservations_state",
+        ),
+    ):
+        verify_schema_is_current(connection)
+
+
+def test_postgres_schema_gate_accepts_equivalent_literal_array_casts(
+    postgres_engine,
+) -> None:
+    """Server rendering changes must not falsely refuse a current database."""
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE resource_reservations DROP CONSTRAINT ck_reservations_state"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE resource_reservations ADD CONSTRAINT ck_reservations_state CHECK ((state::text = ANY (ARRAY['active'::character varying::text, 'promised'::character varying::text, 'released'::character varying::text, 'expired'::character varying::text])) AND amount_bytes >= 0)"
+            )
+        )
+    with postgres_engine.connect() as connection:
+        verify_schema_is_current(connection)
