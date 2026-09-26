@@ -3103,7 +3103,9 @@ class FleetProfileService:
                 select(FleetProfileApplication).where(
                     FleetProfileApplication.state.in_(("queued", "running")),
                     func.coalesce(
-                        FleetProfileApplication.progress["admission_pending"].as_boolean(),
+                        FleetProfileApplication.progress[
+                            "admission_pending"
+                        ].as_boolean(),
                         False,
                     ).is_(False),
                 )
@@ -3480,9 +3482,7 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             attempt = progress.admission_attempt + 1
             next_retry = now + (
-                _admission_retry_delay(attempt)
-                if retry_delay is None
-                else retry_delay
+                _admission_retry_delay(attempt) if retry_delay is None else retry_delay
             )
             progress_data = progress.model_dump(mode="json")
             progress_data["admission_pending"] = True
@@ -3492,10 +3492,87 @@ class FleetProfileService:
                 canonical_message(progress_data), strict=True
             ).model_dump(mode="json")
             row.state = "waiting-for-operator"
-            row.status_reason = f"{reason} Next attempt: {next_retry.isoformat()}."[:512]
+            row.status_reason = f"{reason} Next attempt: {next_retry.isoformat()}."[
+                :512
+            ]
             row.updated_at = now
             session.flush()
             return self._application_view(row)
+
+    def _prepare_pending_admission(
+        self, application_id: str, plan: FleetProfilePreview
+    ) -> None:
+        """Fence older workload effects before retrying the full admission lock."""
+
+        if self._switch_adapter is None:
+            return
+        execution_nodes = tuple(
+            sorted({node_id for step in plan.steps for node_id in step.node_ids})
+        )
+        if not execution_nodes:
+            return
+        now = _aware(self._clock())
+        try:
+            with self._sessions.begin() as session:
+                row = session.get(
+                    FleetProfileApplication,
+                    application_id,
+                    with_for_update={"nowait": True},
+                )
+                if row is None:
+                    return
+                progress = _persisted_profile_progress(row)
+                if (
+                    not progress.admission_pending
+                    or progress.cancellation is not None
+                    or progress.workload_intent_ordinal is not None
+                ):
+                    return
+                profile = session.get(FleetProfile, row.profile_id)
+                if profile is None:
+                    raise KeyError(row.profile_id)
+                if _digest(_profile_document(profile)) != plan.profile_digest:
+                    raise FleetProfileStalePlanConflict(
+                        "Pending profile intent is stale before workload fencing"
+                    )
+                acquire_admission_keys(
+                    session,
+                    tuple(node_admission_key(node_id) for node_id in execution_nodes),
+                )
+                nodes = tuple(
+                    session.scalars(
+                        select(AgentNode)
+                        .where(AgentNode.node_id.in_(execution_nodes))
+                        .order_by(AgentNode.node_id)
+                        .with_for_update(nowait=True)
+                    )
+                )
+                if tuple(node.node_id for node in nodes) != execution_nodes:
+                    raise FleetProfileStalePlanConflict(
+                        "Pending profile workload scope changed before fencing"
+                    )
+                ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
+                for node in nodes:
+                    node.workload_intent_ordinal = ordinal
+                self._switch_adapter.request_superseded_workload_cancellation_in_session(
+                    session, execution_nodes, ordinal, now
+                )
+                progress_data = progress.model_dump(mode="json")
+                progress_data["workload_intent_ordinal"] = ordinal
+                row.progress = FleetProfileApplicationProgress.model_validate_json(
+                    canonical_message(progress_data), strict=True
+                ).model_dump(mode="json")
+                row.updated_at = now
+        except AdmissionLockBusy as error:
+            raise FleetProfileAdmissionEffectBusy(
+                "Profile admission is waiting for the active workload owner to finish; the Controller will retry automatically."
+            ) from error
+        except OperationalError as error:
+            if is_admission_contention(error):
+                raise FleetProfileAdmissionEffectBusy(
+                    "Profile admission is waiting for the active workload owner to finish; the Controller will retry automatically."
+                ) from None
+            raise
 
     def apply(
         self, profile_id: str, *, plan_digest: str, request_key: str, actor: str
@@ -3559,9 +3636,10 @@ class FleetProfileService:
             if pending is not None:
                 with self._sessions.begin() as session:
                     row = session.get(FleetProfileApplication, pending.id)
-                    if row is not None and _persisted_profile_progress(
-                        row
-                    ).admission_pending:
+                    if (
+                        row is not None
+                        and _persisted_profile_progress(row).admission_pending
+                    ):
                         session.delete(row)
             if isinstance(error, FleetProfilePermissionDenied):
                 raise
@@ -3578,9 +3656,10 @@ class FleetProfileService:
                 if replay.state == "waiting-for-operator":
                     with self._sessions.begin() as session:
                         row = session.get(FleetProfileApplication, replay.id)
-                        if row is not None and _persisted_profile_progress(
-                            row
-                        ).admission_pending:
+                        if (
+                            row is not None
+                            and _persisted_profile_progress(row).admission_pending
+                        ):
                             session.delete(row)
                     raise
                 return replay
@@ -3618,9 +3697,7 @@ class FleetProfileService:
                 )
             }
         )
-        with self._admission_session(
-            actor, node_ids=preview.scope.node_ids
-        ) as session:
+        with self._admission_session(actor, node_ids=preview.scope.node_ids) as session:
             profile = session.get(
                 FleetProfile, preview.profile_id, with_for_update={"nowait": True}
             )
@@ -3631,11 +3708,16 @@ class FleetProfileService:
                     FleetProfileApplication.request_key == request_key
                 )
             )
+            pending_ordinal: int | None = None
             if existing is not None:
                 pending = (
                     pending_application_id == existing.id
                     and _persisted_profile_progress(existing).admission_pending
                 )
+                if pending:
+                    pending_ordinal = _persisted_profile_progress(
+                        existing
+                    ).workload_intent_ordinal
                 if pending and existing.state == "cancelled":
                     raise FleetProfileConflict(
                         "Profile application was superseded by a later intent"
@@ -3829,10 +3911,19 @@ class FleetProfileService:
             workload_intent_ordinal = (
                 recovery_ordinal
                 if recovery_ordinal is not None
+                else pending_ordinal
+                if pending_ordinal is not None
                 else max(node.workload_intent_ordinal for node in affected_nodes) + 1
                 if affected_nodes
                 else None
             )
+            if pending_ordinal is not None and any(
+                node.workload_intent_ordinal != pending_ordinal
+                for node in affected_nodes
+            ):
+                raise FleetProfileStalePlanConflict(
+                    "Profile workload intent was superseded before admission resumed"
+                )
             if workload_intent_ordinal is not None:
                 for node in affected_nodes:
                     node.workload_intent_ordinal = workload_intent_ordinal
@@ -3840,12 +3931,13 @@ class FleetProfileService:
                     raise FleetProfileConflict(
                         "Profile switch cancellation authority is unavailable"
                     )
-                self._switch_adapter.request_superseded_workload_cancellation_in_session(
-                    session,
-                    tuple(sorted(execution_nodes)),
-                    workload_intent_ordinal,
-                    now,
-                )
+                if pending_ordinal is None:
+                    self._switch_adapter.request_superseded_workload_cancellation_in_session(
+                        session,
+                        tuple(sorted(execution_nodes)),
+                        workload_intent_ordinal,
+                        now,
+                    )
                 for prior_application in session.scalars(
                     select(FleetProfileApplication)
                     .where(
@@ -4997,6 +5089,7 @@ class FleetProfileService:
             return False
         application_id, request_key, actor, plan = candidate
         try:
+            self._prepare_pending_admission(application_id, plan)
             self._queue_application(
                 plan,
                 request_key=request_key,

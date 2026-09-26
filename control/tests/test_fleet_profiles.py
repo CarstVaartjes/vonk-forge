@@ -31,6 +31,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileVerificationResult,
 )
 from vonk_control.fleet_profiles import (
+    FleetProfileAdmissionBusy,
     FleetProfileConflict,
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
@@ -938,8 +939,7 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
         assert unreadable.assignments is None
         assert unreadable.projection_issue is not None
         assert unreadable.projection_issue.detail == (
-            "stored document is invalid at intended_profile."
-            f"{missing_field} (missing)"
+            f"stored document is invalid at intended_profile.{missing_field} (missing)"
         )
 
     with sessions.begin() as session:
@@ -1080,6 +1080,39 @@ def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> N
     # the newer row first under a tied clock.
     assert service.application(first.id).state == "cancelled"
     assert service.application(second.id).state == "queued"
+
+
+def test_parked_profile_load_fences_workload_before_admission_retry(
+    monkeypatch,
+) -> None:
+    """A parked replacement cancels the older intent before full admission resumes."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    adapter = _SwitchAdapter()
+    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    original_queue = FleetProfileService._queue_application
+
+    def stay_busy(self, reviewed, **kwargs):
+        raise FleetProfileAdmissionBusy("test admission owner")
+
+    monkeypatch.setattr(FleetProfileService, "_queue_application", stay_busy)
+    parked = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(973),
+        actor="admin",
+    )
+    assert parked.state == "waiting-for-operator"
+    assert parked.progress.workload_intent_ordinal is None
+
+    monkeypatch.setattr(FleetProfileService, "_queue_application", original_queue)
+    assert service.tick() is True
+    resumed = service.application(parked.id)
+    assert resumed.progress.workload_intent_ordinal == 1
+    assert adapter.cancellations == [((_node_id(1),), 1)]
 
 
 @pytest.mark.parametrize("old_state", ["failed", "queued", "running"])
