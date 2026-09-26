@@ -23,7 +23,10 @@ from vonk_agent_protocol import (
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
-from vonk_control.install_admission import installation_plan_digest_from_stored_document
+from vonk_control.install_admission import (
+    InstallAdmissionBusy,
+    installation_plan_digest_from_stored_document,
+)
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -1583,8 +1586,11 @@ class _SlowColdCompiler:
 class _ColdCompileExecutor:
     """Real runtime-plan/install admission with value-bearing neighbours."""
 
-    def __init__(self, lifecycle, sessions, clock) -> None:
+    def __init__(
+        self, lifecycle, sessions, clock, runtime_install_busy_attempts=0
+    ) -> None:
         self.events: list[str] = []
+        self.runtime_install_busy_attempts = runtime_install_busy_attempts
         self.delegate = RecipeLifecyclePhaseExecutor(
             lifecycle,
             sessions,
@@ -1605,6 +1611,12 @@ class _ColdCompileExecutor:
         identity = phase.subphase or phase.kind
         self.events.append(identity)
         if phase.subphase in {"runtime-plan", "runtime-install"}:
+            if (
+                phase.subphase == "runtime-install"
+                and self.runtime_install_busy_attempts
+            ):
+                self.runtime_install_busy_attempts -= 1
+                raise InstallAdmissionBusy("install.capacity_busy")
             return self.delegate.execute(
                 plan,
                 phase,
@@ -1640,7 +1652,13 @@ class _ColdCompileExecutor:
         return self.delegate.get(operation_id)
 
 
-def _cold_compile_switch(tmp_path: Path, *, seconds: int = 716, slow_compiles: int = 1):
+def _cold_compile_switch(
+    tmp_path: Path,
+    *,
+    seconds: int = 716,
+    slow_compiles: int = 1,
+    runtime_install_busy_attempts: int = 0,
+):
     """Start a real Run/Switch whose cold compile outlives the preflight window.
 
     The phase gate, ``LifecyclePreflight``, install admission and compiled launch
@@ -1686,7 +1704,12 @@ def _cold_compile_switch(tmp_path: Path, *, seconds: int = 716, slow_compiles: i
         during_compile,
         slow_compiles,
     )
-    executor = _ColdCompileExecutor(lifecycle, sessions, clock)
+    executor = _ColdCompileExecutor(
+        lifecycle,
+        sessions,
+        clock,
+        runtime_install_busy_attempts=runtime_install_busy_attempts,
+    )
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -1823,6 +1846,37 @@ def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
     assert installations[0].plan_digest == admitted.plan_digest
     assert installations[0].mapping_generation == admitted.mapping_generation
     assert installations[0].plan["compiled_execution_plans"]
+
+
+def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
+    tmp_path: Path,
+) -> None:
+    """A busy install admission remains recoverable at child dispatch."""
+
+    switch = _cold_compile_switch(tmp_path, runtime_install_busy_attempts=1)
+    for _ in range(20):
+        switch.drive()
+        view = switch.service.get(switch.operation.operation_id)
+        if (
+            view.result is not None
+            and view.result.retry_reason == "install.capacity_busy"
+        ):
+            break
+    else:
+        pytest.fail("runtime install capacity wait was not observed")
+
+    assert view.state == "running"
+    assert view.progress.subphase == "runtime-install"
+    assert view.result is not None
+    assert view.result.observation_due_at is not None
+    assert "run-switch.install-start-failed" not in (view.status_reason or "")
+
+    for _ in range(20):
+        switch.drive()
+        if switch.executor.events.count("runtime-install") >= 2:
+            break
+    assert switch.executor.events.count("runtime-install") == 2
+    assert switch.service.get(switch.operation.operation_id).state != "failed"
 
 
 def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(

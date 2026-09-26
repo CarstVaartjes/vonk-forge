@@ -1667,6 +1667,8 @@ class RecipeLifecyclePhaseExecutor:
                     ),
                     workload_intent_ordinal=ordinal,
                 )
+            except InstallAdmissionBusy:
+                raise
             except (
                 KeyError,
                 RecipeOperationConflict,
