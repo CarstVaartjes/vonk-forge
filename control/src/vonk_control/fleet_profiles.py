@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol, TypedDict
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
-from sqlalchemy import String, case, cast, func, select, text
+from sqlalchemy import String, case, cast, func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -100,9 +100,11 @@ from .models import (
     InstallationNode,
     Job,
     ModelCacheSet,
+    NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
+    ResourceReservation,
     RunNode,
     RuntimeImageAuthorization,
     User,
@@ -856,6 +858,44 @@ class RunSwitchFleetProfileAdapter:
         assignments: tuple[FleetProfileAssignment, ...],
         reviewed: FleetProfilePreview,
     ) -> None:
+        node_ids = tuple(
+            sorted(
+                {
+                    node.node_id
+                    for assignment in assignments
+                    for node in assignment.nodes
+                }
+            )
+        )
+        if node_ids:
+            # Admission already holds the exact AgentNode rows. Lock the
+            # mutable capacity facts those nodes reference so an inventory
+            # refresh or reservation writer cannot change the fit between the
+            # recheck and the claims committed below. Inserts are fenced by
+            # the parent AgentNode row lock and do not require a table lock.
+            tuple(
+                session.scalars(
+                    select(NodeInventorySnapshot)
+                    .where(NodeInventorySnapshot.node_id.in_(node_ids))
+                    .order_by(
+                        NodeInventorySnapshot.node_id,
+                        NodeInventorySnapshot.observed_at,
+                        NodeInventorySnapshot.id,
+                    )
+                    .with_for_update(nowait=True)
+                )
+            )
+            tuple(
+                session.scalars(
+                    select(ResourceReservation)
+                    .where(
+                        ResourceReservation.node_id.in_(node_ids),
+                        ResourceReservation.state.in_(("active", "promised")),
+                    )
+                    .order_by(ResourceReservation.node_id, ResourceReservation.id)
+                    .with_for_update(nowait=True)
+                )
+            )
         assessments = {item.assignment_id: item for item in reviewed.assessments}
         decisions = {item.assignment_id: item for item in reviewed.admission_decisions}
         changing = {
@@ -2002,14 +2042,17 @@ class FleetProfileService:
 
     @contextmanager
     def _admission_session(
-        self, actor: str, *, node_ids: Sequence[str] = ()
+        self,
+        actor: str,
+        *,
+        node_ids: Sequence[str] = (),
     ) -> Iterator[Session]:
-        """Freeze roster, catalog, workload effects and capacity, including inserts.
+        """Open the short transaction used to accept a reviewed profile plan.
 
-        PostgreSQL's implicit writer locks participate, so another owner cannot
-        insert or replace an effect between reconciliation and acceptance.
-        This is a short SQL-only transaction; contention anywhere in the
-        admission work refuses before effects and releases the transaction.
+        Node advisory locks and the explicit row locks below serialize the
+        effects this transaction owns. A whole-table PostgreSQL fence would
+        make routine heartbeat and telemetry writes unrelated fleet blockers;
+        exact plan, roster, catalog and capacity checks remain authoritative.
         """
         with self._sessions.begin() as session:
             self._authorize(session, actor)
@@ -2018,18 +2061,6 @@ class FleetProfileService:
                     session,
                     tuple(node_admission_key(node_id) for node_id in node_ids),
                 )
-                if session.get_bind().dialect.name == "postgresql":
-                    session.execute(
-                        text(
-                            "LOCK TABLE agent_nodes, catalog_document_heads, "
-                            "catalog_document_revisions, catalog_documents, "
-                            "cluster_mapping_nodes, cluster_mappings, "
-                            "fleet_profile_applications, installation_nodes, jobs, "
-                            "node_inventory_snapshots, recipe_installations, "
-                            "recipe_runs, resource_reservations, run_nodes "
-                            "IN SHARE ROW EXCLUSIVE MODE NOWAIT"
-                        )
-                    )
             except AdmissionLockBusy as error:
                 raise FleetProfileAdmissionBusy(
                     "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
@@ -3802,6 +3833,35 @@ class FleetProfileService:
                         "Profile recipe head changed during admission; review again"
                     )
             self._reserve_preview_assets(session, preview, now=now)
+            stop_ids = tuple(
+                sorted(
+                    {
+                        effect.run_id
+                        for effect in preview.effects.runs
+                        if effect.action == "stop"
+                    }
+                )
+            )
+            if stop_ids:
+                # A reviewed replacement owns the exact runs and run-node rows
+                # it is about to stop. Lock them before the roster snapshot so
+                # another owner cannot change a reviewed effect mid-admission.
+                tuple(
+                    session.scalars(
+                        select(RecipeRun)
+                        .where(RecipeRun.id.in_(stop_ids))
+                        .order_by(RecipeRun.id)
+                        .with_for_update(nowait=True)
+                    )
+                )
+                tuple(
+                    session.scalars(
+                        select(RunNode)
+                        .where(RunNode.run_id.in_(stop_ids))
+                        .order_by(RunNode.run_id, RunNode.rank)
+                        .with_for_update(nowait=True)
+                    )
+                )
             scope_nodes = list(
                 session.scalars(
                     select(AgentNode)
@@ -4113,6 +4173,17 @@ class FleetProfileService:
                 runtime_assignments,
                 now=now,
             )
+            current_scope = tuple(
+                session.scalars(
+                    select(AgentNode.node_id)
+                    .where(AgentNode.revoked_at.is_(None))
+                    .order_by(AgentNode.node_id)
+                )
+            )
+            if current_scope != frozen_nodes:
+                raise FleetProfileStalePlanConflict(
+                    "Profile fleet scope changed during admission; review again"
+                )
             session.flush()
             return self._application_view(row)
 
