@@ -1115,6 +1115,44 @@ def test_parked_profile_load_fences_workload_before_admission_retry(
     assert adapter.cancellations == [((_node_id(1),), 1)]
 
 
+def test_parked_profile_load_rechecks_fencing_after_ordinal_is_bound(
+    monkeypatch,
+) -> None:
+    """A parked admission repeats supersession reconciliation after a retry."""
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    adapter = _SwitchAdapter()
+    now = [NOW]
+    service = FleetProfileService(
+        sessions, clock=lambda: now[0], switch_adapter=adapter
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+
+    def stay_busy(self, reviewed, **kwargs):
+        raise FleetProfileAdmissionBusy("test admission owner")
+
+    monkeypatch.setattr(FleetProfileService, "_queue_application", stay_busy)
+    parked = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(974),
+        actor="admin",
+    )
+    assert parked.state == "waiting-for-operator"
+    assert parked.progress.workload_intent_ordinal is None
+
+    assert service.tick() is True
+    first = service.application(parked.id)
+    assert first.progress.workload_intent_ordinal == 1
+    assert adapter.cancellations == [((_node_id(1),), 1)]
+
+    now[0] += timedelta(seconds=2)
+    assert service.tick() is True
+    assert adapter.cancellations == [((_node_id(1),), 1), ((_node_id(1),), 1)]
+
+
 @pytest.mark.parametrize("old_state", ["failed", "queued", "running"])
 def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) -> None:
     """A history parser failure must not veto a fresh authorized workload."""
