@@ -1487,8 +1487,18 @@ class AgentJobService:
                 .where(
                     StoredOperation.node_id.in_(scope),
                     StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS),
-                    StoredOperation.workload_intent_ordinal.is_not(None),
-                    StoredOperation.workload_intent_ordinal < ordinal,
+                    or_(
+                        and_(
+                            StoredOperation.workload_intent_ordinal.is_not(None),
+                            StoredOperation.workload_intent_ordinal < ordinal,
+                        ),
+                        and_(
+                            StoredOperation.workload_intent_ordinal.is_(None),
+                            Job.payload["workload_intent_ordinal"]
+                            .as_integer()
+                            .is_(None),
+                        ),
+                    ),
                     Job.state.in_({"queued", "running", "waiting-for-operator"}),
                 )
                 .distinct()
@@ -1531,6 +1541,42 @@ class AgentJobService:
                 continue
             children = tuple(children_by_parent.get(parent_id, ()))
             bound = parent.payload.get("workload_intent_ordinal")
+            if bound is None:
+                owner_kind = parent.payload.get("owner_kind")
+                owner_id = parent.payload.get("owner_id")
+                run = (
+                    session.get(RecipeRun, owner_id)
+                    if owner_kind == "run" and isinstance(owner_id, str)
+                    else None
+                )
+                # Legacy workload parents predate intent ordinals.  Retire one
+                # only when its run is durably stopped and every parked child
+                # is an unissued claim refusal; an uncertain issued effect must
+                # remain visible and block until its normal receipt arrives.
+                if run is None or run.state != "stopped" or not children:
+                    continue
+                if any(
+                    child.state not in {"succeeded", "failed", "cancelled"}
+                    and not (
+                        child.state == "waiting-for-operator"
+                        and child.current_attempt > 0
+                        and (child.status_reason or "").startswith("claim refused:")
+                    )
+                    for child in children
+                ):
+                    continue
+                for child in children:
+                    child.retry_disposition = None
+                    child.retry_disposition_attempt = None
+                    child.retry_due_at = None
+                    if child.state == "waiting-for-operator":
+                        child.state = "cancelled"
+                        child.status_reason = "superseded by newer workload intent"
+                        child.updated_at = now
+                parent.state = "cancelled"
+                parent.status_reason = "superseded by newer workload intent"
+                parent.updated_at = now
+                continue
             if (
                 type(bound) is not int
                 or bound >= ordinal

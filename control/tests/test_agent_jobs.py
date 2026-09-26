@@ -47,6 +47,7 @@ from vonk_control.models import (
     Base,
     Job,
     RecipeBuild,
+    RecipeRun,
     ResourceReservation,
 )
 from vonk_control.recipe_operations import RecipeOperationService
@@ -484,6 +485,70 @@ def test_new_intent_finishes_superseded_parent_with_mixed_terminal_children(
         parent_row = session.get(Job, old_parent.id)
         assert parent_row is not None
         assert parent_row.state == "cancelled"
+        assert parent_row.status_reason == "superseded by newer workload intent"
+
+
+def test_new_intent_retires_stopped_legacy_parent_with_unissued_child(service) -> None:
+    """Pre-ordinal parked claims must not block a newer workload forever."""
+
+    jobs, sessions, clock = service
+    old_parent = parent(sessions, clock)
+    start_payload = canonical_start_payload(
+        start_deadline=clock.now + timedelta(minutes=30)
+    )
+    succeeded = jobs.enqueue(
+        old_parent.id, NODE_A, "recipe.start", COMMIT, start_payload
+    )
+    parked = jobs.enqueue(old_parent.id, NODE_B, "recipe.start", COMMIT, start_payload)
+    run_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        parent_row = session.get(Job, old_parent.id)
+        succeeded_row = session.get(AgentOperation, succeeded.id)
+        parked_row = session.get(AgentOperation, parked.id)
+        node_a = session.get(AgentNode, NODE_A)
+        node_b = session.get(AgentNode, NODE_B)
+        assert (
+            parent_row is not None
+            and succeeded_row is not None
+            and parked_row is not None
+            and node_a is not None
+            and node_b is not None
+        )
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id="legacy-installation",
+                mapping_id="legacy-mapping",
+                mapping_generation=1,
+                alias="legacy",
+                plan_digest="d" * 64,
+                plan={},
+                state="stopped",
+                route_state="withdrawn",
+                actor="operator",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        parent_row.payload = {"owner_kind": "run", "owner_id": run_id}
+        parent_row.state = "waiting-for-operator"
+        succeeded_row.state = "succeeded"
+        parked_row.state = "waiting-for-operator"
+        parked_row.current_attempt = 1
+        parked_row.status_reason = "claim refused: operator-retry-not-authorized"
+        succeeded_row.workload_intent_ordinal = None
+        parked_row.workload_intent_ordinal = None
+        node_a.workload_intent_ordinal = 2
+        node_b.workload_intent_ordinal = 2
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, (NODE_A, NODE_B), 2, clock.now
+        )
+
+    with sessions() as session:
+        parent_row = session.get(Job, old_parent.id)
+        parked_row = session.get(AgentOperation, parked.id)
+        assert parent_row is not None and parent_row.state == "cancelled"
+        assert parked_row is not None and parked_row.state == "cancelled"
         assert parent_row.status_reason == "superseded by newer workload intent"
 
 
