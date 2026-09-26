@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy import select, text
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
@@ -71,6 +72,17 @@ def _profile_and_review(
     return profile, review
 
 
+def _selector(sessions) -> str:
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        )
+    assert revision is not None
+    return f"{revision.publisher}/{revision.slug}"
+
+
 def _pending(profiles, review, request_key: str):
     return profiles._create_pending_application(
         review,
@@ -85,6 +97,76 @@ def _application(sessions, application_id: str) -> FleetProfileApplication:
         row = session.get(FleetProfileApplication, application_id)
         assert row is not None
         return row
+
+
+def test_sequential_acceptance_order_survives_service_reconstruction(
+    tmp_path, postgres_engine
+) -> None:
+    """A same-clock second service sees and advances the durable receipt order."""
+    start = datetime(2026, 9, 5, tzinfo=UTC)
+    sessions, lifecycle, _, _, _, nodes = setup_services(
+        tmp_path, engine=postgres_engine, nodes=2
+    )
+    first_service, _planner = _profile_service(sessions, lifecycle)
+    clock = [start]
+    first_service._clock = lambda: clock[0]
+    first_profile, first_review = _profile_and_review(
+        first_service,
+        _selector(sessions),
+        nodes,
+        "First same-clock service receipt",
+    )
+    second_profile, second_review = _profile_and_review(
+        first_service,
+        _selector(sessions),
+        nodes,
+        "Second same-clock service receipt",
+    )
+    first = _pending(first_service, first_review, str(uuid4()))
+
+    reconstructed_service, _reconstructed_planner = _profile_service(
+        sessions, lifecycle
+    )
+    reconstructed_service._clock = lambda: clock[0]
+    second = _pending(reconstructed_service, second_review, str(uuid4()))
+
+    assert first.profile_id == first_profile.id
+    assert second.profile_id == second_profile.id
+    assert second.created_at == first.created_at + timedelta(microseconds=1)
+
+
+def test_acceptance_order_overflow_fails_closed_without_receipt(
+    tmp_path, postgres_engine
+) -> None:
+    """A saturated persisted timestamp cannot wrap or admit ambiguous intent."""
+    start = datetime(2026, 9, 6, tzinfo=UTC)
+    sessions, profiles, nodes, selector, _clock = _profile_order_services(
+        tmp_path, postgres_engine, start=start
+    )
+    _first_profile, first_review = _profile_and_review(
+        profiles, selector, nodes, "Timestamp boundary receipt"
+    )
+    first = _pending(profiles, first_review, str(uuid4()))
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        row.created_at = datetime.max.replace(tzinfo=UTC)
+
+    _second_profile, second_review = _profile_and_review(
+        profiles, selector, nodes, "Receipt beyond timestamp boundary"
+    )
+    request_key = str(uuid4())
+    with pytest.raises(FleetProfileConflict, match="timestamp range"):
+        _pending(profiles, second_review, request_key)
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(FleetProfileApplication).where(
+                    FleetProfileApplication.request_key == request_key
+                )
+            )
+            is None
+        )
 
 
 def test_malformed_sibling_retry_root_does_not_block_new_pending_admission(
@@ -211,10 +293,10 @@ def test_older_unbound_admission_cannot_overtake_newer_bound_deferred_intent(
     assert older_after_retry.state == "cancelled"
 
 
-def test_equal_acceptance_time_uses_deterministic_uuid4_order(
+def test_equal_persisted_acceptance_time_uses_deterministic_uuid4_order(
     tmp_path, postgres_engine, monkeypatch
 ) -> None:
-    """For tied acceptance clocks, the higher UUID4 receipt owns the order."""
+    """Equal persisted acceptance timestamps use UUID4 as a stable tie-break."""
     import vonk_control.fleet_profiles as fleet_profiles_module
 
     start = datetime(2026, 9, 2, tzinfo=UTC)
@@ -237,7 +319,16 @@ def test_equal_acceptance_time_uses_deterministic_uuid4_order(
     higher = _pending(profiles, newer_review, str(uuid4()))
     assert lower.id == str(lower_id)
     assert higher.id == str(higher_id)
-    assert lower.created_at == higher.created_at
+    # Simulate genuinely concurrent transactions that both observed an empty
+    # table before either committed; sequential API calls are ordered by the
+    # acceptance-time allocator even when their wall clocks tie.
+    with sessions.begin() as session:
+        for application_id in (lower.id, higher.id):
+            row = session.get(FleetProfileApplication, application_id)
+            assert row is not None
+            row.created_at = start
+    assert _application(sessions, lower.id).created_at == start
+    assert _application(sessions, higher.id).created_at == start
 
     profiles._defer_pending_application(
         lower.id, "Waiting for later admission", retry_delay=timedelta(seconds=3)
@@ -281,10 +372,10 @@ def test_equal_acceptance_time_uses_deterministic_uuid4_order(
         assert higher_after_retry.state == "queued"
 
 
-def test_direct_queue_of_older_pending_receipt_cannot_replace_terminal_newer_intent(
+def test_clock_rollback_cannot_make_later_accepted_receipt_older(
     tmp_path, postgres_engine
 ) -> None:
-    """A later accepted receipt remains authoritative after its terminal state."""
+    """The durable acceptance order is monotonic across service-clock rollback."""
     start = datetime(2026, 9, 3, tzinfo=UTC)
     sessions, profiles, nodes, selector, clock = _profile_order_services(
         tmp_path, postgres_engine, start=start
@@ -301,20 +392,64 @@ def test_direct_queue_of_older_pending_receipt_cannot_replace_terminal_newer_int
         newer.id, state="failed", reason="A later terminal receipt still owns order"
     )
 
-    # Simulate an older request whose submitter captured its acceptance time
-    # before its insert committed, while the newer request already reached a
-    # terminal receipt. The old transaction must still reconcile by accepted
-    # order rather than row insertion time.
+    # A second service submitter observes an older injected wallclock, but its
+    # durable receipt is accepted after the first one and therefore receives a
+    # later logical timestamp.
     clock[0] = start
+    _later_profile, later_review = _profile_and_review(
+        profiles, selector, nodes, "Later accepted after clock rollback"
+    )
+    later = _pending(profiles, later_review, str(uuid4()))
+    assert later.created_at > newer.created_at
+
+    queued = profiles._queue_application(
+        later_review,
+        request_key=later.request_key,
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+        pending_application_id=later.id,
+    )
+
+    newer_after = _application(sessions, newer.id)
+    later_after = _application(sessions, later.id)
+    with sessions() as session:
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None and node.workload_intent_ordinal == 2
+    assert queued.id == later.id
+    assert later_after.progress["workload_intent_ordinal"] == 2
+    assert later_after.state == "queued"
+    assert newer_after.state == "failed"
+    assert newer_after.progress["workload_intent_ordinal"] == 1
+
+
+def test_direct_queue_cannot_overtake_later_terminal_receipt(
+    tmp_path, postgres_engine
+) -> None:
+    """An earlier unbound receipt cannot reclaim order from a later terminal one."""
+    start = datetime(2026, 9, 7, tzinfo=UTC)
+    sessions, profiles, nodes, selector, clock = _profile_order_services(
+        tmp_path, postgres_engine, start=start
+    )
     _older_profile, older_review = _profile_and_review(
-        profiles, selector, nodes, "Older delayed insert"
+        profiles, selector, nodes, "Earlier unbound receipt"
     )
     older = _pending(profiles, older_review, str(uuid4()))
+    profiles._defer_pending_application(
+        older.id, "Waiting for later admission", retry_delay=timedelta(seconds=5)
+    )
 
-    # Deliberately use the normal queue boundary on the older persisted review.
-    # The owner must compare accepted order before it can bump the node ordinal
-    # or issue cancellation for the newer receipt.
-    try:
+    clock[0] = start + timedelta(seconds=1)
+    _newer_profile, newer_review = _profile_and_review(
+        profiles, selector, nodes, "Later terminal receipt"
+    )
+    newer = _pending(profiles, newer_review, str(uuid4()))
+    profiles._prepare_pending_admission(newer.id, newer_review)
+    profiles._finish_pending_admission(
+        newer.id, state="failed", reason="A later terminal receipt still owns order"
+    )
+    assert older.created_at < newer.created_at
+
+    with pytest.raises(FleetProfileConflict, match="superseded"):
         profiles._queue_application(
             older_review,
             request_key=older.request_key,
@@ -322,21 +457,16 @@ def test_direct_queue_of_older_pending_receipt_cannot_replace_terminal_newer_int
             operation_kind="fleet-profile.apply",
             pending_application_id=older.id,
         )
-    except FleetProfileConflict:
-        pass
 
-    newer_after = _application(sessions, newer.id)
     older_after = _application(sessions, older.id)
+    newer_after = _application(sessions, newer.id)
     with sessions() as session:
         node = session.get(AgentNode, nodes[0])
-        assert node is not None and node.workload_intent_ordinal == 1
-    assert newer_after.state == "failed"
-    assert newer_after.progress["workload_intent_ordinal"] == 1
+    assert node is not None and node.workload_intent_ordinal == 1
     assert older_after.progress["workload_intent_ordinal"] is None
-    assert older_after.progress["admission_pending"] is True or older_after.state in {
-        "cancelled",
-        "failed",
-    }
+    assert older_after.state == "cancelled"
+    assert newer_after.progress["workload_intent_ordinal"] == 1
+    assert newer_after.state == "failed"
 
 
 def test_retry_lineage_cannot_make_an_older_root_newer_than_pending_intent(

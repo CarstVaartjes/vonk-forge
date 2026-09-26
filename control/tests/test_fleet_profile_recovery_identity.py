@@ -295,6 +295,16 @@ def test_retry_requires_preparation_only_when_an_assignment_needs_work(
         with pytest.raises(FleetProfileConflict, match="recovery_identity_unavailable"):
             service.retry(first.id, request_key=_uuid(922), actor="admin")
     else:
+        # The service clock may move backward across reconstruction/retry.
+        # Receipt chronology remains monotonic, while updated_at reflects the
+        # retry's actual injected wallclock.
+        retry_clock = first.created_at - timedelta(seconds=1)
+        service._clock = lambda: retry_clock
         retried = service.retry(first.id, request_key=_uuid(922), actor="admin")
         assert retried.retry_of_application_id == first.id
         assert retried.state == "queued"
+        assert retried.created_at == first.created_at + timedelta(microseconds=1)
+        assert retried.updated_at == retry_clock
+        with sessions() as session:
+            latest = service.endpoint_intent(session, profile.number)
+        assert latest.application_id == retried.id

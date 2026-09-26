@@ -1067,7 +1067,6 @@ def test_new_profile_load_supersedes_older_queued_scope_by_acceptance_order() ->
         actor="admin",
     )
     second_preview = service.preview(second_profile.id)
-    now[0] += timedelta(microseconds=1)
     second = service.apply(
         second_profile.id,
         plan_digest=second_preview.plan_digest,
@@ -1184,7 +1183,6 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
     first = service.application(first.id)
     assert first.progress.workload_intent_ordinal == 1
 
-    now[0] += timedelta(microseconds=1)
     second = service.apply(
         profile.id,
         plan_digest=preview.plan_digest,
@@ -1571,7 +1569,6 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
 
     # The authoritative per-node intent still fences the receipt once a later
     # load supersedes it, even though a damaged sibling is present.
-    now[0] += timedelta(microseconds=1)
     service.load(
         profile.number,
         request_key=_uuid(989),
@@ -1595,7 +1592,6 @@ def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
         actor="admin",
         expected_plan_digest=service.preview(profile.id).plan_digest,
     )
-    now[0] += timedelta(microseconds=1)
     second = service.load(
         profile.number,
         request_key=_uuid(978),

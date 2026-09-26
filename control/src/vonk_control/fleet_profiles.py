@@ -372,6 +372,21 @@ def _persisted_profile_scope(row: FleetProfileApplication) -> tuple[str, ...] | 
     return tuple(node_ids)
 
 
+def _next_profile_acceptance_time(session: Session, now: datetime) -> datetime:
+    """Order sequential receipts; concurrent inserts may share time and tie by ID."""
+
+    latest = session.scalar(select(func.max(FleetProfileApplication.created_at)))
+    if latest is None:
+        return _aware(now)
+    try:
+        next_order = _aware(latest) + timedelta(microseconds=1)
+    except OverflowError as error:
+        raise FleetProfileConflict(
+            "Persisted profile application order exceeds the supported timestamp range"
+        ) from error
+    return max(_aware(now), next_order)
+
+
 def _application_order_key(
     session: Session,
     row: FleetProfileApplication,
@@ -3583,6 +3598,7 @@ class FleetProfileService:
                 scope=FleetProfileScope(node_ids=list(preview.scope.node_ids)),
                 assignments=list(preview.resolved_assignments),
             )
+            created_at = _next_profile_acceptance_time(session, now)
             next_retry = now + _admission_retry_delay(1)
             row = FleetProfileApplication(
                 id=application_id,
@@ -3612,7 +3628,7 @@ class FleetProfileService:
                     f"will retry automatically after {next_retry.isoformat()}."
                 )[:512],
                 actor=actor,
-                created_at=now,
+                created_at=created_at,
                 updated_at=now,
             )
             session.add(row)
@@ -3964,6 +3980,9 @@ class FleetProfileService:
                 .with_for_update(nowait=True)
             )
             pending_ordinal: int | None = None
+            created_at = (
+                _next_profile_acceptance_time(session, now) if existing is None else now
+            )
             if existing is not None:
                 pending = (
                     pending_application_id == existing.id
@@ -4190,7 +4209,7 @@ class FleetProfileService:
                 if existing is not None
                 else _application_order_key(session, reviewed_application)
                 if reviewed_application is not None
-                else (_aware(now), application_id)
+                else (_aware(created_at), application_id)
             )
             if _newer_profile_intent_overlaps(session, intent_order, execution_nodes):
                 raise _FleetProfileSupersededIntentConflict(
@@ -4326,7 +4345,7 @@ class FleetProfileService:
                         else None
                     ),
                     actor=actor,
-                    created_at=now,
+                    created_at=created_at,
                     updated_at=now,
                 )
                 session.add(row)
