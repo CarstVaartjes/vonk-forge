@@ -1045,13 +1045,14 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
     assert step_result.result.verified is True
 
 
-def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> None:
+def test_new_profile_load_supersedes_older_queued_scope_by_acceptance_order() -> None:
     """A pending whole-fleet load cannot veto a later authorized profile."""
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+        sessions, clock=lambda: now[0], switch_adapter=_SwitchAdapter()
     )
     first_profile = service.create(_input(revision_id), actor="admin")
     second_profile = service.create(
@@ -1066,6 +1067,7 @@ def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> N
         actor="admin",
     )
     second_preview = service.preview(second_profile.id)
+    now[0] += timedelta(microseconds=1)
     second = service.apply(
         second_profile.id,
         plan_digest=second_preview.plan_digest,
@@ -1073,7 +1075,7 @@ def test_new_profile_load_supersedes_older_queued_scope_at_the_same_clock() -> N
         actor="admin",
     )
     assert first.state == second.state == "queued"
-    assert first.created_at == second.created_at
+    assert first.created_at < second.created_at
     assert first.progress.workload_intent_ordinal == 1
     assert second.progress.workload_intent_ordinal == 2
     # Admission cancels the older logical order even if the worker selects
@@ -1160,8 +1162,9 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+        sessions, clock=lambda: now[0], switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
     preview = service.preview(profile.id)
@@ -1181,6 +1184,7 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
     first = service.application(first.id)
     assert first.progress.workload_intent_ordinal == 1
 
+    now[0] += timedelta(microseconds=1)
     second = service.apply(
         profile.id,
         plan_digest=preview.plan_digest,
@@ -1526,8 +1530,9 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+        sessions, clock=lambda: now[0], switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
     first = service.load(
@@ -1566,6 +1571,7 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
 
     # The authoritative per-node intent still fences the receipt once a later
     # load supersedes it, even though a damaged sibling is present.
+    now[0] += timedelta(microseconds=1)
     service.load(
         profile.number,
         request_key=_uuid(989),
@@ -1578,8 +1584,9 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
 def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
     service = FleetProfileService(
-        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+        sessions, clock=lambda: now[0], switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
     first = service.load(
@@ -1588,6 +1595,7 @@ def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
         actor="admin",
         expected_plan_digest=service.preview(profile.id).plan_digest,
     )
+    now[0] += timedelta(microseconds=1)
     second = service.load(
         profile.number,
         request_key=_uuid(978),

@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol, TypedDict
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
-from sqlalchemy import String, case, cast, func, select
+from sqlalchemy import String, case, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -372,12 +372,95 @@ def _persisted_profile_scope(row: FleetProfileApplication) -> tuple[str, ...] | 
     return tuple(node_ids)
 
 
+def _application_order_key(
+    session: Session,
+    row: FleetProfileApplication,
+) -> tuple[datetime, str]:
+    """Order a receipt by its root reviewed intent, including its retries."""
+
+    own_order = (_aware(row.created_at), row.id)
+    progress = _persisted_profile_progress(row)
+    intended = progress.intended_profile
+    if intended is None:
+        return own_order
+    if intended.reviewed_application_id == row.id:
+        if progress.retry_of_application_id is not None:
+            raise FleetProfileConflict(
+                "Persisted retry receipt cannot be its own reviewed intent"
+            )
+        return own_order
+    root = session.get(FleetProfileApplication, intended.reviewed_application_id)
+    if root is None:
+        raise FleetProfileConflict("Persisted application review source is unavailable")
+    root_progress = _persisted_profile_progress(root)
+    if (
+        root.profile_id != row.profile_id
+        or root.profile_digest != row.profile_digest
+        or root_progress.retry_of_application_id is not None
+        or root_progress.intended_profile != intended
+        or intended.reviewed_application_id != root.id
+    ):
+        raise FleetProfileConflict(
+            "Persisted application review source is inconsistent"
+        )
+    return _aware(root.created_at), root.id
+
+
+def _newer_profile_intent_overlaps(
+    session: Session,
+    intent_order: tuple[datetime, str],
+    effect_nodes: set[str],
+) -> bool:
+    """Whether a later durable profile receipt still owns overlapping intent.
+
+    ``intended_profile`` is written when the request is accepted and retained
+    through terminal states and retries. A later accepted receipt therefore
+    remains authoritative even if it has already fenced nodes and then failed
+    or was cancelled. Only overlapping execution steps participate.
+    """
+
+    if not effect_nodes:
+        return False
+    order = intent_order
+    for candidate in session.scalars(
+        select(FleetProfileApplication)
+        .where(FleetProfileApplication.created_at >= order[0])
+        .order_by(
+            FleetProfileApplication.created_at,
+            FleetProfileApplication.id,
+        )
+    ):
+        try:
+            progress = _persisted_profile_progress(candidate)
+            candidate_order = _application_order_key(session, candidate)
+        except FleetProfileConflict:
+            continue
+        if progress.intended_profile is None:
+            continue
+        if candidate_order <= order:
+            continue
+        try:
+            plan = _persisted_profile_plan(candidate)
+        except FleetProfileConflict:
+            persisted_scope = _persisted_profile_scope(candidate)
+            if persisted_scope is None:
+                continue
+            candidate_nodes = set(persisted_scope)
+        else:
+            candidate_nodes = {
+                node_id for step in plan.steps for node_id in step.node_ids
+            }
+        if candidate_nodes & effect_nodes:
+            return True
+    return False
+
+
 def _stored_retry_lineage(value: object) -> str | None:
     """Read only the explicit retry lineage one stored receipt declared.
 
-    Retry authority is the durable workload-intent ordinal on each node plus
-    this explicit lineage.  A damaged historical row contributes no lineage
-    instead of forcing the projection to decode every sibling document.
+    The scoped accepted-order scan handles newer overlapping receipts. This
+    final profile-level check only needs explicit child lineage, so malformed
+    unrelated history cannot deny a valid receipt its retry.
     """
 
     if not isinstance(value, Mapping):
@@ -418,6 +501,10 @@ class FleetProfileStalePlanConflict(FleetProfileConflict):
     """Admission refused because the caller's reviewed plan is no longer current."""
 
     code = "profile.stale_plan"
+
+
+class _FleetProfileSupersededIntentConflict(FleetProfileStalePlanConflict):
+    """A later accepted intent owns an overlapping workload effect scope."""
 
 
 class FleetProfilePermissionDenied(PermissionError):
@@ -3570,6 +3657,19 @@ class FleetProfileService:
             session.flush()
             return self._application_view(row)
 
+    def _discard_pending_application(self, application_id: str) -> None:
+        """Delete only a still-owned pending receipt after submitter failure."""
+
+        with self._sessions.begin() as session:
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if row is None:
+                return
+            progress = _persisted_profile_progress(row)
+            if _owns_pending_admission(row, progress):
+                session.delete(row)
+
     def _prepare_pending_admission(
         self, application_id: str, plan: FleetProfilePreview
     ) -> None:
@@ -3595,6 +3695,10 @@ class FleetProfileService:
                 progress = _persisted_profile_progress(row)
                 if not _owns_pending_admission(row, progress):
                     return
+                # A persisted request may outlive the authority that accepted
+                # it. Recheck that authority before fencing workloads or
+                # recording cancellation against older operations.
+                self._authorize(session, row.actor)
                 profile = session.get(FleetProfile, row.profile_id)
                 if profile is None:
                     raise KeyError(row.profile_id)
@@ -3618,13 +3722,21 @@ class FleetProfileService:
                     raise FleetProfileStalePlanConflict(
                         "Pending profile workload scope changed before fencing"
                     )
+                if _newer_profile_intent_overlaps(
+                    session,
+                    _application_order_key(session, row),
+                    set(execution_nodes),
+                ):
+                    raise _FleetProfileSupersededIntentConflict(
+                        "Pending profile intent was superseded by a later accepted request"
+                    )
                 ordinal = progress.workload_intent_ordinal
                 if ordinal is None:
                     ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
                     for node in nodes:
                         node.workload_intent_ordinal = ordinal
                 elif any(node.workload_intent_ordinal != ordinal for node in nodes):
-                    raise FleetProfileStalePlanConflict(
+                    raise _FleetProfileSupersededIntentConflict(
                         "Pending profile workload intent was superseded before recovery"
                     )
                 self._switch_adapter.request_superseded_workload_cancellation_in_session(
@@ -3647,8 +3759,6 @@ class FleetProfileService:
                 ):
                     try:
                         prior_progress = _persisted_profile_progress(prior)
-                        if not prior_progress.admission_pending:
-                            continue
                         prior_plan = _persisted_profile_plan(prior)
                     except FleetProfileConflict:
                         continue
@@ -3657,12 +3767,43 @@ class FleetProfileService:
                         for step in prior_plan.steps
                         for node_id in step.node_ids
                     }
-                    prior_ordinal = prior_progress.workload_intent_ordinal
+                    if not prior_scope & set(execution_nodes):
+                        continue
                     if (
-                        not prior_scope & set(execution_nodes)
-                        or prior_ordinal is None
-                        or prior_ordinal >= ordinal
+                        _owns_pending_admission(prior, prior_progress)
+                        and prior_progress.intended_profile is not None
                     ):
+                        # Pending receipts can be inserted without taking the
+                        # node fence, so check ordering again after locking the
+                        # row. Retire older unbound receipts even when they
+                        # never received an ordinal.
+                        try:
+                            prior_order = _application_order_key(session, prior)
+                        except FleetProfileConflict:
+                            # Broken retry lineage cannot grant a receipt
+                            # ordering authority. Preserve the pre-existing
+                            # ordinal rule for malformed siblings instead.
+                            prior_order = None
+                        if (
+                            prior_order is not None
+                            and prior_order > _application_order_key(session, row)
+                        ):
+                            raise _FleetProfileSupersededIntentConflict(
+                                "A later accepted profile intent owns the workload scope"
+                            )
+                        if prior_order is None:
+                            prior_ordinal = prior_progress.workload_intent_ordinal
+                            if prior_ordinal is None or prior_ordinal >= ordinal:
+                                continue
+                        self._set_application_state(session, prior, "cancelled")
+                        prior.status_reason = (
+                            "Profile order was replaced before admission by a later "
+                            "scoped intent"
+                        )
+                        prior.updated_at = now
+                        continue
+                    prior_ordinal = prior_progress.workload_intent_ordinal
+                    if prior_ordinal is None or prior_ordinal >= ordinal:
                         continue
                     self._set_application_state(session, prior, "cancelled")
                     prior.status_reason = (
@@ -3753,13 +3894,14 @@ class FleetProfileService:
             KeyError,
         ) as error:
             if pending is not None:
-                with self._sessions.begin() as session:
-                    row = session.get(FleetProfileApplication, pending.id)
-                    if (
-                        row is not None
-                        and _persisted_profile_progress(row).admission_pending
-                    ):
-                        session.delete(row)
+                if isinstance(error, _FleetProfileSupersededIntentConflict):
+                    self._finish_pending_admission(
+                        pending.id,
+                        state="cancelled",
+                        reason=str(error),
+                    )
+                else:
+                    self._discard_pending_application(pending.id)
             if isinstance(error, FleetProfilePermissionDenied):
                 raise
             # Another identical submission can commit after our first lookup.
@@ -3773,13 +3915,7 @@ class FleetProfileService:
             )
             if replay is not None:
                 if replay.state == "waiting-for-operator":
-                    with self._sessions.begin() as session:
-                        row = session.get(FleetProfileApplication, replay.id)
-                        if (
-                            row is not None
-                            and _persisted_profile_progress(row).admission_pending
-                        ):
-                            session.delete(row)
+                    self._discard_pending_application(replay.id)
                     raise
                 return replay
             raise
@@ -3823,9 +3959,9 @@ class FleetProfileService:
             if profile is None:
                 raise KeyError(preview.profile_id)
             existing = session.scalar(
-                select(FleetProfileApplication).where(
-                    FleetProfileApplication.request_key == request_key
-                )
+                select(FleetProfileApplication)
+                .where(FleetProfileApplication.request_key == request_key)
+                .with_for_update(nowait=True)
             )
             pending_ordinal: int | None = None
             if existing is not None:
@@ -3940,6 +4076,7 @@ class FleetProfileService:
             attempt = 1
             recovery_ordinal: int | None = None
             accepted_images: dict[str, RuntimeImageIdentity] = {}
+            reviewed_application: FleetProfileApplication | None = None
             if retry_of_application_id is not None:
                 parent = session.get(
                     FleetProfileApplication,
@@ -4048,6 +4185,17 @@ class FleetProfileService:
             affected_nodes = [
                 node for node in scope_nodes if node.node_id in execution_nodes
             ]
+            intent_order = (
+                _application_order_key(session, existing)
+                if existing is not None
+                else _application_order_key(session, reviewed_application)
+                if reviewed_application is not None
+                else (_aware(now), application_id)
+            )
+            if _newer_profile_intent_overlaps(session, intent_order, execution_nodes):
+                raise _FleetProfileSupersededIntentConflict(
+                    "Profile intent was superseded by a later accepted overlapping request"
+                )
             if self._switch_adapter is not None:
                 self._switch_adapter.validate_resources_in_session(
                     session, frozen_assignments, preview
@@ -4069,7 +4217,7 @@ class FleetProfileService:
                 node.workload_intent_ordinal != pending_ordinal
                 for node in affected_nodes
             ):
-                raise FleetProfileStalePlanConflict(
+                raise _FleetProfileSupersededIntentConflict(
                     "Profile workload intent was superseded before admission resumed"
                 )
             if workload_intent_ordinal is not None:
@@ -4106,6 +4254,7 @@ class FleetProfileService:
                         if not prior_scope & execution_nodes:
                             continue
                         prior_progress = _persisted_profile_progress(prior_application)
+                        prior_order = _application_order_key(session, prior_application)
                     except FleetProfileConflict as error:
                         # Quarantine the invalid order, retaining its evidence.
                         # Its agent effects were independently fenced above;
@@ -4117,6 +4266,17 @@ class FleetProfileService:
                         prior_application.updated_at = now
                         continue
                     prior_ordinal = prior_progress.workload_intent_ordinal
+                    if (
+                        prior_order > intent_order
+                        and prior_progress.intended_profile is not None
+                    ):
+                        # New pending receipts do not acquire the node fence.
+                        # A later accepted receipt can therefore appear after
+                        # the earlier overlap scan; preserve it instead of
+                        # cancelling it as though it were an older pending row.
+                        raise _FleetProfileSupersededIntentConflict(
+                            "Profile intent was superseded by a later accepted overlapping request"
+                        )
                     if prior_progress.admission_pending:
                         self._set_application_state(
                             session, prior_application, "cancelled"
@@ -4265,11 +4425,19 @@ class FleetProfileService:
             return False
         if superseded:
             return False
-        # Retry authority is the durable workload-intent ordinal each node owns
-        # (compared above) plus this receipt's explicit lineage.  Decoding every
-        # sibling's full progress let one damaged historical row deny a valid
-        # receipt its retry; the sibling ordinal was only a proxy for the
-        # node-owned intent that is already authoritative.
+        try:
+            plan = _persisted_profile_plan(row)
+            effect_nodes = {node_id for step in plan.steps for node_id in step.node_ids}
+            if _newer_profile_intent_overlaps(
+                session, _application_order_key(session, row), effect_nodes
+            ):
+                return False
+        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+            return False
+        # The scoped accepted-order scan above catches later overlapping work,
+        # and _superseding_intent checks the durable node ordinals. This final
+        # profile-level pass only checks for active siblings or explicit retry
+        # children; malformed unrelated history must not deny a valid retry.
         others = session.scalars(
             select(FleetProfileApplication).where(
                 FleetProfileApplication.profile_id == row.profile_id,
@@ -5219,15 +5387,30 @@ class FleetProfileService:
 
         candidate: tuple[str, str, str, FleetProfilePreview] | None = None
         with self._sessions() as session:
+            progress_document = FleetProfileApplication.progress
+            admission_pending = (
+                (func.json_typeof(progress_document["admission_pending"]) == "boolean")
+                & (progress_document["admission_pending"].as_string() == "true")
+                if session.get_bind().dialect.name == "postgresql"
+                else progress_document["admission_pending"].as_boolean().is_(True)
+            )
+            retry_at = func.replace(
+                progress_document["admission_retry_at"].as_string(),
+                "Z",
+                "+00:00",
+            )
+            retry_cutoff = TypeAdapter(datetime).dump_python(_aware(now), mode="json")
+            if not isinstance(retry_cutoff, str):
+                raise TypeError("profile admission retry cutoff is not a string")
+            retry_cutoff_text = retry_cutoff.replace("Z", "+00:00")
             rows = session.scalars(
                 select(FleetProfileApplication)
                 .where(
                     FleetProfileApplication.state.in_(
                         ("queued", "waiting-for-operator")
                     ),
-                    FleetProfileApplication.progress["admission_pending"]
-                    .as_boolean()
-                    .is_(True),
+                    admission_pending,
+                    or_(retry_at.is_(None), retry_at <= retry_cutoff_text),
                 )
                 .order_by(
                     FleetProfileApplication.updated_at.desc(),
@@ -5244,10 +5427,12 @@ class FleetProfileService:
                     continue
                 if not _owns_pending_admission(row, progress):
                     continue
-                if (
-                    progress.admission_retry_at is not None
-                    and _aware(progress.admission_retry_at) > now
-                ):
+                # The SQL text predicate narrows the bounded batch without a
+                # cast that malformed historical JSON could make fail. The
+                # typed timestamp remains the actual retry authority.
+                if progress.admission_retry_at is not None and _aware(
+                    progress.admission_retry_at
+                ) > _aware(now):
                     continue
                 candidate = (row.id, row.request_key, row.actor, plan)
                 break
