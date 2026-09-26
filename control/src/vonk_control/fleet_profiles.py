@@ -3559,6 +3559,46 @@ class FleetProfileService:
                 self._switch_adapter.request_superseded_workload_cancellation_in_session(
                     session, execution_nodes, ordinal, now
                 )
+                # Retire older parked profile applications while the newer
+                # intent owns the node fence. Waiting applications have no
+                # issued effects; leaving them eligible lets their retry loop
+                # contend with the newer intent and starve admission.
+                for prior in session.scalars(
+                    select(FleetProfileApplication)
+                    .where(
+                        FleetProfileApplication.id != application_id,
+                        FleetProfileApplication.state.in_(
+                            ("queued", "running", "waiting-for-operator")
+                        ),
+                    )
+                    .order_by(FleetProfileApplication.id)
+                    .with_for_update(nowait=True)
+                ):
+                    try:
+                        prior_progress = _persisted_profile_progress(prior)
+                        if not prior_progress.admission_pending:
+                            continue
+                        prior_plan = _persisted_profile_plan(prior)
+                    except FleetProfileConflict:
+                        continue
+                    prior_scope = {
+                        node_id
+                        for step in prior_plan.steps
+                        for node_id in step.node_ids
+                    }
+                    prior_ordinal = prior_progress.workload_intent_ordinal
+                    if (
+                        not prior_scope & set(execution_nodes)
+                        or prior_ordinal is None
+                        or prior_ordinal >= ordinal
+                    ):
+                        continue
+                    self._set_application_state(session, prior, "cancelled")
+                    prior.status_reason = (
+                        "Profile order was replaced before admission by a later "
+                        "scoped intent"
+                    )
+                    prior.updated_at = now
                 progress_data = progress.model_dump(mode="json")
                 if progress.workload_intent_ordinal is None:
                     progress_data["workload_intent_ordinal"] = ordinal
