@@ -220,6 +220,8 @@ from .freshness_evidence_state import FreshnessEvidenceState
 from .freshness_policy import FreshnessPolicy
 from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from .get_fleet_metrics_history_resolution import GetFleetMetricsHistoryResolution
+from .git_hub_release_asset import GitHubReleaseAsset
+from .git_hub_release_source import GitHubReleaseSource
 from .identity_history_item import IdentityHistoryItem
 from .identity_history_response import IdentityHistoryResponse
 from .installation_node_change import InstallationNodeChange
@@ -841,6 +843,8 @@ __all__ = (
     "FreshnessPolicy",
     "GetFleetLogInfoSourceType0",
     "GetFleetMetricsHistoryResolution",
+    "GitHubReleaseAsset",
+    "GitHubReleaseSource",
     "IdentityHistoryItem",
     "IdentityHistoryResponse",
     "InstallationNodeChange",

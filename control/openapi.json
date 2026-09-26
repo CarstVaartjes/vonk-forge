@@ -7878,6 +7878,68 @@
         "title": "FreshnessPolicy",
         "type": "object"
       },
+      "GitHubReleaseAsset": {
+        "additionalProperties": false,
+        "description": "One GitHub release asset selected for an existing model file.",
+        "properties": {
+          "asset_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Asset Id",
+            "type": "integer"
+          },
+          "file_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "File Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id",
+          "asset_id"
+        ],
+        "title": "GitHubReleaseAsset",
+        "type": "object"
+      },
+      "GitHubReleaseSource": {
+        "additionalProperties": false,
+        "description": "An exact asset from one release in a canonical GitHub repository.",
+        "properties": {
+          "assets": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubReleaseAsset"
+            },
+            "minItems": 1,
+            "title": "Assets",
+            "type": "array"
+          },
+          "provider": {
+            "const": "github-release",
+            "title": "Provider",
+            "type": "string"
+          },
+          "release_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Release Id",
+            "type": "integer"
+          },
+          "repository": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "repository",
+          "release_id",
+          "assets"
+        ],
+        "title": "GitHubReleaseSource",
+        "type": "object"
+      },
       "IdentityHistoryItem": {
         "additionalProperties": false,
         "properties": {
@@ -10933,7 +10995,15 @@
             "type": "integer"
           },
           "source": {
-            "$ref": "#/components/schemas/ModelSource"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelSource"
+              },
+              {
+                "$ref": "#/components/schemas/GitHubReleaseSource"
+              }
+            ],
+            "title": "Source"
           },
           "supersedes": {
             "anyOf": [

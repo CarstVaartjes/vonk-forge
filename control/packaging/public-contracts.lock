@@ -1,8 +1,8 @@
 source = "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
-# Resolved from the published recipe library release v1.0.17.
+# Resolved from the merged recipe contract at f16d092a8644f3604fc8c7f9fca42088783f3774.
 branch = "main"
-revision = "efbbba29bd4c706c73d295d24047787be3f36d78"
+revision = "f16d092a8644f3604fc8c7f9fca42088783f3774"
 subdirectory = "contracts"
 package = "vonk-forge-public-contracts==0.1.0"
 wheel = "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
-sha256 = "522dcc509d05a6402ee466248a7747bfe68fd5c010ab1eef7ecd1739d90b7027"
+sha256 = "212796a92b1b81527f0b92507fbba85277ce3f9515965457639a79f2394c7043"

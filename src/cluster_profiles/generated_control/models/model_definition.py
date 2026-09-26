@@ -20,6 +20,7 @@ if TYPE_CHECKING:
   from ..models.model_source import ModelSource
   from ..models.model_identity import ModelIdentity
   from ..models.model_reference import ModelReference
+  from ..models.git_hub_release_source import GitHubReleaseSource
   from ..models.model_license import ModelLicense
   from ..models.model_access import ModelAccess
   from ..models.model_lineage import ModelLineage
@@ -55,7 +56,7 @@ class ModelDefinition:
             modalities (list[ModelDefinitionModalitiesItem]):
             parameters (ModelParameters):
             provenance (ModelProvenance):
-            source (ModelSource):
+            source (Union['GitHubReleaseSource', 'ModelSource']):
             kind (Union[Literal['model'], Unset]):  Default: 'model'.
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             supersedes (Union['ModelReference', None, Unset]):
@@ -74,7 +75,7 @@ class ModelDefinition:
     modalities: list[ModelDefinitionModalitiesItem]
     parameters: 'ModelParameters'
     provenance: 'ModelProvenance'
-    source: 'ModelSource'
+    source: Union['GitHubReleaseSource', 'ModelSource']
     kind: Union[Literal['model'], Unset] = 'model'
     schema_version: Union[Literal[2], Unset] = 2
     supersedes: Union['ModelReference', None, Unset] = UNSET
@@ -89,6 +90,7 @@ class ModelDefinition:
         from ..models.model_source import ModelSource
         from ..models.model_identity import ModelIdentity
         from ..models.model_reference import ModelReference
+        from ..models.git_hub_release_source import GitHubReleaseSource
         from ..models.model_license import ModelLicense
         from ..models.model_access import ModelAccess
         from ..models.model_lineage import ModelLineage
@@ -138,7 +140,12 @@ class ModelDefinition:
 
         provenance = self.provenance.to_dict()
 
-        source = self.source.to_dict()
+        source: dict[str, Any]
+        if isinstance(self.source, ModelSource):
+            source = self.source.to_dict()
+        else:
+            source = self.source.to_dict()
+
 
         kind = self.kind
 
@@ -189,6 +196,7 @@ class ModelDefinition:
         from ..models.model_source import ModelSource
         from ..models.model_identity import ModelIdentity
         from ..models.model_reference import ModelReference
+        from ..models.git_hub_release_source import GitHubReleaseSource
         from ..models.model_license import ModelLicense
         from ..models.model_access import ModelAccess
         from ..models.model_lineage import ModelLineage
@@ -278,9 +286,26 @@ class ModelDefinition:
 
 
 
-        source = ModelSource.from_dict(d.pop("source"))
+        def _parse_source(data: object) -> Union['GitHubReleaseSource', 'ModelSource']:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                source_type_0 = ModelSource.from_dict(data)
 
 
+
+                return source_type_0
+            except: # noqa: E722
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            source_type_1 = GitHubReleaseSource.from_dict(data)
+
+
+
+            return source_type_1
+
+        source = _parse_source(d.pop("source"))
 
 
         kind = cast(Union[Literal['model'], Unset] , d.pop("kind", UNSET))

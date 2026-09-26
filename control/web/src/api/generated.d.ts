@@ -3790,6 +3790,33 @@ export interface components {
              */
             telemetry_live_seconds: number;
         };
+        /**
+         * GitHubReleaseAsset
+         * @description One GitHub release asset selected for an existing model file.
+         */
+        GitHubReleaseAsset: {
+            /** Asset Id */
+            asset_id: number;
+            /** File Id */
+            file_id: string;
+        };
+        /**
+         * GitHubReleaseSource
+         * @description An exact asset from one release in a canonical GitHub repository.
+         */
+        GitHubReleaseSource: {
+            /** Assets */
+            assets: components["schemas"]["GitHubReleaseAsset"][];
+            /**
+             * Provider
+             * @constant
+             */
+            provider: "github-release";
+            /** Release Id */
+            release_id: number;
+            /** Repository */
+            repository: string;
+        };
         /** IdentityHistoryItem */
         IdentityHistoryItem: {
             /** Agent State */
@@ -4793,7 +4820,8 @@ export interface components {
              * @constant
              */
             schema_version: 2;
-            source: components["schemas"]["ModelSource"];
+            /** Source */
+            source: components["schemas"]["ModelSource"] | components["schemas"]["GitHubReleaseSource"];
             supersedes?: components["schemas"]["ModelReference"] | null;
         };
         /** ModelDetailResponse */

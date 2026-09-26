@@ -33,3 +33,30 @@ receive the cache payload through the existing tokenless distribution path.
 See Hugging Face's guidance on [user access tokens](https://huggingface.co/docs/hub/security-tokens)
 and [gated models](https://huggingface.co/docs/hub/models-gated) for account
 and repository authorization requirements.
+
+## Public GitHub release assets
+
+A model may instead bind a public GitHub release by its numeric `release_id`
+and bind each model file ID to one numeric release `asset_id`. Mutable release
+tags and browser download URLs are not source identities. The Controller reads
+the exact public release anonymously, checks the release ID and asset
+membership, uploaded state, filename, size, and any SHA-256 digest GitHub
+reports. The canonical `ModelFile` size and SHA-256 remain authoritative; the
+Controller verifies the complete bytes against them before publishing.
+
+Binary requests use GitHub's release-asset API for that exact asset ID. A
+redirect is followed manually only to the `release-assets.githubusercontent.com`
+host. Caller-level HTTP authorization and cookies are excluded from both the
+API and CDN requests, and signed redirect URLs are not persisted or exposed in
+cache errors. Restricted GitHub sources are refused because this source path
+has no credential flow.
+
+Verified local objects remain usable while GitHub is unavailable. Missing or
+partial objects recheck the pinned release metadata, then resume through the
+same durable range/checkpoint and content-verification path. GitHub release
+metadata is an upstream consistency check, not a replacement for the model
+file's exact content hash.
+
+See GitHub's [release lookup](https://docs.github.com/en/rest/releases/releases)
+and [release asset download](https://docs.github.com/en/rest/releases/assets)
+API documentation for the public endpoints used by this provider.
