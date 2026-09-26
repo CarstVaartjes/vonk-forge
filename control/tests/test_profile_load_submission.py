@@ -213,9 +213,7 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
         assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
 
 
-def test_load_retries_a_transient_admission_owner(
-    postgres_engine, monkeypatch
-) -> None:
+def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) -> None:
     sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
     original = FleetProfileService._queue_application
     attempts = 0
@@ -381,18 +379,15 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
             )
             try:
                 assert snapshot_locked.wait(timeout=5)
-                # A row lock on the two known Sparks cannot block this insert.
-                with pytest.raises(OperationalError) as failure:
-                    add_node()
-                assert getattr(failure.value.orig, "sqlstate", None) == "55P03"
+                # A row lock on the two known Sparks cannot block an unrelated
+                # enrollment. The final roster recheck rejects the stale plan.
+                add_node()
             finally:
                 release.set()
             response = future.result(timeout=5)
-        assert response.status_code == 202, response.text
-        assert response.json()["progress"]["intended_profile"]["scope"] == {
-            "node_ids": preview["scope"]["node_ids"]
-        }
-        add_node()
+        assert response.status_code == 409, response.text
+        assert response.headers["x-vonk-error-code"] == "profile.stale_plan"
+        assert "fleet scope" in response.json()["detail"].lower()
     finally:
         release.set()
         event.remove(postgres_engine, "after_cursor_execute", after_roster_read)

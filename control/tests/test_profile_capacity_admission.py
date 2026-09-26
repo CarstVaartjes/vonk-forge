@@ -533,7 +533,9 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
             and thread_id == run_thread_ids[0]
         ):
             run_key_acquired.set()
-            assert release_run.wait(timeout=10), "test did not release the run admission"
+            assert release_run.wait(timeout=10), (
+                "test did not release the run admission"
+            )
 
     def start_run():
         run_thread_ids.append(threading.get_ident())
@@ -544,9 +546,7 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
             request_id=str(uuid4()),
         )
 
-    event.listen(
-        postgres_engine, "after_cursor_execute", hold_after_run_admission_key
-    )
+    event.listen(postgres_engine, "after_cursor_execute", hold_after_run_admission_key)
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(start_run)
@@ -576,11 +576,16 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
                     assert parked is not None
                     assert parked.state == "waiting-for-operator"
                     assert parked.progress["admission_pending"] is True
-                    assert set(
-                        session.execute(
-                            select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
+                    assert (
+                        set(
+                            session.execute(
+                                select(
+                                    AgentNode.node_id, AgentNode.workload_intent_ordinal
+                                )
+                            )
                         )
-                    ) == intents_before
+                        == intents_before
+                    )
             finally:
                 release_run.set()
             started = future.result(timeout=10)
@@ -591,7 +596,16 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
         )
 
     assert started.id
-    assert profiles.tick()
+    # A parked, already-fenced retry must not wait for unrelated job writers.
+    # The original whole-table admission fence treated routine worker DML as a
+    # fleet-wide blocker even though this retry only needs its reviewed rows.
+    unrelated_writer = sessions()
+    try:
+        unrelated_writer.execute(text("LOCK TABLE jobs IN ROW EXCLUSIVE MODE"))
+        assert profiles.tick()
+    finally:
+        unrelated_writer.rollback()
+        unrelated_writer.close()
     with sessions() as session:
         assert session.scalar(select(Job.id).where(Job.id == started.id)) is not None
         application = session.scalar(
