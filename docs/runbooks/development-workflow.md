@@ -150,6 +150,18 @@ Two artifacts are called the manifest:
   image; reused components or separately rebuilt images may have different
   build revisions. A refreshed source field alone does not prove new code runs.
 
+Install the repository hook once per checkout so the curated supply-chain
+evidence is regenerated and staged before each commit:
+
+```bash
+scripts/install-git-hooks
+```
+
+The hook requires tracked edits to be staged together before it updates
+`inventory/sbom/manifest.json`; this keeps the digest map bound to the bytes
+that will actually be committed. It also runs the pinned Ruff lint, format,
+and Python type checks. CI remains the authoritative verification.
+
 ## Remove landed worktrees
 
 Cleanup is part of completing an authorized merge, including each component

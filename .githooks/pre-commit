@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+# Generated evidence must describe the exact tree being committed.  A staged
+# subset alongside other tracked edits would let the hook hash bytes that are
+# not part of the commit, so ask the caller to stage the complete change first.
+if [ -n "$(git diff --name-only)" ]; then
+    echo "manifest hook: stage all tracked edits before committing" >&2
+    exit 1
+fi
+
+scripts/verify-supply-chain --generate --json
+git add inventory/sbom inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl
+scripts/verify-supply-chain --json
+changed_python=$(git diff --cached --name-only -- '*.py')
+if [ -n "$changed_python" ]; then
+    printf '%s\n' "$changed_python" | xargs uvx --from ruff==0.16.1 ruff check --force-exclude
+    printf '%s\n' "$changed_python" | xargs uvx --from ruff==0.16.1 ruff format --check --force-exclude
+fi
+UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-forge-hook-uv-cache}" \
+    uv sync --project control --frozen
+UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-forge-hook-uv-cache}" \
+    scripts/check-python-types
