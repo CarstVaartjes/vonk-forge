@@ -3522,11 +3522,7 @@ class FleetProfileService:
                 if row is None:
                     return
                 progress = _persisted_profile_progress(row)
-                if (
-                    not progress.admission_pending
-                    or progress.cancellation is not None
-                    or progress.workload_intent_ordinal is not None
-                ):
+                if not progress.admission_pending or progress.cancellation is not None:
                     return
                 profile = session.get(FleetProfile, row.profile_id)
                 if profile is None:
@@ -3551,14 +3547,21 @@ class FleetProfileService:
                     raise FleetProfileStalePlanConflict(
                         "Pending profile workload scope changed before fencing"
                     )
-                ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
-                for node in nodes:
-                    node.workload_intent_ordinal = ordinal
+                ordinal = progress.workload_intent_ordinal
+                if ordinal is None:
+                    ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
+                    for node in nodes:
+                        node.workload_intent_ordinal = ordinal
+                elif any(node.workload_intent_ordinal != ordinal for node in nodes):
+                    raise FleetProfileStalePlanConflict(
+                        "Pending profile workload intent was superseded before recovery"
+                    )
                 self._switch_adapter.request_superseded_workload_cancellation_in_session(
                     session, execution_nodes, ordinal, now
                 )
                 progress_data = progress.model_dump(mode="json")
-                progress_data["workload_intent_ordinal"] = ordinal
+                if progress.workload_intent_ordinal is None:
+                    progress_data["workload_intent_ordinal"] = ordinal
                 row.progress = FleetProfileApplicationProgress.model_validate_json(
                     canonical_message(progress_data), strict=True
                 ).model_dump(mode="json")

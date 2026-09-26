@@ -445,6 +445,48 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     )
 
 
+def test_new_intent_finishes_superseded_parent_with_mixed_terminal_children(
+    service,
+) -> None:
+    """A succeeded rank plus a cancelled rank must not leave its parent running."""
+
+    jobs, sessions, clock = service
+    old_parent = parent(sessions, clock)
+    succeeded = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    cancelled = jobs.enqueue(old_parent.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    with sessions.begin() as session:
+        parent_row = session.get(Job, old_parent.id)
+        succeeded_row = session.get(AgentOperation, succeeded.id)
+        cancelled_row = session.get(AgentOperation, cancelled.id)
+        node_a = session.get(AgentNode, NODE_A)
+        node_b = session.get(AgentNode, NODE_B)
+        assert (
+            parent_row is not None
+            and succeeded_row is not None
+            and cancelled_row is not None
+            and node_a is not None
+            and node_b is not None
+        )
+        parent_row.state = "running"
+        parent_row.result = {
+            "cancel_requested": True,
+            "cancel_requested_at": clock.now.isoformat(),
+        }
+        succeeded_row.state = "succeeded"
+        cancelled_row.state = "cancelled"
+        node_a.workload_intent_ordinal = 2
+        node_b.workload_intent_ordinal = 2
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, (NODE_A, NODE_B), 2, clock.now
+        )
+
+    with sessions() as session:
+        parent_row = session.get(Job, old_parent.id)
+        assert parent_row is not None
+        assert parent_row.state == "cancelled"
+        assert parent_row.status_reason == "superseded by newer workload intent"
+
+
 def test_lost_heartbeat_renewal_ack_is_only_benign_old_cancellation(service) -> None:
     jobs, sessions, clock = service
     job = parent(sessions, clock)

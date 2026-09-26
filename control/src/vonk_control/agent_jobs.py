@@ -1579,8 +1579,22 @@ class AgentJobService:
                         "cancel_requested_at": _aware(now).isoformat(),
                     }
                 parent.state = "running"
-            elif all(child.state == "cancelled" for child in children):
-                parent.state = "cancelled"
+            elif all(
+                child.state
+                in {"succeeded", "failed", "cancelled", "waiting-for-operator"}
+                for child in children
+            ):
+                # A superseded parent may have one rank finish just before the
+                # replacement fences the other rank.  Once no child is still
+                # running or parked, the cancellation is terminal even when
+                # the children have mixed terminal outcomes.  Leaving the
+                # parent ``running`` here makes every newer intent wait for a
+                # receipt that can no longer arrive.
+                parent.state = (
+                    "failed"
+                    if any(child.state == "failed" for child in children)
+                    else "cancelled"
+                )
             parent.status_reason = "superseded by newer workload intent"
             parent.updated_at = now
 
