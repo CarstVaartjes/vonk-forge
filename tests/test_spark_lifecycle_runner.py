@@ -1356,6 +1356,62 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
     assert observed["result"]["model_content_digests"] == [model_digest]
 
 
+def test_recipe_download_timeout_preserves_durable_progress(monkeypatch) -> None:
+    pytest.importorskip(
+        "fastapi", reason="Controller contract tests run in the control suite"
+    )
+    lifecycle = _module()
+    from vonk_agent_protocol import OperationProgress
+    from vonk_control.recipe_availability_intent import RecipeSelectorIntent
+    from vonk_control.recipe_image_availability_api import (
+        RecipeImageAvailabilityResponse,
+    )
+
+    recipe_digest = "a" * 64
+    pending = RecipeImageAvailabilityResponse(
+        id="11111111-1111-4111-8111-111111111111",
+        request_id="22222222-2222-4222-8222-222222222222",
+        request=RecipeSelectorIntent(
+            selector="acceptance/synthetic-canary", force=False
+        ),
+        kind="recipe.image.availability.v2",
+        state="running",
+        attempt=2,
+        recipe_revision_id="33333333-3333-4333-8333-333333333333",
+        recipe_content_sha256=recipe_digest,
+        progress=OperationProgress(phase="build", completed_bytes=4),
+        updated_at="2026-09-10T10:00:04Z",
+        created_at="2026-09-10T10:00:00Z",
+    )
+    fixture = lifecycle.CanonicalCanaryFixture(
+        index_path=Path("index.json"),
+        index_bytes=b"{}",
+        package_path=PurePosixPath("package.tar.gz"),
+        package_bytes=b"package",
+        source_commit="e" * 40,
+        publisher="acceptance",
+        slug="synthetic-canary",
+        recipe_content_sha256=recipe_digest,
+        model_content_sha256="b" * 64,
+        role="entrypoint",
+        serving_check={},
+        recipe={},
+    )
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = object()
+    monkeypatch.setattr(lifecycle, "_CANARY_CONVERGENCE_SECONDS", 0)
+
+    with pytest.raises(
+        lifecycle.LifecycleError,
+        match=r'recipe download did not converge: .*"phase":"build"',
+    ):
+        run._await_recipe_download(
+            pending.model_dump(mode="json"),
+            fixture=fixture,
+            recipe_revision_id=pending.recipe_revision_id,
+        )
+
+
 def test_profile_application_poll_pins_exact_identity(monkeypatch) -> None:
     pytest.importorskip(
         "fastapi", reason="Controller contract tests run in the control suite"
