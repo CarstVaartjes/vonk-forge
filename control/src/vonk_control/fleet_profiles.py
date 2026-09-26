@@ -5063,6 +5063,10 @@ class FleetProfileService:
         if adapter is None:
             return False
         with self._sessions.begin() as session:
+            admission_pending = func.coalesce(
+                FleetProfileApplication.progress["admission_pending"].as_boolean(),
+                False,
+            )
             rows = tuple(
                 session.scalars(
                     select(FleetProfileApplication)
@@ -5075,6 +5079,7 @@ class FleetProfileService:
                             "",
                         )
                         != "cancelling",
+                        admission_pending.is_(False),
                     )
                     .order_by(
                         FleetProfileApplication.created_at,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -361,6 +361,39 @@ def test_a_changed_profile_cancels_its_own_parked_application_on_tick(
     ended = service.application(first.id)
     assert ended.state == "cancelled"
     assert "changed profile" in (ended.status_reason or "")
+
+
+def test_pending_admission_is_not_cancelled_by_parked_child_observer(
+    tmp_path: Path,
+) -> None:
+    """Admission retry owns parked rows until a workload intent is bound."""
+
+    sessions, lifecycle, service, _profile, _desired, application, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        progress = FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(row.progress), strict=True
+        )
+        progress_data = progress.model_dump(mode="json")
+        progress_data["admission_pending"] = True
+        progress_data["admission_attempt"] = 1
+        progress_data["admission_retry_at"] = (
+            lifecycle._clock() + timedelta(hours=1)
+        ).isoformat()
+        progress_data["workload_intent_ordinal"] = None
+        row.progress = FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(progress_data), strict=True
+        ).model_dump(mode="json")
+        row.state = "waiting-for-operator"
+        row.status_reason = "Profile admission is waiting for the active workload owner"
+
+    assert service.tick() is False
+    parked = service.application(application.id)
+    assert parked.state == "waiting-for-operator"
+    assert parked.progress.admission_pending is True
 
 
 def test_explicit_retirement_ends_the_parked_operation_and_admits_a_new_intent(
