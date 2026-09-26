@@ -1396,6 +1396,48 @@ def test_profile_application_poll_pins_exact_identity(monkeypatch) -> None:
     assert calls == [("GET", f"/api/profile/applications/{pending['id']}")]
 
 
+def test_profile_application_poll_follows_durable_admission_wait(monkeypatch) -> None:
+    pytest.importorskip(
+        "fastapi", reason="Controller contract tests run in the control suite"
+    )
+    lifecycle = _module()
+    pending = _failed_profile_application(
+        "Profile admission is waiting for the active workload owner to finish."
+    )
+    pending["state"] = "waiting-for-operator"
+    terminal = _failed_profile_application("")
+    terminal.update(
+        attempt=2,
+        state="succeeded",
+        status_reason=None,
+        total_steps=0,
+        progress={"attempt": 2, "completed_steps": 0, "total_steps": 0},
+        result={"changed": False, "completed_steps": 0},
+    )
+    calls: list[tuple[str, str]] = []
+
+    class Control:
+        @staticmethod
+        def request(method, path, payload=None, **kwargs):
+            calls.append((method, path))
+            assert payload is None
+            return 200, terminal
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.control = Control()
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
+
+    assert (
+        run._await_profile_application(
+            pending,
+            label="profile load",
+            node_id="spk_" + "a" * 32,
+        )["state"]
+        == "succeeded"
+    )
+    assert calls == [("GET", f"/api/profile/applications/{pending['id']}")]
+
+
 def test_profile_application_poll_rejects_a_different_returned_identity(
     monkeypatch,
 ) -> None:
