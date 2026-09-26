@@ -334,6 +334,17 @@ def _persisted_profile_progress(
         ) from error
 
 
+def _owns_pending_admission(
+    row: FleetProfileApplication, progress: FleetProfileApplicationProgress
+) -> bool:
+    """A late admission observer cannot replace a newer lifecycle decision."""
+    return (
+        row.state in {"queued", "waiting-for-operator"}
+        and progress.admission_pending
+        and progress.cancellation is None
+    )
+
+
 def _persisted_profile_scope(row: FleetProfileApplication) -> tuple[str, ...] | None:
     """Read an application's declared frozen scope without decoding its plan.
 
@@ -391,6 +402,10 @@ class FleetProfileAdmissionBusy(FleetProfileConflict):
     """A transient admission owner must finish before the plan can be bound."""
 
     code = "profile.admission_busy"
+
+
+class FleetProfileAdmissionStorageError(FleetProfileConflict):
+    """A persisted intent awaits correction of a database constraint failure."""
 
 
 class FleetProfileAdmissionEffectBusy(FleetProfileConflict):
@@ -2073,6 +2088,27 @@ class FleetProfileService:
                 raise
             try:
                 yield session
+            except IntegrityError as error:
+                diagnostic = getattr(error.orig, "diag", None)
+                constraint = getattr(diagnostic, "constraint_name", None)
+                sqlstate = getattr(error.orig, "sqlstate", None)
+                # Never include SQL, parameters or raw driver error text.
+                name = (
+                    constraint
+                    if isinstance(constraint, str)
+                    and re.fullmatch(r"[A-Za-z0-9_]{1,128}", constraint)
+                    else "unknown constraint"
+                )
+                code = (
+                    sqlstate
+                    if isinstance(sqlstate, str)
+                    and re.fullmatch(r"[0-9A-Z]{5}", sqlstate)
+                    else "unknown"
+                )
+                raise FleetProfileAdmissionStorageError(
+                    f"Profile admission database constraint {name} rejected the write (SQLSTATE {code}). "
+                    "The database contract must be reconciled; this request is retained and will retry automatically."
+                ) from None
             except AdmissionLockBusy as error:
                 raise FleetProfileAdmissionEffectBusy(
                     "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
@@ -3507,10 +3543,14 @@ class FleetProfileService:
 
         now = _aware(self._clock())
         with self._sessions.begin() as session:
-            row = session.get(FleetProfileApplication, application_id)
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
             if row is None:
                 raise KeyError(application_id)
             progress = _persisted_profile_progress(row)
+            if not _owns_pending_admission(row, progress):
+                return self._application_view(row)
             attempt = progress.admission_attempt + 1
             next_retry = now + (
                 _admission_retry_delay(attempt) if retry_delay is None else retry_delay
@@ -3553,7 +3593,7 @@ class FleetProfileService:
                 if row is None:
                     return
                 progress = _persisted_profile_progress(row)
-                if not progress.admission_pending or progress.cancellation is not None:
+                if not _owns_pending_admission(row, progress):
                     return
                 profile = session.get(FleetProfile, row.profile_id)
                 if profile is None:
@@ -3693,11 +3733,16 @@ class FleetProfileService:
                             retry_delay=timedelta(0),
                         )
                     time.sleep(retry_delay)
-                except FleetProfileAdmissionEffectBusy:
+                except (
+                    FleetProfileAdmissionEffectBusy,
+                    FleetProfileAdmissionStorageError,
+                ) as error:
                     return self._defer_pending_application(
                         pending.id,
-                        "Profile admission is waiting for the active workload owner to finish; the Controller will retry automatically.",
-                        retry_delay=timedelta(0),
+                        str(error),
+                        retry_delay=timedelta(seconds=60)
+                        if isinstance(error, FleetProfileAdmissionStorageError)
+                        else timedelta(0),
                     )
             raise FleetProfileAdmissionBusy(
                 "Profile admission retry schedule was exhausted"
@@ -5176,7 +5221,14 @@ class FleetProfileService:
         with self._sessions() as session:
             rows = session.scalars(
                 select(FleetProfileApplication)
-                .where(FleetProfileApplication.state == "waiting-for-operator")
+                .where(
+                    FleetProfileApplication.state.in_(
+                        ("queued", "waiting-for-operator")
+                    ),
+                    FleetProfileApplication.progress["admission_pending"]
+                    .as_boolean()
+                    .is_(True),
+                )
                 .order_by(
                     FleetProfileApplication.updated_at.desc(),
                     FleetProfileApplication.created_at.desc(),
@@ -5190,7 +5242,7 @@ class FleetProfileService:
                     plan = _persisted_profile_plan(row)
                 except FleetProfileConflict:
                     continue
-                if not progress.admission_pending or progress.cancellation is not None:
+                if not _owns_pending_admission(row, progress):
                     continue
                 if (
                     progress.admission_retry_at is not None
@@ -5203,6 +5255,17 @@ class FleetProfileService:
             return False
         application_id, request_key, actor, plan = candidate
         try:
+            # The persisted plan is already bound to the execution request.
+            # Admission consumes the original reviewed identity and binds it
+            # once; reusing the execution digest here would hash it twice.
+            with self._sessions() as session:
+                row = session.get(FleetProfileApplication, application_id)
+                if row is None:
+                    return False
+                intended = self._intended_profile(row, session=session)
+            plan = plan.model_copy(
+                update={"plan_digest": intended.reviewed_plan_digest}
+            )
             self._prepare_pending_admission(application_id, plan)
             self._queue_application(
                 plan,
@@ -5211,7 +5274,11 @@ class FleetProfileService:
                 operation_kind="fleet-profile.apply",
                 pending_application_id=application_id,
             )
-        except (FleetProfileAdmissionBusy, FleetProfileAdmissionEffectBusy) as error:
+        except (
+            FleetProfileAdmissionBusy,
+            FleetProfileAdmissionEffectBusy,
+            FleetProfileAdmissionStorageError,
+        ) as error:
             self._defer_pending_application(application_id, str(error))
             return True
         except FleetProfileStalePlanConflict as error:
@@ -5239,10 +5306,14 @@ class FleetProfileService:
     ) -> None:
         now = _aware(self._clock())
         with self._sessions.begin() as session:
-            row = session.get(FleetProfileApplication, application_id)
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
             if row is None:
                 return
             progress = _persisted_profile_progress(row)
+            if not _owns_pending_admission(row, progress):
+                return
             progress_data = progress.model_dump(mode="json")
             progress_data["admission_pending"] = False
             progress_data["admission_retry_at"] = None

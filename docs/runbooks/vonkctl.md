@@ -707,6 +707,15 @@ it does not free space still owned by an installation. If another capacity
 writer is briefly busy, progress names the dependency and next retry time,
 and the same operation continues automatically.
 
+The Controller persists the reviewed request before admission. A restart at that
+boundary resumes the same request, including requests still marked queued;
+recovery keeps the reviewed digest separate from the execution digest. A late
+observer cannot reopen cancelled work or overwrite completed admission. Database
+constraint failures name the constraint and SQLSTATE, retain the request, and
+schedule a bounded retry after the database contract is corrected. Startup
+checks the actual constraint expressions; it does not silently change an
+incompatible database or discard its data.
+
 Accepted profiles also hold their required serving and rendezvous ports through
 preparation. A workload being replaced keeps its active ports until it stops;
 the accepted replacement prevents another workload taking them in between.

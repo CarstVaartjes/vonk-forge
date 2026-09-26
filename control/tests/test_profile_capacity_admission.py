@@ -614,3 +614,166 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
             )
         )
         assert application is not None
+
+
+def test_pending_admission_reports_constraint_failure_and_recovers_same_request(
+    tmp_path,
+    postgres_engine,
+) -> None:
+    """A schema refusal must not spin every tick behind a stale busy message."""
+    from datetime import timedelta
+
+    sessions, profiles, _, profile, _, _, _, _ = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    review = profiles.preview(profile.id)
+    pending = profiles._create_pending_application(
+        review,
+        request_key=str(uuid4()),
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+    )
+    profiles._defer_pending_application(
+        pending.id, "initial contention", retry_delay=timedelta(0)
+    )
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE resource_reservations DROP CONSTRAINT ck_reservations_state"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE resource_reservations ADD CONSTRAINT ck_reservations_state CHECK (state IN ('active','released','expired') AND amount_bytes>=0)"
+            )
+        )
+    assert profiles.tick()
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, pending.id)
+        assert row is not None
+        assert row.status_reason is not None
+        assert "ck_reservations_state" in row.status_reason
+        assert "23514" in row.status_reason
+        assert row.progress["admission_pending"] is True
+        retry = row.progress["admission_retry_at"]
+        assert isinstance(retry, str)
+        assert row.current_operation_id is None
+    assert not profiles._observe_pending_admissions(profiles._clock())
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE resource_reservations DROP CONSTRAINT ck_reservations_state"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE resource_reservations ADD CONSTRAINT ck_reservations_state CHECK (state IN ('active','promised','released','expired') AND amount_bytes>=0)"
+            )
+        )
+    from datetime import datetime
+
+    profiles._clock = lambda: datetime.fromisoformat(retry)
+    assert profiles._observe_pending_admissions(profiles._clock())
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, pending.id)
+        assert row is not None
+        assert row.progress["admission_pending"] is False
+        assert row.state == "queued"
+        assert row.request_key == pending.request_key
+        assert row.plan_digest == pending.plan_digest
+        intended = profiles._intended_profile(row, session=session)
+        assert intended.reviewed_plan_digest == review.plan_digest
+
+
+def test_queued_admission_survives_submitter_death_before_first_attempt(
+    tmp_path, postgres_engine
+) -> None:
+    """A committed pending intent must survive death before defer or admission."""
+    sessions, profiles, planner, profile, _, _, _, _ = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    review = profiles.preview(profile.id)
+    pending = profiles._create_pending_application(
+        review,
+        request_key=str(uuid4()),
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+    )
+    retry = pending.progress.admission_retry_at
+    assert retry is not None
+    # Reconstruct the service with no submitter memory, as after worker restart.
+    assert planner._lifecycle is not None
+    restarted, _ = _profile_service(sessions, planner._lifecycle)
+    restarted._clock = lambda: retry
+    assert restarted.tick()
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, pending.id)
+        assert row is not None
+        assert row.progress["admission_pending"] is False
+        assert row.plan_digest == pending.plan_digest
+        assert (
+            restarted._intended_profile(row, session=session).reviewed_plan_digest
+            == review.plan_digest
+        )
+        assert row.state == "running", row.status_reason
+        assert row.current_operation_id is not None
+
+
+@pytest.mark.parametrize("winner", ["admitted", "cancelled"])
+@pytest.mark.parametrize("late_outcome", ["defer", "finish"])
+def test_late_admission_outcome_preserves_concurrent_winner(
+    tmp_path, postgres_engine, winner, late_outcome
+) -> None:
+    """A losing observer cannot resurrect cancelled work or undo admission."""
+    sessions, profiles, _, profile, _, _, _, _ = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    review = profiles.preview(profile.id)
+    pending = profiles._create_pending_application(
+        review,
+        request_key=str(uuid4()),
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+    )
+    attempted = threading.Event()
+
+    def observe_read(connection, cursor, statement, parameters, context, executemany):
+        if "SELECT fleet_profile_applications" in statement:
+            attempted.set()
+
+    def report_late_outcome():
+        if late_outcome == "defer":
+            profiles._defer_pending_application(
+                pending.id, "obsolete observer contention"
+            )
+        else:
+            profiles._finish_pending_admission(
+                pending.id, state="failed", reason="obsolete observer failure"
+            )
+
+    owner = sessions()
+    try:
+        row = owner.get(FleetProfileApplication, pending.id, with_for_update=True)
+        assert row is not None
+        row.state = "queued" if winner == "admitted" else "cancelled"
+        row.progress = {**row.progress, "admission_pending": winner != "admitted"}
+        row.status_reason = "concurrent owner won"
+        owner.flush()
+        event.listen(postgres_engine, "before_cursor_execute", observe_read)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(report_late_outcome)
+            try:
+                assert attempted.wait(timeout=5)
+            finally:
+                owner.commit()
+            future.result(timeout=5)
+    finally:
+        owner.rollback()
+        owner.close()
+        event.remove(postgres_engine, "before_cursor_execute", observe_read)
+    with sessions() as session:
+        current = session.get(FleetProfileApplication, pending.id)
+        assert current is not None
+        assert current.state == ("queued" if winner == "admitted" else "cancelled")
+        assert current.progress["admission_pending"] == (winner != "admitted")
+        assert current.status_reason == "concurrent owner won"
