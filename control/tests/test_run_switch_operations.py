@@ -67,6 +67,7 @@ from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
 )
+from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
     RunSwitchApplyRequest,
@@ -4962,6 +4963,50 @@ def test_scoped_cleanup_removes_the_installation_through_run_switch(
     with sessions() as session:
         row = session.get(RecipeInstallation, installation.owner_id)
         assert row is None or row.state == "uninstalled"
+
+
+def test_scoped_cleanup_retries_when_uninstall_capacity_writer_is_busy(
+    tmp_path: Path,
+) -> None:
+    """A busy uninstall admission parks the exact cleanup checkpoint."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+    operation = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation.owner_id,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    original_uninstall = lifecycle.uninstall
+
+    def busy_once(*args, **kwargs):
+        del args, kwargs
+        raise RunAdmissionBusy("run capacity writer is busy")
+
+    lifecycle.uninstall = busy_once  # type: ignore[method-assign]
+    try:
+        assert service.tick() is True
+    finally:
+        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+
+    parked = service.get(operation.operation_id)
+    assert parked.state == "running"
+    assert parked.status_reason is not None
+    assert "admission will retry" in parked.status_reason
+    assert parked.result is not None
+    assert parked.result.retry_reason == RunAdmissionBusy.code
+    assert parked.result.phase_index == 0
+    assert parked.result.item_index == 0
 
 
 def _planned_installation(tmp_path: Path, *, nodes: int = 2):
