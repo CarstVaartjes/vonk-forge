@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ def run_metadata(
         check=False,
         capture_output=True,
         text=True,
+        env={"HOME": str(root), "PATH": os.defpath, "LANG": "C", "LC_ALL": "C"},
     )
 
 
@@ -115,6 +117,7 @@ def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
     assert "agent package metadata is invalid" in result.stderr
 
 
+@pytest.mark.needs_dpkg
 def test_debian_ordering_promotes_development_to_final() -> None:
     current = "0.1.1~dev.417+g0123456789ab"
 
@@ -135,6 +138,7 @@ def test_debian_ordering_promotes_development_to_final() -> None:
     assert higher.returncode == 0, higher.stderr
 
 
+@pytest.mark.needs_dpkg
 def test_current_development_line_is_newer_than_last_stable() -> None:
     result = run_metadata("development", "branch", "main", SHA, "417")
 
@@ -150,6 +154,7 @@ def test_current_development_line_is_newer_than_last_stable() -> None:
     assert ordered.returncode == 0, ordered.stderr
 
 
+@pytest.mark.needs_dpkg
 def test_debian_ordering_uses_publication_sequence_before_sha() -> None:
     earlier = run_metadata("development", "branch", "main", "f" * 40, "417")
     later = run_metadata("development", "branch", "main", "0" * 40, "418")

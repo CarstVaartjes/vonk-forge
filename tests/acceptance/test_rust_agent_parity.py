@@ -3,7 +3,6 @@
 import ast
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -17,8 +16,6 @@ def _source(relative: str) -> str:
 
 def _rust_claim_capabilities() -> tuple[str, ...]:
     """Ask the compiled agent for the exact list used by its claim lane."""
-    if sys.platform != "linux":
-        pytest.skip("the production agent binary is Linux-only; run this gate in CI")
     result = subprocess.run(
         [
             "cargo",
@@ -105,6 +102,8 @@ def _controller_known_capabilities() -> frozenset[str]:
     return frozenset(evaluate(assignments["_KNOWN_CAPABILITIES"]))
 
 
+@pytest.mark.linux_only
+@pytest.mark.needs_cargo
 def test_rust_claim_capabilities_cover_current_controller_contract() -> None:
     """Every current Controller operation must be advertised by the Rust agent."""
     advertised = set(_rust_claim_capabilities())

@@ -304,6 +304,7 @@ http://127.0.0.1:{caddy_port} {{
             upstream.join(timeout=5)
 
 
+@pytest.mark.needs_docker
 def test_real_caddy_forwards_bootstrap_request_to_live_upstream(
     real_lease_edge: _RealLeaseEdge,
 ) -> None:
@@ -314,6 +315,7 @@ def test_real_caddy_forwards_bootstrap_request_to_live_upstream(
     assert real_lease_edge.upstream.is_alive()
 
 
+@pytest.mark.needs_docker
 def test_real_caddy_denies_at_expiry_without_contacting_live_upstream(
     real_lease_edge: _RealLeaseEdge,
 ) -> None:
@@ -330,6 +332,7 @@ def test_real_caddy_denies_at_expiry_without_contacting_live_upstream(
     assert real_lease_edge.upstream.is_alive()
 
 
+@pytest.mark.needs_docker
 def test_real_caddy_fails_closed_when_authority_stops(
     real_lease_edge: _RealLeaseEdge,
 ) -> None:
@@ -343,6 +346,7 @@ def test_real_caddy_fails_closed_when_authority_stops(
     assert real_lease_edge.upstream.is_alive()
 
 
+@pytest.mark.needs_docker
 def test_real_caddy_honors_same_config_renewal_until_renewed_deadline(
     real_lease_edge: _RealLeaseEdge,
 ) -> None:

@@ -74,4 +74,16 @@ pythonpath = ["src", "."]
 testpaths = ["tests"]
 markers = [
     "lane: requires Docker, PostgreSQL, cargo or a Linux host tool; excluded from the fast tier",
+    "linux_only: requires Linux host semantics or Linux system tools",
+    "needs_systemd: requires systemd tooling for installed unit verification",
+    "needs_recipe_library: requires VONK_RECIPE_LIBRARY_ROOT to name a recipe checkout",
+    "needs_rust_probe: requires REPAIR_PROBE_BINARY to name the built repair probe",
+    "needs_installer_release_probe: requires the installer-release Rust contract probe",
+    "needs_dpkg_deb: requires the Debian package tools used by package tests",
+    "needs_dpkg: requires the Debian version comparison tool",
+    "needs_docker: requires a working Docker daemon for container tests",
+    "needs_cargo: requires the Rust toolchain to build an integration probe",
+    "needs_aptly: requires aptly for package repository integration tests",
+    "needs_backup_container: requires the opt-in PostgreSQL backup container lane",
+    "postgres: requires the explicit PostgreSQL test service configured by the test",
 ]

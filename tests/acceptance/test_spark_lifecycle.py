@@ -2950,9 +2950,10 @@ class SparkLifecycle:
                 check,
             )
             responses.append(response)
-        if responses[0] != responses[1]:
+        first_response, second_response = responses
+        if first_response != second_response:
             raise LifecycleError("synthetic canary response is not deterministic")
-        return hashlib.sha256(_canonical(responses[0])).hexdigest()
+        return hashlib.sha256(_canonical(first_response)).hexdigest()
 
     @staticmethod
     def _serial_proof(serial: str) -> str:

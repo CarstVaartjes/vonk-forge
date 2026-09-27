@@ -18,7 +18,7 @@ import sys
 import tarfile
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import quote
 
 import httpx
@@ -41,6 +41,12 @@ DEFAULT_SLUG = "qwen3-8-flash-next-nvfp4-sglang-dual"
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _skip_or_fail_in_ci(reason: str) -> NoReturn:
+    if os.environ.get("CI", "").lower() == "true":
+        pytest.fail(f"required acceptance prerequisite is missing in CI: {reason}")
+    pytest.skip(reason)
+
+
 def _path(name: str, default: str | None = None) -> Path | None:
     value = os.environ.get(name, default)
     return Path(value).expanduser().resolve() if value else None
@@ -50,12 +56,12 @@ def _package_inputs() -> tuple[dict[str, Any], dict[str, Any], Path]:
     index_path = _path("VONK_ACCEPTANCE_PACKAGE_INDEX")
     package_root = _path("VONK_ACCEPTANCE_PACKAGE_ROOT")
     if index_path is None or package_root is None:
-        pytest.skip(
+        _skip_or_fail_in_ci(
             "set VONK_ACCEPTANCE_PACKAGE_ROOT and VONK_ACCEPTANCE_PACKAGE_INDEX "
             "to the exact frozen producer package fixture"
         )
     if not index_path.is_file() or not package_root.is_dir():
-        pytest.skip("producer package index/archive fixture is unavailable")
+        _skip_or_fail_in_ci("producer package index/archive fixture is unavailable")
     try:
         index = json.loads(index_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -235,7 +241,7 @@ def test_recipe_producer_output_is_fresh_before_controller_sync() -> None:
     library_root = _path("VONK_ACCEPTANCE_LIBRARY_ROOT", "/opt/vonk-forge-recipes")
     producer = library_root / "tools/build-catalog-index" if library_root else None
     if producer is None or not producer.is_file():
-        pytest.skip("recipe producer checkout is unavailable")
+        _skip_or_fail_in_ci("recipe producer checkout is unavailable")
     result = subprocess.run(
         [sys.executable, os.fspath(producer), "--check"],
         check=False,
@@ -259,7 +265,7 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         or token_path is None
         or not token_path.is_file()
     ):
-        pytest.skip(
+        _skip_or_fail_in_ci(
             "set VONK_ACCEPTANCE_CONTROL_URL, VONK_ACCEPTANCE_PACKAGE_INDEX_URL "
             "and VONK_ACCEPTANCE_TOKEN_FILE for connected Controller checks"
         )
