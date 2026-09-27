@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -10,7 +12,14 @@ from vonk_control.fleet_profiles import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileService,
 )
-from vonk_control.models import AgentNode, Base, FleetProfileApplication
+from vonk_control.models import (
+    AgentNode,
+    Base,
+    CatalogDocumentRevision,
+    FleetProfileApplication,
+    FleetProfileSelection,
+)
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .test_fleet_profiles import (
     _assessment,
@@ -21,6 +30,11 @@ from .test_fleet_profiles import (
     _SwitchAdapter,
     _uuid,
 )
+from .test_fleet_profiles_canonical import (
+    NODE_1,
+    RECIPE_REVISION_ID,
+)
+from .test_fleet_profiles_canonical import _seed as _seed_canonical
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=UTC)
 
@@ -77,7 +91,7 @@ def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edi
         FleetProfileInput(name="Idle fleet", assignments=[]), actor="admin"
     )
     preview = service.preview(profile.id)
-    assert preview.allowed is True
+    assert preview.allowed is True, preview.reasons
     accepted = service.apply(
         profile.id,
         plan_digest=preview.plan_digest,
@@ -302,10 +316,10 @@ def test_failed_newer_load_stays_selected_instead_of_falling_back_to_success(
         restarted_engine.dispose()
 
 
-def test_pending_selected_profile_resumes_from_snapshot_after_restart_and_edit(
+def test_pending_profile_edit_is_rejected_before_selection_after_restart(
     postgres_engine: Engine,
 ) -> None:
-    """A restart retries the accepted assignment even if its saved draft changes."""
+    """A parked load is not selected and cannot survive a changed review."""
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -323,7 +337,8 @@ def test_pending_selected_profile_resumes_from_snapshot_after_restart_and_edit(
     assert accepted.state == "waiting-for-operator"
     assert accepted.progress.admission_pending is True
 
-    # The accepted load is the desired fact. Later autosaves do not replace it.
+    # The request is still pending admission, so the saved draft can make its
+    # reviewed plan stale before it becomes selected.
     service.update(
         profile.id,
         FleetProfileInput(
@@ -340,19 +355,92 @@ def test_pending_selected_profile_resumes_from_snapshot_after_restart_and_edit(
         restarted = _service(restarted_sessions)
         assert restarted.tick() is True
 
-        selected = _selected(restarted_engine)
-        assert selected["application_id"] == accepted.id
-        assert selected["profile_revision"] == 1
         resumed = restarted.application(accepted.id)
-        assert resumed.state in {"queued", "running"}, resumed.status_reason
+        assert resumed.state == "cancelled", resumed.status_reason
         assert resumed.progress.admission_pending is False
-        assert resumed.progress.intended_profile is not None
-        assert [item.id for item in resumed.progress.intended_profile.assignments] == [
-            item.id for item in preview.resolved_assignments
-        ]
-        assert restarted.get(profile.id).loaded_revision == 1
+        assert "profile changed" in (resumed.status_reason or "").lower()
+        with restarted_sessions() as session:
+            assert session.get(FleetProfileSelection, 1) is None
     finally:
         restarted_engine.dispose()
+
+
+def test_pending_recipe_head_change_is_rejected_before_workload_fencing(
+    postgres_engine: Engine,
+) -> None:
+    """A stale pending review cannot cancel workloads before retry rejects it."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _seed_canonical(sessions)
+    recipe_revision_id = RECIPE_REVISION_ID
+    adapter = _BusyOnceAdapter()
+    service = _service(sessions, adapter)
+    profile_input = _input(recipe_revision_id)
+    profile_input = profile_input.model_copy(
+        update={
+            "assignments": [
+                profile_input.assignments[0].model_copy(update={"spark_ids": [NODE_1]})
+            ]
+        }
+    )
+    profile = service.create(profile_input, actor="test")
+    preview = service.preview(profile.id)
+    assert preview.allowed is True, preview.reasons
+    pending = service._create_pending_application(
+        preview,
+        request_key=_uuid(884),
+        actor="test",
+        operation_kind="fleet-profile.apply",
+        select_profile=True,
+    )
+    pending = service._defer_pending_application(
+        pending.id,
+        "temporary test admission block",
+        retry_delay=timedelta(0),
+    )
+    assert pending.progress.admission_pending is True
+
+    with sessions.begin() as session:
+        previous = session.get(CatalogDocumentRevision, recipe_revision_id)
+        assert previous is not None
+        document = RecipeDefinition.model_validate_json(json.dumps(previous.document))
+        document = document.model_copy(
+            update={
+                "metadata": document.metadata.model_copy(
+                    update={"title": "Updated recipe head"}
+                )
+            }
+        )
+        session.add(
+            CatalogDocumentRevision(
+                id=str(uuid4()),
+                document_id=previous.document_id,
+                kind="recipe",
+                publisher=previous.publisher,
+                slug=previous.slug,
+                revision_number=2,
+                schema_version=2,
+                state="active",
+                document=document.model_dump(mode="json"),
+                content_digest=content_sha256(document),
+                execution_key="d" * 64,
+                created_by="test",
+                created_at=NOW,
+            )
+        )
+
+    assert service.tick() is True
+
+    resumed = service.application(pending.id)
+    assert resumed.state == "cancelled"
+    assert "recipe head changed" in (resumed.status_reason or "").lower()
+    assert adapter.cancellations == []
+    with sessions() as session:
+        assert session.get(FleetProfileSelection, 1) is None
+        node = session.get(AgentNode, NODE_1)
+        assert node is not None
+        assert node.workload_intent_ordinal == 0
 
 
 def test_retry_uses_selected_snapshot_after_saved_profile_edit(

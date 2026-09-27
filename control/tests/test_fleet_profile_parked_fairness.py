@@ -1,4 +1,4 @@
-"""A parked parent remains observable while unrelated profile work is active."""
+"""A newer whole-fleet selection supersedes an older parked application."""
 
 from datetime import timedelta
 
@@ -20,7 +20,7 @@ from .test_fleet_profiles import (
 )
 
 
-def test_active_profile_cannot_starve_a_recovered_parked_parent(
+def test_new_whole_fleet_profile_supersedes_a_parked_parent(
     postgres_engine: Engine,
 ) -> None:
     Base.metadata.create_all(postgres_engine)
@@ -72,22 +72,14 @@ def test_active_profile_cannot_starve_a_recovered_parked_parent(
     with sessions.begin() as session:
         parked_row = session.get(FleetProfileApplication, parked.id)
         assert parked_row is not None
-        # Keep the unrelated active application first in the runnable queue;
-        # apply this queue-order fixture only after logical receipt chronology
-        # has been assigned by the service.
-        parked_row.created_at = active.created_at + timedelta(seconds=1)
+        # Keep the newly selected application first in the runnable queue.
+        # The parked row remains older selection authority regardless of this
+        # observation-order fixture.
+        parked_row.created_at = active.created_at + timedelta(microseconds=1)
     assert service.tick()
     active_child_id = service.application(active.id).current_operation_id
     assert active_child_id is not None
-    assert service.application(parked.id).state == "waiting-for-operator"
-
-    adapter._operations[parked_child_id] = [
-        FleetProfileChildOperation(id=parked_child_id, state="running")
-    ]
-    active_observations = adapter._states[active_child_id]
-
-    assert service.tick()
-
-    assert service.application(parked.id).state == "running"
+    superseded = service.application(parked.id)
+    assert superseded.state == "cancelled"
+    assert "replaced" in (superseded.status_reason or "")
     assert service.application(active.id).state == "running"
-    assert adapter._states[active_child_id] == active_observations + 1

@@ -466,7 +466,7 @@ def _newer_profile_intent_overlaps(
             candidate_order = _application_order_key(session, candidate)
         except FleetProfileConflict:
             continue
-        if progress.intended_profile is None:
+        if progress.admission_pending or progress.intended_profile is None:
             continue
         if candidate_order <= order:
             continue
@@ -2709,6 +2709,39 @@ class FleetProfileService:
                 "persisted Fleet profile choices are invalid"
             ) from error
 
+    def _validate_draft_review_identity(
+        self,
+        session: Session,
+        profile: FleetProfile,
+        *,
+        profile_digest: str,
+        assignments: tuple[FleetProfileAssignment, ...],
+    ) -> None:
+        """Recheck the saved draft and exact recipe heads bound by a review."""
+
+        if _digest(_profile_document(profile)) != profile_digest:
+            raise FleetProfileStalePlanConflict(
+                "Fleet profile changed during application admission; review again"
+            )
+        assignment_by_id = {item.id: item for item in assignments}
+        choices = self._choices(profile)
+        if set(assignment_by_id) != {_choice_id(choice) for choice in choices}:
+            raise FleetProfileStalePlanConflict(
+                "Profile assignment set changed during admission; review again"
+            )
+        for choice in choices:
+            document_id, revision_id = self._recipe_identity(
+                session, choice.recipe_selector
+            )
+            assignment = assignment_by_id[_choice_id(choice)]
+            if (
+                assignment.recipe_id != document_id
+                or assignment.recipe_revision_id != revision_id
+            ):
+                raise FleetProfileStalePlanConflict(
+                    "Profile recipe head changed during admission; review again"
+                )
+
     def _execution_assignments(
         self, session: Session, row: FleetProfile
     ) -> tuple[FleetProfileAssignment, ...]:
@@ -3701,6 +3734,8 @@ class FleetProfileService:
                 if pending.id == excluded_application_id:
                     continue
                 try:
+                    if _persisted_profile_progress(pending).admission_pending:
+                        continue
                     _pending_plan = _persisted_profile_plan(pending)
                 except FleetProfileConflict:
                     # The step list is unreadable, so the declared frozen
@@ -3937,6 +3972,8 @@ class FleetProfileService:
             if pending.id == excluded_application_id:
                 continue
             try:
+                if _persisted_profile_progress(pending).admission_pending:
+                    continue
                 plan = _persisted_profile_plan(pending)
                 members = {node_id for step in plan.steps for node_id in step.node_ids}
             except FleetProfileConflict:
@@ -4108,6 +4145,11 @@ class FleetProfileService:
                 # path changes this to waiting-for-operator before returning.
                 state="queued",
                 plan=pending_preview.model_dump(mode="json"),
+                selection_generation=(
+                    selection_precondition.generation
+                    if selection_precondition is not None
+                    else None
+                ),
                 current_step=0,
                 current_operation_id=None,
                 progress=FleetProfileApplicationProgress(
@@ -4130,35 +4172,8 @@ class FleetProfileService:
             )
             session.add(row)
             session.flush()
-            generation: int | None = None
-            if selection_precondition is None and select_profile:
-                if preview.profile_revision is None:
-                    raise FleetProfileConflict(
-                        "Selected profile revision is unavailable"
-                    )
-                generation = _set_selected_profile(
-                    session,
-                    profile_id=preview.profile_id,
-                    profile_revision=preview.profile_revision,
-                    application_id=row.id,
-                    node_ids=preview.scope.node_ids,
-                    now=now,
-                )
-            elif selection_precondition is not None:
-                generation = _replace_selected_profile_roster(
-                    session,
-                    expected_generation=selection_precondition.generation,
-                    expected_application_id=selection_precondition.application_id,
-                    expected_roster_digest=selection_precondition.roster_digest,
-                    profile_id=preview.profile_id,
-                    profile_revision=selection_precondition.profile_revision,
-                    application_id=row.id,
-                    node_ids=preview.scope.node_ids,
-                    now=now,
-                )
-            if generation is not None:
-                row.selection_generation = generation
-                session.flush()
+            # Pending applications are not authority. In particular, keeping
+            # the prior selection in place makes failed admission cleanup FK-safe.
             return self._application_view(row)
 
     def _defer_pending_application(
@@ -4252,9 +4267,12 @@ class FleetProfileService:
                         raise _FleetProfileSupersededIntentConflict(
                             "Selected Fleet profile was replaced before admission resumed"
                         )
-                elif _digest(_profile_document(profile)) != plan.profile_digest:
-                    raise FleetProfileStalePlanConflict(
-                        "Pending profile intent is stale before workload fencing"
+                else:
+                    self._validate_draft_review_identity(
+                        session,
+                        profile,
+                        profile_digest=plan.profile_digest,
+                        assignments=tuple(plan.resolved_assignments),
                     )
                 acquire_admission_keys(
                     session,
@@ -4517,6 +4535,12 @@ class FleetProfileService:
             existing_progress = (
                 _persisted_profile_progress(existing) if existing is not None else None
             )
+            pending_roster_reconciliation = bool(
+                existing is not None
+                and existing_progress is not None
+                and existing_progress.admission_pending
+                and existing.selection_generation is not None
+            )
             selected_application = bool(
                 existing is not None and existing.selection_generation is not None
             )
@@ -4572,13 +4596,17 @@ class FleetProfileService:
                     FleetProfileSelection, 1, with_for_update={"nowait": True}
                 )
                 selection_source = (
-                    existing
+                    session.get(FleetProfileApplication, selection.application_id)
+                    if pending_roster_reconciliation and selection is not None
+                    else existing
                     if existing is not None
                     and existing.selection_generation is not None
                     else retry_parent
                 )
                 selection_source_progress = (
-                    existing_progress
+                    _persisted_profile_progress(selection_source)
+                    if selection_source is not None and selection_source is not existing
+                    else existing_progress
                     if selection_source is existing
                     else retry_parent_progress
                 )
@@ -4586,6 +4614,11 @@ class FleetProfileService:
                     selection is None
                     or selection_source is None
                     or selection_source_progress is None
+                    or (
+                        pending_roster_reconciliation
+                        and existing is not None
+                        and existing.selection_generation != selection.generation
+                    )
                     or not self._application_is_current_selection(
                         session, selection_source, selection_source_progress
                     )
@@ -4596,35 +4629,16 @@ class FleetProfileService:
                 selected_generation = selection.generation
                 selected_application_id = selection.application_id
                 selected_roster_digest = selection.roster_digest
-            if (
-                not selected_application
-                and _digest(_profile_document(profile)) != preview.profile_digest
-            ):
-                raise FleetProfileStalePlanConflict(
-                    "Fleet profile changed during application admission; review again"
-                )
             # Use the reviewed snapshot. Resolving through the cache here both
             # substituted newer choices and performed storage work under SQL locks.
             frozen_assignments = tuple(preview.resolved_assignments)
             if not selected_application:
-                assignment_by_id = {item.id: item for item in frozen_assignments}
-                choices = self._choices(profile)
-                if set(assignment_by_id) != {_choice_id(choice) for choice in choices}:
-                    raise FleetProfileStalePlanConflict(
-                        "Profile assignment set changed during admission; review again"
-                    )
-                for choice in choices:
-                    document_id, revision_id = self._recipe_identity(
-                        session, choice.recipe_selector
-                    )
-                    assignment = assignment_by_id[_choice_id(choice)]
-                    if (
-                        assignment.recipe_id != document_id
-                        or assignment.recipe_revision_id != revision_id
-                    ):
-                        raise FleetProfileStalePlanConflict(
-                            "Profile recipe head changed during admission; review again"
-                        )
+                self._validate_draft_review_identity(
+                    session,
+                    profile,
+                    profile_digest=preview.profile_digest,
+                    assignments=frozen_assignments,
+                )
             self._reserve_preview_assets(session, preview, now=now)
             stop_ids = tuple(
                 sorted(
@@ -4681,7 +4695,10 @@ class FleetProfileService:
                     or intended.profile_digest != preview.profile_digest
                     or tuple(intended.scope.node_ids) != frozen_nodes
                     or tuple(intended.assignments) != tuple(frozen_assignments)
-                    or intended.reviewed_plan_digest != reviewed_plan_digest
+                    or (
+                        retry_of_application_id is None
+                        and intended.reviewed_plan_digest != reviewed_plan_digest
+                    )
                     or (
                         retry_of_application_id is None
                         and intended.reviewed_application_id != application_id
@@ -4847,6 +4864,28 @@ class FleetProfileService:
                 if reviewed_application is not None
                 else (_aware(created_at), application_id)
             )
+            if not selected_application:
+                current_selection = session.get(
+                    FleetProfileSelection, 1, with_for_update={"nowait": True}
+                )
+                current_selected_application = (
+                    session.get(
+                        FleetProfileApplication, current_selection.application_id
+                    )
+                    if current_selection is not None
+                    else None
+                )
+                if (
+                    current_selection is not None
+                    and current_selected_application is not None
+                    and current_selected_application.selection_generation
+                    == current_selection.generation
+                    and _application_order_key(session, current_selected_application)
+                    > intent_order
+                ):
+                    raise _FleetProfileSupersededIntentConflict(
+                        "Profile load was superseded by a newer accepted profile"
+                    )
             if _newer_profile_intent_overlaps(session, intent_order, fenced_nodes):
                 raise _FleetProfileSupersededIntentConflict(
                     "Profile intent was superseded by a later accepted overlapping request"
@@ -4921,6 +4960,21 @@ class FleetProfileService:
                         prior_application.updated_at = now
                         continue
                     prior_ordinal = prior_progress.workload_intent_ordinal
+                    if prior_progress.admission_pending:
+                        # A parked receipt has not passed admission and owns no
+                        # selected profile or workload order. Keep a newer one
+                        # parked; an older one is superseded by this acceptance.
+                        if prior_order > intent_order:
+                            continue
+                        self._set_application_state(
+                            session, prior_application, "cancelled"
+                        )
+                        prior_application.status_reason = (
+                            "Profile order was replaced before admission by a later "
+                            "scoped intent"
+                        )
+                        prior_application.updated_at = now
+                        continue
                     if (
                         prior_order > intent_order
                         and prior_progress.intended_profile is not None
@@ -4932,16 +4986,6 @@ class FleetProfileService:
                         raise _FleetProfileSupersededIntentConflict(
                             "Profile intent was superseded by a later accepted overlapping request"
                         )
-                    if prior_progress.admission_pending:
-                        self._set_application_state(
-                            session, prior_application, "cancelled"
-                        )
-                        prior_application.status_reason = (
-                            "Profile order was replaced before admission by a later "
-                            "scoped intent"
-                        )
-                        prior_application.updated_at = now
-                        continue
                     if (
                         prior_ordinal is None
                         or prior_ordinal >= workload_intent_ordinal
@@ -5065,6 +5109,49 @@ class FleetProfileService:
             if current_scope != frozen_nodes:
                 raise FleetProfileStalePlanConflict(
                     "Profile fleet scope changed during admission; review again"
+                )
+            if pending_roster_reconciliation:
+                if (
+                    selected_generation is None
+                    or selected_application_id is None
+                    or selected_roster_digest is None
+                ):
+                    raise FleetProfileStalePlanConflict(
+                        "Selected profile changed before roster admission"
+                    )
+                row.selection_generation = _replace_selected_profile_roster(
+                    session,
+                    expected_generation=selected_generation,
+                    expected_application_id=selected_application_id,
+                    expected_roster_digest=selected_roster_digest,
+                    profile_id=preview.profile_id,
+                    profile_revision=(
+                        preview.profile_revision
+                        if preview.profile_revision is not None
+                        else profile.revision
+                    ),
+                    application_id=row.id,
+                    node_ids=frozen_nodes,
+                    now=now,
+                )
+            elif (
+                existing is not None
+                and existing_progress is not None
+                and existing_progress.admission_pending
+                and existing.selection_generation is None
+                and operation_kind == "fleet-profile.apply"
+            ):
+                if preview.profile_revision is None:
+                    raise FleetProfileConflict(
+                        "Selected profile revision is unavailable"
+                    )
+                row.selection_generation = _set_selected_profile(
+                    session,
+                    profile_id=preview.profile_id,
+                    profile_revision=preview.profile_revision,
+                    application_id=row.id,
+                    node_ids=frozen_nodes,
+                    now=now,
                 )
             session.flush()
             return self._application_view(row)
