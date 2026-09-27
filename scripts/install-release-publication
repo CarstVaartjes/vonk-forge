@@ -894,6 +894,9 @@ def assemble(arguments: argparse.Namespace) -> str:
             f"{endpoint_prefix}spark": _render_channel_endpoint(
                 "spark", channel, origin, signing_public_key
             ),
+            f"{endpoint_prefix}vonkctl": _render_channel_endpoint(
+                "cli", channel, origin, signing_public_key
+            ),
         }
         for key, content in sorted(endpoints.items()):
             _install_object(objects, key, content, 0o755)

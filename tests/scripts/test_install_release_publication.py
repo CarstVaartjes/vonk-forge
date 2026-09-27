@@ -423,7 +423,7 @@ def wait_for_peer(kind: str, key: str) -> None:
     ) or (
         kind == "acceptance" and "/acceptance/" in key
     ) or (
-        kind == "endpoint" and key in {"nas", "spark"}
+        kind == "endpoint" and key in {"nas", "spark", "vonkctl"}
     )
     if not selected:
         return
@@ -1822,7 +1822,8 @@ def test_rclone_promotion_parallelizes_reads_and_phase_groups_before_pointer(
         )
     )
     operations = [json.loads(line) for line in promoted.stdout.splitlines()]
-    assert [operation["phase"] for operation in operations[-3:]] == [
+    assert [operation["phase"] for operation in operations[-4:]] == [
+        "endpoint",
         "endpoint",
         "endpoint",
         "pointer",
@@ -1869,7 +1870,8 @@ def test_promotion_publishes_signed_acceptance_receipt_before_channel_pointer(
 
     assert result.returncode == 0, result.stderr
     operations = [json.loads(line) for line in result.stdout.splitlines()]
-    assert [operation["phase"] for operation in operations[-3:]] == [
+    assert [operation["phase"] for operation in operations[-4:]] == [
+        "endpoint",
         "endpoint",
         "endpoint",
         "pointer",
@@ -2052,6 +2054,7 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
     } == {
         "nas",
         "spark",
+        "vonkctl",
     }
     assert plan["objects"][-1]["key"] == "artifacts/stable/current.manifest"
 
@@ -2158,9 +2161,10 @@ def test_development_uses_the_same_signed_channel_flow_under_dev_paths(
         entry["key"] for entry in plan["objects"] if entry["phase"] == "endpoint"
     }
 
-    assert endpoint_keys == {"dev/nas", "dev/spark"}
+    assert endpoint_keys == {"dev/nas", "dev/spark", "dev/vonkctl"}
     assert plan["objects"][-1]["key"] == "artifacts/dev/current.manifest"
     assert b"channel='dev'" in (publication / "objects/dev/nas").read_bytes()
+    assert b"kind='cli'" in (publication / "objects/dev/vonkctl").read_bytes()
 
 
 @pytest.mark.parametrize(
@@ -2314,8 +2318,9 @@ def test_promotion_writes_signed_atomic_manifest_after_acceptance_and_static_end
         "key": "artifacts/stable/current.manifest",
         "phase": "pointer",
     }
-    assert all(item["phase"] == "acceptance" for item in operations[:-3])
-    assert [item["phase"] for item in operations[-3:]] == [
+    assert all(item["phase"] == "acceptance" for item in operations[:-4])
+    assert [item["phase"] for item in operations[-4:]] == [
+        "endpoint",
         "endpoint",
         "endpoint",
         "pointer",
@@ -2374,6 +2379,9 @@ def test_static_endpoints_do_not_change_between_release_generations(
     assert (first / "objects/nas").read_bytes() == (second / "objects/nas").read_bytes()
     assert (first / "objects/spark").read_bytes() == (
         second / "objects/spark"
+    ).read_bytes()
+    assert (first / "objects/vonkctl").read_bytes() == (
+        second / "objects/vonkctl"
     ).read_bytes()
 
 
@@ -2569,6 +2577,72 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
     )
     assert rejected.returncode != 0
     assert "signature is invalid" in rejected.stderr
+    assert not receipt.exists()
+
+
+def test_public_cli_endpoint_verifies_the_signed_wheel_before_uv_install(
+    tmp_path: Path,
+) -> None:
+    inputs = _inputs(tmp_path / "inputs")
+    publication = _assemble(tmp_path / "inputs", inputs)
+    destination = tmp_path / "public"
+    published = _publish_accepted(publication, destination, tmp_path / "acceptance")
+    assert published.returncode == 0, published.stderr
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    curl = commands / "curl"
+    curl.write_text(
+        "#!/bin/sh\nset -eu\ndestination=\nurl=\n"
+        "while [ $# -gt 0 ]; do case $1 in -o) destination=$2; shift 2;; -*) shift;; *) url=$1; shift;; esac; done\n"
+        'path=${url#https://install.example.test/}\ncp "$VONK_TEST_PUBLIC/$path" "$destination"\n'
+    )
+    curl.chmod(0o755)
+    receipt = tmp_path / "uv-receipt"
+    uv = commands / "uv"
+    uv.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" > "$VONK_TEST_UV_RECEIPT"\n')
+    uv.chmod(0o755)
+    environment = {
+        **os.environ,
+        "PATH": f"{commands}:{os.environ['PATH']}",
+        "VONK_INSTALL_BASE_URL": "https://install.example.test",
+        "VONK_TEST_PUBLIC": str(destination),
+        "VONK_TEST_UV_RECEIPT": str(receipt),
+        "HOME": str(tmp_path / "home"),
+    }
+
+    result = subprocess.run(
+        ["sh", destination / "vonkctl"],
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "vonkctl 1.2.3 is installed" in result.stdout
+    assert "tool install --force" in receipt.read_text()
+    signing_public_key = inputs["signing_public_key"]
+    assert isinstance(signing_public_key, Path)
+    assert (
+        tmp_path / "home/.config/vonkforge/installer-public.pem"
+    ).read_bytes() == signing_public_key.read_bytes()
+    receipt.unlink()
+    cli_artifact = next(destination.glob("artifacts/stable/releases/*/cli/*.whl"))
+    cli_artifact.write_bytes(cli_artifact.read_bytes() + b"tampered")
+    rejected = subprocess.run(
+        ["sh", destination / "vonkctl"],
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert rejected.returncode != 0
+    assert (
+        "CLI wheel size is invalid" in rejected.stderr
+        or "CLI wheel digest is invalid" in rejected.stderr
+    )
     assert not receipt.exists()
 
 

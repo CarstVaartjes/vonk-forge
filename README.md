@@ -105,16 +105,33 @@ start `docker-compose.yaml`. Keep `.env` and `secrets/` beside it.
 ### 3. Add a Spark
 
 Open the controller's private Web address, go to **Fleet**, and create a one-use
-enrollment grant. Run the generated command on the Spark. It has this shape:
+enrollment grant with **Enroll Spark**. Enter a display name, then run the
+generated command on the Spark before the displayed expiry. The installer asks
+for the one-use pairing token shown with the command. It has this shape:
 
 ```bash
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
 ```
 
 Use the stable LAN address of your laptop, NAS, or server. The installer verifies
 the immutable release, enrolls the native agent, writes the required agent and
 firewall configuration, and checks service health. Repeat with a new one-use
 grant for each additional Spark.
+
+### Install `vonkctl`
+
+Install the latest accepted stable CLI without cloning the repository. This
+requires `curl`, `openssl`, Python 3, and `uv` on your workstation. The CLI
+requires Python 3.14 or newer, which `uv` can manage for its tool environment:
+
+```sh
+curl -fsSL https://install.vonkforge.ai/vonkctl | sh
+```
+
+The installer verifies the signed channel and immutable release, then checks
+the wheel's digest, size, and build identity before `uv` installs it. See the
+[`vonkctl` runbook](docs/runbooks/vonkctl.md) for development-channel and
+verification details.
 
 The same controller command prepares upgrades while preserving local identity
 and secrets. Running the Spark installer on an enrolled node performs an in-place
