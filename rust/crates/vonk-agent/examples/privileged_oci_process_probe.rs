@@ -41,6 +41,7 @@ fn request_root() -> String {
 
 const AUTH_SEED: [u8; 32] = [42; 32];
 const PROBE_RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
+const PROBE_INSTALLATION_ID: &str = "40000000-0000-4000-8000-000000000001";
 
 fn main() {
     let mode = env::args().nth(1).expect("mode setup|import|start");
@@ -281,14 +282,16 @@ fn production_start_arguments() -> (Vec<String>, RecipeStartRequest) {
         image_archive: PathBuf::from(format!(
             "/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"
         )),
-        model_root: PathBuf::from("/var/lib/vonk-forge-agent/installations/proof-install/models"),
+        model_root: PathBuf::from(format!(
+            "/var/lib/vonk-forge-agent/installations/{PROBE_INSTALLATION_ID}/models"
+        )),
         input_root: None,
         output_root: PathBuf::from(format!(
             "/var/lib/vonk-forge-agent/runs/{PROBE_RUN_ID}/outputs"
         )),
-        cache_root: PathBuf::from(
-            "/var/lib/vonk-forge-agent/installations/proof-install/runtime-cache",
-        ),
+        cache_root: PathBuf::from(format!(
+            "/var/lib/vonk-forge-agent/installations/{PROBE_INSTALLATION_ID}/runtime-cache"
+        )),
         runtime_spec: PathBuf::from(format!(
             "/var/lib/vonk-forge-agent/run-metadata/{PROBE_RUN_ID}/runtime.json"
         )),
@@ -303,7 +306,7 @@ fn typed_start_plan(plan: &CompiledExecutionPlan) -> RecipeStartRequest {
     serde_json::from_value(json!({
         "schema_version": 2,
         "run_id": PROBE_RUN_ID,
-        "installation_id": "40000000-0000-4000-8000-000000000001",
+        "installation_id": PROBE_INSTALLATION_ID,
         "recipe_revision_id": "40000000-0000-4000-8000-000000000002",
         "recipe_content_sha256": plan.identity.recipe_revision_sha256,
         "mapping_id": "40000000-0000-4000-8000-000000000007",

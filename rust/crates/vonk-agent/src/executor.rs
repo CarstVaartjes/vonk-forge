@@ -649,9 +649,9 @@ fn exact_stop_plan_from_claim(
                 job.mapping_id,
                 job.mapping_generation,
                 job.plan_digest.clone(),
-                u64::from(placement.rank),
+                placement.rank,
                 placement.role.clone(),
-                u64::from(placement.world_size),
+                placement.world_size,
                 job.compiled_execution_plan.clone(),
             )
         }

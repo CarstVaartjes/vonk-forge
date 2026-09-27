@@ -1447,7 +1447,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .as_ref()
                     .ok_or(OperationError::InvalidOperation)?;
                 validate_runtime_stop_plan(plan)?;
-                if request.arguments.len() != 0
+                if !request.arguments.is_empty()
                     || request.installation_id.is_some()
                     || request.reconciliation_identity.is_some()
                     || request.start_plan.is_some()
@@ -2441,10 +2441,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             if fields != expected {
                 return Err(OperationError::InvalidArtifact);
             }
-            return if validated.job_timeout_seconds.is_some() {
-                Ok(RuntimeStartLaunch::Job {
-                    timeout_seconds: validated.job_timeout_seconds.unwrap(),
-                })
+            return if let Some(timeout_seconds) = validated.job_timeout_seconds {
+                Ok(RuntimeStartLaunch::Job { timeout_seconds })
             } else if validated.detached {
                 Ok(RuntimeStartLaunch::Service)
             } else {
@@ -5657,31 +5655,35 @@ mod tests {
         }
     }
 
-    fn runtime_request_identity(
-        job_id: &uuid::Uuid,
-        operation_id: &uuid::Uuid,
-        fence: &uuid::Uuid,
+    struct RuntimeRequestTestParts {
         action: HostRuntimeAction,
         arguments: Vec<String>,
         run_generation: u32,
         start_plan: Option<RecipeStartPayload>,
         stop_plan: Option<RecipeStopPayload>,
+    }
+
+    fn runtime_request_identity(
+        job_id: &uuid::Uuid,
+        operation_id: &uuid::Uuid,
+        fence: &uuid::Uuid,
+        parts: RuntimeRequestTestParts,
     ) -> HostRuntimeRequest {
         HostRuntimeRequest {
             schema_version: 1,
-            action,
+            action: parts.action,
             job_id: *job_id,
             operation_id: *operation_id,
             attempt: 1,
             fence: *fence,
-            arguments,
+            arguments: parts.arguments,
             observation: None,
             installation_id: None,
             reconciliation_identity: None,
             job_plan: None,
-            run_generation: Some(run_generation),
-            start_plan,
-            stop_plan,
+            run_generation: Some(parts.run_generation),
+            start_plan: parts.start_plan,
+            stop_plan: parts.stop_plan,
         }
     }
 
@@ -5710,11 +5712,13 @@ mod tests {
             &job_id,
             &operation_id,
             &fence,
-            HostRuntimeAction::Start,
-            arguments,
-            start_plan.run_generation,
-            Some(start_plan.clone()),
-            None,
+            RuntimeRequestTestParts {
+                action: HostRuntimeAction::Start,
+                arguments,
+                run_generation: start_plan.run_generation,
+                start_plan: Some(start_plan.clone()),
+                stop_plan: None,
+            },
         );
         let plan_sha256 = hex_sha256(&canonical_json(&start_plan).unwrap());
         let grant = RuntimeRequestGrantBinding {
@@ -5793,11 +5797,13 @@ mod tests {
             &job_id,
             &operation_id,
             &fence,
-            HostRuntimeAction::Start,
-            hook_arguments,
-            hook_plan.run_generation,
-            Some(hook_plan.clone()),
-            None,
+            RuntimeRequestTestParts {
+                action: HostRuntimeAction::Start,
+                arguments: hook_arguments,
+                run_generation: hook_plan.run_generation,
+                start_plan: Some(hook_plan.clone()),
+                stop_plan: None,
+            },
         );
         let hook_sha256 = hex_sha256(&canonical_json(&hook_plan).unwrap());
         let hook_grant = RuntimeRequestGrantBinding {
@@ -5828,11 +5834,13 @@ mod tests {
             &job_id,
             &operation_id,
             &fence,
-            HostRuntimeAction::Stop,
-            Vec::new(),
-            stop_plan.run_generation,
-            None,
-            Some(stop_plan.clone()),
+            RuntimeRequestTestParts {
+                action: HostRuntimeAction::Stop,
+                arguments: Vec::new(),
+                run_generation: stop_plan.run_generation,
+                start_plan: None,
+                stop_plan: Some(stop_plan.clone()),
+            },
         );
         let plan_sha256 = hex_sha256(&canonical_json(&stop_plan).unwrap());
         let grant = RuntimeRequestGrantBinding {
@@ -5916,11 +5924,13 @@ mod tests {
             &job_id,
             &operation_id,
             &fence,
-            HostRuntimeAction::Stop,
-            Vec::new(),
-            hook_plan.run_generation,
-            None,
-            Some(hook_plan.clone()),
+            RuntimeRequestTestParts {
+                action: HostRuntimeAction::Stop,
+                arguments: Vec::new(),
+                run_generation: hook_plan.run_generation,
+                start_plan: None,
+                stop_plan: Some(hook_plan.clone()),
+            },
         );
         let hook_sha256 = hex_sha256(&canonical_json(&hook_plan).unwrap());
         let hook_grant = RuntimeRequestGrantBinding {
