@@ -163,7 +163,9 @@ def test_recovery_waits_for_original_active_child_and_reports_missing_child(
         recover()
 
 
-def test_retry_rejects_revoked_scope_and_changed_profile_intent(tmp_path: Path) -> None:
+def test_retry_rejects_revoked_scope_but_uses_accepted_profile_snapshot(
+    tmp_path: Path,
+) -> None:
     sessions, lifecycle, service, profile, desired, first, _child, nodes = (
         _failed_profile(tmp_path)
     )
@@ -171,7 +173,7 @@ def test_retry_rejects_revoked_scope_and_changed_profile_intent(tmp_path: Path) 
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.revoked_at = lifecycle._clock()
-    with pytest.raises(FleetProfileConflict, match="blocks"):
+    with pytest.raises(FleetProfileConflict, match="Fleet scope changed"):
         service.retry(first.id, request_key=_uuid(804), actor="admin")
 
     with sessions.begin() as session:
@@ -191,9 +193,10 @@ def test_retry_rejects_revoked_scope_and_changed_profile_intent(tmp_path: Path) 
         ),
         actor="admin",
     )
-    assert not service.retry_eligible(first.id)
-    with pytest.raises(FleetProfileConflict, match="obsolete"):
-        service.retry(first.id, request_key=_uuid(804), actor="admin")
+    assert service.retry_eligible(first.id)
+    retry = service.retry(first.id, request_key=_uuid(804), actor="admin")
+    assert retry.retry_of_application_id == first.id
+    assert retry.profile_digest == first.profile_digest
 
 
 def test_repeated_idle_loads_preserve_distinct_noop_receipts(tmp_path: Path) -> None:
@@ -252,8 +255,8 @@ def test_intent_checks_do_not_resolve_storage_inside_coordination(tmp_path: Path
         assert saved is not None
         saved.name = "New saved intent"
         saved.revision += 1
-        assert service._superseding_intent(session, application, progress)
-        assert not service._retry_eligible(session, application)
+        assert not service._superseding_intent(session, application, progress)
+        assert service._retry_eligible(session, application)
 
 
 def _park_exhausted_application(
@@ -325,7 +328,7 @@ def test_new_intent_supersedes_a_parked_exhausted_application(tmp_path: Path) ->
     assert "replaced by a later scoped intent" in (ended.status_reason or "")
 
 
-def test_a_changed_profile_cancels_its_own_parked_application_on_tick(
+def test_a_changed_saved_draft_does_not_cancel_accepted_parked_application(
     tmp_path: Path,
 ) -> None:
     """A parked order is revisited once the saved profile it bound has changed.
@@ -356,11 +359,11 @@ def test_a_changed_profile_cancels_its_own_parked_application_on_tick(
         actor="admin",
     )
 
-    assert service.tick() is True
+    assert service.tick() is False
 
     ended = service.application(first.id)
-    assert ended.state == "cancelled"
-    assert "changed profile" in (ended.status_reason or "")
+    assert ended.state == "waiting-for-operator"
+    assert "interrupted before" in (ended.status_reason or "")
 
 
 def test_pending_admission_is_not_cancelled_by_parked_child_observer(

@@ -62,6 +62,7 @@ from .host_helper import (
     HostOperation,
     HostOperationKind,
     InstallVonkDebOperation,
+    HostRuntimeRequest,
     RecipeReconciliationIdentity,
     RecipeRunObservationReceiptClaims,
     RestartUnit,
@@ -162,6 +163,14 @@ from .workload_packages import (
     workload_release_lock_schema,
 )
 
+HostRuntimeRequest.model_rebuild(
+    _types_namespace={
+        "RecipeStartPayload": RecipeStartPayload,
+        "RecipeJobRunRequest": RecipeJobRunRequest,
+        "RecipeStopPayload": RecipeStopPayload,
+    }
+)
+
 __all__ = [
     "ERROR_CODE_PATTERN",
     "MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES",
@@ -204,6 +213,7 @@ __all__ = [
     "HostHelperSignature",
     "HostOperation",
     "HostOperationKind",
+    "HostRuntimeRequest",
     "InstallVonkDebOperation",
     "InventoryRequest",
     "OciBundleMetadata",

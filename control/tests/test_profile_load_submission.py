@@ -29,6 +29,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
+    FleetProfileSelection,
     InstallationNode,
     Job,
     RecipeInstallation,
@@ -80,6 +81,10 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
     accepted = api.post(path, headers=headers, json=body)
     assert accepted.status_code == 202, accepted.text
     assert accepted.json()["request_key"] == key
+    with sessions() as session:
+        selection = session.get(FleetProfileSelection, 1)
+        assert selection is not None
+        assert selection.application_id == accepted.json()["id"]
     changed = api.put(
         "/api/profile/1",
         headers=headers,
@@ -287,6 +292,7 @@ def test_change_between_fresh_review_and_admission_refuses_load(
     )
     with sessions() as session:
         assert session.scalar(select(FleetProfileApplication)) is None
+        assert session.get(FleetProfileSelection, 1) is None
 
 
 def test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_review(

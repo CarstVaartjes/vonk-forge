@@ -4256,7 +4256,8 @@ def test_parked_start_after_observation_deadline_keeps_exact_effect_pending(
     assert service.tick() is True
 
     view = service.get(operation.operation_id)
-    assert view.state == "waiting-for-operator"
+    assert view.state == "waiting"
+    assert view.progress.state == "waiting"
     assert "start-observation-expired" in (view.status_reason or "")
     assert view.result is not None and view.result.observation_due_at is not None
     assert view.result.observation_due_at == now[0] + timedelta(seconds=60)
@@ -4267,6 +4268,25 @@ def test_parked_start_after_observation_deadline_keeps_exact_effect_pending(
     for _ in range(4):
         service.tick()
     assert service.get(operation.operation_id).state == "succeeded"
+
+
+def test_operator_wait_without_observation_deadline_is_not_auto_claimed(
+    tmp_path: Path,
+) -> None:
+    service, operation, _start_index = _parked_start_switch(tmp_path, healthy=False)
+    with service._sessions.begin() as session:
+        row = session.get(Job, operation.operation_id)
+        assert row is not None and isinstance(row.result, dict)
+        row.state = "waiting-for-operator"
+        result = dict(row.result)
+        result.pop("observation_due_at", None)
+        row.result = result
+
+    held = service.get(operation.operation_id)
+    assert held.state == "waiting-for-operator"
+    assert held.progress.state == "waiting-for-operator"
+    assert service.tick() is False
+    assert service.get(operation.operation_id).state == "waiting-for-operator"
 
 
 def test_parked_start_still_progressing_is_observed_before_final_success(
@@ -4315,7 +4335,8 @@ def test_restart_interrupted_start_keeps_exact_child_when_effect_is_uncertain(
 
     assert service.tick() is True
     view = service.get(operation.operation_id)
-    assert view.state == "waiting-for-operator"
+    assert view.state == "waiting"
+    assert view.progress.state == "waiting"
     assert view.result is not None
     assert view.result.child_operation_id == child_id
 
@@ -5157,7 +5178,7 @@ def test_parked_switch_observes_recovered_child_after_controller_restart(
     with service._sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
         assert row is not None
-        row.state = "waiting-for-operator"
+        row.state = "waiting"
     restarted = RunSwitchOperationService(
         service._sessions,
         lifecycle=service._lifecycle,

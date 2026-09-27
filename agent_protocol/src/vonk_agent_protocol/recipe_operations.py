@@ -15,7 +15,7 @@ from .contracts import (
     AgentProtocolError,
     canonical_message,
 )
-from .host_helper import RecipeReconciliationIdentity
+from .host_helper import NodeId, RecipeReconciliationIdentity
 from .wire_model import WireModel
 
 RECIPE_OPERATIONS = frozenset(
@@ -41,6 +41,7 @@ ByteCount = Annotated[int, Field(ge=0, le=16 * 1024**4)]
 PositiveByteCount = Annotated[int, Field(ge=1, le=16 * 1024**4)]
 Port = Annotated[int, Field(ge=1024, le=65535)]
 PositiveInt = Annotated[int, Field(ge=1)]
+RunGeneration = Annotated[int, Field(ge=1, le=2**31 - 1, strict=True)]
 
 
 class _StrictPayload(WireModel):
@@ -91,7 +92,7 @@ class RecipeStartPayload(_StrictPayload):
     start_deadline: str | None = Field(
         default=None, json_schema_extra={"format": "date-time"}
     )
-    run_generation: PositiveInt | None = None
+    run_generation: RunGeneration
 
     @model_validator(mode="after")
     def placement_matches(self) -> RecipeStartPayload:
@@ -161,10 +162,6 @@ class RecipeStartPayload(_StrictPayload):
             self.phase is not None or self.start_deadline is not None
         ):
             raise ValueError("single-node start phases are invalid")
-        if self.world_size == 1 and (
-            self.run_generation is None or self.run_generation < 1
-        ):
-            raise ValueError("single-node run generation is required")
         if self.phase is not None:
             try:
                 deadline = datetime.fromisoformat(self.start_deadline or "")
@@ -176,20 +173,44 @@ class RecipeStartPayload(_StrictPayload):
                 raise ValueError("start deadline must be UTC")
         if self.phase is None and self.start_deadline is not None:
             raise ValueError("start phase binding is invalid")
-        if self.phase is not None and (
-            self.start_deadline is None
-            or self.run_generation is None
-            or self.run_generation < 1
-        ):
+        if self.phase is not None and self.start_deadline is None:
             raise ValueError("start phase binding is invalid")
         return self
 
 
 class RecipeStopPayload(_StrictPayload):
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     run_id: CanonicalUuid
+    target_runtime_id: CanonicalUuid
+    run_generation: RunGeneration
+    node_id: NodeId
+    installation_id: CanonicalUuid
+    recipe_revision_id: CanonicalUuid
+    recipe_content_sha256: Digest
+    mapping_id: CanonicalUuid
+    mapping_generation: PositiveInt
     plan_digest: Digest
+    rank: Annotated[int, Field(ge=0)]
+    role: Role
+    world_size: PositiveInt
+    compiled_execution_plan: CompiledExecutionPlan
     cancel_pending_start: bool = False
+
+    @model_validator(mode="after")
+    def placement_matches(self) -> RecipeStopPayload:
+        placement = self.compiled_execution_plan.runtime.placement
+        if (self.rank, self.role, self.world_size) != (
+            placement.rank,
+            placement.role,
+            placement.world_size,
+        ):
+            raise ValueError("stop placement does not match compiled plan")
+        if (
+            self.recipe_content_sha256
+            != self.compiled_execution_plan.identity.recipe_revision_sha256
+        ):
+            raise ValueError("stop recipe digest does not match compiled plan")
+        return self
 
 
 class RecipeUninstallPayload(_StrictPayload):

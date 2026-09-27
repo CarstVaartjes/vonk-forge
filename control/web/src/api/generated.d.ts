@@ -3442,6 +3442,7 @@ export interface components {
             installation_id: string;
             /** Node Ids */
             node_ids: string[];
+            profile_stop_scope?: components["schemas"]["RunSwitchProfileStopScope"] | null;
             /** Run Id */
             run_id: string;
         };
@@ -3582,6 +3583,7 @@ export interface components {
              * @enum {string}
              */
             kind: "install" | "run" | "stop" | "cleanup";
+            profile_stop_scope?: components["schemas"]["RunSwitchProfileStopScope"] | null;
         };
         /**
          * FleetProfileVerificationResult
@@ -7604,8 +7606,11 @@ export interface components {
              * @constant
              */
             schema_version: 2;
-            /** State */
-            state: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "waiting" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
             /** Status Reason */
             status_reason?: string | null;
         };
@@ -7764,6 +7769,7 @@ export interface components {
             plan_digest: string;
             post_stop_memory_check?: components["schemas"]["ConditionalPostStopMemoryCheck"] | null;
             preparation?: components["schemas"]["RolloutPreparation"] | null;
+            profile_stop_scope?: components["schemas"]["RunSwitchProfileStopScope"] | null;
             /** Recipe Build Id */
             recipe_build_id: string | null;
             /** Recipe Capabilities */
@@ -7821,6 +7827,21 @@ export interface components {
              */
             subphase: "runtime-plan";
         };
+        /**
+         * RunSwitchProfileStopScope
+         * @description Reviewed profile-only cleanup of the reachable ranks in a lost group.
+         *
+         *     The full accepted topology remains visible even though only its reachable
+         *     subset is sent Stop work.  Missing ranks are explicit so a partial cleanup
+         *     can never be presented as a successful full-group stop.
+         */
+        RunSwitchProfileStopScope: {
+            /** Missing Node Ids */
+            missing_node_ids: string[];
+            original_group: components["schemas"]["SparkGroup"];
+            /** Target Node Ids */
+            target_node_ids: string[];
+        };
         /** RunSwitchProgress */
         RunSwitchProgress: {
             /**
@@ -7845,7 +7866,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
+            state: "queued" | "running" | "waiting" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled" | "unknown";
             /** Subphase */
             subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Total Bytes */

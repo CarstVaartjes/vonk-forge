@@ -98,6 +98,7 @@ export function activityActionLabel(action: string): string {
       running: "Running",
       succeeded: "Completed",
       uncertain: "Needs review",
+      waiting: "Waiting to recheck",
       "waiting-for-operator": "Waiting for operator",
     };
     return `${kind} · ${stateLabels[state] ?? titleCase(state)}`;
@@ -125,6 +126,7 @@ export function activityStatus(event: AuditSummary): ActivityStatus {
       expired: "unsuccessful",
       failed: "unsuccessful",
       uncertain: "attention",
+      waiting: "in_progress",
       "waiting-for-operator": "attention",
       compensating: "in_progress",
       pending: "in_progress",
@@ -268,13 +270,32 @@ function TargetSummary({compact = false, event}: {compact?: boolean; event: Acti
   return compact ? <small className="activity-target-summary">{content}</small> : <span className="activity-target-summary">{content}</span>;
 }
 
-const LIVE_JOB_STATES = new Set(["compensating", "pending", "planned", "queued", "running", "starting", "stopping"]);
+const LIVE_JOB_STATES = new Set([
+  "compensating",
+  "pending",
+  "planned",
+  "queued",
+  "running",
+  "starting",
+  "stopping",
+  "waiting",
+]);
+
+export function activityStateLabel(state: string): string {
+  if (state === "waiting") return "Waiting to recheck";
+  if (state === "waiting-for-operator") return "Waiting for operator";
+  return titleCase(state);
+}
 
 function jobUpdatesAutomatically(detail: JobDetail): boolean {
   return LIVE_JOB_STATES.has(detail.state) || (
     detail.state === "waiting-for-operator"
     && (detail.agent_upgrade_diagnostics?.targets.some(target => target.retry_queued) ?? false)
   );
+}
+
+function jobRefreshIntervalMs(detail: JobDetail): number {
+  return detail.state === "waiting" ? 60_000 : 5_000;
 }
 
 function friendlyTarget(target: string, names: Map<string, string>): string {
@@ -346,7 +367,7 @@ function JobProgressDetails({
 
   useEffect(() => {
     if (!open || !detail || !jobUpdatesAutomatically(detail)) return undefined;
-    const interval = window.setInterval(() => loadDetail(true), 5_000);
+    const interval = window.setInterval(() => loadDetail(true), jobRefreshIntervalMs(detail));
     return () => window.clearInterval(interval);
   }, [detail, loadDetail, open]);
 
@@ -391,10 +412,10 @@ function JobProgressDetails({
       {error && <div className="activity-job-message is-error" role="alert"><p>Current operation details could not be loaded. {error}</p><button type="button" className="button secondary" disabled={loading} onClick={() => void loadDetail()}>{loading ? "Retrying…" : "Try again"}</button></div>}
       {detail && <>
         <header className="activity-job-header">
-          <div><span>Current state</span><strong>{titleCase(detail.state)}</strong></div>
+          <div><span>Current state</span><strong>{activityStateLabel(detail.state)}</strong></div>
           <button type="button" className="button secondary" disabled={loading || resuming} onClick={() => void loadDetail()}>{loading ? "Refreshing…" : "Refresh details"}</button>
         </header>
-        {jobUpdatesAutomatically(detail) && <p className="activity-job-live" role="status"><span aria-hidden="true"/>Updates automatically while this operation is active.</p>}
+        {jobUpdatesAutomatically(detail) && <p className="activity-job-live" role="status"><span aria-hidden="true"/>{detail.state === "waiting" ? "The Controller rechecks automatically; this view refreshes about once a minute." : "Updates automatically while this operation is active."}</p>}
         {detail.status_reason && <div className="activity-job-reason"><span>State reason</span><strong>{detail.status_reason}</strong></div>}
         <section className="activity-job-progress" aria-label="Operation progress">
           <div><span>Completed</span><strong>{detail.progress.completed}</strong></div>
@@ -407,7 +428,7 @@ function JobProgressDetails({
         <AgentUpgradeDiagnostics detail={detail} targetNames={targetNames}/>
         {visibleTargets.length > 0 && <section className="activity-job-targets" aria-label="Affected targets"><h3>Affected targets</h3><ul>{visibleTargets.map((target, index) => <li key={`${detail.targets[index]}:${index}`}>{target}</li>)}</ul>{detail.target_total > detail.targets.length && <p>Showing {detail.targets.length} of {detail.target_total} affected targets.</p>}</section>}
         {"operation" in detail.progress && detail.progress.operation != null && <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress.operation)}/>}
-        {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{operation.kind === "artifact.distribution.v1" ? "Model distribution" : titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{titleCase(operation.state)}</StatusPill>{operation.progress && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>} {operation.evidence_download && <DiagnosticDownload id={operation.id} attempt={operation.attempt}/>}</li>)}</ul>{detail.operation_total > detail.operations.length && <p>Showing {detail.operations.length} of {detail.operation_total} operation steps.</p>}</section>}
+        {visibleOperations.length > 0 && <section className="activity-job-steps" aria-label="Operation steps"><h3>Operation steps</h3><ul>{visibleOperations.map(operation => <li key={operation.id}><div><strong>{operation.kind === "artifact.distribution.v1" ? "Model distribution" : titleCase(operation.kind)}</strong><span>{friendlyTarget(operation.node_id, targetNames)}</span></div><StatusPill tone={statusTone(activityStatus({...event, action: `operation.${operation.kind}.${operation.state}`}))}>{activityStateLabel(operation.state)}</StatusPill>{operation.progress && <LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/>} {operation.evidence_download && <DiagnosticDownload id={operation.id} attempt={operation.attempt}/>}</li>)}</ul>{detail.operation_total > detail.operations.length && <p>Showing {detail.operations.length} of {detail.operation_total} operation steps.</p>}</section>}
         {detail.state === "waiting-for-operator" && (agentRetryQueued ? <section className="activity-job-resume"><div><strong>Retry queued behind safety delay</strong><p>{detail.agent_upgrade_diagnostics?.next_action}</p></div></section> : <section className="activity-job-resume"><div><strong>Operator action required</strong><p>{detail.agent_upgrade_diagnostics?.next_action || "This operation can be returned to the queue. Review the state reason and affected targets first."}</p></div><button type="button" className="button" disabled={resuming || loading} onClick={() => void resume()}>{resuming ? detail.kind === "agent-upgrade" ? "Queuing…" : "Resuming…" : detail.kind === "agent-upgrade" ? "Queue retry after inspection" : "Resume operation"}</button></section>)}
         {resumeNotice && <p className="activity-job-message is-success" role="status">{resumeNotice}</p>}
         {resumeError && <p className="activity-job-message is-error" role="alert">Operation was not resumed. {resumeError}</p>}

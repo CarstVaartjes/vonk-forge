@@ -356,15 +356,54 @@ class AgentGrantRequest(StrictJSONModel):
 class HostRuntimeGrantRequest(AgentGrantRequest):
     action: ContainerRuntimeActionName
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    start_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    stop_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_generation: int | None = Field(default=None, ge=1, le=2**31 - 1, strict=True)
+    runtime_run_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
+    runtime_target_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
+    runtime_installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     reconciliation_identity: RecipeReconciliationIdentity | None = None
 
     @model_validator(mode="after")
-    def installation_cleanup_binding(self) -> HostRuntimeGrantRequest:
+    def runtime_binding(self) -> HostRuntimeGrantRequest:
         if (self.installation_id is not None) != (
             self.action == "installation-cleanup"
         ):
             raise ValueError("host runtime installation binding is invalid")
+        has_runtime_binding = any(
+            value is not None
+            for value in (
+                self.start_plan_sha256,
+                self.stop_plan_sha256,
+                self.run_generation,
+                self.runtime_run_id,
+                self.runtime_target_id,
+                self.runtime_installation_id,
+            )
+        )
+        if self.action in {"start", "stop"}:
+            expected_plan = (
+                self.start_plan_sha256
+                if self.action == "start"
+                else self.stop_plan_sha256
+            )
+            unexpected_plan = (
+                self.stop_plan_sha256
+                if self.action == "start"
+                else self.start_plan_sha256
+            )
+            if (
+                expected_plan is None
+                or unexpected_plan is not None
+                or self.run_generation is None
+                or self.runtime_run_id is None
+                or self.runtime_target_id is None
+                or self.runtime_installation_id is None
+            ):
+                raise ValueError("host runtime plan binding is invalid")
+        elif has_runtime_binding:
+            raise ValueError("host runtime plan binding does not match the action")
         if self.reconciliation_identity is not None and (
             self.action != "installation-cleanup"
             or self.reconciliation_identity.installation_id != self.installation_id
@@ -1466,6 +1505,8 @@ def install_agent_routes(
                         node.state = "failed"
                         node.observed_run_generation = None
                         node.observation_receipt_sha256 = None
+                        node.observation_process_running = None
+                        node.observation_observed_at = None
                         node.observation_endpoint_ready = None
                         node.updated_at = max(
                             _now(node.updated_at).astimezone(UTC), evidence_observed_at
@@ -1484,12 +1525,22 @@ def install_agent_routes(
                         mapping is not None
                         and mapping.endpoint_owner_node_id == identity.node_id
                     )
-                    if (
-                        initial_observation_late
-                        or observed_identity != evidence.observation_identity_sha256
+                    observation_identity_mismatch = (
+                        observed_identity != evidence.observation_identity_sha256
                         or (owner and type(evidence.endpoint_ready) is not bool)
                         or (not owner and evidence.endpoint_ready is not None)
-                    ):
+                    )
+                    if observation_identity_mismatch:
+                        node.state = "failed"
+                        node.observed_run_generation = None
+                        node.observation_receipt_sha256 = None
+                        node.observation_process_running = None
+                        node.observation_observed_at = None
+                        node.observation_endpoint_ready = None
+                    elif initial_observation_late:
+                        # Late first evidence cannot make the run routable, but
+                        # its exact signed process result remains valid evidence
+                        # for Controller-owned recovery.
                         node.state = "failed"
                     elif node.state != "failed":
                         node.state = (
@@ -1498,14 +1549,23 @@ def install_agent_routes(
                             and (not owner or evidence.endpoint_ready is True)
                             else "failed"
                         )
-                    node.observed_run_generation = run.run_generation
-                    node.observation_receipt_sha256 = receipt_sha256
-                    node.observation_endpoint_ready = (
-                        evidence.endpoint_ready if owner else None
-                    )
+                    if not observation_identity_mismatch:
+                        node.observed_run_generation = run.run_generation
+                        node.observation_receipt_sha256 = receipt_sha256
+                        node.observation_process_running = process_running
+                        node.observation_observed_at = evidence_observed_at
+                        node.observation_endpoint_ready = (
+                            evidence.endpoint_ready if owner else None
+                        )
                     node.updated_at = max(
                         _now(node.updated_at).astimezone(UTC), evidence_observed_at
                     )
+                    if (
+                        run.route_state == "withdrawn"
+                        and run.route_next_attempt_at is not None
+                    ):
+                        run.route_next_attempt_at = None
+                        run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -1879,6 +1939,12 @@ def install_agent_routes(
                 fence=body.fence,
                 action=ContainerRuntimeAction(body.action),
                 request_sha256=body.request_sha256,
+                start_plan_sha256=body.start_plan_sha256,
+                stop_plan_sha256=body.stop_plan_sha256,
+                run_generation=body.run_generation,
+                runtime_run_id=body.runtime_run_id,
+                runtime_target_id=body.runtime_target_id,
+                runtime_installation_id=body.runtime_installation_id,
                 installation_id=body.installation_id,
                 reconciliation_identity=body.reconciliation_identity,
                 certificate_serial=identity.certificate_serial,

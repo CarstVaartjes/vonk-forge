@@ -187,6 +187,18 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
                 observation_identity_sha256: None,
                 installation_id: None,
                 reconciliation_identity: None,
+                run_generation: Some(1),
+                runtime_installation_id: Some(
+                    Uuid::parse_str("50000000-0000-4000-8000-000000000005").unwrap(),
+                ),
+                runtime_run_id: Some(
+                    Uuid::parse_str("60000000-0000-4000-8000-000000000006").unwrap(),
+                ),
+                runtime_target_id: Some(
+                    Uuid::parse_str("60000000-0000-4000-8000-000000000006").unwrap(),
+                ),
+                start_plan_sha256: Some("b".repeat(64)),
+                stop_plan_sha256: None,
             },
         ),
     ];
@@ -608,6 +620,53 @@ fn write_runtime_request(roots: &ManagedRoots, request: &HostRuntimeRequest) -> 
 }
 
 fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperation {
+    let (
+        start_plan_sha256,
+        stop_plan_sha256,
+        run_generation,
+        runtime_run_id,
+        runtime_target_id,
+        runtime_installation_id,
+    ) = match request.action {
+        HostRuntimeAction::Start => {
+            if let Some(plan) = request.start_plan.as_ref() {
+                (
+                    Some(hex_sha256(&canonical_json(plan).unwrap())),
+                    None,
+                    Some(plan.run_generation),
+                    Some(plan.run_id),
+                    Some(plan.run_id),
+                    Some(plan.installation_id),
+                )
+            } else if let Some(plan) = request.job_plan.as_ref() {
+                (
+                    Some(hex_sha256(&canonical_json(plan).unwrap())),
+                    None,
+                    Some(plan.run_generation),
+                    Some(plan.run_id),
+                    Some(plan.job_id),
+                    Some(plan.installation_id),
+                )
+            } else {
+                (None, None, request.run_generation, None, None, None)
+            }
+        }
+        HostRuntimeAction::Stop => {
+            if let Some(plan) = request.stop_plan.as_ref() {
+                (
+                    None,
+                    Some(hex_sha256(&canonical_json(plan).unwrap())),
+                    Some(plan.run_generation),
+                    Some(plan.run_id),
+                    Some(plan.target_runtime_id),
+                    Some(plan.installation_id),
+                )
+            } else {
+                (None, None, request.run_generation, None, None, None)
+            }
+        }
+        _ => (None, None, None, None, None, None),
+    };
     HostOperation::ExecuteContainerRuntimeRequestOperation(
         ExecuteContainerRuntimeRequestOperation {
             type_: "execute-container-runtime-request".into(),
@@ -630,6 +689,12 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
             observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
             installation_id: request.installation_id,
             reconciliation_identity: None,
+            run_generation,
+            runtime_installation_id,
+            runtime_run_id,
+            runtime_target_id,
+            start_plan_sha256,
+            stop_plan_sha256,
         },
     )
 }
@@ -646,6 +711,10 @@ fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRun
         observation: None,
         installation_id: None,
         reconciliation_identity: None,
+        job_plan: None,
+        run_generation: None,
+        start_plan: None,
+        stop_plan: None,
     }
 }
 
@@ -830,511 +899,7 @@ fn accepted_docker_archive_does_not_depend_on_load_output_format() {
 }
 
 #[test]
-fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
-    let (_temp, roots, runner, release) = fixture();
-    let run_id = "40000000-0000-4000-8000-000000000004";
-    let registry_index_digest = format!("sha256:{}", "a".repeat(64));
-    let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
-    let (archive_body, image_id) = runtime_image_archive();
-    let archive_sha256 = hex_sha256(&archive_body);
-    let image = format!("localhost/vonk/compiled-runtime-{archive_sha256}");
-    let image_reference = format!("{image}@{platform_manifest_digest}");
-    let state = roots.agent_data.join("runs").join(run_id);
-    let outputs = state.join("outputs");
-    let metadata = roots.agent_data.join("run-metadata").join(run_id);
-    let mark_fresh_start = || {
-        fs::write(metadata.join("tmp-reset-required"), b"").unwrap();
-        fs::set_permissions(
-            metadata.join("tmp-reset-required"),
-            fs::Permissions::from_mode(0o600),
-        )
-        .unwrap();
-    };
-    let model = roots
-        .agent_data
-        .join("installations")
-        .join("installation-1")
-        .join("models")
-        .join("primary")
-        .join("artifact-a.bin");
-    fs::create_dir_all(&outputs).unwrap();
-    fs::create_dir_all(&metadata).unwrap();
-    fs::create_dir_all(model.parent().unwrap()).unwrap();
-    fs::write(&model, b"model artifact").unwrap();
-    fs::write(metadata.join("runtime.json"), b"{}").unwrap();
-    mark_fresh_start();
-    let archive_root = roots.agent_data.join("oci-archives");
-    fs::create_dir_all(&archive_root).unwrap();
-    let archive = archive_root.join(&archive_sha256);
-    fs::write(&archive, &archive_body).unwrap();
-    fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
-    fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
-    let archive_metadata = fs::metadata(&archive).unwrap();
-    fs::write(
-        roots.runtime_image_receipts.join(&archive_sha256),
-        serde_json::to_vec(&serde_json::json!({
-            "archive_identity": {
-                "bytes": archive_body.len(),
-                "changed_nanoseconds": archive_metadata.ctime_nsec(),
-                "changed_seconds": archive_metadata.ctime(),
-                "device": archive_metadata.dev(),
-                "inode": archive_metadata.ino(),
-                "modified_nanoseconds": archive_metadata.mtime_nsec(),
-                "modified_seconds": archive_metadata.mtime(),
-            },
-            "schema_version": 2,
-            "registry_index_digest": registry_index_digest,
-            "platform_manifest_digest": platform_manifest_digest,
-            "archive_sha256": archive_sha256,
-            "archive_bytes": archive_body.len(),
-            "archive_config_id": image_id,
-            "image_config_id": image_id,
-            "local_image_reference": image_reference,
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    let docker_arguments = vec![
-        "run".to_owned(),
-        "--detach".to_owned(),
-        "--name".to_owned(),
-        format!("vonk-{run_id}"),
-        "--entrypoint".to_owned(),
-        "/opt/vonk/bin/vllm".to_owned(),
-        "--restart".to_owned(),
-        "no".to_owned(),
-        "--read-only".to_owned(),
-        "--tmpfs".to_owned(),
-        "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824".to_owned(),
-        "--init".to_owned(),
-        "--pull".to_owned(),
-        "never".to_owned(),
-        "--log-driver".to_owned(),
-        "local".to_owned(),
-        "--log-opt".to_owned(),
-        "max-size=10m".to_owned(),
-        "--log-opt".to_owned(),
-        "max-file=3".to_owned(),
-        "--cap-drop=ALL".to_owned(),
-        "--security-opt=no-new-privileges".to_owned(),
-        "--network".to_owned(),
-        "bridge".to_owned(),
-        "--pids-limit".to_owned(),
-        "4096".to_owned(),
-        "--memory".to_owned(),
-        "1000000000".to_owned(),
-        "--memory-swap".to_owned(),
-        "1000000000".to_owned(),
-        "--shm-size".to_owned(),
-        "134217728".to_owned(),
-        "--user".to_owned(),
-        "10001:10001".to_owned(),
-        "--env".to_owned(),
-        "VONK_RANK=0".to_owned(),
-        "--env".to_owned(),
-        "VONK_LISTEN_PORT=8000".to_owned(),
-        "--env".to_owned(),
-        "HOME=/outputs/cache/home".to_owned(),
-        "--env".to_owned(),
-        "XDG_CACHE_HOME=/outputs/cache".to_owned(),
-        "--env".to_owned(),
-        "TMPDIR=/outputs/tmp".to_owned(),
-        "--publish".to_owned(),
-        "192.168.1.211:8101:8000".to_owned(),
-        "--mount".to_owned(),
-        format!(
-            "type=bind,src={},dst=/models/artifact-a.bin,readonly",
-            model.display()
-        ),
-        "--mount".to_owned(),
-        format!("type=bind,src={},dst=/outputs", outputs.display()),
-        "--mount".to_owned(),
-        format!(
-            "type=bind,src={},dst=/outputs/cache",
-            roots
-                .agent_data
-                .join("installations")
-                .join("installation-1")
-                .join("runtime-cache")
-                .display()
-        ),
-        "--mount".to_owned(),
-        format!(
-            "type=bind,src={},dst=/run/vonk/runtime.json,readonly",
-            metadata.join("runtime.json").display()
-        ),
-        image_reference.clone(),
-        "/opt/vonk/bin/vllm".to_owned(),
-    ];
-    let mut arguments = vec![
-        archive_sha256.clone(),
-        registry_index_digest.clone(),
-        platform_manifest_digest.clone(),
-        image_reference.clone(),
-    ];
-    arguments.extend(docker_arguments);
-    let request = runtime_request(HostRuntimeAction::Start, arguments);
-    let digest = write_runtime_request(&roots, &request);
-    let executor = OperationExecutor::new(
-        roots.clone(),
-        release.public_key().as_ref(),
-        runner.clone(),
-        None,
-    )
-    .unwrap();
-
-    executor
-        .execute(&runtime_operation(&request, digest.clone()))
-        .unwrap();
-    let private_tmp = outputs.join("tmp").join(run_id).join("private");
-    fs::create_dir(&private_tmp).unwrap();
-    fs::write(private_tmp.join("old-engine-state"), b"temporary").unwrap();
-    let outside = roots.agent_data.join("outside-tmp");
-    fs::create_dir(&outside).unwrap();
-    fs::write(outside.join("sentinel"), b"outside").unwrap();
-    symlink(&outside, private_tmp.join("outside-link")).unwrap();
-    fs::set_permissions(&private_tmp, fs::Permissions::from_mode(0o700)).unwrap();
-    if rustix::process::geteuid().is_root() {
-        rustix::fs::chown(
-            &private_tmp,
-            Some(rustix::process::Uid::from_raw(10001)),
-            None,
-        )
-        .unwrap();
-    }
-    let cache = roots
-        .agent_data
-        .join("installations/installation-1/runtime-cache");
-    fs::write(cache.join("compiled-kernel"), b"reuse").unwrap();
-    fs::write(outputs.join("result"), b"keep").unwrap();
-    // Even a pending cleanup request cannot erase an already active run.
-    mark_fresh_start();
-    executor
-        .execute(&runtime_operation(&request, digest.clone()))
-        .unwrap();
-    assert!(
-        private_tmp.join("old-engine-state").is_file(),
-        "replayed start must preserve a live container's temporary work"
-    );
-    assert!(metadata.join("tmp-reset-required").is_file());
-
-    for forbidden_target in ["/state", "/scratch"] {
-        let mut forbidden = request.clone();
-        let writable = forbidden
-            .arguments
-            .iter_mut()
-            .find(|value| value.contains("dst=/outputs"))
-            .unwrap();
-        *writable = format!("type=bind,src={},dst={forbidden_target}", outputs.display());
-        let forbidden_digest = write_runtime_request(&roots, &forbidden);
-        assert!(
-            executor
-                .execute(&runtime_operation(&forbidden, forbidden_digest))
-                .is_err()
-        );
-    }
-    {
-        let calls = runner.calls.lock().unwrap();
-        let docker_run = calls
-            .iter()
-            .find(|(program, arguments)| {
-                program == std::path::Path::new("/usr/bin/docker")
-                    && arguments.first().is_some_and(|value| value == "run")
-            })
-            .unwrap();
-        assert_eq!(
-            calls
-                .iter()
-                .filter(|(program, arguments)| {
-                    program == std::path::Path::new("/usr/bin/docker")
-                        && arguments.first().is_some_and(|value| value == "run")
-                })
-                .count(),
-            1,
-            "{calls:?}"
-        );
-        assert!(docker_run.1.contains(&image_reference));
-        assert!(docker_run.1.windows(2).any(|values| {
-            values == ["--tmpfs", "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824"]
-        }));
-        assert!(
-            docker_run
-                .1
-                .contains(&"ai.vonkforge.managed=true".to_owned())
-        );
-        assert!(
-            docker_run
-                .1
-                .contains(&format!("ai.vonkforge.run-id={run_id}"))
-        );
-        assert!(!docker_run.1.iter().any(|value| {
-            value.contains("docker.sock")
-                || value == "--privileged"
-                || value == "host"
-                || value == "/dev/infiniband:/dev/infiniband"
-        }));
-        assert!(
-            docker_run
-                .1
-                .windows(2)
-                .any(|values| values == ["--network", "bridge"])
-        );
-        assert!(
-            docker_run
-                .1
-                .windows(2)
-                .any(|values| { values == ["--publish", "192.168.1.211:8101:8000"] })
-        );
-    }
-    let inspect = runtime_request(HostRuntimeAction::RunInspect, request.arguments.clone());
-    let inspect_digest = write_runtime_request(&roots, &inspect);
-    executor
-        .execute(&runtime_operation(&inspect, inspect_digest.clone()))
-        .unwrap();
-    let accepted_container = runner.runtime_container.lock().unwrap().clone().unwrap();
-    *runner.runtime_running.lock().unwrap() = false;
-    let failure = executor
-        .execute(&runtime_operation(&inspect, inspect_digest.clone()))
-        .unwrap_err();
-    // The container's own output crosses as its own per-stream document, not
-    // as a line of the rejection's text, and the capture window is the
-    // declared constant rather than a number written twice.
-    let OperationError::RuntimeProcessExited {
-        logs,
-        capture_error,
-    } = &failure
-    else {
-        panic!("expected a runtime exit, got {failure}");
-    };
-    assert_eq!(*capture_error, None);
-    let logs = logs.as_ref().expect("the fixture log is readable");
-    let retained = format!("{}{}", logs.stdout.text, logs.stderr.text);
-    assert!(retained.contains("fixture startup stderr"), "{retained}");
-    assert!(runner.calls.lock().unwrap().iter().any(|(program, args)| {
-        program == std::path::Path::new("/usr/bin/docker")
-            && args
-                == &[
-                    "logs".to_owned(),
-                    "--tail".to_owned(),
-                    vonk_agent_helper::runtime_logs::CAPTURE_LINES.to_owned(),
-                    "e".repeat(64),
-                ]
-    }));
-    *runner.runtime_container.lock().unwrap() = None;
-    assert!(
-        executor
-            .execute(&runtime_operation(&inspect, inspect_digest.clone()))
-            .is_err()
-    );
-    assert_eq!(
-        runner
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(program, arguments)| {
-                program == std::path::Path::new("/usr/bin/docker")
-                    && arguments.first().is_some_and(|value| value == "run")
-            })
-            .count(),
-        1
-    );
-    let log_reads = || {
-        runner
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(program, args)| {
-                program == std::path::Path::new("/usr/bin/docker")
-                    && args.first().is_some_and(|value| value == "logs")
-            })
-            .count()
-    };
-    assert_eq!(
-        log_reads(),
-        1,
-        "an absent container cannot authorize log access"
-    );
-    *runner.runtime_container.lock().unwrap() = Some(("f".repeat(64), run_id.to_owned()));
-    assert!(
-        executor
-            .execute(&runtime_operation(&inspect, inspect_digest))
-            .is_err()
-    );
-    assert_eq!(
-        log_reads(),
-        1,
-        "foreign receipt identity cannot authorize log access"
-    );
-    *runner.runtime_container.lock().unwrap() = Some(accepted_container);
-
-    let stop = runtime_request(
-        HostRuntimeAction::Stop,
-        vec![run_id.to_owned(), "30".to_owned()],
-    );
-    let stop_digest = write_runtime_request(&roots, &stop);
-    executor
-        .execute(&runtime_operation(&stop, stop_digest.clone()))
-        .unwrap();
-    executor
-        .execute(&runtime_operation(&stop, stop_digest))
-        .unwrap();
-    *runner.runtime_container.lock().unwrap() = Some((
-        "f".repeat(64),
-        "50000000-0000-4000-8000-000000000005".to_owned(),
-    ));
-    assert!(
-        executor
-            .execute(&runtime_operation(
-                &stop,
-                hex_sha256(&canonical_json(&stop).unwrap()),
-            ))
-            .is_err()
-    );
-    let calls = runner.calls.lock().unwrap();
-    let docker_stops = calls
-        .iter()
-        .filter(|(program, arguments)| {
-            program == std::path::Path::new("/usr/bin/docker")
-                && arguments.first().is_some_and(|value| value == "stop")
-        })
-        .map(|(_, arguments)| arguments.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        docker_stops,
-        vec![vec![
-            "stop".to_owned(),
-            "--timeout".to_owned(),
-            "30".to_owned(),
-            format!("vonk-{run_id}"),
-        ]]
-    );
-    let docker_removes = calls
-        .iter()
-        .filter(|(program, arguments)| {
-            program == std::path::Path::new("/usr/bin/docker")
-                && arguments.first().is_some_and(|value| value == "rm")
-        })
-        .map(|(_, arguments)| arguments.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        docker_removes,
-        vec![vec!["rm".to_owned(), format!("vonk-{run_id}")]]
-    );
-    drop(calls);
-    *runner.runtime_container.lock().unwrap() = None;
-    mark_fresh_start();
-    *runner.deny_container_listing.lock().unwrap() = true;
-    assert!(
-        executor
-            .execute(&runtime_operation(
-                &request,
-                hex_sha256(&canonical_json(&request).unwrap())
-            ))
-            .is_err()
-    );
-    assert!(
-        private_tmp.join("old-engine-state").is_file(),
-        "uncertain container absence must not authorize deletion"
-    );
-    assert!(metadata.join("tmp-reset-required").is_file());
-    *runner.deny_container_listing.lock().unwrap() = false;
-    executor
-        .execute(&runtime_operation(
-            &request,
-            hex_sha256(&canonical_json(&request).unwrap()),
-        ))
-        .unwrap();
-    assert!(
-        !private_tmp.exists(),
-        "fresh start must clear the stopped runtime's private temporary tree"
-    );
-    assert_eq!(fs::read(cache.join("compiled-kernel")).unwrap(), b"reuse");
-    assert_eq!(fs::read(outputs.join("result")).unwrap(), b"keep");
-    assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
-    // Foreground hooks consume the marker before the first process runs.
-    // Later hooks and main preserve the earlier hook's temporary work.
-    *runner.runtime_container.lock().unwrap() = None;
-    mark_fresh_start();
-    let old_tmp = outputs.join("tmp/old-state");
-    fs::write(&old_tmp, b"old").unwrap();
-    let inputs = state.join("inputs");
-    fs::create_dir(&inputs).unwrap();
-    let mut hook = request.clone();
-    let detached = hook
-        .arguments
-        .iter()
-        .position(|value| value == "--detach")
-        .unwrap();
-    hook.arguments.remove(detached);
-    for option in ["--name", "--restart"] {
-        let index = hook
-            .arguments
-            .iter()
-            .position(|value| value == option)
-            .unwrap();
-        hook.arguments.drain(index..index + 2);
-    }
-    hook.arguments.insert(5, "--rm".to_owned());
-    let image = hook
-        .arguments
-        .iter()
-        .rposition(|value| value == &image_reference)
-        .unwrap();
-    hook.arguments.splice(
-        image..image,
-        [
-            "--env".to_owned(),
-            "VONK_JOB_TIMEOUT_SECONDS=30".to_owned(),
-            "--mount".to_owned(),
-            format!("type=bind,src={},dst=/inputs,readonly", inputs.display()),
-        ],
-    );
-    let hook_digest = write_runtime_request(&roots, &hook);
-    for name in ["hook-one", "hook-two"] {
-        let path = outputs.join("tmp").join(name);
-        *runner.runtime_output.lock().unwrap() = Some(path.clone());
-        executor
-            .execute(&runtime_operation(&hook, hook_digest.clone()))
-            .unwrap();
-        assert!(
-            !old_tmp.exists(),
-            "the first hook must not see stale temporary work"
-        );
-        assert_eq!(fs::read(path).unwrap(), b"prepared");
-        assert_eq!(fs::read(outputs.join("tmp/hook-one")).unwrap(), b"prepared");
-    }
-    executor
-        .execute(&runtime_operation(
-            &request,
-            hex_sha256(&canonical_json(&request).unwrap()),
-        ))
-        .unwrap();
-    for name in ["hook-one", "hook-two"] {
-        assert_eq!(
-            fs::read(outputs.join("tmp").join(name)).unwrap(),
-            b"prepared"
-        );
-    }
-    // A writable mount cannot redirect privileged cleanup outside its scope.
-    *runner.runtime_container.lock().unwrap() = None;
-    mark_fresh_start();
-    fs::rename(outputs.join("tmp"), outputs.join("old-tmp")).unwrap();
-    symlink(&outside, outputs.join("tmp")).unwrap();
-    assert!(
-        executor
-            .execute(&runtime_operation(
-                &request,
-                hex_sha256(&canonical_json(&request).unwrap())
-            ))
-            .is_err()
-    );
-    assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
-}
-
-#[test]
-fn runtime_rejects_bridge_host_and_direct_fabric_networks_before_docker() {
+fn helper_rejects_argv_only_start_and_stop_before_container_mutation() {
     let (_temp, roots, runner, release) = fixture();
     let executor = OperationExecutor::new(
         roots.clone(),
@@ -1343,69 +908,29 @@ fn runtime_rejects_bridge_host_and_direct_fabric_networks_before_docker() {
         None,
     )
     .unwrap();
-    for docker_arguments in [
-        vec![
-            "run".to_owned(),
-            "--network".to_owned(),
-            "bridge".to_owned(),
-        ],
-        vec!["run".to_owned(), "--network".to_owned(), "host".to_owned()],
-        vec![
-            "run".to_owned(),
-            "--network".to_owned(),
-            "host".to_owned(),
-            "--ipc".to_owned(),
-            "host".to_owned(),
-            "--device".to_owned(),
-            "/dev/infiniband:/dev/infiniband".to_owned(),
-            "--ulimit".to_owned(),
-            "memlock=-1:-1".to_owned(),
-            "--ulimit".to_owned(),
-            "stack=67108864:67108864".to_owned(),
-        ],
-    ] {
-        let mut request_arguments = vec![format!("sha256:{}", "c".repeat(64))];
-        request_arguments.extend(docker_arguments);
-        let request = runtime_request(HostRuntimeAction::Start, request_arguments);
-        let digest = write_runtime_request(&roots, &request);
-        assert!(
-            executor
-                .execute(&runtime_operation(&request, digest))
-                .is_err()
-        );
-    }
-    assert!(runner.calls.lock().unwrap().is_empty());
-}
 
-#[test]
-fn runtime_rejects_privilege_and_unmanaged_mounts_before_docker() {
-    let (_temp, roots, runner, release) = fixture();
-    let executor = OperationExecutor::new(
-        roots.clone(),
-        release.public_key().as_ref(),
-        runner.clone(),
-        None,
-    )
-    .unwrap();
-    for arguments in [
+    let start = runtime_request(
+        HostRuntimeAction::Start,
         vec!["run".to_owned(), "--privileged".to_owned()],
-        vec![
-            "run".to_owned(),
-            "--mount".to_owned(),
-            "type=bind,src=/run/docker.sock,dst=/run/docker.sock".to_owned(),
-        ],
-    ] {
-        let mut request_arguments = vec![format!("sha256:{}", "c".repeat(64))];
-        request_arguments.extend(arguments);
-        let request = runtime_request(HostRuntimeAction::Start, request_arguments);
-        let digest = write_runtime_request(&roots, &request);
-        assert!(
-            executor
-                .execute(&runtime_operation(&request, digest))
-                .is_err()
-        );
-    }
-    assert!(runner.calls.lock().unwrap().is_empty());
+    );
+    let start_digest = write_runtime_request(&roots, &start);
+    assert!(
+        executor
+            .execute(&runtime_operation(&start, start_digest))
+            .is_err()
+    );
+
+    let stop = runtime_request(HostRuntimeAction::Stop, Vec::new());
+    let stop_digest = write_runtime_request(&roots, &stop);
+    assert!(
+        executor
+            .execute(&runtime_operation(&stop, stop_digest))
+            .is_err()
+    );
+    assert!(
+        runner.calls.lock().unwrap().is_empty(),
+        "untyped argv must never authorize Docker"
+    );
 }
 
 #[test]

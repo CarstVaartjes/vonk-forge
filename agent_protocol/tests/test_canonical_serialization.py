@@ -142,6 +142,11 @@ def test_host_grant_signing_bytes_use_the_same_optional_null_policy() -> None:
             "attempt": 1,
             "fence": "40000000-0000-4000-8000-000000000004",
             "request_sha256": "a" * 64,
+            "start_plan_sha256": "b" * 64,
+            "run_generation": 1,
+            "runtime_run_id": "50000000-0000-4000-8000-000000000005",
+            "runtime_target_id": "60000000-0000-4000-8000-000000000006",
+            "runtime_installation_id": "70000000-0000-4000-8000-000000000007",
         },
     }
     omitted = HostHelperGrantClaims.model_validate(value)

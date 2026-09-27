@@ -18,6 +18,7 @@ on:
       - scripts/build-agent-deb
       - tests/nodes/test_agent_upgrade_recovery_systemd.sh
       - tests/nodes/test_agent_package_rollback_systemd.py
+      - tests/nodes/test_agent_boot_restart_systemd.py
   workflow_dispatch:
 
 permissions:
@@ -111,3 +112,10 @@ jobs:
             --helper "$(realpath target/debug/vonk-agent-helper)" \
             --probe "$(realpath target/debug/examples/package_rollback_probe)" \
             | tee package-rollback-acceptance.json
+      - name: Prove agent boot recovery after transient host readiness failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo python3 tests/nodes/test_agent_boot_restart_systemd.py \
+            --disposable-systemd \
+            | tee agent-boot-recovery-acceptance.json

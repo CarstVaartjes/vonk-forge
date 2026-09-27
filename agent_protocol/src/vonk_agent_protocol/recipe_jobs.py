@@ -249,6 +249,9 @@ class RecipeJobRunRequest(_RecipeJobModel):
     job_id: CanonicalUUID
     run_id: CanonicalUUID
     installation_id: CanonicalUUID
+    mapping_id: CanonicalUUID
+    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
+    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
     recipe_revision_id: CanonicalUUID
     recipe_content_sha256: Digest
     image_digest: ImageDigest

@@ -21,6 +21,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
+    FleetProfileSelection,
     Job,
     NodeArtifact,
     NodeInventorySnapshot,
@@ -145,7 +146,7 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(tmp_path: Path) -
         )
 
 
-def test_cache_recovery_does_not_expand_to_a_new_spark(tmp_path: Path) -> None:
+def test_selected_profile_reconciles_a_newly_enrolled_spark(tmp_path: Path) -> None:
     sessions, _lifecycle, service, _profile, _desired, first, child_id, _nodes = (
         _failed_profile(tmp_path)
     )
@@ -161,9 +162,17 @@ def test_cache_recovery_does_not_expand_to_a_new_spark(tmp_path: Path) -> None:
                 last_seen_at=NOW,
             )
         )
-    assert service.tick() is False
+    assert service.tick() is True
     with sessions() as session:
-        assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
+        applications = tuple(session.scalars(select(FleetProfileApplication)))
+        assert len(applications) == 2
+        selection = session.get(FleetProfileSelection, 1)
+        assert selection is not None
+        assert selection.application_id != first.id
+        selected = session.get(FleetProfileApplication, selection.application_id)
+        assert selected is not None
+        intended = service._intended_profile(selected, session=session)
+        assert _node_id(99) in intended.scope.node_ids
 
 
 def test_cache_recovery_refuses_access_and_integrity_failures(tmp_path: Path) -> None:

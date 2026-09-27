@@ -43,6 +43,10 @@ class StopPlan:
     allowed: bool
     route_withdrawal: bool
     nodes: tuple[StopNodeImpact, ...]
+    # Full original membership remains in ``nodes``. These ordered sets bind
+    # the subset receiving Stop jobs and any ranks absent from the live fleet.
+    target_node_ids: tuple[str, ...]
+    missing_node_ids: tuple[str, ...]
     total_active_memory_reservation_bytes: int
     blockers: tuple[ActionReason, ...]
     warnings: tuple[ActionReason, ...]
@@ -126,6 +130,8 @@ def stop_plan(
     route_digest: str | None,
     authority_digest: str,
     nodes: Sequence[StopNodeImpact],
+    target_node_ids: Sequence[str] | None = None,
+    missing_node_ids: Sequence[str] = (),
     immutable_membership_exact: bool,
     reservation_membership_exact: bool,
     reservation_facts: Sequence[Mapping[str, object]],
@@ -133,6 +139,18 @@ def stop_plan(
     """Build one stop impact plan; human copy is excluded from its digest."""
 
     ordered_nodes = tuple(sorted(nodes, key=lambda item: (item.rank, item.node_id)))
+    full_node_ids = tuple(sorted(node.node_id for node in ordered_nodes))
+    target_ids = tuple(
+        sorted(target_node_ids if target_node_ids is not None else full_node_ids)
+    )
+    missing_ids = tuple(sorted(missing_node_ids))
+    stop_scope_exact = (
+        len(set(target_ids)) == len(target_ids)
+        and len(set(missing_ids)) == len(missing_ids)
+        and set(target_ids).isdisjoint(missing_ids)
+        and set(target_ids) | set(missing_ids) == set(full_node_ids)
+        and bool(target_ids)
+    )
     blockers: list[ActionReason] = []
     if run_state not in {"starting", "running", "stopping", "failed", "lost"}:
         blockers.append(
@@ -146,6 +164,13 @@ def stop_plan(
             ActionReason(
                 "stop.rank_membership_changed",
                 "Persisted ranks no longer match the immutable accepted run plan.",
+            )
+        )
+    if not stop_scope_exact:
+        blockers.append(
+            ActionReason(
+                "stop.target_scope_changed",
+                "Stop targets and missing ranks do not partition the accepted group.",
             )
         )
     if not reservation_membership_exact:
@@ -184,6 +209,8 @@ def stop_plan(
             }
             for node in ordered_nodes
         ],
+        "target_node_ids": list(target_ids),
+        "missing_node_ids": list(missing_ids),
         "active_memory_reservations": list(reservation_facts),
         "immutable_membership_exact": immutable_membership_exact,
         "reservation_membership_exact": reservation_membership_exact,
@@ -202,6 +229,8 @@ def stop_plan(
         allowed=not blockers,
         route_withdrawal=True,
         nodes=ordered_nodes,
+        target_node_ids=target_ids,
+        missing_node_ids=missing_ids,
         total_active_memory_reservation_bytes=sum(
             node.active_memory_reservation_bytes for node in ordered_nodes
         ),

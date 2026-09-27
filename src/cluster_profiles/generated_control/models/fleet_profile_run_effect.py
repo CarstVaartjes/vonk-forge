@@ -8,8 +8,13 @@ from ..types import UNSET, Unset
 
 from ..models.fleet_profile_run_effect_action import check_fleet_profile_run_effect_action
 from ..models.fleet_profile_run_effect_action import FleetProfileRunEffectAction
+from ..types import UNSET, Unset
 from typing import cast
+from typing import cast, Union
+from typing import Union
 
+if TYPE_CHECKING:
+  from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
 
 
 
@@ -28,6 +33,7 @@ class FleetProfileRunEffect:
             installation_id (str):
             node_ids (list[str]):
             run_id (str):
+            profile_stop_scope (Union['RunSwitchProfileStopScope', None, Unset]):
      """
 
     action: FleetProfileRunEffectAction
@@ -35,12 +41,14 @@ class FleetProfileRunEffect:
     installation_id: str
     node_ids: list[str]
     run_id: str
+    profile_stop_scope: Union['RunSwitchProfileStopScope', None, Unset] = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
         action: str = self.action
 
         alias = self.alias
@@ -53,6 +61,14 @@ class FleetProfileRunEffect:
 
         run_id = self.run_id
 
+        profile_stop_scope: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.profile_stop_scope, Unset):
+            profile_stop_scope = UNSET
+        elif isinstance(self.profile_stop_scope, RunSwitchProfileStopScope):
+            profile_stop_scope = self.profile_stop_scope.to_dict()
+        else:
+            profile_stop_scope = self.profile_stop_scope
+
 
         field_dict: dict[str, Any] = {}
 
@@ -63,6 +79,8 @@ class FleetProfileRunEffect:
             "node_ids": node_ids,
             "run_id": run_id,
         })
+        if profile_stop_scope is not UNSET:
+            field_dict["profile_stop_scope"] = profile_stop_scope
 
         return field_dict
 
@@ -70,6 +88,7 @@ class FleetProfileRunEffect:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
         d = dict(src_dict)
         action = check_fleet_profile_run_effect_action(d.pop("action"))
 
@@ -85,12 +104,33 @@ class FleetProfileRunEffect:
 
         run_id = d.pop("run_id")
 
+        def _parse_profile_stop_scope(data: object) -> Union['RunSwitchProfileStopScope', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                profile_stop_scope_type_0 = RunSwitchProfileStopScope.from_dict(data)
+
+
+
+                return profile_stop_scope_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['RunSwitchProfileStopScope', None, Unset], data)
+
+        profile_stop_scope = _parse_profile_stop_scope(d.pop("profile_stop_scope", UNSET))
+
+
         fleet_profile_run_effect = cls(
             action=action,
             alias=alias,
             installation_id=installation_id,
             node_ids=node_ids,
             run_id=run_id,
+            profile_stop_scope=profile_stop_scope,
         )
 
         return fleet_profile_run_effect

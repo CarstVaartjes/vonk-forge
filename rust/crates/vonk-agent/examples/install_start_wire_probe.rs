@@ -14,7 +14,6 @@ use std::{
 };
 
 use vonk_agent::{
-    compiled_oci::CompiledOciPaths,
     executor::{
         recipe_install_success_body, recipe_start_success_body, recipe_stop_success_body,
         recipe_uninstall_success_body, runtime_arguments_for_plan,
@@ -23,6 +22,7 @@ use vonk_agent::{
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentResult, DistributionAssignment, RecipeOperationRequest, RecipeStartRequest,
+    compiled_oci::CompiledOciPaths,
 };
 
 const PROBE_DATA_ROOT: &str = "/var/lib/vonk-forge";

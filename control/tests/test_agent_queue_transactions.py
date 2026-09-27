@@ -19,15 +19,12 @@ from vonk_control.models import (
     Job,
 )
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
 NODE_ID = "spk_" + "a" * 32
 COMMIT = "a" * 64
-STOP_PAYLOAD = {
-    "schema_version": 1,
-    "run_id": "00000000-0000-4000-8000-000000000001",
-    "plan_digest": COMMIT,
-}
+STOP_PAYLOAD = recipe_stop_payload(NODE_ID, plan_digest=COMMIT)
 
 
 class Clock:

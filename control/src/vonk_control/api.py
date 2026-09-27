@@ -87,7 +87,7 @@ from .installation_reconciliation_api import (
     install_installation_reconciliation_routes,
 )
 from .library_assessment import LibraryAssessment
-from .logging import JobLogCorruptError
+from .logging import JobLogCorruptError, configure_controller_logging
 from .metrics import MetricsRegistry, runnable_job_ages
 from .model_cache_api import (
     install_model_operator_routes,
@@ -1416,6 +1416,7 @@ def create_app(
 
 
 def production_app() -> FastAPI:
+    configure_controller_logging()
     from sqlalchemy import func, select
     from vonk_forge_contracts import RecipeDefinition, content_sha256
 

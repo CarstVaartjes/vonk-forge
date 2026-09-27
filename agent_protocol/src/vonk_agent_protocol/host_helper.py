@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import re
 from enum import StrEnum
@@ -15,7 +16,12 @@ from pydantic import (
     model_validator,
 )
 
-from .contracts import AgentProtocolError, canonical_message
+from .contracts import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    AgentProtocolError,
+    canonical_message,
+)
 from .package_upgrade import PackageRollbackAuthority
 from .wire_model import WireModel
 
@@ -25,29 +31,18 @@ HOST_ARTIFACT_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00"
 RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY = "vonk.recipe-run-observation-helper"
 RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\x00"
 MAX_HOST_HELPER_GRANT_SECONDS = 300
-# The authoritative ceiling on one privileged-helper frame, in bytes. A frame is
-# one signed helper message; it carries the grant and the request digest, never
-# the request document itself. Mirrored by Rust `MAX_HELPER_FRAME_BYTES`.
+# A complete runtime request carries its typed plan plus one frame's worth of
+# projected argv and envelope. The signed helper frame itself carries only the
+# grant and request digest, never the request document.
 MAX_HELPER_FRAME_BYTES = 1024 * 1024
-# The authoritative ceiling on one canonical ``HostRuntimeRequest`` document, in
-# bytes. This, not the frame ceiling, is the budget that bounds a runtime
-# request: the agent writes the document to an owner-only request file and the
-# helper reads and parses that file. The ceiling shares the frame basis so one
-# host-runtime exchange's largest allocation stays at two frames. Mirrored by
-# Rust ``MAX_HOST_RUNTIME_REQUEST_BYTES``.
-MAX_HOST_RUNTIME_REQUEST_BYTES = MAX_HELPER_FRAME_BYTES
-# The bytes a canonical request spends on everything but its argument payload.
-# `MAX_ARGV_BYTES` derives below it, so the plan's argv budget sits strictly
-# below the request ceiling. A measured maximum, not merely an equal one; the
-# Rust test `the_declared_envelope_covers_the_largest_contract_permitted_request`
-# re-measures it and fails when a schema growth outgrows this constant.
+MAX_HOST_RUNTIME_REQUEST_BYTES = (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES + MAX_HELPER_FRAME_BYTES
+)
 HOST_RUNTIME_REQUEST_ENVELOPE_BYTES = 16 * 1024
-# The byte ceiling on one compiled argv vector, derived from the request
-# ceiling. The request the agent sends is this argv plus the image identities,
-# the container-engine options, one mount pair per selected model file and the
-# recipe environment, so an argv budget equal to the request ceiling would claim
-# headroom the request does not have.
-MAX_ARGV_BYTES = MAX_HOST_RUNTIME_REQUEST_BYTES - HOST_RUNTIME_REQUEST_ENVELOPE_BYTES
+MAX_HOST_RUNTIME_ARGUMENT_BYTES = (
+    MAX_HELPER_FRAME_BYTES - HOST_RUNTIME_REQUEST_ENVELOPE_BYTES
+)
+MAX_ARGV_BYTES = MAX_HOST_RUNTIME_ARGUMENT_BYTES
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Signature = Annotated[str, Field(pattern=r"^[0-9a-f]{128}$")]
@@ -155,6 +150,22 @@ class HostRuntimeRequest(WireModel):
     # legal too (the plan's opaque-argv contract admits it), so only the payload
     # ceiling bounds an item.
     arguments: list[Annotated[str, Field(pattern=r"^[^\x00]*$")]]
+    start_plan: "RecipeStartPayload | None" = Field(  # noqa: F821, UP037
+        default=None, exclude_if=lambda value: value is None
+    )
+    job_plan: "RecipeJobRunRequest | None" = Field(  # noqa: F821, UP037
+        default=None, exclude_if=lambda value: value is None
+    )
+    stop_plan: "RecipeStopPayload | None" = Field(  # noqa: F821, UP037
+        default=None, exclude_if=lambda value: value is None
+    )
+    run_generation: int | None = Field(
+        default=None,
+        ge=1,
+        le=2**31 - 1,
+        strict=True,
+        exclude_if=lambda value: value is None,
+    )
     observation: RecipeRunInspectionBinding | None = None
     installation_id: Uuid4Text | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -165,7 +176,11 @@ class HostRuntimeRequest(WireModel):
 
     @model_validator(mode="after")
     def bind_runtime_inspection(self) -> HostRuntimeRequest:
-        argument_free = self.action in {"runtime-preflight", "installation-cleanup"}
+        argument_free = self.action in {
+            "runtime-preflight",
+            "stop",
+            "installation-cleanup",
+        }
         if (not self.arguments) != argument_free:
             raise ValueError("runtime arguments do not match the action")
         if (self.installation_id is not None) != (
@@ -176,20 +191,63 @@ class HostRuntimeRequest(WireModel):
             self.action != "installation-cleanup"
             or self.installation_id != self.reconciliation_identity.installation_id
         ):
-            raise ValueError("runtime reconciliation identity does not match the action")
-        if self.observation is not None:
-            import hashlib
-
+            raise ValueError(
+                "runtime reconciliation identity does not match the action"
+            )
+        if self.action == "start":
             if (
-                self.action != "run-inspect"
-                or self.job_id != self.observation.run_id
-                or self.attempt != self.observation.run_generation
-                or hashlib.sha256(canonical_message(self.arguments)).hexdigest()
-                != self.observation.runtime_arguments_sha256
+                (self.start_plan is None) == (self.job_plan is None)
+                or self.stop_plan is not None
+                or self.run_generation is None
             ):
+                raise ValueError("runtime start plan binding is invalid")
+            plan = self.start_plan if self.start_plan is not None else self.job_plan
+            assert plan is not None
+            if self.run_generation != plan.run_generation:
+                raise ValueError("runtime start generation does not match its plan")
+            if len(canonical_message(plan.compiled_execution_plan)) > (
+                MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+            ):
+                raise ValueError("runtime start compiled plan exceeds its byte ceiling")
+            if len(canonical_message(plan)) > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES:
                 raise ValueError(
-                    "runtime observation binding does not match the request"
+                    "runtime start plan exceeds its canonical byte ceiling"
                 )
+        elif self.action == "stop":
+            plan = self.stop_plan
+            if (
+                plan is None
+                or self.start_plan is not None
+                or self.job_plan is not None
+                or self.run_generation != plan.run_generation
+            ):
+                raise ValueError("runtime stop plan binding is invalid")
+            if len(canonical_message(plan.compiled_execution_plan)) > (
+                MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+            ):
+                raise ValueError("runtime stop compiled plan exceeds its byte ceiling")
+            if len(canonical_message(plan)) > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES:
+                raise ValueError("runtime stop plan exceeds its canonical byte ceiling")
+        elif any(
+            value is not None
+            for value in (
+                self.start_plan,
+                self.job_plan,
+                self.stop_plan,
+                self.run_generation,
+            )
+        ):
+            raise ValueError("runtime plan binding does not match the action")
+        if len(canonical_message(self)) > MAX_HOST_RUNTIME_REQUEST_BYTES:
+            raise ValueError("runtime request exceeds its canonical byte ceiling")
+        if self.observation is not None and (
+            self.action != "run-inspect"
+            or self.job_id != self.observation.run_id
+            or self.attempt != self.observation.run_generation
+            or hashlib.sha256(canonical_message(self.arguments)).hexdigest()
+            != self.observation.runtime_arguments_sha256
+        ):
+            raise ValueError("runtime observation binding does not match the request")
         return self
 
 
@@ -252,6 +310,28 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
     fence: Uuid4Text
     request_sha256: Digest
+    start_plan_sha256: Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    stop_plan_sha256: Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    run_generation: int | None = Field(
+        default=None,
+        ge=1,
+        le=2**31 - 1,
+        strict=True,
+        exclude_if=lambda value: value is None,
+    )
+    runtime_run_id: Uuid4Text | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    runtime_target_id: Uuid4Text | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    runtime_installation_id: Uuid4Text | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     observation_identity_sha256: Digest | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -280,6 +360,38 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
             or self.installation_id != self.reconciliation_identity.installation_id
         ):
             raise ValueError("container runtime reconciliation identity is invalid")
+        if self.action == "start":
+            if (
+                self.start_plan_sha256 is None
+                or self.stop_plan_sha256 is not None
+                or self.run_generation is None
+                or self.runtime_run_id is None
+                or self.runtime_target_id is None
+                or self.runtime_installation_id is None
+            ):
+                raise ValueError("container runtime start authority is invalid")
+        elif self.action == "stop":
+            if (
+                self.stop_plan_sha256 is None
+                or self.start_plan_sha256 is not None
+                or self.run_generation is None
+                or self.runtime_run_id is None
+                or self.runtime_target_id is None
+                or self.runtime_installation_id is None
+            ):
+                raise ValueError("container runtime stop authority is invalid")
+        elif any(
+            value is not None
+            for value in (
+                self.start_plan_sha256,
+                self.stop_plan_sha256,
+                self.run_generation,
+                self.runtime_run_id,
+                self.runtime_target_id,
+                self.runtime_installation_id,
+            )
+        ):
+            raise ValueError("container runtime plan authority is invalid")
         return self
 
 

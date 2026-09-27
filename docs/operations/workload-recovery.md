@@ -41,6 +41,25 @@ runtime is observed instead of started again. A completed installation is checke
 and reused instead of copied again. Completed removal is accepted only when the
 exact managed object is proved absent.
 
+For a persistent single-Spark run, a fresh schema-2 signed observation that
+reports `process_running=false` lets the Controller withdraw the route and
+queue the canonical exact Stop, followed by a new generation of the same
+accepted Start. The model, image, installation, plan and workload-intent
+ordinal remain bound to the original accepted Start. Recovery can repeat after
+later reboots only through the latest verified successful recovery Start and
+its exact completed Stop. A newer workload intent or cancellation fences this
+path, and an uncertain Stop keeps the run's resource claims active.
+
+The Controller does not infer process absence from an expired lease, stale
+observation, or offline Spark. If the signed absence becomes stale, it waits
+for a fresh read-only exact inspection grant for the still-current run
+generation. Missing or stale Controller-observed presence is also a bounded
+wait; refreshed signed absence and presence resume the same run. These waits
+keep the route withdrawn and do not release claims. Singleton reboot recovery
+fails closed when the exact accepted compiled lifecycle plan differs from the
+installed plan or declares `pre_start` or `post_stop` hooks; this release does
+not replay hooks during recovery.
+
 An incomplete hook can remain blocked when its external effect cannot be proved.
 Builds, arbitrary jobs and package upgrades do not inherit automatic workload
 replay. Invalid ownership, revoked authorization, malformed contracts, integrity

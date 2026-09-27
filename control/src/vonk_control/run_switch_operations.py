@@ -22,7 +22,7 @@ from typing import Any, Literal, Protocol, TypeGuard, runtime_checkable
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -55,7 +55,7 @@ from .disk_reservations import outstanding_disk_reservation_bytes
 from .install_admission import InstallAdmissionBusy
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
-from .logging import log_event
+from .logging import log_event, redact_text
 from .memory_reservations import (
     MEMORY_RESERVATION_KINDS,
     memory_reservations,
@@ -186,6 +186,7 @@ from .run_switch_contract import (
     RunSwitchPhaseResult,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
+    RunSwitchProfileStopScope,
     RunSwitchProgress,
     RunSwitchProgressState,
     RunSwitchReason,
@@ -239,6 +240,12 @@ _REASON_SEVERITY_ADAPTER = TypeAdapter(RunSwitchReasonSeverity)
 
 class RunSwitchOperationConflict(RuntimeError):
     """The selected outcome is stale, unsupported, or unsafe to execute."""
+
+
+class _RunSwitchIncompleteProfileGroupConflict(RunSwitchOperationConflict):
+    """Reachable ranks stopped, but the profile group remains incomplete."""
+
+    code = "run-switch.profile.incomplete_multi_spark_model"
 
 
 class _RunSwitchBuildParentChanged(RunSwitchOperationConflict):
@@ -350,6 +357,7 @@ class PhaseExecution:
     operation_id: str | None = None
     result: Mapping[str, object] | None = None
     waiting: bool = False
+    status_reason: str | None = None
 
 
 class RunSwitchArtifactPhaseExecutor(Protocol):
@@ -1374,8 +1382,20 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(result=result)
         return PhaseExecution(_started_operation_id(value), result)
 
-    def _observe_older_issued(self, kind: str, owner_id: str, ordinal: int) -> None:
-        pending = self._lifecycle.assess_superseded_issued(kind, owner_id, ordinal)
+    def _observe_older_issued(
+        self,
+        kind: str,
+        owner_id: str,
+        ordinal: int,
+        *,
+        profile_target_node_ids: Sequence[str] | None = None,
+    ) -> None:
+        pending = self._lifecycle.assess_superseded_issued(
+            kind,
+            owner_id,
+            ordinal,
+            profile_target_node_ids=profile_target_node_ids,
+        )
         if pending is not None:
             raise RunSwitchIssuedWorkloadPending(
                 kind=kind,
@@ -1448,10 +1468,25 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution()
             target = plan.stops[item_index]
             ordinal = _bound_workload_intent(progress)
-            self._lifecycle.reconcile_superseded_unissued(
-                "recipe.stop", target.run_id, ordinal
-            )
             stop_digest = target.plan_digest
+            profile_target_node_ids = (
+                plan.profile_stop_scope.target_node_ids
+                if plan.profile_stop_scope is not None
+                else None
+            )
+            self._lifecycle.reconcile_superseded_unissued(
+                "recipe.stop",
+                target.run_id,
+                ordinal,
+                profile_target_node_ids=profile_target_node_ids,
+            )
+            if profile_target_node_ids is not None:
+                self._observe_older_issued(
+                    "recipe.stop",
+                    target.run_id,
+                    ordinal,
+                    profile_target_node_ids=profile_target_node_ids,
+                )
             if target.state in {"starting", "stopping"}:
                 # A newer explicit Stop can cancel an older same-run command
                 # under the current node ordinal.  Re-preview this exact run
@@ -1466,13 +1501,26 @@ class RecipeLifecyclePhaseExecutor:
                         )
                     if run.state == "stopped" and run.route_state == "withdrawn":
                         return PhaseExecution(result={"run_id": target.run_id})
-                fresh = self._lifecycle.preview_stop(target.run_id)
+                fresh = self._lifecycle.preview_stop(
+                    target.run_id,
+                    profile_target_node_ids=profile_target_node_ids,
+                )
                 if not fresh.allowed:
                     raise RunSwitchOperationConflict(
                         "run-switch.stop-still-unresolved-after-cancellation"
                     )
                 stop_digest = fresh.plan_digest
+            profile_application_id = _string_or_none(
+                progress.get("profile_application_id")
+            )
             child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{target.run_id}"))
+            if profile_application_id is not None:
+                child_key = str(
+                    uuid.uuid5(
+                        uuid.UUID(child_key),
+                        f"profile-stop:{profile_application_id}",
+                    )
+                )
             try:
                 value = self._lifecycle.stop(
                     target.run_id,
@@ -1480,6 +1528,8 @@ class RecipeLifecyclePhaseExecutor:
                     actor=actor,
                     request_id=child_key,
                     workload_intent_ordinal=ordinal,
+                    profile_target_node_ids=profile_target_node_ids,
+                    profile_application_id=profile_application_id,
                 )
             except RecipeArtifactJobCancellationPending as pending:
                 raise RunSwitchIssuedWorkloadPending(
@@ -1875,6 +1925,33 @@ class RecipeLifecyclePhaseExecutor:
                 )
             status = self._lifecycle.run_status(run_id)
             if plan.action == "stop":
+                scope = plan.profile_stop_scope
+                if scope is not None:
+                    reachable_stopped = (
+                        status.state == "lost"
+                        and status.route_state == "withdrawn"
+                        and all(
+                            rank.state == "stopped"
+                            for rank in status.ranks
+                            if rank.node_id in scope.target_node_ids
+                        )
+                    )
+                    if reachable_stopped:
+                        missing_ranks = [
+                            rank
+                            for rank in status.ranks
+                            if rank.node_id in scope.missing_node_ids
+                        ]
+                        raise _RunSwitchIncompleteProfileGroupConflict(
+                            "run-switch.profile.incomplete_multi_spark_model: "
+                            f"{plan.alias or run_id} was removed from service after "
+                            "stopping reachable ranks; missing Spark ranks may still "
+                            "be running: "
+                            + ", ".join(
+                                f"rank {rank.rank} ({rank.node_id})"
+                                for rank in missing_ranks
+                            )
+                        )
                 verified = (
                     status.state == "stopped"
                     and status.route_state == "withdrawn"
@@ -1883,11 +1960,91 @@ class RecipeLifecyclePhaseExecutor:
                 waiting = status.state in _ACTIVE_RUN_STATES or status.route_state in {
                     "pending",
                 }
+                status_reason = (
+                    f"run-switch.stop-verification-pending: run {run_id} is "
+                    f"{status.state}, route is {status.route_state}"
+                )
             else:
                 verified = status.healthy and status.route_state == "published"
-                waiting = status.state in _ACTIVE_RUN_STATES or status.route_state in {
-                    "pending",
-                }
+                waiting = False
+                status_reason = None
+                route_error = (
+                    redact_text(status.route_error)
+                    if status.route_error is not None
+                    else None
+                )
+                if not verified:
+                    if status.state in {"failed", "lost", "stopped"}:
+                        detail = route_error or "run owner reached a terminal state"
+                        raise RunSwitchOperationConflict(
+                            f"run-switch.run-owner-terminal: {status.state}; {detail}"
+                        )
+                    if status.route_state == "failed":
+                        detail = route_error or "route owner reported terminal failure"
+                        raise RunSwitchOperationConflict(
+                            f"run-switch.route-owner-failed: {detail}"
+                        )
+                    waiting = True
+                    route_cause = f"route is {status.route_state}"
+                    if status.route_state == "pending":
+                        if status.route_next_attempt_at is not None:
+                            route_cause = (
+                                "route publication is pending; route owner next "
+                                f"attempt {status.route_next_attempt_at.isoformat()}"
+                            )
+                        elif status.observation_deadline_at is not None:
+                            route_cause = (
+                                "route publication is pending; route owner has no "
+                                "retry scheduled; initial observation deadline "
+                                f"{status.observation_deadline_at.isoformat()}"
+                            )
+                        else:
+                            route_cause = (
+                                "route publication is pending; route owner next "
+                                "attempt is not scheduled"
+                            )
+                    elif status.route_state == "withdrawn":
+                        route_cause = (
+                            f"route is withdrawn; cause {route_error or 'unknown'}"
+                        )
+                    if status.recovery_owners:
+                        owners = ", ".join(
+                            f"{owner.kind} {owner.operation_id} ({owner.state})"
+                            for owner in status.recovery_owners
+                        )
+                        status_reason = (
+                            f"run-switch.distributed-recovery-active: {owners}; run "
+                            f"{run_id} generation {status.run_generation}; {route_cause}"
+                        )
+                    elif status.route_recovery_pending:
+                        status_reason = (
+                            "run-switch.route-health-recovery-active: route owner is "
+                            f"reconciling run {run_id} generation {status.run_generation}; "
+                            f"{route_cause}"
+                        )
+                    elif status.state in {"starting", "stopping"}:
+                        status_reason = (
+                            f"run-switch.run-owner-active: run {run_id} generation "
+                            f"{status.run_generation} is {status.state}; {route_cause}"
+                        )
+                    elif status.route_state == "pending":
+                        status_reason = (
+                            f"run-switch.route-publication-pending: run {run_id} "
+                            f"generation {status.run_generation}; {route_cause}"
+                        )
+                    elif status.route_state == "withdrawn":
+                        cause = route_error or "no terminal route-owner cause recorded"
+                        status_reason = (
+                            f"run-switch.route-withdrawn-owner-unknown: run {run_id} "
+                            f"generation {status.run_generation} remains {status.state}; "
+                            f"route cause {cause}; waiting for exact reconciliation"
+                        )
+                    else:
+                        status_reason = (
+                            f"run-switch.final-owner-state-unknown: run {run_id} "
+                            f"generation {status.run_generation} is {status.state}; "
+                            f"route is {status.route_state}; waiting for exact reconciliation"
+                        )
             evidence = {
                 "run_id": run_id,
                 "state": status.state,
@@ -1910,6 +2067,7 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(
                     result={"final_verified": False, **evidence},
                     waiting=True,
+                    status_reason=status_reason,
                 )
             raise RunSwitchOperationConflict("run-switch.final-verification-failed")
         return PhaseExecution()
@@ -2313,6 +2471,7 @@ class RunSwitchOperationService:
         request: RunSwitchStopPreviewRequest | str,
         *,
         actor: str,
+        profile_stop_scope: RunSwitchProfileStopScope | None = None,
     ) -> RunSwitchPlan:
         run_id = request if isinstance(request, str) else request.run_id
         invocation = (
@@ -2341,7 +2500,7 @@ class RunSwitchOperationService:
                     .order_by(ClusterMappingNode.rank)
                 )
             )
-            group = SparkGroup(
+            original_group = SparkGroup(
                 nodes=[
                     SparkGroupNode(
                         node_id=node.node_id,
@@ -2352,6 +2511,13 @@ class RunSwitchOperationService:
                     for node in mapping_nodes
                 ]
             )
+            target_node_ids = tuple(node.node_id for node in original_group.nodes)
+            if profile_stop_scope is not None:
+                if original_group != profile_stop_scope.original_group:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.profile_stop_scope_changed"
+                    )
+                target_node_ids = tuple(profile_stop_scope.target_node_ids)
             model_digest = (
                 installation.model_content_sha256
                 if installation is not None
@@ -2379,7 +2545,7 @@ class RunSwitchOperationService:
             ) = self._fit(
                 session,
                 revision,
-                group,
+                original_group,
                 now=now,
                 excluded_run_ids=(run.id,),
             )
@@ -2387,7 +2553,7 @@ class RunSwitchOperationService:
                 session,
                 model_digest,
                 revision.id if revision is not None else None,
-                group,
+                original_group,
                 retention="retain-cached",
                 now=now,
             )
@@ -2407,12 +2573,43 @@ class RunSwitchOperationService:
                     revision,
                     build,
                     build_candidate,
-                    group,
+                    original_group,
                     require_available=False,
                     published_receipt_lookup=self._published_image_receipt,
                 )
             )
-            stop_digest = self._stop_digest(run.id)
+            stop_digest = self._stop_digest(
+                run.id,
+                target_node_ids=(
+                    profile_stop_scope.target_node_ids
+                    if profile_stop_scope is not None
+                    else None
+                ),
+            )
+            if profile_stop_scope is not None and stop_digest is not None:
+                lifecycle = self._lifecycle
+                if lifecycle is None:
+                    raise RunSwitchOperationConflict("run-switch.lifecycle-unavailable")
+                lifecycle_stop = lifecycle.preview_stop(
+                    run.id,
+                    profile_target_node_ids=profile_stop_scope.target_node_ids,
+                )
+                if (
+                    lifecycle_stop.target_node_ids
+                    != tuple(profile_stop_scope.target_node_ids)
+                    or lifecycle_stop.missing_node_ids
+                    != tuple(profile_stop_scope.missing_node_ids)
+                    or {
+                        (node.node_id, node.rank, node.role)
+                        for node in lifecycle_stop.nodes
+                    }
+                    != {
+                        (node.node_id, node.rank, node.role)
+                        for node in profile_stop_scope.original_group.nodes
+                    }
+                    or not lifecycle_stop.allowed
+                ):
+                    stop_digest = None
             stops = (
                 [
                     StopImpact(
@@ -2420,8 +2617,12 @@ class RunSwitchOperationService:
                         run_plan_digest=run.plan_digest,
                         alias=run.alias,
                         state=run.state,
-                        node_ids=[node.node_id for node in mapping_nodes],
-                        reserved_bytes=self._run_reserved_bytes(session, run.id),
+                        node_ids=list(target_node_ids),
+                        reserved_bytes=self._run_reserved_bytes(
+                            session,
+                            run.id,
+                            node_ids=target_node_ids,
+                        ),
                         plan_digest=stop_digest,
                     )
                 ]
@@ -2433,6 +2634,25 @@ class RunSwitchOperationService:
             # findings remain diagnostics, but they do not block the stop.
             blockers: list[RunSwitchReason] = []
             warnings = [*fit_warnings, *inspection.warnings]
+            if profile_stop_scope is not None:
+                missing_ranks = [
+                    node
+                    for node in profile_stop_scope.original_group.nodes
+                    if node.node_id in profile_stop_scope.missing_node_ids
+                ]
+                warnings.append(
+                    _as_reason(
+                        "run-switch.profile.incomplete_multi_spark_model",
+                        "This profile Stop will withdraw the model route and stop "
+                        "only reachable ranks. Missing Spark ranks may still be running: "
+                        + ", ".join(
+                            f"rank {node.rank} ({node.node_id})"
+                            for node in missing_ranks
+                        ),
+                        scope="group",
+                        node_ids=profile_stop_scope.missing_node_ids,
+                    )
+                )
             if run.state not in _STOPPABLE_RUN_STATES:
                 blockers.append(
                     _as_reason(
@@ -2453,13 +2673,15 @@ class RunSwitchOperationService:
                 )
             phases = self._phases(
                 action="stop",
-                group=group,
+                group=original_group,
+                phase_node_ids=target_node_ids,
                 installation_id=installation.id if installation is not None else None,
                 installation_state=installation.state
                 if installation is not None
                 else None,
                 stops=stops,
                 inspection=inspection,
+                partial_stop=profile_stop_scope is not None,
                 runtime_storage=runtime_storage,
                 retention="retain-cached",
                 blockers=blockers,
@@ -2467,15 +2689,19 @@ class RunSwitchOperationService:
                 stop_before_prepare=False,
             )
             storage = self._storage(inspection, retention="retain-cached")
-            preparation = self._preparation(
-                revision=revision,
-                group=group,
-                inspection=inspection,
-                build=build,
-                build_candidate=build_candidate,
-                runtime_storage=runtime_storage,
-                now=now,
-                reasons=[*blockers, *warnings],
+            preparation = (
+                None
+                if profile_stop_scope is not None
+                else self._preparation(
+                    revision=revision,
+                    group=original_group,
+                    inspection=inspection,
+                    build=build,
+                    build_candidate=build_candidate,
+                    runtime_storage=runtime_storage,
+                    now=now,
+                    reasons=[*blockers, *warnings],
+                )
             )
             plan_data: dict[str, object] = {
                 "schema_version": 2,
@@ -2486,7 +2712,8 @@ class RunSwitchOperationService:
                 "recipe_content_sha256": recipe_digest,
                 "alias": run.alias,
                 "run_id": run.id,
-                "spark_group": group,
+                "spark_group": original_group,
+                "profile_stop_scope": profile_stop_scope,
                 "mapping": self._mapping_selection(mapping, mapping_nodes),
                 "installation_id": installation.id
                 if installation is not None
@@ -2523,6 +2750,21 @@ class RunSwitchOperationService:
                 "stop_before_prepare": False,
             }
             return self._finalize_plan(plan_data)
+
+    def preview_profile_stop(
+        self,
+        run_id: str,
+        profile_stop_scope: RunSwitchProfileStopScope,
+        *,
+        actor: str,
+    ) -> RunSwitchPlan:
+        """Preview a partial Stop authorized only by a FleetProfile review."""
+
+        return self.preview_stop(
+            run_id,
+            actor=actor,
+            profile_stop_scope=profile_stop_scope,
+        )
 
     def preview_cleanup(
         self,
@@ -2952,6 +3194,7 @@ class RunSwitchOperationService:
         *,
         actor: str,
         workload_intent_ordinal: int | None = None,
+        profile_application_id: str | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
         if request.request_key is not None:
@@ -2981,6 +3224,50 @@ class RunSwitchOperationService:
             actor=actor,
             kind="recipe.stop.v2",
             workload_intent_ordinal=workload_intent_ordinal,
+            profile_application_id=profile_application_id,
+        )
+
+    def apply_profile_stop(
+        self,
+        run_id: str,
+        profile_stop_scope: RunSwitchProfileStopScope,
+        *,
+        plan_digest: str,
+        request_key: str,
+        actor: str,
+        workload_intent_ordinal: int,
+        profile_application_id: str,
+    ) -> RunSwitchOperation:
+        """Apply only a FleetProfile-reviewed reachable-rank Stop scope."""
+
+        existing = self._existing_request_operation(
+            request_key,
+            kind="recipe.stop.v2",
+            plan_digest=plan_digest,
+        )
+        if existing is not None:
+            return existing
+        plan = self.preview_stop(
+            run_id,
+            actor=actor,
+            profile_stop_scope=profile_stop_scope,
+        )
+        if plan.plan_digest != plan_digest:
+            raise RunSwitchOperationConflict(
+                "run-switch.stale_plan: current evidence no longer matches preview"
+            )
+        if not plan.allowed:
+            raise RunSwitchOperationConflict(
+                "run-switch.plan_blocked: "
+                + "; ".join(reason.code for reason in plan.blockers[:8])
+            )
+        return self._apply_plan(
+            plan,
+            request_key=request_key,
+            actor=actor,
+            kind="recipe.stop.v2",
+            workload_intent_ordinal=workload_intent_ordinal,
+            profile_application_id=profile_application_id,
         )
 
     def get(self, operation_id: str) -> RunSwitchOperation:
@@ -3019,7 +3306,7 @@ class RunSwitchOperationService:
                         "run-switch cancellation request was already used differently"
                     )
                 return self._operation_view(job)
-            if job.state not in {"queued", "running"}:
+            if job.state not in {"queued", "running", "waiting"}:
                 raise RunSwitchOperationConflict(
                     "run-switch operation is not cancellable"
                 )
@@ -3043,11 +3330,16 @@ class RunSwitchOperationService:
             ]
             if "start" in require_sequence(
                 progress.get("completed_phases", []), "completed phases"
-            ) or (job.state == "running" and phase.kind in {"start", "final_verify"}):
+            ) or (
+                job.state in {"running", "waiting"}
+                and phase.kind in {"start", "final_verify"}
+            ):
                 raise RunSwitchOperationConflict(
                     "run-switch runtime is starting or active; use the explicit Stop operation"
                 )
             progress["cancellation"] = cancellation.model_dump(mode="json")
+            if job.state == "waiting":
+                progress["observation_due_at"] = cancellation.requested_at.isoformat()
             job.status_reason = (
                 "Cancellation requested; finishing the current preparation safely."
             )
@@ -3255,7 +3547,13 @@ class RunSwitchOperationService:
                 select(Job.id)
                 .where(
                     Job.kind.in_(_OPERATION_KINDS),
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    or_(
+                        Job.state.in_(("queued", "running", "waiting")),
+                        and_(
+                            Job.state == "waiting-for-operator",
+                            due_at.is_not(None),
+                        ),
+                    ),
                     or_(due_at.is_(None), due_at <= _now(self._clock).isoformat()),
                 )
                 .order_by(Job.id)
@@ -5953,10 +6251,12 @@ class RunSwitchOperationService:
         *,
         action: RunSwitchAction,
         group: SparkGroup,
+        phase_node_ids: Sequence[str] | None = None,
         installation_id: str | None,
         installation_state: str | None,
         stops: Sequence[StopImpact],
         inspection: ArtifactInspection,
+        partial_stop: bool = False,
         runtime_storage: RuntimeImageStorageImpact | None,
         retention: RunSwitchRetention,
         blockers: Sequence[RunSwitchReason],
@@ -5967,7 +6267,11 @@ class RunSwitchOperationService:
         cleanup_disposition: Literal["uninstall", "abandon"] = "uninstall",
         cleanup_mode: Literal["uninstall", "reconcile"] = "uninstall",
     ) -> list[RunSwitchPhase]:
-        node_ids = [node.node_id for node in group.nodes]
+        node_ids = list(
+            phase_node_ids
+            if phase_node_ids is not None
+            else (node.node_id for node in group.nodes)
+        )
         phases: list[RunSwitchPhase] = []
         if action == "cleanup":
             # Disposal is authorized by the installation's own uninstall
@@ -6016,7 +6320,12 @@ class RunSwitchOperationService:
                         kind="stop",
                         state="planned" if not blockers else "blocked",
                         node_ids=node_ids,
-                        detail="Stop the selected workload as one complete group.",
+                        detail=(
+                            "Stop the selected workload on the reachable Sparks; "
+                            "the profile will report the missing ranks separately."
+                            if partial_stop
+                            else "Stop the selected workload as one complete group."
+                        ),
                     )
                 )
             phases.append(
@@ -6025,7 +6334,12 @@ class RunSwitchOperationService:
                     kind="final_verify",
                     state="planned" if not blockers else "blocked",
                     node_ids=node_ids,
-                    detail="Verify that the selected workload is stopped and its route is withdrawn.",
+                    detail=(
+                        "Verify that reachable ranks are stopped and the model route "
+                        "is withdrawn."
+                        if partial_stop
+                        else "Verify that the selected workload is stopped and its route is withdrawn."
+                    ),
                 )
             )
             return phases
@@ -6197,28 +6511,36 @@ class RunSwitchOperationService:
             ],
         )
 
-    def _stop_digest(self, run_id: str) -> str | None:
+    def _stop_digest(
+        self,
+        run_id: str,
+        *,
+        target_node_ids: Sequence[str] | None = None,
+    ) -> str | None:
         if self._lifecycle is None:
             return None
         try:
-            return self._lifecycle.preview_stop(run_id).plan_digest
+            plan = self._lifecycle.preview_stop(
+                run_id, profile_target_node_ids=target_node_ids
+            )
+            return plan.plan_digest if plan.allowed else None
         except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError):
             return None
 
     @staticmethod
-    def _run_reserved_bytes(session: Session, run_id: str) -> int:
-        return int(
-            session.scalar(
-                select(
-                    func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)
-                ).where(
-                    ResourceReservation.owner_kind == "run",
-                    ResourceReservation.owner_id == run_id,
-                    ResourceReservation.state == "active",
-                )
-            )
-            or 0
+    def _run_reserved_bytes(
+        session: Session, run_id: str, *, node_ids: Sequence[str] | None = None
+    ) -> int:
+        statement = select(
+            func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)
+        ).where(
+            ResourceReservation.owner_kind == "run",
+            ResourceReservation.owner_id == run_id,
+            ResourceReservation.state == "active",
         )
+        if node_ids is not None:
+            statement = statement.where(ResourceReservation.node_id.in_(node_ids))
+        return int(session.scalar(statement) or 0)
 
     @staticmethod
     def _finalize_plan(data: Mapping[str, object]) -> RunSwitchPlan:
@@ -6237,6 +6559,7 @@ class RunSwitchOperationService:
         profile_application_id: str | None = None,
     ) -> RunSwitchOperation:
         now = _now(self._clock)
+        target_node_ids = _plan_target_node_ids(plan)
         total_bytes, member_totals = _planned_transfer_bytes(plan)
         payload = {
             "schema_version": 2,
@@ -6270,6 +6593,7 @@ class RunSwitchOperationService:
                         "error": None,
                     }
                     for node in plan.spark_group.nodes
+                    if node.node_id in target_node_ids
                 ],
             },
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
@@ -6278,16 +6602,18 @@ class RunSwitchOperationService:
             nodes = list(
                 session.scalars(
                     select(AgentNode)
-                    .where(
-                        AgentNode.node_id.in_(
-                            [node.node_id for node in plan.spark_group.nodes]
-                        )
-                    )
+                    .where(AgentNode.node_id.in_(target_node_ids))
                     .order_by(AgentNode.node_id)
                     .with_for_update()
                 )
             )
-            if len(nodes) != len(plan.spark_group.nodes):
+            if len(nodes) != len(target_node_ids) or (
+                plan.profile_stop_scope is not None
+                and any(
+                    node.revoked_at is not None or node.state != "active"
+                    for node in nodes
+                )
+            ):
                 raise RunSwitchOperationConflict(
                     "run-switch target Spark scope changed"
                 )
@@ -6338,7 +6664,7 @@ class RunSwitchOperationService:
                 state="queued",
                 actor=actor,
                 authority_revision=(plan.recipe_content_sha256 or plan.plan_digest),
-                targets=[node.node_id for node in plan.spark_group.nodes],
+                targets=list(target_node_ids),
                 payload_digest=_digest(payload),
                 payload=payload,
                 result=_persisted_result(payload["progress"]),
@@ -6395,7 +6721,12 @@ class RunSwitchOperationService:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
                 return True
-            if job.state not in {"queued", "running", "waiting-for-operator"}:
+            if job.state not in {
+                "queued",
+                "running",
+                "waiting",
+                "waiting-for-operator",
+            }:
                 return False
             payload = job.payload
             raw_plan = payload.get("plan")
@@ -6446,6 +6777,11 @@ class RunSwitchOperationService:
                 job.updated_at = now
                 session.commit()
                 return True
+            if (
+                job.state == "waiting-for-operator"
+                and progress.get("observation_due_at") is None
+            ):
+                return False
             observation_due = progress.get("observation_due_at")
             if isinstance(observation_due, str) and now < _aware(
                 datetime.fromisoformat(observation_due)
@@ -6454,13 +6790,22 @@ class RunSwitchOperationService:
             raw_phase_index = progress.get("phase_index", 0)
             raw_item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
-            if job.state == "waiting-for-operator":
+            if job.state in {"waiting", "waiting-for-operator"}:
                 if not child_id:
-                    return False
-                # Only observe the already-issued child. No new effect is
-                # authorized by reopening this parent's observation checkpoint.
-                job.state = "running"
-                session.commit()
+                    # Final verification observes an existing run and route;
+                    # reopening this checkpoint cannot issue a new workload.
+                    # Newer intent was checked above, and the persisted start
+                    # deadline remains immutable.
+                    if progress.get("phase") != "final_verify":
+                        return False
+                    job.state = "running"
+                    job.updated_at = now
+                    session.commit()
+                else:
+                    # Only observe the already-issued child. No new effect is
+                    # authorized by reopening this parent's observation checkpoint.
+                    job.state = "running"
+                    session.commit()
             if progress.get("cancellation") and child_id is None:
                 _complete_cancellation(job, progress, now)
                 session.commit()
@@ -6472,13 +6817,14 @@ class RunSwitchOperationService:
             if (
                 profile_application_id is not None
                 and plan.recipe_revision_id is not None
+                and plan.action != "stop"
             ):
                 try:
                     expected_image = accepted_profile_runtime_image(
                         session,
                         profile_application_id,
                         plan.recipe_revision_id,
-                        tuple(node.node_id for node in plan.spark_group.nodes),
+                        _plan_target_node_ids(plan),
                     )
                 except ValueError as error:
                     self._mark_failed(job, str(error), now=now, progress=progress)
@@ -6664,7 +7010,7 @@ class RunSwitchOperationService:
                             job, progress, phase_index, item_index, child_id
                         ):
                             return False
-                        job.state = "waiting-for-operator"
+                        job.state = "waiting"
                         due = now + timedelta(seconds=60)
                         progress["observation_due_at"] = due.isoformat()
                         job.result = _persisted_result(progress)
@@ -6834,6 +7180,7 @@ class RunSwitchOperationService:
                 if progress.get("cancellation"):
                     _complete_cancellation(job, progress, now)
             return True
+        expiry_event: dict[str, object] | None = None
         with self._sessions.begin() as session:
             job = checkpoint_job(session)
             if job is None or job.state not in {"queued", "running"}:
@@ -6942,7 +7289,7 @@ class RunSwitchOperationService:
                     pending=pending,
                 )
             except RunSwitchOperationConflict as error:
-                fail(str(error))
+                fail(str(error), failure_code=getattr(error, "code", None))
                 return True
             except RuntimeImagePreparationError as error:
                 if error.code == _RUNTIME_IMAGE_OWNER_CHANGED:
@@ -7002,6 +7349,7 @@ class RunSwitchOperationService:
             progress = _read_progress(job.result)
             if not _checkpoint_matches(job, progress, phase_index, item_index, None):
                 return False
+            previous_status_reason = job.status_reason
             if progress.get("observation_due_at") is not None:
                 progress["observation_due_at"] = None
                 progress["observation_deadline_at"] = None
@@ -7014,6 +7362,7 @@ class RunSwitchOperationService:
                 RunSwitchPostStopEvidencePending.code,
             ):
                 progress["retry_reason"] = None
+            deadline_expired = False
             _merge_progress_evidence(
                 progress,
                 plan,
@@ -7040,14 +7389,56 @@ class RunSwitchOperationService:
                             progress=progress,
                         )
                         return True
+                    raw_start_deadline = progress.get("start_deadline")
+                    start_deadline = (
+                        _aware(datetime.fromisoformat(raw_start_deadline))
+                        if isinstance(raw_start_deadline, str)
+                        else None
+                    )
+                    deadline_expired = (
+                        plan.action in {"run", "switch"}
+                        and start_deadline is not None
+                        and now >= start_deadline
+                    )
                     due = now + timedelta(
-                        seconds=60 if now.timestamp() - started >= 300 else 5
+                        seconds=(
+                            60
+                            if deadline_expired or now.timestamp() - started >= 300
+                            else 5
+                        )
                     )
                     progress["observation_due_at"] = due.isoformat()
-                    job.status_reason = (
-                        "Waiting for exact run and route verification; "
-                        f"next observation at {due.isoformat()}"
-                    )
+                    if deadline_expired and start_deadline is not None:
+                        owner_reason = execution.status_reason or (
+                            "run and route owners have not produced exact final evidence"
+                        )
+                        job.status_reason = (
+                            "run-switch.final-verification-expired: accepted start "
+                            f"deadline {start_deadline.isoformat()} passed; "
+                            f"{owner_reason[:220]}; exact reconciliation retains the "
+                            f"run and reservations; next observation at {due.isoformat()}"
+                        )[:512]
+                        job.state = "waiting"
+                        if not (
+                            isinstance(previous_status_reason, str)
+                            and previous_status_reason.startswith(
+                                "run-switch.final-verification-expired:"
+                            )
+                        ):
+                            phase_evidence = execution.result or {}
+                            expiry_event = {
+                                "operation_id": job.id,
+                                "run_id": phase_evidence.get("run_id"),
+                                "run_state": phase_evidence.get("state"),
+                                "route_state": phase_evidence.get("route_state"),
+                                "accepted_start_deadline": start_deadline.isoformat(),
+                                "status_reason": job.status_reason,
+                            }
+                    else:
+                        job.status_reason = execution.status_reason or (
+                            "Waiting for exact run and route verification; "
+                            f"next observation at {due.isoformat()}"
+                        )
                     # Keep one current observation while awaiting route publication.
                     # Repeated polling must not grow durable phase receipts.
                     progress["final_observation"] = _phase_result(
@@ -7145,11 +7536,19 @@ class RunSwitchOperationService:
                     if next_index < len(plan.phases)
                     else None
                 )
-            job.state = "running"
+            if not deadline_expired:
+                job.state = "running"
             job.result = _persisted_result(progress)
             job.updated_at = now
             if progress.get("cancellation") and not progress.get("child_operation_id"):
                 _complete_cancellation(job, progress, now)
+        if expiry_event is not None:
+            log_event(
+                _LOGGER,
+                "run_switch.final_verification_expired",
+                service="control-worker",
+                **expiry_event,
+            )
         return True
 
     @staticmethod
@@ -7211,7 +7610,7 @@ class RunSwitchOperationService:
                 progress["observation_deadline_at"] = deadline.isoformat()
                 due = now + timedelta(seconds=60)
                 progress["observation_due_at"] = due.isoformat()
-                job.state = "waiting-for-operator"
+                job.state = "waiting"
                 job.status_reason = (
                     "run-switch.start-observation-expired: exact effect remains "
                     f"unresolved; next observation at {due.isoformat()}"
@@ -7482,11 +7881,20 @@ class RunSwitchOperationService:
         completed = (
             persisted_result.completed_phases if persisted_result is not None else []
         )
+        projected_state = _progress_operation_state(job.state)
+        if (
+            projected_state == "waiting-for-operator"
+            and persisted_result is not None
+            and persisted_result.observation_due_at is not None
+        ):
+            # Existing accepted rows parked by the prior automatic-observation
+            # state are still auto-observed; present their actual behavior.
+            projected_state = "waiting"
         return RunSwitchOperation(
             operation_id=job.id,
             kind=_OPERATION_KIND_ADAPTER.validate_python(job.kind, strict=True),
             action=plan.action,
-            state=job.state,
+            state=projected_state,
             plan_digest=plan.plan_digest,
             request_key=job.request_id,
             cleanup_mode=(plan.cleanup_mode if plan.action == "cleanup" else None),
@@ -7499,7 +7907,7 @@ class RunSwitchOperationService:
             progress=_progress_view(
                 plan,
                 progress,
-                job.state,
+                projected_state,
                 job.status_reason,
             ),
             status_reason=job.status_reason,
@@ -7668,7 +8076,7 @@ class RunSwitchOperationProvider:
                 and operation.result
                 and operation.result.retryable
                 else ["cancel"]
-                if operation.state in {"queued", "running"}
+                if operation.state in {"queued", "running", "waiting"}
                 and not (operation.result and operation.result.cancellation)
                 and (
                     operation.state == "queued"
@@ -7759,7 +8167,7 @@ def _planned_transfer_bytes(
     an unknown cache manifest as zero would make the progress contract lie.
     """
 
-    node_ids = [node.node_id for node in plan.spark_group.nodes]
+    node_ids = list(_plan_target_node_ids(plan))
     if plan.action == "stop":
         return 0, {node_id: 0 for node_id in node_ids}
     model_download_bytes = plan.storage.missing_nas_bytes
@@ -7783,6 +8191,14 @@ def _planned_transfer_bytes(
         else None
     )
     return total, {node_id: each for node_id in node_ids}
+
+
+def _plan_target_node_ids(plan: RunSwitchPlan) -> tuple[str, ...]:
+    """Return physical targets while retaining the full reviewed topology."""
+
+    if plan.profile_stop_scope is not None:
+        return tuple(plan.profile_stop_scope.target_node_ids)
+    return tuple(node.node_id for node in plan.spark_group.nodes)
 
 
 def _planned_transfer_parts(
@@ -8420,7 +8836,7 @@ def _merge_progress_evidence(
     entries = _progress_member_entries(member_values)
     if not entries:
         return
-    known_nodes = {node.node_id for node in plan.spark_group.nodes}
+    known_nodes = set(_plan_target_node_ids(plan))
     existing = {
         str(item.get("node_id")): dict(item)
         for item in _progress_member_entries(progress.get("members"))
@@ -8548,7 +8964,7 @@ def _progress_view(
         total = _progress_int(raw.get("total_bytes"))
         member_totals = {node_id: None for node_id in node_ids}
     else:
-        node_ids = [node.node_id for node in plan.spark_group.nodes]
+        node_ids = list(_plan_target_node_ids(plan))
         phase_count = max(1, len(plan.phases))
         raw_index = raw.get("phase_index")
         phase_index = raw_index if type(raw_index) is int and raw_index >= 0 else 0

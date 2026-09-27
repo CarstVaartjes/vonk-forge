@@ -2,7 +2,7 @@ import {act, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {afterEach, vi} from "vitest";
 import type {ControlApi, OperationDetail} from "../api/types";
-import {ActivityPage, activityStatus} from "./activity";
+import {ActivityPage, activityStateLabel, activityStatus} from "./activity";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
 const REQUEST_ID = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
@@ -95,6 +95,9 @@ afterEach(() => {
 test("uses honest status labels for active and operator-blocked operations", () => {
   const base = {request_id: "operation", actor: "Vonk Forge", authority_revision: undefined, targets: []};
   expect(activityStatus({...base, action: "operation.reconcile.planned"})).toBe("in_progress");
+  expect(activityStatus({...base, action: "operation.reconcile.waiting"})).toBe("in_progress");
+  expect(activityStateLabel("waiting")).toBe("Waiting to recheck");
+  expect(activityStateLabel("waiting-for-operator")).toBe("Waiting for operator");
   expect(activityStatus({...base, action: "operation.reconcile.waiting-for-operator"})).toBe("attention");
   expect(activityStatus({...base, action: "operation.reconcile.failed"})).toBe("unsuccessful");
   expect(activityStatus({...base, action: "operation.reconcile.expired"})).toBe("unsuccessful");
@@ -348,6 +351,34 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   expect(intervalCallback).toBeDefined();
   await act(async () => { await intervalCallback?.(); });
   await waitFor(() => expect(loadJob).toHaveBeenCalledTimes(2));
+});
+
+test("refreshes an automatic wait at its bounded observation interval", async () => {
+  let intervalCallback: (() => Promise<unknown>) | undefined;
+  vi.spyOn(window, "setInterval").mockImplementation((handler, timeout) => {
+    if (timeout === 60_000) intervalCallback = handler as () => Promise<unknown>;
+    return 1;
+  });
+  const detail = {
+    id: "operation-1", kind: "recipe-run-switch", state: "waiting", authority_revision: "a".repeat(64), targets: [TARGET_ID], target_next_cursor: null, target_total: 1, current_attempt: 1,
+    status_reason: "Exact run and route remain unresolved; next observation at 2026-08-15T12:01:00+00:00",
+    operations: [], operation_next_cursor: null, operation_total: 0, progress: {completed: 0, failed: 0, running: 0, total: 1},
+  };
+  const recovered = {...detail, state: "succeeded", status_reason: null, progress: {completed: 1, failed: 0, running: 0, total: 1}};
+  const loadJob = vi.fn().mockResolvedValueOnce(detail).mockResolvedValue(recovered);
+  const loadJobs = vi.fn().mockResolvedValue({jobs: [{id: "operation-1", kind: "recipe-run-switch", state: "waiting", created_at: "2026-08-15T11:59:00Z"}], next_cursor: null, total: 1});
+  const user = userEvent.setup();
+  render(<ActivityPage api={api(undefined, loadJobs, loadJob)} now={NOW}/>);
+
+  expect(await screen.findByRole("heading", {name: "Recipe Run Switch · Waiting to recheck"})).toBeVisible();
+  await user.click(screen.getByText("View operation progress"));
+  expect(await screen.findByText("Exact run and route remain unresolved; next observation at 2026-08-15T12:01:00+00:00")).toBeVisible();
+  expect(screen.getByText("The Controller rechecks automatically; this view refreshes about once a minute.")).toBeVisible();
+  expect(window.setInterval).toHaveBeenCalledWith(expect.any(Function), 60_000);
+  expect(window.setInterval).not.toHaveBeenCalledWith(expect.any(Function), 5_000);
+  expect(intervalCallback).toBeDefined();
+  await act(async () => { await intervalCallback?.(); });
+  expect(await screen.findByText("Completed")).toBeVisible();
 });
 
 test("shows a retryable operation-detail failure without offering resume", async () => {

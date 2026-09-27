@@ -14,6 +14,8 @@ use crate::{
 
 #[derive(Debug, Error)]
 pub enum RotationError {
+    #[error("active agent certificate has expired")]
+    ActiveIdentityExpired,
     #[error("credential operation failed: {0}")]
     Client(#[from] ClientError),
     #[error("credential storage failed: {0}")]
@@ -29,6 +31,7 @@ impl RotationError {
 
     pub fn code(&self) -> String {
         match self {
+            Self::ActiveIdentityExpired => "local.identity_expired".to_owned(),
             Self::Client(error) => error
                 .code()
                 .map(str::to_owned)
@@ -136,5 +139,18 @@ mod tests {
         assert_eq!(error.decision(), "exit");
         assert!(!error.retryable());
         assert!(error.to_string().contains("HTTP 403"));
+    }
+
+    #[test]
+    fn expired_active_identity_has_an_explicit_fail_closed_reason() {
+        let error = RotationError::ActiveIdentityExpired;
+        assert_eq!(error.code(), "local.identity_expired");
+        assert_eq!(error.decision(), "exit");
+        assert!(!error.retryable());
+        assert!(
+            error
+                .to_string()
+                .contains("active agent certificate has expired")
+        );
     }
 }

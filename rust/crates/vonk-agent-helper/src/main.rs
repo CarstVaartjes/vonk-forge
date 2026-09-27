@@ -747,6 +747,12 @@ mod tests {
                 observation_identity_sha256: None,
                 installation_id: None,
                 reconciliation_identity: None,
+                run_generation: None,
+                runtime_installation_id: None,
+                runtime_run_id: None,
+                runtime_target_id: None,
+                start_plan_sha256: None,
+                stop_plan_sha256: None,
             },
         );
         let rejection = HelperRejection::for_operation(
@@ -911,6 +917,12 @@ mod tests {
                 observation_identity_sha256: None,
                 installation_id: None,
                 reconciliation_identity: None,
+                run_generation: None,
+                runtime_installation_id: None,
+                runtime_run_id: None,
+                runtime_target_id: None,
+                start_plan_sha256: None,
+                stop_plan_sha256: None,
             },
         );
         for (error, code) in [

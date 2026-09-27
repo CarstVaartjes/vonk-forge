@@ -17,6 +17,7 @@ from vonk_control.models import (
     AgentNode,
     CatalogDocumentRevision,
     FleetProfileApplication,
+    FleetProfileSelection,
     Job,
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
@@ -469,10 +470,10 @@ def test_direct_queue_cannot_overtake_later_terminal_receipt(
     assert newer_after.state == "failed"
 
 
-def test_retry_lineage_cannot_make_an_older_root_newer_than_pending_intent(
+def test_pending_later_receipt_does_not_supersede_retry_until_accepted(
     tmp_path, postgres_engine
 ) -> None:
-    """A retry keeps its root's order even when its new receipt is created later."""
+    """A parked later receipt gains authority only after admission succeeds."""
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2
     )
@@ -530,8 +531,8 @@ def test_retry_lineage_cannot_make_an_older_root_newer_than_pending_intent(
     assert profiles.tick()
     root = profiles.application(root.id)
     assert root.state == "failed"
-    # A pending later receipt on another profile still supersedes overlapping
-    # workload effects, despite not changing the root's node ordinal yet.
+    # A later receipt is parked, so it must not block the earlier accepted
+    # selection's retry before its own plan is revalidated and admitted.
     clock = [root.created_at + timedelta(seconds=1)]
     profiles._clock = lambda: clock[0]
     with sessions() as session:
@@ -551,18 +552,18 @@ def test_retry_lineage_cannot_make_an_older_root_newer_than_pending_intent(
     )
     later = _pending(profiles, later_review, str(uuid4()))
 
-    assert not profiles.retry_eligible(root.id)
-    retry: object | None = None
-    try:
-        retry = profiles.retry(root.id, request_key=str(uuid4()), actor="admin")
-    except FleetProfileConflict as error:
-        assert "supersed" in str(error).lower(), str(error)
+    assert profiles.retry_eligible(root.id)
+    retry = profiles.retry(root.id, request_key=str(uuid4()), actor="admin")
+    assert retry.retry_of_application_id == root.id
 
     later_after = _application(sessions, later.id)
     with sessions() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        assert node.workload_intent_ordinal == root.progress.workload_intent_ordinal
+        assert node.workload_intent_ordinal == retry.progress.workload_intent_ordinal
+        selection = session.get(FleetProfileSelection, 1)
+        assert selection is not None
+        assert selection.application_id == retry.id
         retry_rows = tuple(
             session.scalars(
                 select(FleetProfileApplication).where(
@@ -576,6 +577,5 @@ def test_retry_lineage_cannot_make_an_older_root_newer_than_pending_intent(
         )
     assert later_after.progress["admission_pending"] is True
     assert later_after.progress["workload_intent_ordinal"] is None
-    assert retry is None
-    assert not retry_rows
+    assert [row.id for row in retry_rows] == [retry.id]
     assert later_after.state == "queued"

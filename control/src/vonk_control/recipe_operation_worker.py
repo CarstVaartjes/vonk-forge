@@ -215,6 +215,8 @@ class RecipeOperationWorker:
                     continue
                 for node in missing:
                     node.state = "failed"
+                    node.observation_process_running = None
+                    node.observation_observed_at = None
                     node.updated_at = now
                 run.route_state = "withdrawn"
                 run.route_error = "initial exact observation deadline elapsed"

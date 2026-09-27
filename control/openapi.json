@@ -6914,6 +6914,16 @@
             "title": "Node Ids",
             "type": "array"
           },
+          "profile_stop_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchProfileStopScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "run_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Run Id",
@@ -6940,7 +6950,6 @@
               "type": "string"
             },
             "maxItems": 32,
-            "minItems": 1,
             "title": "Node Ids",
             "type": "array"
           }
@@ -7327,6 +7336,16 @@
             ],
             "title": "Kind",
             "type": "string"
+          },
+          "profile_stop_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchProfileStopScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -19800,8 +19819,16 @@
             "type": "integer"
           },
           "state": {
-            "maxLength": 32,
-            "minLength": 1,
+            "enum": [
+              "queued",
+              "running",
+              "waiting",
+              "waiting-for-operator",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "unknown"
+            ],
             "title": "State",
             "type": "string"
           },
@@ -20579,6 +20606,16 @@
               }
             ]
           },
+          "profile_stop_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchProfileStopScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "recipe_build_id": {
             "anyOf": [
               {
@@ -20767,6 +20804,42 @@
         "title": "RunSwitchPreparedResult",
         "type": "object"
       },
+      "RunSwitchProfileStopScope": {
+        "additionalProperties": false,
+        "description": "Reviewed profile-only cleanup of the reachable ranks in a lost group.\n\nThe full accepted topology remains visible even though only its reachable\nsubset is sent Stop work.  Missing ranks are explicit so a partial cleanup\ncan never be presented as a successful full-group stop.",
+        "properties": {
+          "missing_node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 31,
+            "minItems": 1,
+            "title": "Missing Node Ids",
+            "type": "array"
+          },
+          "original_group": {
+            "$ref": "#/components/schemas/SparkGroup"
+          },
+          "target_node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Target Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "original_group",
+          "target_node_ids",
+          "missing_node_ids"
+        ],
+        "title": "RunSwitchProfileStopScope",
+        "type": "object"
+      },
       "RunSwitchProgress": {
         "additionalProperties": false,
         "properties": {
@@ -20856,6 +20929,8 @@
             "enum": [
               "queued",
               "running",
+              "waiting",
+              "waiting-for-operator",
               "succeeded",
               "failed",
               "cancelled",

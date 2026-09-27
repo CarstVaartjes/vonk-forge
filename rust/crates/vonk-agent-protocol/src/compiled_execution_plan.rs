@@ -29,11 +29,11 @@ pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934c
 /// The generated wire schema declares this vector's `maxItems` from the Python
 /// `MAX_ARGV_ITEMS`, so this is a structural mirror of the schema, not the size
 /// authority. The size authority is `MAX_ARGV_BYTES`, derived below from the
-/// ceiling on the whole host-runtime request.
+/// helper-frame budget reserved for projected argv and its request envelope.
 const MAX_ARGV_ITEMS: usize = 4096;
 const MAX_ARGV_ITEM_BYTES: usize = 65_536;
-/// The byte ceiling on one compiled argv vector, derived from the ceiling on
-/// the whole [`HostRuntimeRequest`](crate::MAX_HOST_RUNTIME_REQUEST_BYTES).
+/// The byte ceiling on one compiled argv vector, derived from the helper frame
+/// ceiling and the measured request envelope reserved around the argv.
 ///
 /// The request the agent sends is this argv plus the four image identities, the
 /// `podman run` options, one `--mount` pair per mounted file and the recipe
@@ -41,12 +41,13 @@ const MAX_ARGV_ITEM_BYTES: usize = 65_536;
 /// request ceiling therefore claimed headroom the request does not have: the
 /// earlier comment described `1024 * 1024` as a backstop "below" the frame
 /// budget while the two were the same number. Subtracting the measured maximum
-/// non-argument envelope puts this budget strictly below the request ceiling.
+/// non-argument envelope keeps this budget inside one helper frame even though
+/// the request document also contains the typed plan and has a larger ceiling.
 /// The whole request, not this component, is still the authority, and
 /// `HostRuntimeRequest::validate` names its limit and the observed byte count
 /// instead of an opaque `invalid`.
 const MAX_ARGV_BYTES: usize =
-    crate::MAX_HOST_RUNTIME_REQUEST_BYTES - crate::HOST_RUNTIME_REQUEST_ENVELOPE_BYTES;
+    crate::MAX_HELPER_FRAME_BYTES - crate::HOST_RUNTIME_REQUEST_ENVELOPE_BYTES;
 // A canonical launch can project one mount for each selected model artifact,
 // plus the fixed input and output mounts.  This reuses the existing compiled
 // artifact ceiling rather than imposing a small engine-specific cap.

@@ -47,6 +47,14 @@ from .agent_jobs import (
     _WORKLOAD_INTENT_OPERATIONS,
     superseded_cancellation_deadline,
 )
+from .distributed_recovery import (
+    _accepted_start_authority,
+)
+from .host_runtime_plan_authority import (
+    RuntimePlanAuthorityError,
+    RuntimePlanBinding,
+    derive_runtime_plan_binding,
+)
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -263,19 +271,31 @@ class HostRuntimeAuthorityService:
         action: ContainerRuntimeAction,
         request_sha256: str,
         certificate_serial: str,
+        start_plan_sha256: str | None = None,
+        stop_plan_sha256: str | None = None,
+        run_generation: int | None = None,
+        runtime_run_id: str | None = None,
+        runtime_target_id: str | None = None,
+        runtime_installation_id: str | None = None,
         installation_id: str | None = None,
         reconciliation_identity: RecipeReconciliationIdentity | None = None,
         expires_in_seconds: int = 30,
     ) -> SignedHostHelperGrant:
         if type(action) is not ContainerRuntimeAction:
             raise HostHelperAuthorityError("container runtime action is invalid")
-        lease_deadline = self._check_attempt(
+        lease_deadline, plan_binding = self._check_attempt(
             node_id=node_id,
             job_id=job_id,
             operation_id=operation_id,
             attempt=attempt,
             fence=fence,
             action=action,
+            start_plan_sha256=start_plan_sha256,
+            stop_plan_sha256=stop_plan_sha256,
+            run_generation=run_generation,
+            runtime_run_id=runtime_run_id,
+            runtime_target_id=runtime_target_id,
+            runtime_installation_id=runtime_installation_id,
             installation_id=installation_id,
             reconciliation_identity=reconciliation_identity,
             request_sha256=request_sha256,
@@ -291,6 +311,12 @@ class HostRuntimeAuthorityService:
                 attempt=attempt,
                 fence=fence,
                 request_sha256=request_sha256,
+                start_plan_sha256=plan_binding.start_plan_sha256,
+                stop_plan_sha256=plan_binding.stop_plan_sha256,
+                run_generation=plan_binding.run_generation,
+                runtime_run_id=plan_binding.runtime_run_id,
+                runtime_target_id=plan_binding.runtime_target_id,
+                runtime_installation_id=plan_binding.runtime_installation_id,
                 installation_id=installation_id,
                 reconciliation_identity=reconciliation_identity,
             ),
@@ -544,7 +570,8 @@ class HostRuntimeAuthorityService:
             or node is None
             or certificate is None
             or run.state != "running"
-            or run_node.state != "running"
+            or run_node.state not in {"running", "failed"}
+            or (run_node.state == "failed" and run.route_state != "withdrawn")
             or not exact_observations
             or installation.state != "installed"
             or revision.kind != "recipe"
@@ -568,26 +595,40 @@ class HostRuntimeAuthorityService:
             ) from error
         if content_sha256(recipe) != revision.content_digest:
             raise HostHelperAuthorityError("recipe run observation authority is stale")
-        jobs = session.scalars(
-            select(Job)
-            .where(Job.kind == "recipe.start", Job.state == "succeeded")
-            .order_by(Job.updated_at.desc(), Job.id.desc())
+        run_node_ids = tuple(
+            session.scalars(
+                select(RunNode.node_id)
+                .where(RunNode.run_id == run.id)
+                .order_by(RunNode.node_id)
+            )
         )
-        launch: Mapping[str, object] | None = None
-        for job in jobs:
-            if job.payload.get("owner_id") != run.id or not isinstance(
-                job.result, Mapping
-            ):
-                continue
-            evidence = job.result.get("launch_evidence")
-            candidate = evidence.get(node_id) if isinstance(evidence, Mapping) else None
-            if (
-                isinstance(candidate, Mapping)
-                and candidate.get("run_generation") == run.run_generation
-            ):
-                launch = candidate
-                break
-        if launch is None:
+        try:
+            start, workload_intent_ordinal = _accepted_start_authority(
+                session,
+                run,
+                revision.content_digest,
+                node_id,
+                allow_multi_target=len(run_node_ids) > 1,
+                now=now,
+            )
+        except RuntimeError as error:
+            raise HostHelperAuthorityError(
+                "recipe run launch evidence is unavailable"
+            ) from error
+        if node.workload_intent_ordinal != workload_intent_ordinal or (
+            isinstance(start.result, Mapping)
+            and start.result.get("cancel_requested") is True
+        ):
+            raise HostHelperAuthorityError("recipe run launch evidence is unavailable")
+        result = start.result
+        evidence = (
+            result.get("launch_evidence") if isinstance(result, Mapping) else None
+        )
+        launch = evidence.get(node_id) if isinstance(evidence, Mapping) else None
+        if (
+            not isinstance(launch, Mapping)
+            or launch.get("run_generation") != run.run_generation
+        ):
             raise HostHelperAuthorityError("recipe run launch evidence is unavailable")
         expected = RecipeRunObservationIdentity.model_validate(
             {
@@ -755,11 +796,17 @@ class HostRuntimeAuthorityService:
         attempt: int,
         fence: str,
         action: ContainerRuntimeAction,
+        start_plan_sha256: str | None,
+        stop_plan_sha256: str | None,
+        run_generation: int | None,
+        runtime_run_id: str | None,
+        runtime_target_id: str | None,
+        runtime_installation_id: str | None,
         installation_id: str | None,
         reconciliation_identity: RecipeReconciliationIdentity | None,
         request_sha256: str,
         certificate_serial: str,
-    ) -> datetime:
+    ) -> tuple[datetime, RuntimePlanBinding]:
         now = self._clock()
         with self._sessions() as session:
             operation = session.get(StoredAgentOperation, operation_id)
@@ -908,8 +955,34 @@ class HostRuntimeAuthorityService:
                 raise HostHelperAuthorityError(
                     "container runtime installation binding is invalid"
                 )
+            try:
+                binding = derive_runtime_plan_binding(
+                    session,
+                    parent=parent,
+                    operation=operation,
+                    node_id=node_id,
+                    action=action,
+                    cancellation_requested=cancellation_requested,
+                    now=_aware(now),
+                )
+            except (RuntimePlanAuthorityError, TypeError, ValueError) as error:
+                raise HostHelperAuthorityError(
+                    "container runtime lifecycle authority is invalid"
+                ) from error
+            if (
+                start_plan_sha256 != binding.start_plan_sha256
+                or stop_plan_sha256 != binding.stop_plan_sha256
+                or run_generation != binding.run_generation
+                or runtime_run_id != binding.runtime_run_id
+                or runtime_target_id != binding.runtime_target_id
+                or runtime_installation_id != binding.runtime_installation_id
+            ):
+                raise HostHelperAuthorityError(
+                    "container runtime lifecycle binding differs from exact plan"
+                )
             return (
                 min(lease_deadline, cancellation_deadline)
                 if cancellation_stop and cancellation_deadline is not None
-                else lease_deadline
+                else lease_deadline,
+                binding,
             )

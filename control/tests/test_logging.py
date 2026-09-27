@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.logging import (
     DatabaseJobLogStore,
     JobLogCorruptError,
+    configure_controller_logging,
     log_event,
     redact_text,
 )
@@ -27,6 +28,41 @@ def test_structured_logger_redacts_secrets(caplog) -> None:
     assert "abc123" not in caplog.text
     assert "hunter2" not in caplog.text
     assert "<redacted>" in caplog.text
+
+
+def test_controller_api_and_worker_info_events_are_emitted_at_runtime_config(
+    capsys,
+) -> None:
+    configure_controller_logging()
+    api_logger = logging.getLogger("vonk_control.api")
+    worker_logger = logging.getLogger("vonk-control-worker")
+    run_switch_logger = logging.getLogger("vonk-control-run-switch")
+    assert api_logger.getEffectiveLevel() == logging.INFO
+    assert worker_logger.getEffectiveLevel() == logging.INFO
+    assert run_switch_logger.getEffectiveLevel() == logging.INFO
+
+    log_event(api_logger, "api.request_failed", service="controller", request_id="api")
+    log_event(
+        worker_logger,
+        "worker.source_failed",
+        service="control-worker",
+        source="runs",
+        token="must-not-be-logged",
+    )
+    log_event(
+        run_switch_logger,
+        "run_switch.final_verification_expired",
+        service="control-worker",
+        operation_id="operation",
+        run_id="run",
+        route_state="pending",
+    )
+
+    output = capsys.readouterr().err
+    assert '"event":"api.request_failed"' in output
+    assert '"event":"worker.source_failed"' in output
+    assert '"event":"run_switch.final_verification_expired"' in output
+    assert "must-not-be-logged" not in output
 
 
 def test_job_log_store_is_postgres_backed_content_addressed_and_sanitized() -> None:

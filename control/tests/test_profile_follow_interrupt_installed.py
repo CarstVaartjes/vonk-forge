@@ -202,7 +202,7 @@ def test_installed_follow_sigint_retains_exact_application_without_remote_mutati
 
 
 @pytest.mark.lane
-def test_installed_follow_timeout_stays_with_original_application_after_newer_load(
+def test_installed_follow_stays_with_original_application_after_newer_load(
     installed_vonkctl: Path, postgres_engine, monkeypatch, tmp_path: Path
 ) -> None:
     """A later profile application cannot redirect a running observer."""
@@ -213,7 +213,6 @@ def test_installed_follow_timeout_stays_with_original_application_after_newer_lo
     api, codec = _client(sessions, profiles=service)
     headers = _headers(codec, "administrator")
     identity = application.id
-    first_state = application.state
     latest_path = f"/api/profile/{profile.number}/progress"
     exact_path = f"/api/profile/applications/{identity}"
     original_request = api.request
@@ -223,9 +222,8 @@ def test_installed_follow_timeout_stays_with_original_application_after_newer_lo
         nonlocal newer_application_id
         result = original_request(method, path, **kwargs)
         if method == "GET" and path == latest_path and newer_application_id is None:
-            # Save a new same-profile intent on another Spark. Its admitted
-            # plan is newer, but its execution scope leaves the observed
-            # application intact.
+            # Save a new same-profile intent on another Spark. The fleet-wide
+            # selection still supersedes the application being observed.
             source_node_id = _nodes[0]
             second_node_id = "spk_" + f"{2:032x}"
             recipe_slug = _add_disjoint_profile_node(
@@ -271,7 +269,10 @@ def test_installed_follow_timeout_stays_with_original_application_after_newer_lo
             assert newer.id != identity
             assert newer.created_at > application.created_at
             assert service.progress_number(profile.number).id == newer.id
-            assert service.application(identity).state == first_state
+            superseded = service.application(identity)
+            assert superseded.state == "cancelled"
+            assert superseded.status_reason is not None
+            assert "replaced" in superseded.status_reason
             newer_application_id = newer.id
         return result
 
@@ -305,13 +306,10 @@ def test_installed_follow_timeout_stays_with_original_application_after_newer_lo
     assert completed.stdout.count("\n") == 1
     assert completed.stderr == ""
     document = json.loads(completed.stdout)
-    result = document["result"]
-    assert result["id"] == identity
-    assert result["state"] == first_state
-    observation = document["observation"]
-    assert observation["status"] == "timed_out"
-    assert identity in observation["reconnect_command"]
-    assert "--application" in observation["reconnect_command"]
+    assert document["id"] == identity
+    assert document["state"] == "cancelled"
+    assert document["status_reason"] is not None
+    assert "replaced" in document["status_reason"]
     assert newer_application_id is not None and newer_application_id != identity
     calls = [(method, path) for method, path, _ in peer.calls]
     assert calls[0] == ("GET", latest_path)
@@ -321,5 +319,7 @@ def test_installed_follow_timeout_stays_with_original_application_after_newer_lo
     with sessions() as session:
         original = session.get(FleetProfileApplication, identity)
         newer = session.get(FleetProfileApplication, newer_application_id)
-        assert original is not None and original.state == first_state
+        assert original is not None and original.state == "cancelled"
+        assert original.status_reason is not None
+        assert "replaced" in original.status_reason
         assert newer is not None and newer.id != original.id

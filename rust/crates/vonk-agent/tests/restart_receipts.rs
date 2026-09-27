@@ -6,6 +6,7 @@ use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::client::ControllerError;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
+use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_protocol::generated::{
     AgentClaimPayload, AgentFailureKind, AgentOperation, AgentResultResult, RecipeStopPayload,
 };
@@ -14,11 +15,28 @@ use vonk_agent_protocol::{AgentClaim, canonical_json, hex_sha256};
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
 fn claim() -> AgentClaim {
+    let compiled_execution_plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
+        "../../../../control/tests/fixtures/compiled_workload_v2.json"
+    ))
+    .unwrap();
+    let run_id = Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap();
     let payload = RecipeStopPayload {
         cancel_pending_start: false,
-        plan_digest: "a".repeat(64),
-        run_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
-        schema_version: 1,
+        compiled_execution_plan: compiled_execution_plan.clone(),
+        installation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap(),
+        mapping_generation: 1,
+        mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
+        node_id: NODE_ID.to_owned(),
+        plan_digest: compiled_execution_plan.identity.execution_sha256,
+        rank: compiled_execution_plan.runtime.placement.rank,
+        recipe_content_sha256: compiled_execution_plan.identity.recipe_revision_sha256,
+        recipe_revision_id: Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
+        role: compiled_execution_plan.runtime.placement.role,
+        run_generation: 1,
+        run_id,
+        schema_version: 2,
+        target_runtime_id: run_id,
+        world_size: compiled_execution_plan.runtime.placement.world_size,
     };
     let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
     AgentClaim {

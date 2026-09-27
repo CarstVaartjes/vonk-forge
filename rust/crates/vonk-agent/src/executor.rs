@@ -19,7 +19,7 @@ use crate::{
         DistributionProgress, ExactRecipeRunObservation, HEARTBEAT_LEASE_MARGIN,
     },
     health::{wait_ready, wait_ready_until},
-    host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
+    host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome, HostRuntimePlan},
     image_importer::ImageImporter,
     oci::{OciError, OciRuntime, RecipeRunStartIdentity},
     process::ProcessRunner,
@@ -35,7 +35,7 @@ use vonk_agent_protocol::{
     ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
     RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
     RecipeReconcileResult, RecipeReconciliationIdentity, RecipeStartPhase, RecipeStartRequest,
-    RecipeStopResult, RecipeUninstallResult, canonical_json, hex_sha256,
+    RecipeStopRequest, RecipeStopResult, RecipeUninstallResult, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -57,7 +57,6 @@ struct HeartbeatSchedule {
     retry_interval: Duration,
 }
 const JOB_CANCEL_EXIT_CODE: u32 = 130;
-const JOB_CANCEL_STOP_TIMEOUT_SECONDS: u16 = 5;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionPlan, OciError> {
@@ -462,6 +461,45 @@ impl<R> RecipeExecutor<'_, R> {
             })
     }
 
+    async fn execute_host_runtime_plan_outcome(
+        &self,
+        claim: &AgentClaim,
+        arguments: Vec<String>,
+        plan: HostRuntimePlan,
+    ) -> Result<HostRuntimeOutcome, crate::host_runtime::HostRuntimeError> {
+        let phase = match &plan {
+            HostRuntimePlan::Start(_) | HostRuntimePlan::JobRun(_) => "starting",
+            HostRuntimePlan::Stop(_) => "stopping",
+        };
+        self.report_phase(claim, phase).await;
+        let request_root = self.runtime_root.join("runtime-requests");
+        HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            observation_receipt_public_key: self.observation_receipt_public_key,
+        }
+        .execute_plan(claim, arguments, plan)
+        .await
+    }
+
+    async fn execute_host_runtime_plan(
+        &self,
+        claim: &AgentClaim,
+        arguments: Vec<String>,
+        plan: HostRuntimePlan,
+    ) -> Result<(), crate::host_runtime::HostRuntimeError> {
+        self.execute_host_runtime_plan_outcome(claim, arguments, plan)
+            .await
+            .and_then(|outcome| {
+                if outcome.stop_uncertain {
+                    Err(crate::host_runtime::HostRuntimeError::StopUncertain)
+                } else {
+                    Ok(())
+                }
+            })
+    }
+
     async fn cleanup_installation_cache(
         &self,
         claim: &AgentClaim,
@@ -518,16 +556,19 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
-        // The helper's exact run fence keeps an in-flight Docker START from
-        // creating this run after STOP has observed temporary absence.
-        let mut arguments = vec![run_id.to_owned(), stop_timeout_seconds.to_string()];
-        if cancel_pending_start {
-            arguments.push("job-cancel".to_owned());
-        }
-        if self
-            .execute_host_runtime(claim, HostRuntimeAction::Stop, arguments)
-            .await
-            .is_err()
+        let Some(stop_plan) = exact_stop_plan_from_claim(claim, run_id, cancel_pending_start)
+        else {
+            return Err(waiting_for_operator("workload stop remains unconfirmed"));
+        };
+        if stop_plan
+            .compiled_execution_plan
+            .lifecycle
+            .stop_timeout_seconds
+            != stop_timeout_seconds
+            || self
+                .execute_host_runtime_plan(claim, Vec::new(), HostRuntimePlan::Stop(stop_plan))
+                .await
+                .is_err()
         {
             return Err(waiting_for_operator("workload stop remains unconfirmed"));
         }
@@ -559,6 +600,84 @@ impl<R> RecipeExecutor<'_, R> {
             body: json!({"reason": "controller cancellation confirmed after exact workload stop", "error_code": "operation_cancelled"}),
         }
     }
+}
+
+fn exact_stop_plan_from_claim(
+    claim: &AgentClaim,
+    expected_run_id: &str,
+    cancel_pending_start: bool,
+) -> Option<RecipeStopRequest> {
+    let (
+        run_id,
+        target_runtime_id,
+        run_generation,
+        installation_id,
+        recipe_revision_id,
+        recipe_content_sha256,
+        mapping_id,
+        mapping_generation,
+        plan_digest,
+        rank,
+        role,
+        world_size,
+        compiled_execution_plan,
+    ) = match &claim.payload {
+        vonk_agent_protocol::generated::AgentClaimPayload::RecipeStartPayload(start) => (
+            start.run_id,
+            start.run_id,
+            start.run_generation,
+            start.installation_id,
+            start.recipe_revision_id,
+            start.recipe_content_sha256.clone(),
+            start.mapping_id,
+            start.mapping_generation,
+            start.plan_digest.clone(),
+            start.rank,
+            start.role.clone(),
+            start.world_size,
+            start.compiled_execution_plan.clone(),
+        ),
+        vonk_agent_protocol::generated::AgentClaimPayload::RecipeJobRunRequest(job) => {
+            let placement = &job.compiled_execution_plan.runtime.placement;
+            (
+                job.run_id,
+                job.job_id,
+                job.run_generation,
+                job.installation_id,
+                job.recipe_revision_id,
+                job.recipe_content_sha256.clone(),
+                job.mapping_id,
+                job.mapping_generation,
+                job.plan_digest.clone(),
+                placement.rank,
+                placement.role.clone(),
+                placement.world_size,
+                job.compiled_execution_plan.clone(),
+            )
+        }
+        _ => return None,
+    };
+    if run_id.to_string() != expected_run_id {
+        return None;
+    }
+    Some(RecipeStopRequest {
+        cancel_pending_start,
+        compiled_execution_plan,
+        installation_id,
+        mapping_generation,
+        mapping_id,
+        node_id: claim.node_id.clone(),
+        plan_digest,
+        rank,
+        recipe_content_sha256,
+        recipe_revision_id,
+        role,
+        run_generation,
+        run_id,
+        schema_version: 2,
+        target_runtime_id,
+        world_size,
+    })
 }
 
 /// Why a readiness wait ended.
@@ -1442,6 +1561,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 };
+                if plan.pre_start != request.compiled_execution_plan.lifecycle.pre_start {
+                    let _ = self.runtime.cleanup_job_scope(&job_scope);
+                    return failed_job(
+                        &request,
+                        1,
+                        started,
+                        "job pre-start plan does not match the signed execution plan",
+                    );
+                }
                 for hook in &plan.pre_start {
                     let arguments = runtime_arguments_for_plan(&plan, hook);
                     if self
@@ -1466,19 +1594,31 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     plan.image_reference,
                 ];
                 arguments.extend(plan.main);
+                let Some(job_cancel_stop_plan) =
+                    exact_stop_plan_from_claim(claim, &request.run_id.to_string(), true)
+                else {
+                    let _ = self.runtime.cleanup_job_scope(&job_scope);
+                    return failed_job(
+                        &request,
+                        1,
+                        started,
+                        "job cancellation stop plan could not be bound",
+                    );
+                };
                 let outcome = run_interruptible_job(
-                    self.execute_host_runtime_outcome(claim, HostRuntimeAction::Start, arguments),
+                    self.execute_host_runtime_plan_outcome(
+                        claim,
+                        arguments,
+                        HostRuntimePlan::JobRun(request.clone()),
+                    ),
                     &mut cancellation,
-                    || {
-                        self.execute_host_runtime(
+                    || async {
+                        self.execute_host_runtime_plan(
                             claim,
-                            HostRuntimeAction::Stop,
-                            vec![
-                                job_scope.clone(),
-                                JOB_CANCEL_STOP_TIMEOUT_SECONDS.to_string(),
-                                "job-cancel".to_owned(),
-                            ],
+                            Vec::new(),
+                            HostRuntimePlan::Stop(job_cancel_stop_plan),
                         )
+                        .await
                     },
                 )
                 .await;
@@ -1938,16 +2078,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 };
                 let placement = spec.runtime.placement.clone();
                 let run_id = request.run_id.to_string();
-                let inspection_identity =
-                    request
-                        .run_generation
-                        .map(|run_generation| RecipeRunStartIdentity {
-                            mapping_generation: request.mapping_generation,
-                            mapping_id: request.mapping_id,
-                            recipe_content_sha256: request.recipe_content_sha256.clone(),
-                            recipe_revision_id: request.recipe_revision_id,
-                            run_generation,
-                        });
+                let inspection_identity = Some(RecipeRunStartIdentity {
+                    mapping_generation: request.mapping_generation,
+                    mapping_id: request.mapping_id,
+                    recipe_content_sha256: request.recipe_content_sha256.clone(),
+                    recipe_revision_id: request.recipe_revision_id,
+                    run_generation: u64::from(request.run_generation),
+                });
                 let collective_readiness =
                     matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
                 let rank_launch = matches!(request.phase, Some(RecipeStartPhase::RankLaunch));
@@ -2050,6 +2187,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if collective_readiness && !plan.pre_start.is_empty() {
                     return failed("retained workload unexpectedly contains start hooks");
                 }
+                if plan.pre_start != request.compiled_execution_plan.lifecycle.pre_start {
+                    return failed("local pre-start plan does not match the signed execution plan");
+                }
                 if *cancellation.borrow() {
                     return self
                         .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
@@ -2119,7 +2259,19 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     arguments
                 };
                 let mut runtime_result = run_until_cancelled(
-                    self.execute_host_runtime(claim, runtime_action, runtime_arguments),
+                    async {
+                        if runtime_action == HostRuntimeAction::Start {
+                            self.execute_host_runtime_plan(
+                                claim,
+                                runtime_arguments,
+                                HostRuntimePlan::Start(request.clone()),
+                            )
+                            .await
+                        } else {
+                            self.execute_host_runtime(claim, runtime_action, runtime_arguments)
+                                .await
+                        }
+                    },
                     &mut cancellation_observer,
                 )
                 .await;
@@ -2158,10 +2310,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         }
                     };
                     runtime_result = run_until_cancelled(
-                        self.execute_host_runtime(
+                        self.execute_host_runtime_plan(
                             claim,
-                            HostRuntimeAction::Start,
                             runtime_guard_arguments.clone(),
+                            HostRuntimePlan::Start(request.clone()),
                         ),
                         &mut cancellation_observer,
                     )
@@ -2504,16 +2656,23 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(plan) => plan,
                     Err(_) => return failed("container runtime could not prepare workload stop"),
                 };
-                let mut cancel_remove = plan.remove.clone();
-                cancel_remove.push("job-cancel".to_owned());
-                let fenced_stop = request.cancel_pending_start || *cancellation.borrow();
-                let remove = if fenced_stop {
-                    cancel_remove.clone()
-                } else {
-                    plan.remove
-                };
+                if !plan.post_stop.is_empty()
+                    || !request
+                        .compiled_execution_plan
+                        .lifecycle
+                        .post_stop
+                        .is_empty()
+                {
+                    return waiting_for_operator(
+                        "container runtime stop cannot authorize post-stop hooks",
+                    );
+                }
                 if self
-                    .execute_host_runtime(claim, HostRuntimeAction::Stop, remove)
+                    .execute_host_runtime_plan(
+                        claim,
+                        Vec::new(),
+                        HostRuntimePlan::Stop(request.clone()),
+                    )
                     .await
                     .is_err()
                 {
@@ -2563,15 +2722,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 return failed("container runtime post-stop hook failed");
                             }
                         }
-                    }
-                    if *cancellation.borrow()
-                        && !fenced_stop
-                        && self
-                            .execute_host_runtime(claim, HostRuntimeAction::Stop, cancel_remove)
-                            .await
-                            .is_err()
-                    {
-                        return waiting_for_operator("cancelled workload stop remains unconfirmed");
                     }
                     if self.runtime.complete_stop(&run_id).is_err() {
                         return waiting_for_operator(
@@ -3691,8 +3841,10 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_helper_request_schema_version_invalid"
             | "runtime_helper_request_attempt_invalid"
             | "runtime_helper_request_arguments_presence_invalid"
+            | "runtime_helper_request_plan_binding_invalid"
             | "runtime_helper_request_installation_identity_invalid"
             | "runtime_helper_request_bytes_invalid"
+            | "runtime_helper_request_plan_bytes_invalid"
             | "runtime_helper_request_argument_nul_byte"
             | "runtime_helper_request_storage_invalid"
             | "runtime_helper_system_clock_invalid"
@@ -3894,9 +4046,9 @@ mod tests {
         ExecutionResult, Executor, HEARTBEAT_RETRY_FLOOR, HeartbeatFailure, InterruptibleJob,
         LoopClient, ReadinessOutcome, RecipeExecutor, RecipeObservationError, RejectingExecutor,
         RunOncePolicy, classify_heartbeat_failure, controller_denial_diagnostic,
-        distribution_failure_result, distribution_success_evidence, normalize_execution_result,
-        output_media_type, parse_compiled_execution_plan, readiness_identity,
-        recipe_build_client_failure_result, recipe_install_success_body,
+        distribution_failure_result, distribution_success_evidence, exact_stop_plan_from_claim,
+        normalize_execution_result, output_media_type, parse_compiled_execution_plan,
+        readiness_identity, recipe_build_client_failure_result, recipe_install_success_body,
         report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
         run_once_with_heartbeat_interval, runtime_observation_failure, temporary_observation_error,
         temporary_runtime_observation_failure, wait_for_launch_stability,
@@ -3925,7 +4077,7 @@ mod tests {
     };
     use tempfile::tempdir;
     use uuid::Uuid;
-    use vonk_agent_protocol::generated::{AgentFailureKind, AgentFailureResult};
+    use vonk_agent_protocol::generated::{AgentClaimPayload, AgentFailureKind, AgentFailureResult};
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, AgentResult, RecipeJobOutputMapping,
         RecipeOperationRequest, canonical_json, hex_sha256,
@@ -4060,6 +4212,38 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn job_run_stop_binding_keeps_parent_run_and_exact_job_target_distinct() {
+        let claim: AgentClaim = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        let AgentClaimPayload::RecipeJobRunRequest(job) = &claim.payload else {
+            panic!("expected canonical job-run claim");
+        };
+        let stop = exact_stop_plan_from_claim(&claim, &job.run_id.to_string(), true)
+            .expect("accepted JobRun must produce its exact cancellation Stop");
+
+        assert_eq!(stop.run_id, job.run_id);
+        assert_eq!(stop.target_runtime_id, job.job_id);
+        assert_ne!(stop.run_id, stop.target_runtime_id);
+        assert_eq!(stop.run_generation, job.run_generation);
+        assert_eq!(stop.installation_id, job.installation_id);
+        assert_eq!(stop.mapping_id, job.mapping_id);
+        assert_eq!(stop.mapping_generation, job.mapping_generation);
+        assert_eq!(stop.node_id, claim.node_id);
+        assert!(stop.cancel_pending_start);
+
+        let mut stop_claim = claim.clone();
+        stop_claim.operation = "recipe.stop".parse().unwrap();
+        stop_claim.payload = AgentClaimPayload::RecipeStopPayload(stop);
+        stop_claim.payload_digest = hex_sha256(&canonical_json(&stop_claim.payload).unwrap());
+        assert!(matches!(
+            RecipeOperationRequest::parse(&stop_claim),
+            Ok(RecipeOperationRequest::Stop(_))
+        ));
     }
 
     struct ObservationServer {

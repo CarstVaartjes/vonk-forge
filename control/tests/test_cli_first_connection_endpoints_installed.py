@@ -37,6 +37,7 @@ from vonk_control.fleet_profiles import (
     FleetProfileService,
     _digest,
     _profile_document,
+    _roster_digest,
 )
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.jobs import JobService
@@ -48,6 +49,7 @@ from vonk_control.models import (
     ClusterMappingNode,
     FleetProfile,
     FleetProfileApplication,
+    FleetProfileSelection,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -222,6 +224,7 @@ def _seed_profile_application_for_run(
     profile_number: int = 1,
     desired_state: Literal["installed", "running"] = "running",
     alias: str | None = None,
+    selected: bool = False,
 ) -> tuple[FleetProfileService, str, str, str]:
     """Persist a reviewed profile owner bound to the exact published run."""
 
@@ -370,12 +373,25 @@ def _seed_profile_application_for_run(
                 state="succeeded",
                 plan=plan.model_dump(mode="json"),
                 current_step=0,
+                selection_generation=1 if selected else None,
                 progress=progress.model_dump(mode="json"),
                 actor="admin",
                 created_at=ROUTE_NOW,
                 updated_at=ROUTE_NOW,
             )
         )
+        if selected:
+            session.add(
+                FleetProfileSelection(
+                    singleton_id=1,
+                    generation=1,
+                    profile_id=profile_id,
+                    profile_revision=profile.revision,
+                    application_id=application_id,
+                    roster_digest=_roster_digest(node_ids),
+                    updated_at=ROUTE_NOW,
+                )
+            )
     return (
         FleetProfileService(sessions, clock=lambda: ROUTE_NOW),
         profile_id,
@@ -400,7 +416,7 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
     routes = atomic_service(base_routes, route_root, lambda: ROUTE_NOW)
     first_generation = routes.publish_run(run_id)
 
-    profiles, installed_profile_id, _application_id, installed_assignment_id = (
+    profiles, installed_profile_id, _application_id, _installed_assignment_id = (
         _seed_profile_application_for_run(
             sessions, run_id, profile_number=1, desired_state="installed"
         )
@@ -408,7 +424,7 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
     _seed_profile_application_for_run(
         sessions, run_id, profile_number=2, alias="another-profile-model"
     )
-    _seed_profile_application_for_run(sessions, run_id, profile_number=3)
+    _seed_profile_application_for_run(sessions, run_id, profile_number=3, selected=True)
     api, codec = _api(sessions, route_root, profiles=profiles)
     token = codec.issue(Actor("viewer", "viewer"), ttl_seconds=1_000, now=0)
     headers = {"Authorization": f"Bearer {token}"}
@@ -417,30 +433,30 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
     assert installed.status_code == 200, installed.text
     installed_view = FleetProfileEndpointsView.model_validate_json(installed.text)
     assert installed_view.profile_id == installed_profile_id
-    assert installed_view.assignments is not None
-    assert len(installed_view.assignments) == 1
-    installed_assignment = installed_view.assignments[0]
-    assert installed_assignment.assignment_id == installed_assignment_id
-    assert installed_assignment.desired_state == "installed"
-    assert installed_assignment.state == "installed-only"
-    assert installed_assignment.alias is None
-    assert installed_assignment.endpoint is None
+    assert installed_view.application_id is None
+    assert installed_view.assignments == []
+
+    unselected = api.get("/api/profile/2/endpoints", headers=headers)
+    assert unselected.status_code == 200, unselected.text
+    unselected_view = FleetProfileEndpointsView.model_validate_json(unselected.text)
+    assert unselected_view.application_id is None
+    assert unselected_view.assignments == []
 
     owned_alias = api.get(
-        "/api/profile/2/endpoints",
-        params={"alias": "another-profile-model"},
+        "/api/profile/3/endpoints",
+        params={"alias": "qwen"},
         headers=headers,
     )
     assert owned_alias.status_code == 200, owned_alias.text
-    assert owned_alias.json()["assignments"][0]["alias"] == "another-profile-model"
+    assert owned_alias.json()["assignments"][0]["alias"] == "qwen"
 
     foreign_alias = api.get(
-        "/api/profile/1/endpoints",
+        "/api/profile/3/endpoints",
         params={"alias": "another-profile-model"},
         headers=headers,
     )
     assert foreign_alias.status_code == 404
-    assert "not part of profile 1" in foreign_alias.json()["detail"]
+    assert "not part of profile 3" in foreign_alias.json()["detail"]
 
     current = api.get(
         "/api/profile/3/endpoints", params={"alias": "qwen"}, headers=headers
@@ -518,7 +534,7 @@ def test_invalid_profile_history_is_reported_without_false_alias_not_found(
     routes.publish_run(run_id)
     profiles, profile_id, application_id, _assignment_id = (
         _seed_profile_application_for_run(
-            sessions, run_id, profile_number=1, alias="qwen"
+            sessions, run_id, profile_number=1, alias="qwen", selected=True
         )
     )
 
@@ -565,7 +581,7 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
     routes = atomic_service(base_routes, route_root, lambda: ROUTE_NOW)
     routes.publish_run(run_id)
     profiles, profile_id, application_id, assignment_id = (
-        _seed_profile_application_for_run(sessions, run_id)
+        _seed_profile_application_for_run(sessions, run_id, selected=True)
     )
     api, codec = _api(sessions, route_root, profiles=profiles)
     token = codec.issue(Actor("viewer", "viewer"), ttl_seconds=1_000, now=0)

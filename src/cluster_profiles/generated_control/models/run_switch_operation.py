@@ -16,6 +16,8 @@ from ..models.run_switch_operation_current_phase_type_0 import check_run_switch_
 from ..models.run_switch_operation_current_phase_type_0 import RunSwitchOperationCurrentPhaseType0
 from ..models.run_switch_operation_kind import check_run_switch_operation_kind
 from ..models.run_switch_operation_kind import RunSwitchOperationKind
+from ..models.run_switch_operation_state import check_run_switch_operation_state
+from ..models.run_switch_operation_state import RunSwitchOperationState
 from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
@@ -46,7 +48,7 @@ class RunSwitchOperation:
             plan_digest (str):
             progress (RunSwitchProgress):
             request_key (str):
-            state (str):
+            state (RunSwitchOperationState):
             cleanup_mode (Union[None, RunSwitchOperationCleanupModeType0, Unset]):
             current_phase (Union[None, RunSwitchOperationCurrentPhaseType0, Unset]):
             installation_id (Union[None, Unset, str]):
@@ -63,7 +65,7 @@ class RunSwitchOperation:
     plan_digest: str
     progress: 'RunSwitchProgress'
     request_key: str
-    state: str
+    state: RunSwitchOperationState
     cleanup_mode: Union[None, RunSwitchOperationCleanupModeType0, Unset] = UNSET
     current_phase: Union[None, RunSwitchOperationCurrentPhaseType0, Unset] = UNSET
     installation_id: Union[None, Unset, str] = UNSET
@@ -101,7 +103,7 @@ class RunSwitchOperation:
 
         request_key = self.request_key
 
-        state = self.state
+        state: str = self.state
 
         cleanup_mode: Union[None, Unset, str]
         if isinstance(self.cleanup_mode, Unset):
@@ -211,7 +213,10 @@ class RunSwitchOperation:
 
         request_key = d.pop("request_key")
 
-        state = d.pop("state")
+        state = check_run_switch_operation_state(d.pop("state"))
+
+
+
 
         def _parse_cleanup_mode(data: object) -> Union[None, RunSwitchOperationCleanupModeType0, Unset]:
             if data is None:
