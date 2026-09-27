@@ -3972,8 +3972,9 @@ class FleetProfileService:
             if pending.id == excluded_application_id:
                 continue
             try:
-                if _persisted_profile_progress(pending).admission_pending:
-                    continue
+                # A parked receipt is not accepted selection authority, but a
+                # fresh reviewed load still needs to show that accepting it
+                # will retire the older overlapping receipt.
                 plan = _persisted_profile_plan(pending)
                 members = {node_id for step in plan.steps for node_id in step.node_ids}
             except FleetProfileConflict:
@@ -4727,6 +4728,7 @@ class FleetProfileService:
                 raise FleetProfileStalePlanConflict(
                     "Profile switch scope changed during admission"
                 )
+            whole_fleet_intent = selected_application or retry_of_application_id is None
             prior_profile_work = (
                 session.scalar(
                     select(FleetProfileApplication.id)
@@ -4738,12 +4740,12 @@ class FleetProfileService:
                     )
                     .limit(1)
                 )
-                if selected_application and self._switch_adapter is not None
+                if whole_fleet_intent and self._switch_adapter is not None
                 else None
             )
             fenced_nodes = (
                 set(frozen_nodes)
-                if selected_application
+                if whole_fleet_intent
                 and self._switch_adapter is not None
                 and (execution_nodes or prior_profile_work is not None)
                 else execution_nodes
@@ -4875,13 +4877,28 @@ class FleetProfileService:
                     if current_selection is not None
                     else None
                 )
+                current_selected_order = None
+                if current_selected_application is not None:
+                    try:
+                        current_selected_order = _application_order_key(
+                            session, current_selected_application
+                        )
+                    except FleetProfileConflict:
+                        # The selection FK and receipt columns remain
+                        # sufficient to order this accepted root against a
+                        # fresh request. Corrupt retry/progress history must
+                        # not veto unrelated newly reviewed work.
+                        current_selected_order = (
+                            _aware(current_selected_application.created_at),
+                            current_selected_application.id,
+                        )
                 if (
                     current_selection is not None
                     and current_selected_application is not None
                     and current_selected_application.selection_generation
                     == current_selection.generation
-                    and _application_order_key(session, current_selected_application)
-                    > intent_order
+                    and current_selected_order is not None
+                    and current_selected_order > intent_order
                 ):
                     raise _FleetProfileSupersededIntentConflict(
                         "Profile load was superseded by a newer accepted profile"
