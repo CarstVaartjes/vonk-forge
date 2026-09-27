@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
+linux_markers='linux_only or needs_systemd or postgres'
+portable_markers='not linux_only and not needs_systemd and not needs_rust_probe and not postgres'
+
+run_python_suites() {
+    local marker_expression=$1
+    local uv_project_environment=${UV_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-root-venv"}
+    local uv_control_environment=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"}
+    local uv_cache_dir=${UV_CACHE_DIR:-"/private/tmp/vonk-test-local-uv-cache"}
+    local recipe_args=()
+    local marker_args=()
+    if [[ -n "$marker_expression" ]]; then
+        marker_args=(-m "$marker_expression")
+    fi
+    if [[ -d "$recipe_root/contracts" ]]; then
+        recipe_args=(--with-editable "$recipe_root/contracts")
+        export VONK_RECIPE_LIBRARY_ROOT="$recipe_root"
+    elif [[ ${CI:-false} == true ]]; then
+        echo "VONK_RECIPE_LIBRARY_ROOT is required in CI: $recipe_root/contracts" >&2
+        return 1
+    else
+        echo "[SKIP-PREREQUISITE] recipe library unavailable; recipe-library tests must skip locally" >&2
+        unset VONK_RECIPE_LIBRARY_ROOT || true
+    fi
+
+    UV_CACHE_DIR="$uv_cache_dir" UV_PROJECT_ENVIRONMENT="$uv_project_environment" \
+        uv run --python 3.14 --frozen --with pytest==9.1.1 \
+        --with pytest-xdist==3.8.0 "${recipe_args[@]}" \
+        pytest -q -n auto --dist loadfile --durations=40 "${marker_args[@]}"
+
+    UV_CACHE_DIR="$uv_cache_dir" UV_PROJECT_ENVIRONMENT="$uv_control_environment" \
+        uv run --project control --frozen --with-editable . \
+        --with pytest-xdist==3.8.0 pytest -q -n 4 --dist loadfile --durations=40 \
+        "${marker_args[@]}" control/tests
+}
+
+run_ci_wire_boundary() {
+    if [[ -d "$recipe_root/contracts" ]]; then
+        export VONK_RECIPE_LIBRARY_ROOT="$recipe_root"
+        UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
+            UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
+            uv run --project control --frozen --with-editable . \
+            python scripts/tests/check_recipe_launch_contracts.py "$recipe_root"
+    elif [[ ${CI:-false} == true ]]; then
+        echo "VONK_RECIPE_LIBRARY_ROOT is required in CI: $recipe_root/contracts" >&2
+        return 1
+    else
+        echo "[SKIP-PREREQUISITE] recipe launch projection check needs the recipe checkout" >&2
+    fi
+
+    UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
+        UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
+        uv run --project control --frozen --with-editable . \
+        python scripts/tests/check_api_contract_completeness.py
+    UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
+        UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
+        uv run --project control --frozen --with-editable . \
+        pytest -q control/tests/test_api_contract_completeness.py \
+        control/tests/test_api_contract_graph.py \
+        control/tests/test_api_response_witness.py \
+        control/tests/test_source_bundle_client_handoff.py \
+        control/tests/test_artifact_job_api.py \
+        control/tests/test_fleet_profile_api.py::test_profile_operator_routes_are_singular_and_unversioned \
+        control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
+        control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
+        --api-response-witness="${TMPDIR:-/tmp}/vonk-test-local-api-response-witnesses.json"
+    UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
+        UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
+        uv run --project control --frozen --with-editable . \
+        python scripts/generate-agent-wire --check
+    UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
+        UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
+        uv run --project control --frozen --with-editable . \
+        python scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile
+}
+
+if [[ "$(uname -s)" != Darwin ]]; then
+    run_python_suites "${VONK_TEST_LOCAL_MARKERS:-}"
+    run_ci_wire_boundary
+    exit
+fi
+
+echo "Running portable repository and Controller suites on macOS"
+run_python_suites "$portable_markers"
+
+if ! command -v orb >/dev/null 2>&1; then
+    if [[ ${CI:-false} == true ]]; then
+        echo "OrbStack is required in CI for Linux-only test markers" >&2
+        exit 1
+    fi
+    echo "[SKIP-PREREQUISITE] OrbStack VM vonk-ci is unavailable; Linux-only tests were not run"
+    exit 0
+fi
+
+if ! orb -m vonk-ci bash -lc 'test -d /' >/dev/null 2>&1; then
+    if [[ ${CI:-false} == true ]]; then
+        echo "OrbStack VM vonk-ci is unavailable in CI; Linux-only tests were not run" >&2
+        exit 1
+    fi
+    echo "[SKIP-PREREQUISITE] OrbStack VM vonk-ci is not running; Linux-only tests were not run"
+    exit 0
+fi
+
+echo "Running Linux-marked repository and Controller tests in OrbStack VM vonk-ci"
+printf -v guest_root '%q' "$root"
+orb -m vonk-ci bash -lc \
+    "cd $guest_root && export UV_PROJECT_ENVIRONMENT=\"\$HOME/venv-vonk-ci-infra-root\" CARGO_TARGET_DIR=\"\$HOME/target-vonk-ci-infra\" UV_CACHE_DIR=\"\$HOME/.cache/vonk-ci-infra-uv\" UV_CONTROL_PROJECT_ENVIRONMENT=\"\$HOME/venv-vonk-ci-infra-control\" VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") VONK_TEST_LOCAL_MARKERS=$(printf %q "$linux_markers") && scripts/test-local"

@@ -48,7 +48,6 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
                 "config/",
                 "tests/",
                 "agent_protocol/",
-                "inventory/sbom/",
             ),
             ("pyproject.toml",),
         ):

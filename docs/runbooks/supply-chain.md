@@ -48,14 +48,16 @@ Run the offline gate before building or deploying:
 scripts/verify-supply-chain --json
 ```
 
-The verifier checks image defaults, both dependency lockfiles, deterministic
-SPDX 2.3 documents, the rebuilt `vonk-agent-protocol` wheel hash,
-Dockerfile/Compose inputs, the LiteLLM cosign public key, and the
-content-addressed evidence manifest. Normal verification performs no network
-access. Regeneration is an explicit reviewed operation:
+The verifier checks the Python, Rust, and web dependency lockfiles, the reviewed
+third-party contracts wheel digest, runtime and build image pins,
+Dockerfile/Compose relationships, and the LiteLLM cosign public key. It has no
+network access and does not require generated inventory in the checkout. The
+protocol wheel and SPDX 2.3 files are build outputs. Generate release evidence
+into a separate directory:
 
 ```bash
-scripts/verify-supply-chain --write-manifest --json
+uv build --project agent_protocol --wheel --out-dir inventory/wheels
+scripts/verify-supply-chain --output-dir /tmp/vonk-supply-chain --json
 ```
 
 ## Local diagnostic builds

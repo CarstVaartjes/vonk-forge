@@ -18,6 +18,7 @@ on:
       - Cargo.lock
       - Cargo.toml
       - control/**
+      - agent_protocol/**
       - deploy/compose/**
       - inventory/wheels/**
       - install/**

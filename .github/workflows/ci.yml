@@ -3,9 +3,12 @@ name: CI
 on:
   pull_request:
     branches: [main]
-  workflow_dispatch:
+  merge_group:
+    types: [checks_requested]
   push:
+    branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,8 +17,8 @@ permissions:
 # so one valid version can never evict another version from GitHub's pending
 # concurrency slot.
 concurrency:
-  group: vonk-forge-ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: vonk-forge-ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
   changes:
@@ -142,15 +145,32 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      # The offline half of release-image validation: it binds the SBOM, the
-      # protocol wheel, the image lock and the Compose pins to the exact inputs
-      # without needing a registry, attestations or Docker.  Running it on every
-      # pull request means an invalidated manifest fails here instead of first
-      # on the release tag, where publication is already underway.
+      # Build generated release inputs from locked dependencies; no generated
+      # inventory files are checked into the source tree.
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: agent_protocol/pyproject.toml
+      - name: Build protocol wheel from source
+        run: uv build --project agent_protocol --wheel --out-dir inventory/wheels
+      - name: Include protocol wheel with generated release evidence
+        run: |
+          mkdir -p "$RUNNER_TEMP/supply-chain"
+          cp inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl "$RUNNER_TEMP/supply-chain/"
       - name: Verify public image inputs
         run: scripts/verify-public-image-inputs
       - name: Verify supply-chain evidence
-        run: scripts/verify-supply-chain --json
+        run: scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json
+      - name: Preserve verified SBOMs and manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: supply-chain-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/supply-chain
+          if-no-files-found: error
+          retention-days: 30
 
   rust-quality:
     name: Rust workspace lint
@@ -172,6 +192,7 @@ jobs:
         with:
           shared-key: linux-amd64
           add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Verify Rust formatting
         run: cargo fmt --all --check
       - name: Lint Rust workspace
@@ -206,7 +227,7 @@ jobs:
         with:
           shared-key: linux-amd64
           add-job-id-key: "false"
-          save-if: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test complete Rust shard
         shell: bash
         env:
@@ -284,7 +305,7 @@ jobs:
         with:
           shared-key: linux-amd64
           add-job-id-key: "false"
-          save-if: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Prepare locked Controller dependencies
         run: scripts/retry-dependency-fetch uv sync --project control --frozen
       - name: Validate every canonical recipe launch projection
@@ -340,7 +361,7 @@ jobs:
         with:
           shared-key: linux-amd64
           add-job-id-key: "false"
-          save-if: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Spark-compatible rootless Podman
         shell: bash
         run: |
@@ -862,7 +883,7 @@ jobs:
 
   ci-gate:
     name: CI gate
-    needs: [changes, lint, rust, rust-quality-gate, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, web-suite, catalog-runtime]
+    needs: [changes, lint, supply-chain, rust, rust-quality-gate, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, web-suite, catalog-runtime]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -882,6 +903,7 @@ jobs:
           SELECTED_GENERATED: ${{ needs.changes.outputs.generated }}
           SELECTED_COMPOSE: ${{ needs.changes.outputs.compose }}
           LINT_RESULT: ${{ needs.lint.result }}
+          SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           RUST_UMBRELLA_RESULT: ${{ needs.rust.result }}
           RUST_QUALITY_RESULT: ${{ needs.rust-quality-gate.result }}
           RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
@@ -904,6 +926,7 @@ jobs:
             --selected "generated=$SELECTED_GENERATED" \
             --selected "compose=$SELECTED_COMPOSE" \
             --result "lint=$LINT_RESULT" \
+            --result "supply-chain=$SUPPLY_CHAIN_RESULT" \
             --result "rust-umbrella=$RUST_UMBRELLA_RESULT" \
             --result "rust-quality-gate=$RUST_QUALITY_RESULT" \
             --result "rust-tests=$RUST_TESTS_RESULT" \
@@ -915,6 +938,30 @@ jobs:
             --result "generated=$GENERATED_RESULT" \
             --result "compose=$COMPOSE_RESULT" \
             --result "catalog-runtime=$CATALOG_RESULT"
+
+  main-ci-summary:
+    name: Main branch CI status summary
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [ci-gate, supply-chain]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Report main branch CI result
+        env:
+          GATE_RESULT: ${{ needs.ci-gate.result }}
+          SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          {
+            echo "## Main branch CI"
+            echo
+            echo "- Result: **$GATE_RESULT**"
+            echo "- Supply-chain evidence: **$SUPPLY_CHAIN_RESULT**"
+            echo "- Commit: `$SOURCE_SHA`"
+            echo "- Run: $RUN_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   release-metadata:
     name: Validate container release tag
@@ -1046,7 +1093,7 @@ jobs:
 
   validate-release-images:
     name: Validate accepted release images
-    needs: [lint, generated-clients, compose-integration, release-metadata, build-agent-package]
+    needs: [lint, generated-clients, compose-integration, supply-chain, release-metadata, build-agent-package]
     runs-on: ubuntu-latest
     permissions:
       attestations: read
@@ -1061,10 +1108,23 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Download verified supply-chain evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: supply-chain-evidence-${{ github.run_id }}
+          path: release-output/supply-chain
+      - name: Restore verified protocol wheel for image build context
+        run: install -D -m 0644 release-output/supply-chain/vonk_agent_protocol-3.0.0-py3-none-any.whl inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl
       - name: Verify public image inputs
         run: scripts/verify-public-image-inputs
-      - name: Verify supply-chain evidence
-        run: scripts/verify-supply-chain --json
+      - name: Rebuild and compare release supply-chain evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/supply-chain"
+          cp inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl "$RUNNER_TEMP/supply-chain/"
+          scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json
+          diff -ru "$RUNNER_TEMP/supply-chain" release-output/supply-chain
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Install Skopeo from Ubuntu
@@ -1499,7 +1559,7 @@ jobs:
 
   release-manifest:
     name: Publish container release manifest
-    needs: [release-metadata, publish-images, build-agent-package]
+    needs: [release-metadata, publish-images, build-agent-package, supply-chain]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1513,6 +1573,11 @@ jobs:
         with:
           name: platform-build-${{ needs.release-metadata.outputs.version }}
           path: release-output
+      - name: Download verified source supply-chain evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: supply-chain-evidence-${{ github.run_id }}
+          path: release-output/supply-chain
       - name: Download verified agent package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1559,6 +1624,12 @@ jobs:
           set -euo pipefail
           [[ "$ARM64_PACKAGE" == "vonk-forge-agent_${VERSION}_arm64.deb" ]]
           release_assets=(
+            "release-output/supply-chain/manifest.json"
+            "release-output/supply-chain/agent-protocol.spdx.json"
+            "release-output/supply-chain/agent-rust.spdx.json"
+            "release-output/supply-chain/control-python.spdx.json"
+            "release-output/supply-chain/control-web.spdx.json"
+            "release-output/supply-chain/vonk_agent_protocol-3.0.0-py3-none-any.whl"
             "release-output/agent-package/$ARM64_PACKAGE"
             "release-output/agent-package/vonk-forge-systemd-security.json"
           )
@@ -1575,7 +1646,9 @@ jobs:
             )
           done
           mapfile -t expected_names < <(
-            printf '%s\n' "${release_assets[@]##*/}" | LC_ALL=C sort
+            for asset in "${release_assets[@]}"; do
+              [[ "$asset" == release-output/agent-package/* ]] && printf '%s\n' "${asset##*/}"
+            done | LC_ALL=C sort
           )
           mapfile -t actual_names < <(
             find release-output/agent-package -mindepth 1 -maxdepth 1 \

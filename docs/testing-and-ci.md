@@ -34,6 +34,21 @@ Run `git diff --check` before committing. Use the active task worktree for all
 commands and a writable task-specific cache. Keep `tests` and `control/tests`
 in separate invocations.
 
+For the complete local repository and Controller pytest suites, run:
+
+```bash
+scripts/test-local
+```
+
+On Linux, this runs both suites in full. On macOS, it runs portable tests on
+the host and sends tests marked `linux_only`, `needs_systemd`,
+`needs_rust_probe`, or `postgres` to the `vonk-ci` OrbStack VM when available.
+It prints an explicit prerequisite skip if the VM is unavailable; CI must
+provide the VM and required recipe checkout. The VM uses task-specific uv and
+Cargo directories under `$HOME` to isolate Python and Rust artifacts. Set
+`VONK_RECIPE_LIBRARY_ROOT` when the sibling
+checkout is outside `/opt/vonk-forge-recipes`.
+
 ### Local Linux and container testing
 
 On macOS, use OrbStack for container-backed tests before treating a Linux-only
@@ -235,9 +250,11 @@ success for missing environment inputs.
 
 ### Supply-chain verification
 
-Run `scripts/verify-supply-chain --json` for generated release inputs; CI runs
-the same verifier. Regenerate curated inventory when its inputs change and
-expect a no-op for changes outside that set. See the
+Run `scripts/verify-supply-chain --json` to validate authored lockfiles, the
+third-party contract wheel digest, and image pins. CI builds the protocol
+wheel, generates SPDX documents and a digest manifest, and uploads them as
+verified release evidence. These generated files are not committed or staged
+by the pre-commit hook. See the
 [development workflow](runbooks/development-workflow.md#generated-artifacts-and-release-evidence).
 
 ## What earns a test
