@@ -222,7 +222,11 @@ class ControlProcessHeartbeat(Base):
 
     __tablename__ = "control_process_heartbeats"
     __table_args__ = (
-        UniqueConstraint("process_kind", name="uq_control_process_heartbeats_kind"),
+        UniqueConstraint(
+            "process_kind",
+            "process_instance_id",
+            name="uq_control_process_heartbeats_instance",
+        ),
         CheckConstraint(
             "process_kind = 'worker'",
             name="ck_control_process_heartbeats_process_kind",

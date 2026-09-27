@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import re
+import traceback
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -1456,11 +1457,15 @@ class RecipeLifecyclePhaseExecutor:
                 request_key=request_key,
                 progress=progress,
             )
-            if execution.operation_id is None and execution.waiting:
+            if (
+                execution.operation_id is None
+                and execution.waiting
+                and phase.subphase != "runtime-image"
+            ):
                 raise RunSwitchOperationConflict(
                     "run-switch.runtime-image-waiting-without-child"
                 )
-            if execution.operation_id is None:
+            if execution.operation_id is None and not execution.waiting:
                 _validate_artifact_execution(plan, phase, execution.result)
             return execution
         if phase.kind == "stop":
@@ -3589,6 +3594,8 @@ class RunSwitchOperationService:
                     service="control-worker",
                     job_id=str(job_id),
                     error=type(error).__name__,
+                    message=redact_text(error),
+                    traceback=redact_text(traceback.format_exc()),
                 )
                 continue
         return advanced
@@ -7324,6 +7331,7 @@ class RunSwitchOperationService:
             execution.waiting
             and execution.operation_id is None
             and phase.kind != "final_verify"
+            and not (phase.kind == "prepare" and phase.subphase == "runtime-image")
         ):
             fail(f"run-switch.{phase.kind}-waiting-without-child")
             return True
@@ -7452,6 +7460,14 @@ class RunSwitchOperationService:
                     )
                     results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
+                elif phase.kind == "prepare" and phase.subphase == "runtime-image":
+                    due = now + timedelta(seconds=5)
+                    progress["observation_due_at"] = due.isoformat()
+                    job.status_reason = execution.status_reason or (
+                        "Runtime image preparation is running in the background; "
+                        f"next check at {due.isoformat()}"
+                    )
+                    job.state = "waiting"
             elif execution.operation_id is not None:
                 progress["child_operation_id"] = execution.operation_id
                 progress["phase"] = phase.kind
@@ -7536,7 +7552,11 @@ class RunSwitchOperationService:
                     if next_index < len(plan.phases)
                     else None
                 )
-            if not deadline_expired:
+            if not deadline_expired and not (
+                execution.waiting
+                and phase.kind == "prepare"
+                and phase.subphase == "runtime-image"
+            ):
                 job.state = "running"
             job.result = _persisted_result(progress)
             job.updated_at = now

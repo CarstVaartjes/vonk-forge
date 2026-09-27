@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import threading
+import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Protocol
@@ -10,6 +13,7 @@ from typing import Protocol
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .logging import log_event, redact_text
 from .models import RecipeRun, RunNode
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -26,6 +30,8 @@ from .recovery_policy import RecoveryPolicy
 _ROUTE_PUBLICATION_RETRY = RecoveryPolicy(
     max_failures=6, base_delay_seconds=5, max_delay_seconds=60
 )
+_ROUTE_LEASE_RENEW_INTERVAL_SECONDS = 20
+_LOGGER = logging.getLogger("vonk-control-worker")
 
 
 class _RoutePublisher(Protocol):
@@ -64,6 +70,7 @@ class RecipeOperationWorker:
         run_switches: _RunSwitchCoordinator | None = None,
         build_cleanup: Callable[[], bool] | None = None,
         retirement_cleanup: Callable[[], bool] | None = None,
+        manage_route_leases_in_background: bool = False,
     ) -> None:
         self._sessions = sessions
         self._routes = routes
@@ -73,6 +80,38 @@ class RecipeOperationWorker:
         self._run_switches = run_switches
         self._build_cleanup = build_cleanup
         self._retirement_cleanup = retirement_cleanup
+        self._route_lease_stop = threading.Event()
+        self._route_lease_thread: threading.Thread | None = None
+        self._manage_route_leases_in_background = manage_route_leases_in_background
+        if manage_route_leases_in_background:
+            self._route_lease_thread = threading.Thread(
+                target=self._maintain_route_leases,
+                name="route-lease-renewal",
+                daemon=True,
+            )
+            self._route_lease_thread.start()
+
+    def close(self) -> None:
+        """Stop route renewal cleanly while leaving durable operations intact."""
+
+        self._route_lease_stop.set()
+        if self._route_lease_thread is not None:
+            self._route_lease_thread.join(timeout=2)
+
+    def _maintain_route_leases(self) -> None:
+        while not self._route_lease_stop.is_set():
+            try:
+                self._routes.maintain(renew_before_seconds=10)
+            except Exception as error:  # noqa: BLE001 - retry route DB failures
+                log_event(
+                    _LOGGER,
+                    "worker.route_lease_renewal_failed",
+                    service="control-worker",
+                    error=type(error).__name__,
+                    message=redact_text(error),
+                    traceback=redact_text(traceback.format_exc()),
+                )
+            self._route_lease_stop.wait(_ROUTE_LEASE_RENEW_INTERVAL_SECONDS)
 
     def tick(self) -> bool:
         progressed = False
@@ -120,6 +159,8 @@ class RecipeOperationWorker:
             except (OSError, RuntimeError, TypeError, ValueError) as error:
                 self._defer_publication(run_id, error)
             return True
+        if self._manage_route_leases_in_background:
+            return progressed
         return self._routes.maintain(renew_before_seconds=10) or progressed
 
     def _defer_publication(self, run_id: str, error: BaseException) -> None:
