@@ -21,17 +21,13 @@ from vonk_control.models import (
 )
 from vonk_control.run_admission import RunAdmissionBusy
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
 NOW = datetime(2026, 9, 7, tzinfo=UTC)
 NODES = ("spk_" + "a" * 32, "spk_" + "b" * 32)
 REVISION = "a" * 64
 CAPABILITIES = ("agent.runtime.rust.v1", "recipe.stop")
-PAYLOAD = {
-    "schema_version": 1,
-    "run_id": "00000000-0000-4000-8000-000000000001",
-    "plan_digest": REVISION,
-}
 
 
 @pytest.fixture
@@ -77,7 +73,13 @@ def queue(postgres_engine):
         session.add(parent)
     services = [AgentJobService(sessions, clock=lambda: NOW) for _ in NODES]
     operations = [
-        services[0].enqueue(parent.id, node, "recipe.stop", REVISION, PAYLOAD)
+        services[0].enqueue(
+            parent.id,
+            node,
+            "recipe.stop",
+            REVISION,
+            recipe_stop_payload(node, plan_digest=REVISION),
+        )
         for node in NODES
     ]
     return sessions, parent, services, operations
@@ -209,7 +211,13 @@ def test_changed_candidate_does_not_claim_another_operation(queue, postgres_engi
         with sessions.begin() as session:
             session.get(AgentOperation, operations[0].id).state = "cancelled"
         replacement.append(
-            services[1].enqueue(parent.id, NODES[0], "recipe.stop", REVISION, PAYLOAD)
+            services[1].enqueue(
+                parent.id,
+                NODES[0],
+                "recipe.stop",
+                REVISION,
+                recipe_stop_payload(NODES[0], plan_digest=REVISION),
+            )
         )
 
     hook = _before_first_node_lock(postgres_engine, replace_candidate)
@@ -274,7 +282,7 @@ def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
                     NODES[index],
                     "recipe.stop",
                     REVISION,
-                    PAYLOAD,
+                    recipe_stop_payload(NODES[index], plan_digest=REVISION),
                     operation_id=operation_ids[index],
                 )
         except RunAdmissionBusy as error:
@@ -286,9 +294,7 @@ def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
             futures = [pool.submit(enqueue, index) for index in range(2)]
             try:
                 assert owner_has_key.wait(timeout=10)
-                completed, _ = wait(
-                    futures, timeout=3, return_when=FIRST_COMPLETED
-                )
+                completed, _ = wait(futures, timeout=3, return_when=FIRST_COMPLETED)
                 assert len(completed) == 1, "contending enqueue did not return promptly"
                 refusal = next(iter(completed)).result()
                 assert isinstance(refusal, RunAdmissionBusy), refusal
@@ -328,14 +334,11 @@ def test_dual_node_enqueues_follow_claim_lock_order(queue, postgres_engine):
     with sessions() as observer:
         final = tuple(
             observer.scalars(
-                select(AgentOperation).where(
-                    AgentOperation.parent_job_id == parent.id
-                )
+                select(AgentOperation).where(AgentOperation.parent_job_id == parent.id)
             )
         )
     new_rows = {operation.id: operation.node_id for operation in final}
     assert len(final) == len(original) + 2
     assert {
-        operation_id: new_rows[operation_id]
-        for operation_id in operation_ids
+        operation_id: new_rows[operation_id] for operation_id in operation_ids
     } == dict(zip(operation_ids, NODES, strict=True))

@@ -103,6 +103,7 @@ Each fact has one authoritative owner. The following is the target contract:
 | --- | --- | --- |
 | Users, sessions, enrollment, certificates, revocations, and execution authorization | PostgreSQL | Files cannot grant or restore this authority. |
 | Accepted catalog revisions, topology, saved profiles, desired placements, and exact plan references | PostgreSQL | Imported catalog files are source material; a digest reference does not assert local availability. |
+| One current selected-profile record pointing to the immutable accepted application snapshot as standing desired state for the whole fleet | PostgreSQL | The selected record is an explicit authority fact; do not infer it from latest application or audit history. Unselected profiles are drafts. |
 | Operation intent, idempotency keys, queue/attempt ownership, cancellation, reservations, and route decisions | PostgreSQL | Local work records carry the owning request/attempt identity; they do not schedule or authorize work. |
 | Model bytes, image archives, complete artifact manifests, and verification receipts | Managed artifact storage | A disposable index may accelerate discovery; readiness resolves through the storage owner. |
 | Local download ranges, completed members, build/export checkpoints, and local failure diagnostics | Canonical typed records alongside the work | API progress is derived from these records and current worker evidence, without a second independently writable SQL checkpoint. |
@@ -562,6 +563,32 @@ entries referenced by saved profiles, active workloads, or other current
 authority. This cleanup does not remove shared immutable recipe or model
 authority and does not treat Spark-local cache state as a reason to retain a
 NAS entry.
+
+### Ongoing whole-fleet profile policy (target)
+
+The current profile editor saves drafts and a profile load creates an
+application. Application history does not provide durable standing authority
+for later fleet changes. The target contract has one durable
+selected-profile record in PostgreSQL that points to the immutable accepted
+application snapshot. That snapshot owns desired state for the whole fleet;
+other saved profiles remain drafts and do not drive fleet actions.
+
+The Controller worker reconciles that accepted snapshot when Spark enrollment
+or revocation changes membership; a roster event does not ask the operator to
+make a new choice. A newly enrolled Spark enters idle. A removed Spark leaves
+the current scope, so its independent assignment is ignored without rewriting
+the snapshot. If that removal makes a multi-Spark model incomplete, stop and
+confirm its remaining reachable ranks, withdraw its route, report the missing
+member, and continue unrelated assignments. Do not claim the removed,
+unreachable Spark stopped or count its historical run as live capacity. If the
+same node ID rejoins, reconcile its actual state against the accepted snapshot
+before scheduling work there.
+
+This ongoing reconciliation is separate from review and load: a review binds
+the current membership and planned effects, and a membership change before
+acceptance requires a fresh review. The selected-profile record and the
+worker's enrollment and revocation reconciliation are target behavior under
+test; they have not shipped.
 
 The run alias is the stable client-facing model name. A recipe may serve a
 different implementation-local model name: the first ordered value in

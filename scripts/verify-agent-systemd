@@ -136,7 +136,7 @@ def _security(root: Path, name: str) -> dict[str, object]:
     }
 
 
-def _package_helper_socket(root: Path) -> dict[str, str]:
+def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     unit_root = root / "usr/lib/systemd/system"
     agent = ConfigParser(interpolation=None, strict=False)
     helper = ConfigParser(interpolation=None, strict=False)
@@ -165,6 +165,17 @@ def _package_helper_socket(root: Path) -> dict[str, str]:
         "/usr/lib/vonk-forge/vonk-agent --config /etc/vonk-forge-agent/agent.toml run"
     ):
         raise RuntimeError("agent service does not execute the direct binary")
+    if (
+        agent["Unit"].get("StartLimitIntervalSec") != "0"
+        or agent["Service"].get("Restart") != "on-failure"
+        or agent["Service"].get("RestartSec") != "30s"
+    ):
+        raise RuntimeError("agent boot dependency recovery policy is invalid")
+    if (
+        agent["Service"].get("PrivateDevices") != "yes"
+        or agent["Service"].get("DevicePolicy") != "closed"
+    ):
+        raise RuntimeError("agent boot recovery weakened device isolation")
     if agent["Unit"].get("PartOf"):
         raise RuntimeError("agent service has an indirect lifecycle owner")
     if (
@@ -180,12 +191,21 @@ def _package_helper_socket(root: Path) -> dict[str, str]:
         or helper["Service"].get("RuntimeDirectoryPreserve") != "restart"
     ):
         raise RuntimeError("package helper runtime ownership boundary is invalid")
-    return {
-        "directory_mode": expected["DirectoryMode"],
-        "group": expected["SocketGroup"],
-        "listen_stream": expected["ListenStream"],
-        "runtime_owner": expected["SocketUser"],
-    }
+    return (
+        {
+            "directory_mode": expected["DirectoryMode"],
+            "group": expected["SocketGroup"],
+            "listen_stream": expected["ListenStream"],
+            "runtime_owner": expected["SocketUser"],
+        },
+        {
+            "restart": agent["Service"].get("Restart"),
+            "restart_delay": agent["Service"].get("RestartSec"),
+            "start_limit_interval": agent["Unit"].get("StartLimitIntervalSec"),
+            "private_devices": agent["Service"].get("PrivateDevices"),
+            "device_policy": agent["Service"].get("DevicePolicy"),
+        },
+    )
 
 
 def verify(repository: Path) -> dict[str, object]:
@@ -193,7 +213,7 @@ def verify(repository: Path) -> dict[str, object]:
         root = Path(temporary)
         _install(root, repository)
         _verify(root)
-        package_helper_socket = _package_helper_socket(root)
+        package_helper_socket, agent_boot_recovery = _package_helper_socket(root)
         units = {name: _security(root, name) for name in SECURITY_UNITS}
         if any(unit["ambient_capabilities"] for unit in units.values()):
             raise RuntimeError("agent services must not receive ambient capabilities")
@@ -204,6 +224,7 @@ def verify(repository: Path) -> dict[str, object]:
                     f"CAP_SYS_PTRACE boundary for {name} does not match policy"
                 )
     return {
+        "agent_boot_recovery": agent_boot_recovery,
         "package_helper_socket": package_helper_socket,
         "schema_version": 1,
         "security_units": units,

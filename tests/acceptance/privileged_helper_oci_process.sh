@@ -15,6 +15,17 @@ chmod 0700 "$report_root"
 
 registry_name=vonk-helper-proof-registry
 run_id=40000000-0000-4000-8000-000000000004
+installation_id=40000000-0000-4000-8000-000000000001
+installation_root="/var/lib/vonk-forge-agent/installations/$installation_id"
+endpoint_address=$(ip -4 route get 1.1.1.1 | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')
+python3 - "$endpoint_address" <<'PY'
+import ipaddress
+import sys
+
+address = ipaddress.IPv4Address(sys.argv[1])
+if address.is_loopback or address.is_unspecified or address.is_multicast or address.is_link_local:
+    raise SystemExit("helper proof requires an assigned non-loopback IPv4 endpoint")
+PY
 run_name=vonk-$run_id
 image_base=localhost:5001/vonk/helper-tiny
 image_name="$image_base:v1"
@@ -46,7 +57,7 @@ install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper /var/lib/vonk-forg
 install -d -o root -g root -m 0755 /run/vonk-forge-agent /run/vonk-forge-package-helper
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent /var/lib/vonk-forge-agent/oci-archives /run/vonk-forge-agent/runtime-requests
 rm -rf \
-  /var/lib/vonk-forge-agent/installations/proof-install \
+  "$installation_root" \
   /var/lib/vonk-forge-agent/runs/$run_id \
   /var/lib/vonk-forge-agent/run-metadata/$run_id
 runtime_probe=/run/vonk-forge-agent/privileged_oci_process_probe
@@ -162,11 +173,11 @@ chmod 0600 "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
 
 install -d -o vonk-agent -g vonk-agent -m 0700 \
   /var/lib/vonk-forge-agent/installations \
-  /var/lib/vonk-forge-agent/installations/proof-install \
-  /var/lib/vonk-forge-agent/installations/proof-install/models \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/primary \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101 \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/support \
+  "$installation_root" \
+  "$installation_root/models" \
+  "$installation_root/models/primary" \
+  "$installation_root/models/dependency-qwen3-8-27b-dspark-b3c99101" \
+  "$installation_root/models/support" \
   /var/lib/vonk-forge-agent/runs \
   /var/lib/vonk-forge-agent/runs/$run_id \
   /var/lib/vonk-forge-agent/runs/$run_id/outputs \
@@ -174,17 +185,17 @@ install -d -o vonk-agent -g vonk-agent -m 0700 \
   /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/$run_id \
   /var/lib/vonk-forge-agent/run-metadata \
   /var/lib/vonk-forge-agent/run-metadata/$run_id \
-  /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache
+  "$installation_root/runtime-cache"
 for path in \
   /var/lib/vonk-forge-agent \
   /var/lib/vonk-forge-agent/oci-archives \
   /var/lib/vonk-forge-agent/installations \
-  /var/lib/vonk-forge-agent/installations/proof-install \
-  /var/lib/vonk-forge-agent/installations/proof-install/models \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/primary \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101 \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/support \
-  /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache \
+  "$installation_root" \
+  "$installation_root/models" \
+  "$installation_root/models/primary" \
+  "$installation_root/models/dependency-qwen3-8-27b-dspark-b3c99101" \
+  "$installation_root/models/support" \
+  "$installation_root/runtime-cache" \
   /var/lib/vonk-forge-agent/runs \
   /var/lib/vonk-forge-agent/runs/$run_id \
   /var/lib/vonk-forge-agent/runs/$run_id/outputs \
@@ -198,11 +209,11 @@ done
 printf 'host_agent_uid=%s\nhost_agent_gid=%s\ncontainer_uid=10001\n' \
   "$agent_uid" "$agent_gid" >"$report_root/custody-identity.txt"
 for path in \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/primary/config.json \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/primary/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/support/LICENSE \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/support/__init__.py; do
+  "$installation_root/models/primary/config.json" \
+  "$installation_root/models/primary/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf" \
+  "$installation_root/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json" \
+  "$installation_root/models/support/LICENSE" \
+  "$installation_root/models/support/__init__.py"; do
   printf 'helper-process-proof\n' >"$path"
   chown vonk-agent:vonk-agent "$path"
   chmod 0600 "$path"
@@ -265,6 +276,7 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_CONFIG_ID="$config_id" \
   VONK_HELPER_IMAGE_REF="$image_ref" \
   VONK_HELPER_FIXTURE="$fixture" \
+  VONK_HELPER_PROBE_ENDPOINT_ADDRESS="$endpoint_address" \
   VONK_HELPER_SOCKET="$VONK_HELPER_SOCKET" \
   VONK_HELPER_REQUEST_ROOT="$VONK_HELPER_REQUEST_ROOT" \
   "$probe_binary" start | tee "$report_root/start.log"
@@ -274,7 +286,7 @@ docker logs "$run_name" >"$report_root/container-first.log" 2>&1
 grep -q 'uid=10001' "$report_root/container-first.log"
 grep -q 'cache-created' "$report_root/container-first.log"
 grep -q 'tmp-fresh' "$report_root/container-first.log"
-test "$(cat /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/helper-cache-ok)" = cache-created
+test "$(cat "$installation_root/runtime-cache/helper-cache-ok")" = cache-created
 docker rm "$run_name" >"$report_root/container-first-remove.log"
 sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_SHA="$archive_sha" \
@@ -284,6 +296,7 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_CONFIG_ID="$config_id" \
   VONK_HELPER_IMAGE_REF="$image_ref" \
   VONK_HELPER_FIXTURE="$fixture" \
+  VONK_HELPER_PROBE_ENDPOINT_ADDRESS="$endpoint_address" \
   VONK_HELPER_SOCKET="$VONK_HELPER_SOCKET" \
   VONK_HELPER_REQUEST_ROOT="$VONK_HELPER_REQUEST_ROOT" \
   "$probe_binary" start | tee "$report_root/start-reuse.log"
@@ -292,7 +305,8 @@ docker inspect "$run_name" >"$report_root/container-inspect.json"
 sleep 6
 docker logs "$run_name" >"$report_root/container.log" 2>&1 || true
 
-grep -q '"--network","none"' "$report_root/start.log"
+grep -q '"--network","bridge"' "$report_root/start.log"
+grep -Fq "\"--publish\",\"${endpoint_address}:8000:8000\"" "$report_root/start.log"
 grep -q '"--tmpfs"' "$report_root/start.log"
 grep -q '"--read-only"' "$report_root/start.log"
 grep -q '"--cap-drop=ALL"' "$report_root/start.log"
@@ -307,8 +321,8 @@ grep -q 'uid=10001' "$report_root/container.log"
 grep -q 'helper-argv-once' "$report_root/container.log"
 grep -q 'cache-reused' "$report_root/container.log"
 grep -q 'tmp-fresh' "$report_root/container.log"
-test -f /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/home/helper-entrypoint-ok
-test "$(cat /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/helper-cache-ok)" = cache-created
+test -f "$installation_root/runtime-cache/home/helper-entrypoint-ok"
+test "$(cat "$installation_root/runtime-cache/helper-cache-ok")" = cache-created
 test -f /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/helper-tmp-ok
 printf 'helper-process-proof=passed\narchive_sha256=%s\narchive_bytes=%s\nimage_ref=%s\nplatform_digest=%s\nplatform_config_digest=%s\nconfig_id=%s\ndocker_local_image_id=%s\n' \
   "$archive_sha" "$archive_bytes" "$image_ref" "$platform_digest" "$platform_config_digest" "$config_id" "$docker_local_image_id" \

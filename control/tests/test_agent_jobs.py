@@ -58,6 +58,7 @@ from vonk_control.recipe_start_payloads import (
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
@@ -72,11 +73,7 @@ _BUILD_ADAPTER = (
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
-STOP_PAYLOAD = {
-    "schema_version": 1,
-    "run_id": "00000000-0000-4000-8000-000000000001",
-    "plan_digest": COMMIT,
-}
+STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
 STOP_RESULT = {"stopped": True}
 
 #: The capability set a Spark advertises when it can re-acquire one exact fenced
@@ -365,7 +362,13 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     jobs, sessions, clock = service
     job = parent(sessions, clock)
     running = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    queued = jobs.enqueue(job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    queued = jobs.enqueue(
+        job.id,
+        NODE_B,
+        "recipe.stop",
+        COMMIT,
+        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+    )
     claim = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert claim is not None
     with sessions.begin() as session:
@@ -454,7 +457,13 @@ def test_new_intent_finishes_superseded_parent_with_mixed_terminal_children(
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
     succeeded = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    cancelled = jobs.enqueue(old_parent.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    cancelled = jobs.enqueue(
+        old_parent.id,
+        NODE_B,
+        "recipe.stop",
+        COMMIT,
+        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+    )
     with sessions.begin() as session:
         parent_row = session.get(Job, old_parent.id)
         succeeded_row = session.get(AgentOperation, succeeded.id)
@@ -1606,7 +1615,13 @@ def test_sqlite_enqueue_enforces_parent_commit_and_target(service) -> None:
         assert stored_parent is not None
         stored_parent.targets = [NODE_A]
     with pytest.raises(ValueError, match="target"):
-        jobs.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+        jobs.enqueue(
+            parent_job.id,
+            NODE_B,
+            "recipe.stop",
+            COMMIT,
+            recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+        )
 
 
 def test_sqlite_enqueue_rejects_retired_node_before_parent_mutation(service) -> None:
@@ -2215,7 +2230,13 @@ def test_parent_job_becomes_succeeded_only_after_every_operation_succeeds(
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    jobs.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    jobs.enqueue(
+        parent_job.id,
+        NODE_B,
+        "recipe.stop",
+        COMMIT,
+        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+    )
 
     first = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert first is not None
@@ -2235,7 +2256,13 @@ def test_parent_job_fails_when_all_operations_are_terminal_and_one_failed(
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    jobs.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    jobs.enqueue(
+        parent_job.id,
+        NODE_B,
+        "recipe.stop",
+        COMMIT,
+        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+    )
 
     failed = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert failed is not None
@@ -2259,7 +2286,13 @@ def test_parent_job_waits_when_all_operations_terminal_without_failures(
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    jobs.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    jobs.enqueue(
+        parent_job.id,
+        NODE_B,
+        "recipe.stop",
+        COMMIT,
+        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+    )
 
     waiting = claim_agent(jobs, NODE_A, "serial-a", 30)
     assert waiting is not None

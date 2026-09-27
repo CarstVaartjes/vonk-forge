@@ -21,6 +21,7 @@ from vonk_control.models import (
     Base,
     FleetProfile,
     FleetProfileApplication,
+    FleetProfileSelection,
     Job,
     ModelCacheOperation,
     ModelCacheSet,
@@ -411,6 +412,7 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
     # The real profile owner query fails with PostgreSQL undefined_table. The
     # review must roll back that scanner savepoint before it reads lifecycle
     # gates and returns a fail-closed blocker.
+    cast(Table, FleetProfileSelection.__table__).drop(postgres_engine)
     cast(Table, FleetProfileApplication.__table__).drop(postgres_engine)
     cast(Table, FleetProfile.__table__).drop(postgres_engine)
     try:

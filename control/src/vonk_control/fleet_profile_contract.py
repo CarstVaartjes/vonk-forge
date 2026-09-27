@@ -27,6 +27,7 @@ from .run_switch_contract import (
     ResourceDemandEvidence,
     RunSwitchAssessment,
     RunSwitchOperationResult,
+    RunSwitchProfileStopScope,
     RunSwitchReason,
     StopImpact,
 )
@@ -228,7 +229,7 @@ class FleetProfileScope(_StrictModel):
     operation cannot silently expand or shrink with fleet membership changes.
     """
 
-    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    node_ids: list[NodeId] = Field(max_length=32)
 
     @model_validator(mode="after")
     def validate_scope(self) -> FleetProfileScope:
@@ -633,8 +634,25 @@ class FleetProfileRunEffect(_StrictModel):
     run_id: UuidId
     installation_id: UuidId
     alias: Alias
+    # node_ids always names the full stored topology.  For a profile-owned
+    # cleanup after fleet removal, this separately binds the live Stop targets
+    # and missing ranks; ordinary Stops keep this field absent.
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     action: Literal["keep", "stop"]
+    profile_stop_scope: RunSwitchProfileStopScope | None = None
+
+    @model_validator(mode="after")
+    def partial_scope_matches_effect(self) -> FleetProfileRunEffect:
+        if self.node_ids != sorted(set(self.node_ids)):
+            raise ValueError("profile run effect node IDs must be sorted and unique")
+        scope = self.profile_stop_scope
+        if scope is not None and (
+            self.action != "stop"
+            or self.node_ids
+            != sorted(node.node_id for node in scope.original_group.nodes)
+        ):
+            raise ValueError("profile Stop scope differs from its full run effect")
+        return self
 
 
 class FleetProfileInstallationEffect(_StrictModel):
@@ -692,6 +710,13 @@ class FleetProfileSwitchQueueItem(_StrictModel):
 
     kind: FleetProfileSwitchChildKind
     id: UuidId
+    profile_stop_scope: RunSwitchProfileStopScope | None = None
+
+    @model_validator(mode="after")
+    def partial_stop_is_a_stop_item(self) -> FleetProfileSwitchQueueItem:
+        if self.profile_stop_scope is not None and self.kind != "stop":
+            raise ValueError("profile Stop scope requires a Stop queue item")
+        return self
 
 
 class FleetProfileSwitchChildState(_StrictModel):

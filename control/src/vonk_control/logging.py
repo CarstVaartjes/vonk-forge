@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging as stdlib_logging
 import re
+import sys
 import uuid
 from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
@@ -26,6 +27,41 @@ _HTTP_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _MAX_FIELD = 4096
 _MAX_LOG_INPUT = 1_048_576
+
+
+class _CurrentStderrHandler(stdlib_logging.StreamHandler):
+    """Follow the process stderr stream so test and supervisor capture stays live."""
+
+    def emit(self, record: stdlib_logging.LogRecord) -> None:
+        self.stream = sys.stderr
+        super().emit(record)
+
+
+def configure_controller_logging() -> None:
+    """Emit Controller structured INFO events without enabling dependency noise."""
+
+    for name in (
+        "vonk_control",
+        "vonk-control-worker",
+        "vonk-control-run-switch",
+    ):
+        logger = stdlib_logging.getLogger(name)
+        logger.setLevel(stdlib_logging.INFO)
+        logger.propagate = False
+        handler = next(
+            (
+                current
+                for current in logger.handlers
+                if getattr(current, "_vonk_controller_handler", False)
+            ),
+            None,
+        )
+        if handler is None:
+            handler = _CurrentStderrHandler()
+            handler.setFormatter(stdlib_logging.Formatter("%(message)s"))
+            handler._vonk_controller_handler = True  # type: ignore[attr-defined]
+            logger.addHandler(handler)
+        handler.setLevel(stdlib_logging.INFO)
 
 
 def _redact_url(match: re.Match[str]) -> str:

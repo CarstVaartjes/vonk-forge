@@ -61,6 +61,7 @@ from vonk_control.operation_api import (
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.strict_json import serialize_json_value
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
 COMMIT = "a" * 64
@@ -72,11 +73,7 @@ PARKED_CAPABILITIES = (
     "recipe.stop",
     "agent.lifecycle.resume.exact.v1",
 )
-PARKED_PAYLOAD = {
-    "schema_version": 1,
-    "run_id": "00000000-0000-4000-8000-000000000001",
-    "plan_digest": COMMIT,
-}
+PARKED_PAYLOAD = recipe_stop_payload(PARKED_NODE_ID, plan_digest=COMMIT)
 
 
 class MutableClock:

@@ -345,6 +345,22 @@ class RunAdmissionService:
                     )
                 )
             )
+            unreconciled_lost_ranks: dict[str, list[tuple[str, str]]] = {}
+            for node_id, run_id, run_alias in session.execute(
+                select(RunNode.node_id, RecipeRun.id, RecipeRun.alias)
+                .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+                .where(
+                    RunNode.node_id.in_(
+                        [mapping_node.node_id for mapping_node in mapping_nodes]
+                    ),
+                    RunNode.state != "stopped",
+                    RecipeRun.state == "lost",
+                )
+                .order_by(RunNode.node_id, RecipeRun.id)
+            ):
+                unreconciled_lost_ranks.setdefault(node_id, []).append(
+                    (run_id, run_alias)
+                )
             agent_capabilities = {
                 node.node_id: tuple(node.capabilities or ()) for node in agent_nodes
             }
@@ -407,6 +423,14 @@ class RunAdmissionService:
         for placement in ordered:
             blockers = [] if topology_reason is None else [topology_reason]
             warnings: list[AdmissionReason] = []
+            for run_id, run_alias in unreconciled_lost_ranks.get(placement.node_id, ()):
+                blockers.append(
+                    AdmissionReason(
+                        "run.unreconciled_lost_rank",
+                        f"Spark {placement.node_id} still has rank state for lost "
+                        f"model {run_alias} ({run_id}); reconcile it before placing work.",
+                    )
+                )
             if legal_admission.blocker is not None:
                 blockers.append(AdmissionReason(*legal_admission.blocker))
             if legal_admission.warning is not None:

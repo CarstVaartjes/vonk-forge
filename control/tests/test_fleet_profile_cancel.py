@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from threading import Event
 from typing import Any
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult
@@ -27,8 +28,10 @@ from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
+    ArtifactJob,
     CatalogDocumentRevision,
     FleetProfileApplication,
+    FleetProfileSelection,
     Job,
     RecipeRun,
     ResourceReservation,
@@ -42,6 +45,7 @@ from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profiles import _uuid
 from .test_recipe_operations import (
@@ -66,6 +70,238 @@ class _IdleRoutes:
     def maintain(self, *, renew_before_seconds: int = 10) -> bool:
         del renew_before_seconds
         return False
+
+
+@pytest.mark.parametrize("stop_receipt_state", ["succeeded", "waiting-for-operator"])
+@pytest.mark.parametrize("profile_run_generation", [1, 2])
+def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
+    tmp_path,
+    postgres_engine,
+    stop_receipt_state: str,
+    profile_run_generation: int,
+) -> None:
+    (
+        sessions,
+        lifecycle,
+        _queue,
+        artifact_jobs,
+        run_id,
+        node_id,
+    ) = running_artifact_service(tmp_path, engine=postgres_engine)
+    artifact = submitted_artifact_job(artifact_jobs, run_id, request_suffix=115)
+    with sessions.begin() as session:
+        artifact_row = session.get(ArtifactJob, artifact.id)
+        assert artifact_row is not None and artifact_row.operation_id is not None
+        source_job = session.get(Job, artifact_row.operation_id)
+        source_operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == artifact_row.operation_id
+            )
+        )
+        assert source_job is not None and source_operation is not None
+        if profile_run_generation > 1:
+            current_run = session.get(RecipeRun, run_id)
+            assert current_run is not None
+            current_run.run_generation = profile_run_generation
+            current_plan = dict(current_run.plan)
+            current_plan["run_generation"] = profile_run_generation
+            current_run.plan = current_plan
+        # Model a one-shot Start whose executor lost its lease after issuing
+        # the effect. The old parent remains diagnostic; its receipt is not a
+        # prerequisite for the newer profile's exact Stop.
+        source_job.state = "waiting-for-operator"
+        source_operation.state = "waiting-for-operator"
+        source_operation.current_attempt = 1
+        artifact_row.state = "failed"
+        artifact_row.result_evidence = {
+            "failure_kind": "cancellation-stop-uncertain",
+            "recoverable": True,
+            "active_scope_may_remain": True,
+            "elapsed_milliseconds": 10,
+            "peak_memory_bytes": None,
+        }
+
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=lambda: NOW, run_switch_operations=run_switch
+    )
+    profile = profiles.create(
+        FleetProfileInput.model_validate(
+            {"name": "Replace uncertain one-shot", "assignments": []}
+        ),
+        actor="admin",
+    )
+    preview = profiles.preview(profile.id)
+    assert preview.allowed, preview.reasons
+    assert preview.summary.stops == 1
+    application = profiles.load(
+        profile.number,
+        actor="admin",
+        request_key=_uuid(116),
+        expected_plan_digest=preview.plan_digest,
+    )
+
+    for _ in range(8):
+        profiles.tick()
+        run_switch.tick()
+        with sessions() as session:
+            stop = session.scalar(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["execution_mode"].as_string() == "profile-jobrun-stop",
+                )
+            )
+            if stop is not None:
+                break
+
+    assert stop is not None, (
+        "profile should issue a fresh exact JobRun Stop; "
+        f"application={profiles.application(application.id)!r}"
+    )
+    stop_payload = stop.payload
+    assert isinstance(stop_payload, dict)
+    phases = stop_payload.get("phases")
+    assert isinstance(phases, list) and phases
+    payloads: list[dict[str, Any]] = []
+    for phase in phases:
+        if not isinstance(phase, list):
+            continue
+        for phase_item in phase:
+            if not isinstance(phase_item, dict):
+                continue
+            payload = phase_item.get("payload")
+            if isinstance(payload, dict):
+                payloads.append(payload)
+    assert len(payloads) == len(stop.targets)
+    assert all(payload["target_runtime_id"] == artifact.id for payload in payloads)
+    assert all(payload["run_id"] == run_id for payload in payloads)
+    assert all(payload["node_id"] == node_id for payload in payloads)
+    assert all(payload["cancel_pending_start"] is True for payload in payloads)
+    assert all(payload["run_generation"] == 1 for payload in payloads), (
+        "Stop retains the exact older JobRun generation instead of rewriting it"
+    )
+    profile_authorization = stop_payload.get("profile_stop_authorization")
+    assert isinstance(profile_authorization, dict)
+    assert profile_authorization["run_generation"] == profile_run_generation
+    assert stop_payload.get("profile_application_id") == application.id
+    assert stop.targets == [node_id]
+    with sessions() as session:
+        current_run = session.get(RecipeRun, run_id)
+        assert current_run is not None and current_run.state != "stopped"
+        claims = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_kind == "run",
+                    ResourceReservation.owner_id == run_id,
+                    ResourceReservation.state == "active",
+                )
+            )
+        )
+        assert claims, "claims stay held until the exact Stop receipt proves absence"
+
+    agent_jobs, stop_claim = _agent_service_and_target_claim(
+        sessions, lifecycle, node_id, [node_id], clock=lambda: NOW
+    )
+    with sessions() as session:
+        stop_children = tuple(
+            (
+                operation.id,
+                operation.kind,
+                operation.state,
+                operation.status_reason,
+                operation.workload_intent_ordinal,
+            )
+            for operation in session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
+            )
+        )
+    assert stop_claim is not None and stop_claim.job_id == stop.id, (
+        f"profile Stop child is not claimable: {stop_children!r}"
+    )
+    if stop_receipt_state == "succeeded":
+        agent_jobs.record_result(
+            _agent_result(stop_claim, state="succeeded", result={"stopped": True})
+        )
+    else:
+        agent_jobs.record_result(
+            _agent_result(
+                stop_claim,
+                state="waiting-for-operator",
+                result={
+                    "reason": "runtime absence could not be confirmed",
+                    "error_code": "helper_stop_uncertain",
+                    "failure_kind": "uncertain-effect",
+                    "uncertain": True,
+                    "recovery": "inspect-before-resume",
+                },
+            )
+        )
+        for _ in range(5):
+            run_switch.tick()
+            profiles.tick()
+        with sessions() as session:
+            unresolved_run = session.get(RecipeRun, run_id)
+            retained_claims = tuple(
+                session.scalars(
+                    select(ResourceReservation).where(
+                        ResourceReservation.owner_kind == "run",
+                        ResourceReservation.owner_id == run_id,
+                        ResourceReservation.state == "active",
+                    )
+                )
+            )
+            unresolved_artifact = session.get(ArtifactJob, artifact.id)
+            unresolved_source_job = session.get(Job, source_job.id)
+        assert profiles.application(application.id).state != "succeeded"
+        assert lifecycle.get(stop.id).state != "succeeded"
+        assert unresolved_run is not None and unresolved_run.state != "stopped"
+        assert retained_claims, "an uncertain Stop cannot release run claims"
+        assert (
+            unresolved_artifact is not None and unresolved_artifact.state != "cancelled"
+        )
+        assert (
+            unresolved_source_job is not None
+            and unresolved_source_job.state != "cancelled"
+        )
+        return
+
+    for _ in range(12):
+        run_switch.tick()
+        profiles.tick()
+        if profiles.application(application.id).state == "succeeded":
+            break
+
+    assert profiles.application(application.id).state == "succeeded"
+    assert lifecycle.get(stop.id).state == "succeeded"
+    with sessions() as session:
+        current_run = session.get(RecipeRun, run_id)
+        stopped_artifact = session.get(ArtifactJob, artifact.id)
+        stopped_source_job = session.get(Job, source_job.id)
+        stopped_source_operation = session.get(AgentOperation, source_operation.id)
+        remaining_claims = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_kind == "run",
+                    ResourceReservation.owner_id == run_id,
+                    ResourceReservation.state == "active",
+                )
+            )
+        )
+    assert current_run is not None and current_run.state == "stopped"
+    assert stopped_artifact is not None and stopped_artifact.state == "cancelled"
+    assert stopped_source_job is not None and stopped_source_job.state == "cancelled"
+    assert (
+        stopped_source_operation is not None
+        and stopped_source_operation.state == "cancelled"
+    )
+    assert not remaining_claims, "run claims release only after exact Stop success"
 
 
 def _profile_worker_process_dies_with_pending_cancel(
@@ -1105,7 +1341,7 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
     assert observations == [application.id]
 
 
-def test_cancellations_rotate_around_waiting_and_active_profile_applications(
+def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1207,11 +1443,27 @@ def test_cancellations_rotate_around_waiting_and_active_profile_applications(
 
     clock_now["now"] = start + timedelta(seconds=3)
     assert service.tick() is True
-    first_id = applications[0][1].id
-    first_child = service.application(first_id).progress.switch_adapter
-    assert first_child is not None and first_child.active_operation_id is not None
+    with sessions() as session:
+        selected = session.get(FleetProfileSelection, 1)
+        rows = tuple(
+            session.scalars(
+                select(FleetProfileApplication).order_by(
+                    FleetProfileApplication.created_at,
+                    FleetProfileApplication.id,
+                )
+            )
+        )
+    assert selected is not None
+    latest_id = applications[2][1].id
+    assert selected.generation == 3
+    assert selected.application_id == latest_id
+    assert [row.state for row in rows] == ["cancelled", "cancelled", "running"]
+    assert [row.selection_generation for row in rows] == [1, 2, 3]
+    assert [row.current_operation_id for row in rows] == [None, None, latest_id]
 
-    active_child_ids = {first_id: first_child.active_operation_id}
+    latest_child = service.application(latest_id).progress.switch_adapter
+    assert latest_child is not None and latest_child.active_operation_id is not None
+    active_child_id = latest_child.active_operation_id
     observations: list[str] = []
     adapter.request_cancellation = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
     original_advance = adapter.advance
@@ -1219,66 +1471,22 @@ def test_cancellations_rotate_around_waiting_and_active_profile_applications(
     def observe_pending(
         application_id: str, *, session=None
     ) -> FleetProfileChildOperation:
-        child_id = active_child_ids.get(application_id)
-        if child_id is not None:
+        if application_id == latest_id:
             observations.append(application_id)
-            return FleetProfileChildOperation(id=child_id, state="running")
+            return FleetProfileChildOperation(id=active_child_id, state="running")
         return original_advance(application_id, session=session)
 
     adapter.advance = observe_pending  # type: ignore[method-assign]
-    first_profile, _ = applications[0]
+    latest_profile, _ = applications[2]
     service.cancel(
-        first_id,
-        profile_number=first_profile.number,
+        latest_id,
+        profile_number=latest_profile.number,
         request_key=_uuid(993),
         actor="admin",
     )
     assert service.tick() is True
-    assert observations == [first_id]
-
-    second_profile, second_application = applications[1]
-    second_id = second_application.id
-    second_child = service.application(second_id).progress.switch_adapter
-    assert second_child is not None and second_child.active_operation_id is not None
-    active_child_ids[second_id] = second_child.active_operation_id
-    with sessions.begin() as session:
-        parked = session.get(FleetProfileApplication, second_id)
-        assert parked is not None
-        parked.state = "waiting-for-operator"
-        parked.status_reason = "Synthetic owner wait before accepted cancellation"
-    service.cancel(
-        second_id,
-        profile_number=second_profile.number,
-        request_key=_uuid(994),
-        actor="admin",
-    )
-    assert service.application(second_id).state == "running"
-    # Model a late parked-child status racing with the accepted cancellation.
-    # The parked observer must leave this row to its exact cancellation owner.
-    with sessions.begin() as session:
-        cancelling_parked = session.get(FleetProfileApplication, second_id)
-        assert cancelling_parked is not None
-        cancelling_parked.state = "waiting-for-operator"
-        cancelling_parked.status_reason = "Late parked child observation"
-    assert service.tick() is True
-    assert observations == [first_id, second_id]
-    second_pending = service.application(second_id).cancellation
-    assert second_pending is not None
-    assert second_pending.state == "cancelling"
-    assert second_pending.pending_effects[0].operation_id == active_child_ids[second_id]
-
-    third_id = applications[2][1].id
-    third = service.application(third_id)
-    third_switch = third.progress.switch_adapter
-    assert third.state == "running"
-    assert third_switch is not None and third_switch.active_operation_id is not None
-
-    # Once both pending owners are due, each gets an observation before the
-    # first can monopolize later scheduler passes; ordinary app three remains
-    # eligible in the same passes.
-    clock_now["now"] = start + timedelta(seconds=9)
-    assert service.tick() is True
-    assert observations == [first_id, second_id, first_id]
-    assert service.tick() is True
-    assert observations == [first_id, second_id, first_id, second_id]
-    assert service.application(third_id).state == "running"
+    assert observations == [latest_id]
+    cancellation = service.application(latest_id).cancellation
+    assert cancellation is not None
+    assert cancellation.state == "cancelling"
+    assert cancellation.pending_effects[0].operation_id == active_child_id

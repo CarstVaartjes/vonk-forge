@@ -17,7 +17,7 @@ use vonk_agent::{
         ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError,
         run_once_with_claim_hook,
     },
-    inventory::InventoryCollector,
+    inventory::{InventoryCollector, InventoryError},
     oci::OciRuntime,
     pair::{collect_evidence, pair},
     process::SystemProcessRunner,
@@ -143,7 +143,11 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         Path::new("/run/vonk-forge-agent"),
     )?;
     let client = AgentHttpClient::from_config(config)?;
-    rotate_if_due(config, &client).await?;
+    ensure_startup_identity(
+        || active_identity_is_valid(config),
+        || rotate_if_due(config, &client),
+    )
+    .await?;
     let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
     state.recover_interrupted()?;
     let control = run_control_lane(config, runtime_identity, client.clone(), state);
@@ -180,15 +184,24 @@ async fn run_control_lane(
     let mut readiness_published = false;
     loop {
         if inventory_refresh_due(inventory_reported_at, Instant::now()) {
-            let inventory = InventoryCollector {
+            let collector = InventoryCollector {
                 runner: &runner,
                 meminfo_path: Path::new("/proc/meminfo"),
                 store_path: &config.data_dir,
                 egress_binary_path: Path::new("/usr/lib/vonk-forge/vonk-build-egress"),
                 fabric_address: config.fabric_address,
                 fabric_bandwidth_mbps: config.fabric_bandwidth_mbps,
-            }
-            .collect()?;
+            };
+            let inventory = match collector.collect() {
+                Ok(inventory) => inventory,
+                Err(error @ InventoryError::PrerequisiteUnavailable(_)) => {
+                    eprintln!(
+                        "vonk-agent: {error}; exiting so systemd can recreate the private device namespace before retrying"
+                    );
+                    return Err(error.into());
+                }
+                Err(error) => return Err(error.into()),
+            };
             match client.report_inventory(&inventory).await {
                 Ok(()) => {
                     failures = 0;
@@ -314,6 +327,67 @@ async fn run_control_lane(
     }
 }
 
+async fn ensure_startup_identity<IdentityCheck, Rotate, RotateFuture>(
+    mut active_identity_is_valid: IdentityCheck,
+    mut rotate: Rotate,
+) -> Result<(), RotationError>
+where
+    IdentityCheck: FnMut() -> Result<bool, RotationError>,
+    Rotate: FnMut() -> RotateFuture,
+    RotateFuture: Future<Output = Result<bool, RotationError>>,
+{
+    if active_identity_is_valid()? {
+        return Ok(());
+    }
+    match rotate().await {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            eprintln!(
+                "vonk-agent: active certificate has expired and no replacement was activated; exiting fail-closed"
+            );
+            Err(RotationError::ActiveIdentityExpired)
+        }
+        Err(error) if error.retryable() => {
+            eprintln!(
+                "vonk-agent: active certificate has expired and Controller renewal is unavailable; exiting fail-closed"
+            );
+            Err(error)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+async fn retry_rotation_while_valid<Rotate, RotateFuture, IdentityCheck>(
+    mut rotate: Rotate,
+    mut active_identity_is_valid: IdentityCheck,
+    retry_delay: Duration,
+) -> Result<bool, RotationError>
+where
+    Rotate: FnMut() -> RotateFuture,
+    RotateFuture: Future<Output = Result<bool, RotationError>>,
+    IdentityCheck: FnMut() -> Result<bool, RotationError>,
+{
+    loop {
+        match rotate().await {
+            Ok(changed) => return Ok(changed),
+            Err(error) if error.retryable() => {
+                if !active_identity_is_valid()? {
+                    eprintln!(
+                        "vonk-agent: active certificate expired during Controller outage; exiting fail-closed"
+                    );
+                    return Err(error);
+                }
+                eprintln!(
+                    "vonk-agent: background certificate renewal unavailable ({error}); retrying in {} seconds while the active certificate remains valid",
+                    retry_delay.as_secs()
+                );
+                tokio::time::sleep(retry_delay).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 fn inventory_refresh_due(reported_at: Option<Instant>, now: Instant) -> bool {
     // Idle claims wait at most 60 seconds. Refresh after two minutes so the
     // next loop still reports comfortably inside the Controller's five-minute
@@ -329,14 +403,12 @@ async fn run_rotation_lane(
 ) -> Result<(), RotationError> {
     let interval = std::time::Duration::from_secs(config.poll_min_seconds.clamp(1, 5));
     loop {
-        match rotate_if_due(&config, &client).await {
-            Ok(_) => {}
-            Err(error) if error.retryable() && active_identity_is_valid(&config)? => {
-                tokio::time::sleep(interval).await;
-                continue;
-            }
-            Err(error) => return Err(error),
-        }
+        retry_rotation_while_valid(
+            || rotate_if_due(&config, &client),
+            || active_identity_is_valid(&config),
+            interval,
+        )
+        .await?;
         tokio::time::sleep(interval).await;
     }
 }
@@ -417,19 +489,22 @@ fn claim_wait_seconds(
 #[cfg(test)]
 mod tests {
     use super::{
-        LaneExitWithRotation, claim_wait_seconds, exact_observation_disposition,
-        inventory_refresh_due, supervise_lanes_with_rotation,
+        LaneExitWithRotation, claim_wait_seconds, ensure_startup_identity,
+        exact_observation_disposition, inventory_refresh_due, retry_rotation_while_valid,
+        supervise_lanes_with_rotation,
     };
     use std::{
         future,
         sync::{
             Arc, Barrier,
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
         },
         time::{Duration, Instant},
     };
-    use vonk_agent::client::ClientError;
-    use vonk_agent::{executor::RecipeObservationError, host_runtime::HostRuntimeError};
+    use vonk_agent::client::{ClientError, ControllerError};
+    use vonk_agent::{
+        executor::RecipeObservationError, host_runtime::HostRuntimeError, rotation::RotationError,
+    };
 
     #[test]
     fn idle_agent_refreshes_inventory_before_controller_admission_expires() {
@@ -517,6 +592,88 @@ mod tests {
             outcome,
             LaneExitWithRotation::Rotation(Ok(Err("rotation failed")))
         ));
+    }
+
+    #[tokio::test]
+    async fn valid_startup_identity_does_not_wait_for_controller_renewal() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let operation_attempts = attempts.clone();
+        ensure_startup_identity(
+            || Ok(true),
+            move || {
+                operation_attempts.fetch_add(1, Ordering::SeqCst);
+                future::ready(Err(RotationError::Client(ClientError::Retryable)))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn background_certificate_rotation_recovers_after_controller_outage() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let operation_attempts = attempts.clone();
+        let rotated = retry_rotation_while_valid(
+            move || {
+                let attempt = operation_attempts.fetch_add(1, Ordering::SeqCst);
+                future::ready(if attempt < 6 {
+                    Err(RotationError::Client(ClientError::Controller(Box::new(
+                        ControllerError::from_status(503),
+                    ))))
+                } else {
+                    Ok(true)
+                })
+            },
+            || Ok(true),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+
+        assert!(rotated);
+        assert_eq!(attempts.load(Ordering::SeqCst), 7);
+    }
+
+    #[tokio::test]
+    async fn expired_startup_identity_fails_closed_on_controller_outage_or_denial() {
+        let expired = ensure_startup_identity(|| Ok(false), || future::ready(Ok(false)))
+            .await
+            .unwrap_err();
+        assert!(matches!(expired, RotationError::ActiveIdentityExpired));
+
+        let outage_attempts = Arc::new(AtomicUsize::new(0));
+        let operation_attempts = outage_attempts.clone();
+        let outage = ensure_startup_identity(
+            || Ok(false),
+            move || {
+                operation_attempts.fetch_add(1, Ordering::SeqCst);
+                future::ready(Err(RotationError::Client(ClientError::Retryable)))
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(outage.retryable());
+        assert_eq!(outage_attempts.load(Ordering::SeqCst), 1);
+
+        let denied_attempts = Arc::new(AtomicUsize::new(0));
+        let operation_attempts = denied_attempts.clone();
+        let denied = ensure_startup_identity(
+            || Ok(false),
+            move || {
+                operation_attempts.fetch_add(1, Ordering::SeqCst);
+                future::ready(Err(RotationError::Client(ClientError::Controller(
+                    Box::new(ControllerError::from_status(403)),
+                ))))
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(!denied.retryable());
+        assert_eq!(denied_attempts.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

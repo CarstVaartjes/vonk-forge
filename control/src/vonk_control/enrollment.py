@@ -1434,6 +1434,8 @@ def _invalidate_rotated_observation_receipts(
         run_node.state = "failed"
         run_node.observed_run_generation = None
         run_node.observation_receipt_sha256 = None
+        run_node.observation_process_running = None
+        run_node.observation_observed_at = None
         run_node.observation_endpoint_ready = None
         run_node.updated_at = now
         published_affected = published_affected or run.route_state == "published"

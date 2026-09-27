@@ -525,6 +525,7 @@ from .run_switch_operation_result_completed_phases_item import RunSwitchOperatio
 from .run_switch_operation_result_failed_phase_type_0 import RunSwitchOperationResultFailedPhaseType0
 from .run_switch_operation_result_phase_type_0 import RunSwitchOperationResultPhaseType0
 from .run_switch_operation_result_subphase_type_0 import RunSwitchOperationResultSubphaseType0
+from .run_switch_operation_state import RunSwitchOperationState
 from .run_switch_phase import RunSwitchPhase
 from .run_switch_phase_kind import RunSwitchPhaseKind
 from .run_switch_phase_state import RunSwitchPhaseState
@@ -534,6 +535,7 @@ from .run_switch_plan_action import RunSwitchPlanAction
 from .run_switch_plan_cleanup_disposition import RunSwitchPlanCleanupDisposition
 from .run_switch_plan_cleanup_mode import RunSwitchPlanCleanupMode
 from .run_switch_prepared_result import RunSwitchPreparedResult
+from .run_switch_profile_stop_scope import RunSwitchProfileStopScope
 from .run_switch_progress import RunSwitchProgress
 from .run_switch_progress_phase_type_0 import RunSwitchProgressPhaseType0
 from .run_switch_progress_state import RunSwitchProgressState
@@ -1148,6 +1150,7 @@ __all__ = (
     "RunSwitchOperationResultFailedPhaseType0",
     "RunSwitchOperationResultPhaseType0",
     "RunSwitchOperationResultSubphaseType0",
+    "RunSwitchOperationState",
     "RunSwitchPhase",
     "RunSwitchPhaseKind",
     "RunSwitchPhaseState",
@@ -1157,6 +1160,7 @@ __all__ = (
     "RunSwitchPlanCleanupDisposition",
     "RunSwitchPlanCleanupMode",
     "RunSwitchPreparedResult",
+    "RunSwitchProfileStopScope",
     "RunSwitchProgress",
     "RunSwitchProgressPhaseType0",
     "RunSwitchProgressState",

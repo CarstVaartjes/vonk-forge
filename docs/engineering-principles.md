@@ -94,6 +94,20 @@ remain separately recorded.
   image imports, or package installation without a reason.
 - Consequential fleet-wide platform changes proceed one Spark at a time.
   Recipe profile changes stay topology-atomic.
+- Target standing policy uses one durable selected-profile record in
+  PostgreSQL, pointing to the immutable accepted application snapshot for the
+  whole enrolled, non-revoked fleet. Do not infer it from the latest
+  application or audit history. Enrollment and revocation trigger worker
+  reconciliation without a new operator decision: a new Spark is idle, an
+  independent assignment to a removed Spark is ignored, and a missing
+  multi-Spark member stops and confirms the group's reachable ranks, withdraws
+  its model route, and reports the missing member while unrelated assignments
+  continue. Do not count an unreachable removed Spark's historical run as live
+  capacity; reconcile its actual state against the accepted snapshot before
+  scheduling if it rejoins. A load review still binds current membership and
+  must be repeated if the roster changes before acceptance. This policy is
+  under test and has not shipped; see the
+  [profile membership contract](architecture-overview.md#ongoing-whole-fleet-profile-policy-target).
 - Exact cross-site image reproducibility is desirable but never silently
   assumed. When a local result differs from a publisher's tested result for the
   same recipe, Vonk shows the difference and withholds the claim.

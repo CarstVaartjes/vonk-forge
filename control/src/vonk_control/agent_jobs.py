@@ -30,7 +30,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_payload
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
+from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
 from .admission_locking import (
     AdmissionLockBusy,
@@ -910,6 +911,91 @@ _MAX_CLAIM_REFUSAL_REASON = 512
 
 def _is_refusal_reason(reason: str | None) -> bool:
     return reason is None or reason.startswith(_REFUSAL_PREFIXES)
+
+
+def _profile_stop_covers_jobrun_mutations(
+    session: Session,
+    current: StoredOperation,
+    current_parent: Job,
+    active_mutations: Sequence[StoredOperation],
+    *,
+    now: datetime,
+) -> bool:
+    """Prove this exact current profile Stop covers every older JobRun here."""
+
+    if (
+        current.kind != AgentOperation.RECIPE_STOP.value
+        or current_parent.kind != "recipe.stop"
+        or current_parent.payload.get("execution_mode") != "profile-jobrun-stop"
+        or current_parent.payload_digest
+        != hashlib.sha256(canonical_message(current_parent.payload)).hexdigest()
+    ):
+        return False
+    try:
+        from .profile_stop_authority import (
+            ProfileJobRunStopJob,
+            ProfileStopAuthorityError,
+            validate_profile_jobrun_stop_target,
+        )
+        from .recipe_stop_payloads import stop_payload_from_job_run
+
+        parent = ProfileJobRunStopJob.model_validate_parent(current_parent.payload)
+        authorization = parent.profile_stop_authorization
+        current_stop = RecipeStopPayload.model_validate_json(
+            canonical_message(current.payload)
+        )
+        current_digest = hashlib.sha256(canonical_message(current_stop)).hexdigest()
+        current_targets = [
+            target
+            for target in authorization.targets
+            if target.node_id == current.node_id
+            and target.stop_payload_sha256 == current_digest
+        ]
+        if len(current_targets) != 1:
+            return False
+        validate_profile_jobrun_stop_target(
+            session,
+            authorization,
+            current_targets[0],
+            current_stop,
+            operation=current,
+            stop_parent=current_parent,
+            now=now,
+            require_current=True,
+        )
+        for old in active_mutations:
+            if (
+                old.kind != AgentOperation.RECIPE_JOB_RUN.value
+                or old.node_id != current.node_id
+            ):
+                return False
+            matches = [
+                target
+                for target in authorization.targets
+                if target.source_operation_id == old.id
+                and target.source_job_id == old.parent_job_id
+                and target.node_id == old.node_id
+            ]
+            if len(matches) != 1:
+                return False
+            request = RecipeJobRunRequest.model_validate_json(
+                canonical_message(old.payload)
+            )
+            expected_stop = stop_payload_from_job_run(
+                request, old.node_id, cancel_pending_start=True
+            )
+            validate_profile_jobrun_stop_target(
+                session,
+                authorization,
+                matches[0],
+                expected_stop,
+                stop_parent=current_parent,
+                now=now,
+                require_current=True,
+            )
+        return True
+    except (ProfileStopAuthorityError, TypeError, ValueError):
+        return False
 
 
 def _refusal_reason(prefix: str, check: str, **facts: object) -> str:
@@ -2584,7 +2670,31 @@ class AgentJobService:
                     operation.kind == AgentOperation.RECIPE_STOP.value
                     and current_ordinal is not None
                 ):
+                    current_parent = session.get(Job, operation.parent_job_id)
+                    has_jobrun_blocker = any(
+                        old.kind == AgentOperation.RECIPE_JOB_RUN.value
+                        for old in active_mutations
+                    )
+                    profile_jobrun_stop_authorized = (
+                        current_parent is not None
+                        and _profile_stop_covers_jobrun_mutations(
+                            session,
+                            operation,
+                            current_parent,
+                            active_mutations,
+                            now=now,
+                        )
+                        if has_jobrun_blocker
+                        else False
+                    )
+                    if has_jobrun_blocker and not profile_jobrun_stop_authorized:
+                        stop_cleans_superseded = False
                     for old in active_mutations:
+                        if old.kind == AgentOperation.RECIPE_JOB_RUN.value:
+                            if not profile_jobrun_stop_authorized:
+                                stop_cleans_superseded = False
+                                break
+                            continue
                         old_parent = session.get(Job, old.parent_job_id)
                         if (
                             old.kind

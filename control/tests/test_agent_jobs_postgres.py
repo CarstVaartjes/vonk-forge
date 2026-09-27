@@ -27,17 +27,14 @@ from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.run_admission import RunAdmissionBusy
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import exercise_upgrade_reconnect
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
-STOP_PAYLOAD = {
-    "schema_version": 1,
-    "run_id": "00000000-0000-4000-8000-000000000001",
-    "plan_digest": COMMIT,
-}
+STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
 STOP_RESULT = {"stopped": True}
 
 
@@ -693,7 +690,13 @@ def test_postgres_enqueue_rejects_node_outside_parent_targets(service) -> None:
         session.get(Job, parent_job.id).targets = [NODE_A]  # type: ignore[union-attr]
 
     with pytest.raises(ValueError, match="target"):
-        jobs.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+        jobs.enqueue(
+            parent_job.id,
+            NODE_B,
+            "recipe.stop",
+            COMMIT,
+            recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+        )
 
 
 def test_postgres_enqueue_cannot_race_parent_finalization(
@@ -739,7 +742,11 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
     def enqueue() -> None:
         try:
             enqueueing.enqueue(
-                parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD
+                parent_job.id,
+                NODE_B,
+                "recipe.stop",
+                COMMIT,
+                recipe_stop_payload(NODE_B, plan_digest=COMMIT),
             )
         except (
             AssertionError,
@@ -778,7 +785,13 @@ def test_postgres_enqueue_cannot_race_parent_finalization(
     assert state(sessions, parent_job.id) == "succeeded"
     # A fresh retry rechecks the completed parent instead of adding work to it.
     with pytest.raises(ValueError, match="terminal"):
-        enqueueing.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+        enqueueing.enqueue(
+            parent_job.id,
+            NODE_B,
+            "recipe.stop",
+            COMMIT,
+            recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+        )
     with sessions() as session:
         child_count = session.scalar(
             select(func.count())
@@ -977,7 +990,13 @@ def test_postgres_concurrent_final_completions_aggregate_parent_once(
     second_service = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     first_service.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first_service.enqueue(parent_job.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    first_service.enqueue(
+        parent_job.id,
+        NODE_B,
+        "recipe.stop",
+        COMMIT,
+        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+    )
     first = claim_agent(first_service, NODE_A, "serial-a", 30)
     second = claim_agent(second_service, NODE_B, "serial-b", 30)
     assert first is not None and second is not None

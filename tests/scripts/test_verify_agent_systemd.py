@@ -50,6 +50,13 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
     report = json.loads(result.stdout)
     assert report["verify"] == "passed"
     assert report["units"] == PACKAGED_UNITS
+    assert report["agent_boot_recovery"] == {
+        "restart": "on-failure",
+        "restart_delay": "30s",
+        "start_limit_interval": "0",
+        "private_devices": "yes",
+        "device_policy": "closed",
+    }
     assert set(report["security_units"]) == {
         unit for unit in PACKAGED_UNITS if unit.endswith(".service")
     }

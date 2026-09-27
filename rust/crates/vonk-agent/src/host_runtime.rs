@@ -12,10 +12,10 @@ use ring::signature;
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
 use vonk_agent_protocol::{
-    AgentClaim, HostRuntimeAction, HostRuntimeRequest, HostRuntimeRequestRule,
+    AgentClaim, HostRuntimeAction, HostRuntimeRequest, HostRuntimeRequestRule, RecipeJobRunRequest,
     RecipeReconciliationIdentity, RecipeRunInspectionBinding, RecipeRunObservationOutcome,
-    RecipeRunObservationReceipt, SignedHostHelperGrant, canonical_json, hex_sha256, parse_strict,
-    recipe_run_observation_receipt_signing_bytes,
+    RecipeRunObservationReceipt, RecipeStartRequest, RecipeStopRequest, SignedHostHelperGrant,
+    canonical_json, hex_sha256, parse_strict, recipe_run_observation_receipt_signing_bytes,
 };
 
 use crate::client::{AgentHttpClient, ClientError};
@@ -88,12 +88,17 @@ pub enum HelperProtocolCause {
     RequestAttempt,
     /// The agent-built request carries arguments for the wrong action.
     RequestArgumentsPresence,
+    /// The typed lifecycle plan is missing, duplicated, or bound to another
+    /// runtime generation.
+    RequestPlanBinding,
     /// The agent-built request carries an installation identity for the wrong
     /// action.
     RequestInstallationIdentity,
     /// The agent-built request carries a canonical document larger than the
     /// bounded helper exchange reads.
     RequestBytes,
+    /// A typed lifecycle plan exceeds its declared canonical byte ceiling.
+    RequestPlanBytes,
     /// An agent-built request argument carries a NUL byte an exec argv cannot
     /// frame.
     RequestArgumentNulByte,
@@ -125,8 +130,10 @@ impl HelperProtocolCause {
             Self::RequestSchemaVersion => "request_schema_version_invalid",
             Self::RequestAttempt => "request_attempt_invalid",
             Self::RequestArgumentsPresence => "request_arguments_presence_invalid",
+            Self::RequestPlanBinding => "request_plan_binding_invalid",
             Self::RequestInstallationIdentity => "request_installation_identity_invalid",
             Self::RequestBytes => "request_bytes_invalid",
+            Self::RequestPlanBytes => "request_plan_bytes_invalid",
             Self::RequestArgumentNulByte => "request_argument_nul_byte",
             Self::RequestStorage => "request_storage_invalid",
             Self::SystemClock => "system_clock_invalid",
@@ -145,8 +152,10 @@ impl HelperProtocolCause {
             HostRuntimeRequestRule::SchemaVersion => Self::RequestSchemaVersion,
             HostRuntimeRequestRule::Attempt => Self::RequestAttempt,
             HostRuntimeRequestRule::ArgumentsPresence => Self::RequestArgumentsPresence,
+            HostRuntimeRequestRule::PlanBinding => Self::RequestPlanBinding,
             HostRuntimeRequestRule::InstallationIdentity => Self::RequestInstallationIdentity,
             HostRuntimeRequestRule::RequestBytes { .. } => Self::RequestBytes,
+            HostRuntimeRequestRule::PlanBytes { .. } => Self::RequestPlanBytes,
             HostRuntimeRequestRule::ArgumentNulByte { .. } => Self::RequestArgumentNulByte,
             // The observation binding is an inspection contract rather than one
             // of the argument-envelope rules, and it is unreachable from a
@@ -238,6 +247,25 @@ pub struct HostRuntimeOutcome {
     pub stop_uncertain: bool,
 }
 
+/// The exact signed lifecycle plan carried beside a privileged runtime request.
+/// Job runs use the parent's logical run identity while targeting the exact job
+/// container; the typed plan keeps those identities distinct.
+#[derive(Clone, Debug)]
+pub enum HostRuntimePlan {
+    Start(RecipeStartRequest),
+    JobRun(RecipeJobRunRequest),
+    Stop(RecipeStopRequest),
+}
+
+impl HostRuntimePlan {
+    fn action(&self) -> HostRuntimeAction {
+        match self {
+            Self::Start(_) | Self::JobRun(_) => HostRuntimeAction::Start,
+            Self::Stop(_) => HostRuntimeAction::Stop,
+        }
+    }
+}
+
 pub struct RecipeRunInspectionOutcome {
     pub grant: SignedHostHelperGrant,
     pub observation_identity_sha256: String,
@@ -278,9 +306,13 @@ impl HostRuntimeBoundary<'_> {
             attempt,
             fence: uuid::Uuid::new_v4(),
             arguments,
+            job_plan: None,
             observation: Some(binding.clone()),
             installation_id: None,
             reconciliation_identity: None,
+            run_generation: None,
+            start_plan: None,
+            stop_plan: None,
         };
         request
             .validate()
@@ -339,7 +371,17 @@ impl HostRuntimeBoundary<'_> {
         action: HostRuntimeAction,
         arguments: Vec<String>,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
-        self.execute_bound(claim, action, arguments, None, None)
+        self.execute_bound(claim, action, arguments, None, None, None)
+            .await
+    }
+
+    pub async fn execute_plan(
+        &self,
+        claim: &AgentClaim,
+        arguments: Vec<String>,
+        plan: HostRuntimePlan,
+    ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        self.execute_bound(claim, plan.action(), arguments, None, None, Some(plan))
             .await
     }
 
@@ -353,6 +395,7 @@ impl HostRuntimeBoundary<'_> {
             HostRuntimeAction::InstallationCleanup,
             Vec::new(),
             Some(installation_id),
+            None,
             None,
         )
         .await
@@ -369,6 +412,7 @@ impl HostRuntimeBoundary<'_> {
             Vec::new(),
             Some(identity.installation_id),
             Some(identity),
+            None,
         )
         .await
     }
@@ -380,27 +424,47 @@ impl HostRuntimeBoundary<'_> {
         arguments: Vec<String>,
         installation_id: Option<uuid::Uuid>,
         reconciliation_identity: Option<RecipeReconciliationIdentity>,
+        lifecycle_plan: Option<HostRuntimePlan>,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
         let helper_timeout = match action {
             HostRuntimeAction::RuntimePreflight => Duration::from_secs(14),
-            HostRuntimeAction::Start => arguments
-                .iter()
-                .find_map(|value| value.strip_prefix("VONK_JOB_TIMEOUT_SECONDS="))
-                .and_then(|value| value.parse::<u64>().ok())
+            HostRuntimeAction::Start => lifecycle_plan
+                .as_ref()
+                .and_then(|plan| match plan {
+                    HostRuntimePlan::JobRun(job) => Some(u64::from(job.timeout_seconds)),
+                    _ => None,
+                })
                 .filter(|value| (1..=3600).contains(value))
                 .map_or(Duration::from_secs(610), |value| {
                     // Leave room after the adapter deadline for bounded inspect/stop/remove and
                     // a truthful uncertainty response from the privileged helper.
                     Duration::from_secs(value + 120)
                 }),
-            HostRuntimeAction::Stop => arguments
-                .get(1)
-                .and_then(|value| value.parse::<u64>().ok())
+            HostRuntimeAction::Stop => lifecycle_plan
+                .as_ref()
+                .and_then(|plan| match plan {
+                    HostRuntimePlan::Stop(stop) => Some(u64::from(
+                        stop.compiled_execution_plan.lifecycle.stop_timeout_seconds,
+                    )),
+                    _ => None,
+                })
                 .filter(|value| (1..=600).contains(value))
                 .map_or(Duration::from_secs(45), |value| {
                     Duration::from_secs(value + 45)
                 }),
             _ => Duration::from_secs(610),
+        };
+        let (start_plan, job_plan, stop_plan, run_generation) = match &lifecycle_plan {
+            Some(HostRuntimePlan::Start(plan)) => {
+                (Some(plan.clone()), None, None, Some(plan.run_generation))
+            }
+            Some(HostRuntimePlan::JobRun(plan)) => {
+                (None, Some(plan.clone()), None, Some(plan.run_generation))
+            }
+            Some(HostRuntimePlan::Stop(plan)) => {
+                (None, None, Some(plan.clone()), Some(plan.run_generation))
+            }
+            None => (None, None, None, None),
         };
         let request = HostRuntimeRequest {
             schema_version: 1,
@@ -410,9 +474,13 @@ impl HostRuntimeBoundary<'_> {
             attempt: claim.attempt,
             fence: claim.fence,
             arguments,
+            job_plan,
             observation: None,
             installation_id,
             reconciliation_identity: reconciliation_identity.clone(),
+            run_generation,
+            start_plan,
+            stop_plan,
         };
         request
             .validate()
@@ -428,13 +496,7 @@ impl HostRuntimeBoundary<'_> {
         async {
             let grant = self
                 .client
-                .host_runtime_grant(
-                    claim,
-                    action,
-                    &digest,
-                    installation_id,
-                    reconciliation_identity.as_ref(),
-                )
+                .host_runtime_grant(claim, &request, &digest)
                 .await?;
             let request_id = grant.claims.request_id.to_string();
             let grant = canonical_json(&grant).map_err(|_| {
@@ -622,8 +684,10 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "request_schema_version_invalid"
             | "request_attempt_invalid"
             | "request_arguments_presence_invalid"
+            | "request_plan_binding_invalid"
             | "request_installation_identity_invalid"
             | "request_bytes_invalid"
+            | "request_plan_bytes_invalid"
             | "request_argument_nul_byte"
             | "request_storage_invalid"
             | "system_clock_invalid"
@@ -827,7 +891,7 @@ mod tests {
     use vonk_agent_protocol::{
         HostRuntimeAction, RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunObservationOutcome,
         RecipeRunObservationReceipt, RecipeRunObservationReceiptClaims,
-        RecipeRunObservationReceiptSignature, hex_sha256,
+        RecipeRunObservationReceiptSignature, RecipeStartRequest, hex_sha256,
         recipe_run_observation_receipt_signing_bytes,
     };
 
@@ -1406,7 +1470,46 @@ mod tests {
 
     /// The exact Start request shape `execute_bound` sends, so each rule test
     /// drives the canonical validator instead of asserting a bare constant.
+    fn start_plan() -> RecipeStartRequest {
+        let mut compiled: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        compiled["runtime"]["placement"]["endpoint_address"] = serde_json::json!("100.100.20.30");
+        compiled["security"]["network_mode"] = serde_json::json!("bridge");
+        let placement = compiled["runtime"]["placement"].clone();
+        let recipe_digest = compiled["identity"]["recipe_revision_sha256"].clone();
+        let image_digest = compiled["runtime"]["image_digest"].clone();
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 2,
+            "run_id": "00000000-0000-4000-8000-000000000003",
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "recipe_revision_id": "00000000-0000-4000-8000-000000000002",
+            "recipe_content_sha256": recipe_digest,
+            "mapping_id": "00000000-0000-4000-8000-000000000007",
+            "mapping_generation": 1,
+            "image_digest": image_digest,
+            "plan_digest": "c".repeat(64),
+            "alias": "test-model",
+            "rank": placement["rank"],
+            "role": placement["role"],
+            "port": placement["port"],
+            "reserved_memory_bytes": placement["reserved_memory_bytes"],
+            "memory_floor_bytes": placement["memory_floor_bytes"],
+            "memory_kind": placement["memory_kind"],
+            "endpoint_address": "100.100.20.30",
+            "world_size": placement["world_size"],
+            "compiled_execution_plan": compiled,
+            "local_address": null,
+            "master_address": null,
+            "master_port": null,
+            "run_generation": 1
+        }))
+        .unwrap()
+    }
+
     fn start_request() -> super::HostRuntimeRequest {
+        let plan = start_plan();
         super::HostRuntimeRequest {
             schema_version: 1,
             action: HostRuntimeAction::Start,
@@ -1415,9 +1518,13 @@ mod tests {
             attempt: 1,
             fence: Uuid::new_v4(),
             arguments: vec!["sha256:image".to_owned(), "run".to_owned()],
+            job_plan: None,
             observation: None,
             installation_id: None,
             reconciliation_identity: None,
+            run_generation: Some(plan.run_generation),
+            start_plan: Some(plan),
+            stop_plan: None,
         }
     }
 
@@ -1745,8 +1852,10 @@ mod tests {
             HelperProtocolCause::RequestSchemaVersion,
             HelperProtocolCause::RequestAttempt,
             HelperProtocolCause::RequestArgumentsPresence,
+            HelperProtocolCause::RequestPlanBinding,
             HelperProtocolCause::RequestInstallationIdentity,
             HelperProtocolCause::RequestBytes,
+            HelperProtocolCause::RequestPlanBytes,
             HelperProtocolCause::RequestArgumentNulByte,
             HelperProtocolCause::RequestStorage,
             HelperProtocolCause::SystemClock,

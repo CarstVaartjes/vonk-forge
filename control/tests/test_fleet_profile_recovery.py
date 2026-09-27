@@ -12,10 +12,10 @@ from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import _uuid
 
 
-def test_profile_edit_supersedes_unissued_assignment_after_failed_load(
+def test_profile_edit_does_not_replace_accepted_retry_snapshot(
     tmp_path,
 ):
-    from vonk_control.models import Job
+    from vonk_control.models import FleetProfileApplication, Job
 
     sessions, _lifecycle, service, profile, desired, original, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -33,9 +33,13 @@ def test_profile_edit_supersedes_unissued_assignment_after_failed_load(
     )
     service.update(profile.id, changed, actor="admin")
     assert service.tick()
-    assert service.application(retry.id).state == "cancelled"
-    assert "replaced" in (service.application(retry.id).status_reason or "")
+    assert service.application(retry.id).state == "running"
+    assert service.application(retry.id).profile_digest == original.profile_digest
     with sessions() as session:
+        row = session.get(FleetProfileApplication, retry.id)
+        assert row is not None
+        intended = service._intended_profile(row, session=session)
+        assert intended.assignments[0].alias == "recover-chat"
         assert (
             len(
                 tuple(
@@ -44,7 +48,7 @@ def test_profile_edit_supersedes_unissued_assignment_after_failed_load(
                     )
                 )
             )
-            == 1
+            == 2
         )
 
 

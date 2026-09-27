@@ -1013,10 +1013,12 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
     assert progress.child_progress.phase == "model-download"
     assert adapter.starts[0]["scope_node_ids"] == (_node_id(1),)
     with sessions() as session:
+        # The accepted selection covers the whole fleet, including idle Sparks,
+        # so a later profile load can fence an older effect on either node.
         assert [
             node.workload_intent_ordinal
             for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
-        ] == [1, 0]
+        ] == [1, 1]
 
     observed_phases = [progress.child_progress.phase]
     for _ in range(8):
@@ -1183,9 +1185,16 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
     first = service.application(first.id)
     assert first.progress.workload_intent_ordinal == 1
 
+    refreshed = service.preview(profile.id)
+    assert refreshed.allowed is True
+    assert refreshed.plan_digest != preview.plan_digest
+    assert any(
+        effect.kind == "profile-application" and effect.id == first.id
+        for effect in refreshed.effects.superseded
+    )
     second = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
+        plan_digest=refreshed.plan_digest,
         request_key=_uuid(977),
         actor="admin",
     )
@@ -3418,6 +3427,7 @@ def test_switch_queue_removes_an_installation_the_profile_no_longer_references(
             session,
             (),
             tuple(nodes),
+            application_id=_uuid(1235),
             installation_policy="exact",
             reviewed_effects=reviewed.effects,
             expected_images={},
@@ -3426,6 +3436,7 @@ def test_switch_queue_removes_an_installation_the_profile_no_longer_references(
             session,
             (),
             tuple(nodes),
+            application_id=_uuid(1236),
             installation_policy="keep-cached",
             reviewed_effects=reviewed.effects,
             expected_images={},

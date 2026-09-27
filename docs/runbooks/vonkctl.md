@@ -539,11 +539,28 @@ vonkctl recipe job download JOB_UUID --output artifact-results
 
 ## Profile
 
-Profiles cover the entire enrolled fleet. Editing autosaves a permissive draft;
-it does not stop or restart workloads. Every Spark remains visible and an
-unassigned Spark is explicitly idle. Review resolves the latest verified
-cached compatible recipe/model and checks complete topology. Load requires
+Profiles cover the entire enrolled, non-revoked fleet. Editing autosaves a
+permissive draft; it does not stop or restart workloads. Every current Spark
+remains visible, and an unassigned Spark is explicitly idle. Review resolves
+the latest verified cached compatible recipe/model and checks complete
+topology. Load requires
 the digest of that reviewed decision and a client-generated request key.
+
+Today a profile load creates an application; application history is not a
+standing fleet policy. The target behavior keeps one durable selected-profile
+record in PostgreSQL, pointing to the immutable accepted application snapshot
+as desired state for the whole fleet. Saving another profile does not select it,
+and the latest application alone does not decide which profile is current. The
+Controller worker reconciles that snapshot after enrollment or revocation; a
+roster event does not need a new operator decision. A new Spark appears idle,
+while a removed Spark's independent assignment is ignored without changing the
+snapshot. If removal leaves a multi-Spark model without a required member, the
+Controller should stop and confirm the remaining reachable ranks, withdraw that
+model's route, report the missing member, and continue unrelated assignments.
+Do not count a removed Spark's old run as live capacity or report an unreachable
+Spark as stopped without confirmed cleanup. If the same node ID rejoins,
+reconcile its actual state against the accepted snapshot before scheduling work
+there. This ongoing reconciliation is under test and has not shipped.
 
 ```bash
 vonkctl profile
@@ -594,7 +611,8 @@ The Controller returns warnings for incomplete groups and resource pressure at
 save time. A load preview reports blockers, resolved immutable identities, the
 whole-fleet snapshot, resource fit, and a `plan_digest`. The CLI submits that
 digest with the load request, and the Controller rejects the request if the
-preview no longer describes the current plan.
+preview no longer describes the current plan, including current fleet
+membership.
 
 ### Batched recipe qualification
 

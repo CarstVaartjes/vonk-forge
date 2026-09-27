@@ -452,6 +452,8 @@ def assemble_production_worker(
             routes=recipe_routes,
             agent_jobs=agent_jobs,
             clock=clock,
+            recovery_run_stops=lifecycle,
+            singleton_start_timeout_seconds=distributed_start_timeout_seconds,
         ),
     )
     failure_evidence = FailureEvidenceService(sessions, clock=clock)
@@ -521,6 +523,7 @@ if __name__ == "__main__":
     from .agent_jobs import AgentJobService
     from .db import build_engine, session_factory, wait_for_database
     from .execution_plan_service import ControllerExecutionPlanService
+    from .logging import configure_controller_logging
     from .model_cache import ModelCacheService
     from .models import CatalogDocumentRevision
     from .presence import ManagementAddressPolicy
@@ -536,6 +539,7 @@ if __name__ == "__main__":
     )
     from .settings import WorkerSettings
 
+    configure_controller_logging()
     settings = WorkerSettings.from_env_and_secrets()
     wait_for_database(settings.database_url)
     sessions = session_factory(build_engine(settings.database_url))

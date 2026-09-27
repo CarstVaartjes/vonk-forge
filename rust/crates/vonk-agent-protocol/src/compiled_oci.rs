@@ -12,7 +12,7 @@ use std::{
 
 use thiserror::Error;
 
-use crate::workloads::{
+use crate::compiled_execution_plan::{
     CompiledEndpoint, CompiledEnvironmentEntry, CompiledExecutionPlan, CompiledJob,
     CompiledLifecycle, CompiledModelArtifact, CompiledTopology, WorkloadError,
 };
@@ -26,6 +26,144 @@ pub enum CompiledOciError {
     Workload(#[from] WorkloadError),
     #[error("compiled OCI projection rejected: {0}")]
     Invalid(&'static str),
+    #[error("projected OCI invocation exceeds the host argument-byte limit ({observed} > {limit})")]
+    InvocationBytes { limit: u64, observed: u64 },
+    #[error(
+        "projected OCI invocation string exceeds the host per-string limit ({observed} > {limit})"
+    )]
+    InvocationStringBytes { limit: u64, observed: u64 },
+}
+
+/// Kernel limits that apply to one `execve` argument/environment block.
+///
+/// The caller supplies the limits reported by the target Linux runtime (for
+/// example, `_SC_ARG_MAX` and its `MAX_ARG_STRLEN` equivalent). This keeps
+/// this shared protocol module pure while letting both the agent and helper
+/// measure the exact same projection against the actual host boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecInvocationLimits {
+    /// Maximum total bytes for strings and the argv/envp pointer tables.
+    pub total_bytes: u64,
+    /// Maximum bytes in any one NUL-terminated argument or environment string.
+    pub string_bytes: u64,
+}
+
+/// Accounted bytes for one exact `execve` invocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecInvocationUsage {
+    pub argument_string_bytes: u64,
+    pub environment_string_bytes: u64,
+    pub pointer_bytes: u64,
+    pub total_bytes: u64,
+    pub largest_string_bytes: u64,
+}
+
+/// Measure the exact UTF-8 argv/environment that will be passed to `execve`.
+///
+/// `argv0` is the executable path and `arguments` contains only argv[1..]; the
+/// caller also supplies the final helper environment. Each string includes
+/// its terminating NUL, and the accounting includes both null-terminated
+/// pointer tables. Interior NUL bytes are rejected because the OS would
+/// otherwise observe a truncated value.
+pub fn measure_exec_invocation(
+    argv0: &str,
+    arguments: &[String],
+    environment: &[(&str, &str)],
+    limits: ExecInvocationLimits,
+) -> Result<ExecInvocationUsage, CompiledOciError> {
+    if argv0.is_empty() || argv0.contains('\0') {
+        return Err(CompiledOciError::Invalid("exec argv[0] is invalid"));
+    }
+    let mut argument_string_bytes = 0_u64;
+    let mut environment_string_bytes = 0_u64;
+    let mut largest_string_bytes = 0_u64;
+
+    let mut account_string = |value: &str| -> Result<u64, CompiledOciError> {
+        if value.contains('\0') {
+            return Err(CompiledOciError::Invalid("exec string contains NUL"));
+        }
+        let observed = u64::try_from(value.len())
+            .ok()
+            .and_then(|length| length.checked_add(1))
+            .ok_or(CompiledOciError::Invalid("exec string byte count overflow"))?;
+        if observed > limits.string_bytes {
+            return Err(CompiledOciError::InvocationStringBytes {
+                limit: limits.string_bytes,
+                observed,
+            });
+        }
+        largest_string_bytes = largest_string_bytes.max(observed);
+        Ok(observed)
+    };
+
+    argument_string_bytes = argument_string_bytes
+        .checked_add(account_string(argv0)?)
+        .ok_or(CompiledOciError::Invalid("exec byte count overflow"))?;
+    for argument in arguments {
+        argument_string_bytes = argument_string_bytes
+            .checked_add(account_string(argument)?)
+            .ok_or(CompiledOciError::Invalid("exec byte count overflow"))?;
+    }
+    for (name, value) in environment {
+        if name.is_empty() || name.contains('=') || name.contains('\0') {
+            return Err(CompiledOciError::Invalid(
+                "exec environment name is invalid",
+            ));
+        }
+        if value.contains('\0') {
+            return Err(CompiledOciError::Invalid(
+                "exec environment value contains NUL",
+            ));
+        }
+        let observed = name
+            .len()
+            .checked_add(1)
+            .and_then(|length| length.checked_add(value.len()))
+            .and_then(|length| length.checked_add(1))
+            .ok_or(CompiledOciError::Invalid("exec byte count overflow"))?;
+        let observed = u64::try_from(observed)
+            .map_err(|_| CompiledOciError::Invalid("exec byte count overflow"))?;
+        if observed > limits.string_bytes {
+            return Err(CompiledOciError::InvocationStringBytes {
+                limit: limits.string_bytes,
+                observed,
+            });
+        }
+        largest_string_bytes = largest_string_bytes.max(observed);
+        environment_string_bytes = environment_string_bytes
+            .checked_add(observed)
+            .ok_or(CompiledOciError::Invalid("exec byte count overflow"))?;
+    }
+
+    let pointer_count = arguments
+        .len()
+        .checked_add(environment.len())
+        .and_then(|count| count.checked_add(3))
+        .ok_or(CompiledOciError::Invalid("exec pointer count overflow"))?;
+    let pointer_bytes = u64::try_from(pointer_count)
+        .ok()
+        .and_then(|count| count.checked_mul(std::mem::size_of::<usize>() as u64))
+        .ok_or(CompiledOciError::Invalid(
+            "exec pointer byte count overflow",
+        ))?;
+    let total_bytes = argument_string_bytes
+        .checked_add(environment_string_bytes)
+        .and_then(|bytes| bytes.checked_add(pointer_bytes))
+        .ok_or(CompiledOciError::Invalid("exec byte count overflow"))?;
+    if total_bytes > limits.total_bytes {
+        return Err(CompiledOciError::InvocationBytes {
+            limit: limits.total_bytes,
+            observed: total_bytes,
+        });
+    }
+
+    Ok(ExecInvocationUsage {
+        argument_string_bytes,
+        environment_string_bytes,
+        pointer_bytes,
+        total_bytes,
+        largest_string_bytes,
+    })
 }
 
 /// Host paths for the content-addressed image and the selected, materialized
@@ -353,6 +491,58 @@ pub fn project(
     })
 }
 
+/// Build the exact Podman run vector used for one named compiled workload.
+pub fn start_arguments_for_paths(
+    plan: &CompiledExecutionPlan,
+    paths: &CompiledOciPaths,
+    run_id: &str,
+) -> Result<Vec<String>, CompiledOciError> {
+    let mut arguments = project(plan, paths)?.podman_arguments();
+    arguments.splice(
+        1..1,
+        [
+            "--name".to_owned(),
+            format!("vonk-{run_id}"),
+            "--restart".to_owned(),
+            "no".to_owned(),
+        ],
+    );
+    Ok(arguments)
+}
+
+/// Project a lifecycle hook onto the same image and runtime options as the
+/// compiled workload, while removing options that only apply to its main run.
+pub fn hook_arguments(
+    main: &[String],
+    image: &str,
+    hook: &[String],
+) -> Result<Vec<String>, CompiledOciError> {
+    if hook.is_empty() || main.first().map(String::as_str) != Some("run") {
+        return Err(CompiledOciError::Invalid(
+            "invalid lifecycle hook invocation",
+        ));
+    }
+    let image_index = main
+        .iter()
+        .position(|value| value == image)
+        .ok_or(CompiledOciError::Invalid("compiled image is missing"))?;
+    let mut arguments = vec!["run".to_owned(), "--rm".to_owned()];
+    let mut index = 1;
+    while index < image_index {
+        match main[index].as_str() {
+            "--detach" => index += 1,
+            "--name" | "--restart" | "--publish" => index += 2,
+            _ => {
+                arguments.push(main[index].clone());
+                index += 1;
+            }
+        }
+    }
+    arguments.push(image.to_owned());
+    arguments.extend(hook.iter().cloned());
+    Ok(arguments)
+}
+
 fn validate_paths(paths: &CompiledOciPaths) -> Result<(), CompiledOciError> {
     let mut all = vec![
         ("image archive", &paths.image_archive),
@@ -558,8 +748,11 @@ fn path_prefix_conflict(left: &Path, right: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompiledOciError, CompiledOciPaths, OciNetworkMode, project};
-    use crate::workloads::CompiledExecutionPlan;
+    use super::{
+        CompiledOciError, CompiledOciPaths, ExecInvocationLimits, OciNetworkMode,
+        measure_exec_invocation, project, start_arguments_for_paths,
+    };
+    use crate::compiled_execution_plan::CompiledExecutionPlan;
     use serde_json::{Value, json};
     use std::path::PathBuf;
 
@@ -579,6 +772,118 @@ mod tests {
             cache_root: PathBuf::from("/run/vonk/cache"),
             runtime_spec: PathBuf::from("/run/vonk/runtime.json"),
         }
+    }
+
+    fn helper_environment() -> [(&'static str, &'static str); 3] {
+        [
+            ("LANG", "C.UTF-8"),
+            ("LC_ALL", "C.UTF-8"),
+            (
+                "PATH",
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            ),
+        ]
+    }
+
+    #[test]
+    fn projected_start_measures_the_linux_environment_e2big_boundary() {
+        // Wrong implementation: measure only runtime.argv, omitting the
+        // projected env/mount/Podman tokens, argv[0], fixed helper env, NULs,
+        // and pointer tables. The canonical plan validates at both points;
+        // the exact projected invocation is what crosses the Linux boundary.
+        const LINUX_ARG_MAX: u64 = 2_097_152;
+        const LINUX_MAX_ARG_STRLEN: u64 = 131_072;
+        let limits = ExecInvocationLimits {
+            total_bytes: LINUX_ARG_MAX,
+            string_bytes: LINUX_MAX_ARG_STRLEN,
+        };
+        let measured = |extra_env_count: usize| {
+            let mut value = fixture();
+            for index in 0..extra_env_count {
+                let prefix = format!("VONK_BULK_{index:02}");
+                let name = format!("{prefix}{}", "X".repeat(128 - prefix.len()));
+                value["runtime"]["env"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({"name": name, "value": "x".repeat(65_536)}));
+            }
+            let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+            plan.validate().unwrap();
+            let arguments =
+                start_arguments_for_paths(&plan, &paths(), "10000000-0000-4000-8000-000000000001")
+                    .unwrap();
+            measure_exec_invocation("/usr/bin/docker", &arguments, &helper_environment(), limits)
+        };
+
+        let just_under = measured(31).expect("31 additions fit the measured Linux limit");
+        assert!(just_under.total_bytes < LINUX_ARG_MAX);
+        assert!(just_under.largest_string_bytes <= LINUX_MAX_ARG_STRLEN);
+        assert!(matches!(
+            measured(32),
+            Err(CompiledOciError::InvocationBytes {
+                limit: LINUX_ARG_MAX,
+                observed
+            }) if observed > LINUX_ARG_MAX
+        ));
+    }
+
+    #[test]
+    fn exec_accounting_accepts_empty_and_multiline_arguments_at_exact_limit() {
+        // Wrong implementation: normalize or reject argument strings that the
+        // canonical contract preserves, or omit NUL/pointer bytes and accept
+        // an invocation one entry beyond the exact measured limit.
+        let args = vec![String::new(), "line one\nline two".to_owned()];
+        let environment = helper_environment();
+        let unbounded = ExecInvocationLimits {
+            total_bytes: u64::MAX,
+            string_bytes: u64::MAX,
+        };
+        let usage =
+            measure_exec_invocation("/usr/bin/docker", &args, &environment, unbounded).unwrap();
+        let exact = ExecInvocationLimits {
+            total_bytes: usage.total_bytes,
+            string_bytes: usage.largest_string_bytes,
+        };
+        assert_eq!(
+            measure_exec_invocation("/usr/bin/docker", &args, &environment, exact).unwrap(),
+            usage
+        );
+
+        let mut one_more = args;
+        one_more.push("x".to_owned());
+        let expected_over = usage.total_bytes + 2 + std::mem::size_of::<usize>() as u64;
+        assert!(matches!(
+            measure_exec_invocation("/usr/bin/docker", &one_more, &environment, exact),
+            Err(CompiledOciError::InvocationBytes { limit, observed })
+                if limit == usage.total_bytes && observed == expected_over
+        ));
+    }
+
+    #[test]
+    fn exec_accounting_enforces_single_string_limit_and_rejects_nul() {
+        let limits = ExecInvocationLimits {
+            total_bytes: 1024,
+            string_bytes: 4,
+        };
+        let exact = measure_exec_invocation("p", &["abc".to_owned()], &[], limits).unwrap();
+        assert_eq!(exact.largest_string_bytes, 4);
+        assert!(matches!(
+            measure_exec_invocation("p", &["abcd".to_owned()], &[], limits),
+            Err(CompiledOciError::InvocationStringBytes {
+                limit: 4,
+                observed: 5
+            })
+        ));
+        assert!(matches!(
+            measure_exec_invocation("p", &["a\0b".to_owned()], &[], limits),
+            Err(CompiledOciError::Invalid("exec string contains NUL"))
+        ));
+        assert!(matches!(
+            measure_exec_invocation("p", &[], &[("LANG", "C\0.UTF-8")], limits),
+            Err(CompiledOciError::Invalid(
+                "exec environment value contains NUL"
+            ))
+        ));
     }
 
     #[test]
@@ -661,8 +966,8 @@ mod tests {
         // byte budget that merely equalled the helper frame budget could not
         // carry the command line the plan itself admitted.
         use super::OciMount;
+        use crate::{HostRuntimeAction, HostRuntimeRequest};
         use uuid::Uuid;
-        use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest};
 
         let plan: CompiledExecutionPlan = serde_json::from_value(fixture()).unwrap();
         let mut invocation = project(&plan, &paths()).unwrap();
@@ -717,6 +1022,7 @@ mod tests {
             "the live many-artifact command must exceed the old cap, got {count}"
         );
 
+        let start_plan = crate::recipe_start_tests::valid_start_plan();
         let request = HostRuntimeRequest {
             schema_version: 1,
             action: HostRuntimeAction::Start,
@@ -725,14 +1031,18 @@ mod tests {
             attempt: 1,
             fence: Uuid::new_v4(),
             arguments,
+            job_plan: None,
             observation: None,
             installation_id: None,
             reconciliation_identity: None,
+            run_generation: Some(start_plan.run_generation),
+            start_plan: Some(start_plan),
+            stop_plan: None,
         };
         assert_eq!(request.validate(), Ok(()));
-        let body = vonk_agent_protocol::canonical_json(&request).unwrap();
+        let body = crate::canonical_json(&request).unwrap();
         assert!(
-            body.len() <= vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES,
+            body.len() <= crate::MAX_HOST_RUNTIME_REQUEST_BYTES,
             "the plan-admitted command line must fit one bounded helper exchange, got {} bytes",
             body.len()
         );
@@ -822,12 +1132,12 @@ mod tests {
         let artifact = &mut value["artifacts"][0];
         artifact["file_id"] = json!("tokenizer-config");
         artifact["path"] = json!("tokenizer_config.json");
-        artifact["sha256"] = json!(crate::workloads::EMPTY_SHA256);
+        artifact["sha256"] = json!(crate::compiled_execution_plan::EMPTY_SHA256);
         artifact["size_bytes"] = json!(0);
         artifact["roles"] = json!(["tokenizer"]);
         artifact["distribution_object"] = json!({
             "name":"tokenizer_config.json",
-            "sha256":crate::workloads::EMPTY_SHA256,
+            "sha256":crate::compiled_execution_plan::EMPTY_SHA256,
             "bytes":0,
             "kind":"model"
         });
@@ -921,11 +1231,9 @@ mod tests {
             installed_value["security"]["network_mode"] = json!("none");
             installed_value["security"]["host_network"] = json!(false);
             let installed: CompiledExecutionPlan = serde_json::from_value(installed_value).unwrap();
-            assert!(
-                vonk_agent_protocol::compiled_execution_plan::same_installed_workload(
-                    &installed, &plan
-                )
-            );
+            assert!(crate::compiled_execution_plan::same_installed_workload(
+                &installed, &plan
+            ));
             let invocation = project(&plan, &paths()).unwrap();
             let argv = invocation.podman_arguments();
             assert!(invocation.publishes.is_empty());
