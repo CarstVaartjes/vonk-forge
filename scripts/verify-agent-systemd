@@ -165,6 +165,17 @@ def _package_helper_socket(root: Path) -> dict[str, str]:
         "/usr/lib/vonk-forge/vonk-agent --config /etc/vonk-forge-agent/agent.toml run"
     ):
         raise RuntimeError("agent service does not execute the direct binary")
+    if (
+        agent["Unit"].get("StartLimitIntervalSec") != "0"
+        or agent["Service"].get("Restart") != "on-failure"
+        or agent["Service"].get("RestartSec") != "30s"
+    ):
+        raise RuntimeError("agent boot dependency recovery policy is invalid")
+    if (
+        agent["Service"].get("PrivateDevices") != "yes"
+        or agent["Service"].get("DevicePolicy") != "closed"
+    ):
+        raise RuntimeError("agent boot recovery weakened device isolation")
     if agent["Unit"].get("PartOf"):
         raise RuntimeError("agent service has an indirect lifecycle owner")
     if (
@@ -181,6 +192,13 @@ def _package_helper_socket(root: Path) -> dict[str, str]:
     ):
         raise RuntimeError("package helper runtime ownership boundary is invalid")
     return {
+        "agent_boot_recovery": {
+            "restart": agent["Service"].get("Restart"),
+            "restart_delay": agent["Service"].get("RestartSec"),
+            "start_limit_interval": agent["Unit"].get("StartLimitIntervalSec"),
+            "private_devices": agent["Service"].get("PrivateDevices"),
+            "device_policy": agent["Service"].get("DevicePolicy"),
+        },
         "directory_mode": expected["DirectoryMode"],
         "group": expected["SocketGroup"],
         "listen_stream": expected["ListenStream"],

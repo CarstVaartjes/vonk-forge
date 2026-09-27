@@ -2,8 +2,10 @@
 Description=Vonk Forge outbound agent
 Wants=network-online.target
 After=network-online.target vonk-forge-package-helper.socket
-StartLimitIntervalSec=300
-StartLimitBurst=5
+# Host GPU devices and CDI entries can arrive after network-online. Keep the
+# agent retryable and let its restart delay give systemd time to rebuild the
+# private device namespace after the host runtime becomes ready.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -18,7 +20,7 @@ Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent
 Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp
 Environment=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf
 Restart=on-failure
-RestartSec=5s
+RestartSec=30s
 TimeoutStartSec=30s
 TimeoutStopSec=30s
 UMask=0077

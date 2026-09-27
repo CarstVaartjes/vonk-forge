@@ -1,10 +1,15 @@
 #![forbid(unsafe_code)]
 
-use std::{cell::RefCell, fs, path::Path, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    fs,
+    path::Path,
+    time::Duration,
+};
 
 use tempfile::tempdir;
 use vonk_agent::{
-    inventory::{InventoryCollector, available_memory_bytes},
+    inventory::{InventoryCollector, InventoryError, available_memory_bytes},
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
 };
 
@@ -34,6 +39,31 @@ impl ProcessRunner for FakeRunner {
             stdout,
             stderr: vec![],
         })
+    }
+}
+
+struct DelayedReadyRunner {
+    inner: FakeRunner,
+    failures_remaining: Cell<u32>,
+}
+
+impl ProcessRunner for DelayedReadyRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        let failures = self.failures_remaining.get();
+        if failures > 0 {
+            self.failures_remaining.set(failures - 1);
+            return Ok(ProcessOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            });
+        }
+        self.inner.run(program, arguments, timeout)
     }
 }
 
@@ -247,7 +277,7 @@ fn inventory_refuses_to_advertise_spark_runtime_without_nvidia_cdi() {
         cdi_output: b"",
     };
 
-    assert!(
+    assert!(matches!(
         InventoryCollector {
             runner: &runner,
             meminfo_path: &meminfo,
@@ -256,7 +286,46 @@ fn inventory_refuses_to_advertise_spark_runtime_without_nvidia_cdi() {
             fabric_address: None,
             fabric_bandwidth_mbps: None,
         }
-        .collect()
-        .is_err()
-    );
+        .collect(),
+        Err(InventoryError::PrerequisiteUnavailable(
+            "NVIDIA CDI device list"
+        ))
+    ));
+}
+
+#[test]
+fn transient_host_runtime_failures_remain_retryable_past_the_systemd_start_limit() {
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(
+        &meminfo,
+        "MemTotal:       123456 kB\nMemAvailable:    65432 kB\n",
+    )
+    .unwrap();
+    let runner = DelayedReadyRunner {
+        inner: FakeRunner {
+            calls: RefCell::new(vec![]),
+            gpu_output: b"NVIDIA H100, 119808, 110000, 590.44\n",
+            cdi_output: b"nvidia.com/gpu=all\n",
+        },
+        failures_remaining: Cell::new(7),
+    };
+    let collector = InventoryCollector {
+        runner: &runner,
+        meminfo_path: &meminfo,
+        store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    };
+
+    for _ in 0..7 {
+        assert!(matches!(
+            collector.collect(),
+            Err(InventoryError::PrerequisiteUnavailable(
+                "NVIDIA GPU discovery"
+            ))
+        ));
+    }
+    assert_eq!(collector.collect().unwrap().gpu_count, 1);
 }

@@ -9,7 +9,7 @@ use serde::Serialize;
 use thiserror::Error;
 use vonk_agent_protocol::MemoryPool;
 
-use crate::process::{ProcessError, ProcessRunner, Program};
+use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Inventory {
@@ -40,6 +40,8 @@ pub enum InventoryError {
     Process(#[from] ProcessError),
     #[error("inventory system query failed")]
     System(#[from] rustix::io::Errno),
+    #[error("host prerequisite is not ready: {0}")]
+    PrerequisiteUnavailable(&'static str),
     #[error("inventory evidence is invalid")]
     Parse,
 }
@@ -67,16 +69,20 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             .f_bavail
             .checked_mul(fragment)
             .ok_or(InventoryError::Parse)?;
-        let gpu = self.runner.run(
+        let gpu = startup_probe(
+            self.runner,
             Program::NvidiaSmi,
             &[
                 "--query-gpu=name,memory.total,memory.free,driver_version".to_owned(),
                 "--format=csv,noheader,nounits".to_owned(),
             ],
             Duration::from_secs(10),
+            "NVIDIA GPU discovery",
         )?;
-        if !gpu.success {
-            return Err(InventoryError::Parse);
+        if gpu.stdout.iter().all(u8::is_ascii_whitespace) {
+            return Err(InventoryError::PrerequisiteUnavailable(
+                "NVIDIA GPU discovery",
+            ));
         }
         let (
             gpu_count,
@@ -85,7 +91,8 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             nvidia_driver_version,
             memory_pool,
         ) = parse_gpus(&gpu.stdout, memory_total_bytes, memory_available_bytes)?;
-        let podman = self.runner.run(
+        let podman = startup_probe(
+            self.runner,
             Program::Podman,
             &[
                 "version".to_owned(),
@@ -93,31 +100,33 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
                 "{{.Version}}".to_owned(),
             ],
             Duration::from_secs(10),
+            "Podman",
         )?;
-        if !podman.success {
-            return Err(InventoryError::Parse);
+        if podman.stdout.iter().all(u8::is_ascii_whitespace) {
+            return Err(InventoryError::PrerequisiteUnavailable("Podman"));
         }
-        let docker = self.runner.run(
+        let docker = startup_probe(
+            self.runner,
             Program::Docker,
             &["--version".to_owned()],
             Duration::from_secs(10),
+            "Docker runtime",
         )?;
-        if !docker.success {
-            return Err(InventoryError::Parse);
-        }
-        let cdi = self.runner.run(
+        let cdi = startup_probe(
+            self.runner,
             Program::NvidiaCtk,
             &["cdi".to_owned(), "list".to_owned()],
             Duration::from_secs(10),
+            "NVIDIA CDI device list",
         )?;
-        if !cdi.success
-            || !std::str::from_utf8(&cdi.stdout).ok().is_some_and(|value| {
-                value
-                    .lines()
-                    .any(|line| line.trim() == "nvidia.com/gpu=all")
-            })
+        let cdi_entries = std::str::from_utf8(&cdi.stdout).map_err(|_| InventoryError::Parse)?;
+        if !cdi_entries
+            .lines()
+            .any(|line| line.trim() == "nvidia.com/gpu=all")
         {
-            return Err(InventoryError::Parse);
+            return Err(InventoryError::PrerequisiteUnavailable(
+                "NVIDIA CDI device list",
+            ));
         }
         let mut capabilities = vec![
             "recipe.operations.v1".to_owned(),
@@ -154,6 +163,36 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             fabric_bandwidth_mbps: self.fabric_bandwidth_mbps,
         })
     }
+}
+
+fn startup_probe<R: ProcessRunner>(
+    runner: &R,
+    program: Program,
+    arguments: &[String],
+    timeout: Duration,
+    dependency: &'static str,
+) -> Result<ProcessOutput, InventoryError> {
+    let output = runner
+        .run(program, arguments, timeout)
+        .map_err(|error| match error {
+            ProcessError::Timeout => InventoryError::PrerequisiteUnavailable(dependency),
+            ProcessError::Io(error)
+                if !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound
+                        | std::io::ErrorKind::PermissionDenied
+                        | std::io::ErrorKind::InvalidInput
+                        | std::io::ErrorKind::InvalidData
+                ) =>
+            {
+                InventoryError::PrerequisiteUnavailable(dependency)
+            }
+            error => InventoryError::Process(error),
+        })?;
+    if !output.success {
+        return Err(InventoryError::PrerequisiteUnavailable(dependency));
+    }
+    Ok(output)
 }
 
 fn egress_boundary_available(path: &Path) -> bool {
