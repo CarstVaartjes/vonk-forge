@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from collections.abc import Iterator
@@ -15,11 +16,15 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from .api_response_witness import (  # noqa: F401 - pytest discovers imported hooks.
     pytest_addoption,
-    pytest_configure,
-    pytest_runtest_setup,
     pytest_runtest_teardown,
     pytest_sessionfinish,
     pytest_terminal_summary,
+)
+from .api_response_witness import (
+    pytest_configure as _api_response_pytest_configure,
+)
+from .api_response_witness import (
+    pytest_runtest_setup as _api_response_runtest_setup,
 )
 
 POSTGRES_IMAGE = "postgres:18.3"
@@ -27,6 +32,23 @@ _POSTGRES_PASSWORD = "postgres"
 _POSTGRES_PORT_TEMPLATE = (
     '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}'
 )
+
+_REGISTERED_MARKERS = (
+    "linux_only: requires a Linux operating system or Linux container behavior",
+    "needs_dpkg_deb: requires the Debian package builder at /usr/bin/dpkg-deb",
+    "needs_buildx: requires the Docker Buildx plugin for image builds",
+    "needs_systemd: requires systemd tools or a systemd host",
+    "needs_recipe_library: requires VONK_RECIPE_LIBRARY_ROOT to name the canonical recipe checkout",
+    "needs_rust_probe: requires cargo to build a Python/Rust wire probe",
+    "needs_uv_cache: requires cached wheels for offline installed-CLI tests",
+    "postgres: provisions a disposable PostgreSQL server through Docker",
+)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    _api_response_pytest_configure(config)
+    for marker in _REGISTERED_MARKERS:
+        config.addinivalue_line("markers", marker)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -61,7 +83,7 @@ def postgres_database_name() -> str:
 
 
 def _docker_unavailable(message: str) -> None:
-    if os.getenv("CI"):
+    if os.getenv("CI", "").lower() == "true":
         pytest.fail(message, pytrace=False)
     pytest.skip(message)
 
@@ -180,12 +202,123 @@ def postgres_engine(postgres_server_engine: Engine) -> Iterator[Engine]:
 _POSTGRES_FIXTURES = frozenset({"postgres_engine", "postgres_server_engine"})
 
 
+def _is_ci() -> bool:
+    return os.getenv("CI", "").lower() == "true"
+
+
+def _missing_prerequisite(marker: str, item: pytest.Item) -> str | None:
+    if marker == "linux_only" and not sys.platform.startswith("linux"):
+        return f"{marker} tests require Linux (current platform: {sys.platform})"
+    if marker == "needs_dpkg_deb" and not Path("/usr/bin/dpkg-deb").is_file():
+        return "needs_dpkg_deb tests require /usr/bin/dpkg-deb"
+    if marker == "needs_systemd":
+        if not sys.platform.startswith("linux"):
+            return f"{marker} tests require Linux (current platform: {sys.platform})"
+        if shutil.which("systemd-analyze") is None:
+            return "needs_systemd tests require systemd-analyze"
+    if marker == "needs_buildx":
+        if shutil.which("docker") is None:
+            return "needs_buildx tests require Docker and its Buildx plugin"
+        buildx = subprocess.run(
+            ["docker", "buildx", "version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if buildx.returncode != 0:
+            return "needs_buildx tests require the Docker Buildx plugin"
+    if marker == "needs_recipe_library":
+        configured = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
+        if not configured or not (Path(configured) / "catalog-index.json").is_file():
+            return "needs_recipe_library tests require VONK_RECIPE_LIBRARY_ROOT with catalog-index.json"
+    if marker == "needs_rust_probe" and shutil.which("cargo") is None:
+        return "needs_rust_probe tests require cargo to build the wire probe"
+    if marker == "needs_rust_probe" and not sys.platform.startswith("linux"):
+        return "needs_rust_probe tests build Linux-only agent wire probes"
+    if marker == "needs_rust_probe" and Path(str(item.fspath)).name == (
+        "test_enrollment_wire_bridge.py"
+    ):
+        required_probes = {
+            "bootstrap_wire_probe": "VONK_BOOTSTRAP_WIRE_PROBE",
+            "enrollment_wire_probe": "VONK_ENROLLMENT_WIRE_PROBE",
+        }
+        if isinstance(item, pytest.Function):
+            for fixture, environment_name in required_probes.items():
+                if fixture not in item.fixturenames:
+                    continue
+                configured = os.environ.get(environment_name)
+                if not configured or not Path(configured).is_file():
+                    return (
+                        "needs_rust_probe tests require built enrollment probes; run "
+                        "scripts/tests/run_agent_wire_contracts.py"
+                    )
+    if marker == "postgres":
+        if not sys.platform.startswith("linux"):
+            return (
+                "postgres tests require the Linux Docker lane for reliable concurrent "
+                "PostgreSQL/process recovery"
+            )
+        if shutil.which("docker") is None:
+            return "postgres tests require Docker to provision a disposable PostgreSQL server"
+    return None
+
+
+_PREREQUISITE_MARKERS = (
+    "linux_only",
+    "needs_dpkg_deb",
+    "needs_systemd",
+    "needs_buildx",
+    "needs_recipe_library",
+    "needs_rust_probe",
+    "needs_uv_cache",
+    "postgres",
+)
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Skip unavailable integration lanes locally and fail loudly in CI."""
+
+    _api_response_runtest_setup(item)
+    for marker in _PREREQUISITE_MARKERS:
+        if item.get_closest_marker(marker) is None:
+            continue
+        reason = _missing_prerequisite(marker, item)
+        if reason is None:
+            continue
+        if _is_ci():
+            pytest.fail(f"CI prerequisite missing: {reason}", pytrace=False)
+        pytest.skip(reason)
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Tag every test that cannot run in the fast, hermetic tier."""
 
     for item in items:
-        if Path(str(item.fspath)).name.endswith("_wire_bridge.py") or (
+        if isinstance(item, pytest.Function) and _POSTGRES_FIXTURES.intersection(
+            item.fixturenames
+        ):
+            item.add_marker(pytest.mark.postgres)
+        if (
             isinstance(item, pytest.Function)
-            and _POSTGRES_FIXTURES.intersection(item.fixturenames)
+            and "installed_vonkctl" in item.fixturenames
+        ):
+            item.add_marker(pytest.mark.needs_uv_cache)
+        if Path(str(item.fspath)).name.endswith("_wire_bridge.py"):
+            item.add_marker(pytest.mark.needs_rust_probe)
+        module_namespace = getattr(getattr(item, "module", None), "__dict__", {})
+        if "recipe_library_root" in module_namespace:
+            item.add_marker(pytest.mark.needs_recipe_library)
+        if any(
+            item.get_closest_marker(marker)
+            for marker in (
+                "postgres",
+                "needs_rust_probe",
+                "needs_uv_cache",
+                "needs_recipe_library",
+                "needs_systemd",
+                "needs_buildx",
+                "linux_only",
+                "needs_dpkg_deb",
+            )
         ):
             item.add_marker(pytest.mark.lane)

@@ -82,20 +82,24 @@ def _server_process(
 ) -> tuple[subprocess.Popen[str], Path]:
     ready = tmp_path / f"api-ready-{uuid.uuid4().hex}"
     helper = Path(__file__).with_name("_profile_https_process.py")
-    environment = {
-        **os.environ,
-        "PYTHONPATH": os.pathsep.join(
-            str(path)
-            for path in (
-                Path(__file__).resolve().parents[1],
-                Path(__file__).resolve().parents[1] / "src",
-                Path(__file__).resolve().parents[2] / "src",
-                Path("/opt/vonk-forge-recipes/contracts/src"),
-            )
-        ),
-        "VONK_TEST_DATABASE_URL": database_url,
-        "VONK_RECIPE_LIBRARY_ROOT": "/opt/vonk-forge-recipes",
-    }
+    from tests.subprocess_environment import isolated_environment
+
+    environment = isolated_environment(
+        tmp_path / "api-home",
+        extra={
+            "PYTHONPATH": os.pathsep.join(
+                str(path)
+                for path in (
+                    Path(__file__).resolve().parents[1],
+                    Path(__file__).resolve().parents[1] / "src",
+                    Path(__file__).resolve().parents[2] / "src",
+                    Path("/opt/vonk-forge-recipes/contracts/src"),
+                )
+            ),
+            "VONK_TEST_DATABASE_URL": database_url,
+            "VONK_RECIPE_LIBRARY_ROOT": "/opt/vonk-forge-recipes",
+        },
+    )
     process = subprocess.Popen(
         [
             sys.executable,
@@ -380,11 +384,17 @@ def test_installed_cli_follows_same_profile_application_after_api_process_restar
             assert owner.plan_digest == accepted_plan_digest
             assert owner.created_at == accepted_created_at
             assert owner.updated_at == accepted_updated_at
-            assert owner.progress["intended_profile"] == accepted_progress["intended_profile"]
-            assert owner.progress["operation_kind"] == accepted_progress["operation_kind"]
-            assert owner.progress["retry_of_application_id"] == accepted_progress[
-                "retry_of_application_id"
-            ]
+            assert (
+                owner.progress["intended_profile"]
+                == accepted_progress["intended_profile"]
+            )
+            assert (
+                owner.progress["operation_kind"] == accepted_progress["operation_kind"]
+            )
+            assert (
+                owner.progress["retry_of_application_id"]
+                == accepted_progress["retry_of_application_id"]
+            )
             assert owner.progress["total_steps"] == accepted_progress["total_steps"]
             assert owner.progress["admission_pending"] is False
             assert owner.progress["admission_retry_at"] is None

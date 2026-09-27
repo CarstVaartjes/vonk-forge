@@ -145,11 +145,12 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
             environment,
             tmp_path,
             answer="no",
+            review_content=review["plan_digest"],
         )
 
     visible = stdout + transcript
     assert status == 2
-    assert "Ready for review" in visible and "[y/N]" in visible
+    assert review["plan_digest"] in visible
     assert profile.name in visible
     assert idle_node in visible
     assert previous.owner_id in visible and "Stop endpoint: studio-chat" in visible

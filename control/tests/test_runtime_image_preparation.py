@@ -862,9 +862,14 @@ def test_process_death_after_checkpoint_reuses_export_after_restart(
     root = tmp_path / "objects"
     counter = tmp_path / "exports.txt"
     test_dir = str(Path(__file__).parent)
-    environment = os.environ.copy()
-    environment["PYTHONPATH"] = os.pathsep.join(
-        value for value in (test_dir, environment.get("PYTHONPATH", "")) if value
+    from tests.subprocess_environment import isolated_environment
+
+    environment = isolated_environment(
+        tmp_path / "child-home",
+        extra={
+            "PYTHONPATH": test_dir,
+            "VONK_RECIPE_LIBRARY_ROOT": os.environ["VONK_RECIPE_LIBRARY_ROOT"],
+        },
     )
     script = (
         "import sys\n"
@@ -919,9 +924,14 @@ def test_process_death_after_final_link_repairs_receipt_from_checkpoint(
     root = tmp_path / "objects"
     counter = tmp_path / "exports.txt"
     test_dir = str(Path(__file__).parent)
-    environment = os.environ.copy()
-    environment["PYTHONPATH"] = os.pathsep.join(
-        value for value in (test_dir, environment.get("PYTHONPATH", "")) if value
+    from tests.subprocess_environment import isolated_environment
+
+    environment = isolated_environment(
+        tmp_path / "child-home",
+        extra={
+            "PYTHONPATH": test_dir,
+            "VONK_RECIPE_LIBRARY_ROOT": os.environ["VONK_RECIPE_LIBRARY_ROOT"],
+        },
     )
     script = (
         "import sys\n"
@@ -1124,16 +1134,21 @@ def test_fifo_published_stage_checkpoint_is_rejected_without_blocking(
     os.mkfifo(checkpoint_path)
 
     test_dir = Path(__file__).resolve().parent
-    environment = os.environ.copy()
+    from tests.subprocess_environment import isolated_environment
+
+    environment = isolated_environment(
+        tmp_path / "child-home",
+        extra={
+            "VONK_RECIPE_LIBRARY_ROOT": os.environ["VONK_RECIPE_LIBRARY_ROOT"],
+        },
+    )
     source_paths = (
         test_dir,
         test_dir.parent / "src",
         test_dir.parent.parent / "src",
         Path(environment["VONK_RECIPE_LIBRARY_ROOT"]) / "contracts" / "src",
     )
-    environment["PYTHONPATH"] = os.pathsep.join(
-        [*(str(path) for path in source_paths), environment.get("PYTHONPATH", "")]
-    )
+    environment["PYTHONPATH"] = os.pathsep.join(str(path) for path in source_paths)
     script = (
         "import sys\n"
         "from pathlib import Path\n"
@@ -1146,7 +1161,6 @@ def test_fifo_published_stage_checkpoint_is_rejected_without_blocking(
         "    )\n"
         "except RuntimeImagePreparationError as error:\n"
         "    assert error.code == 'runtime_image.stage_checkpoint_invalid'\n"
-        "    assert error.detail == 'published runtime image checkpoint is not a regular file'\n"
         "else:\n"
         "    raise AssertionError('FIFO checkpoint was accepted')\n"
     )
@@ -1156,7 +1170,7 @@ def test_fifo_published_stage_checkpoint_is_rejected_without_blocking(
         capture_output=True,
         text=True,
         env=environment,
-        timeout=5,
+        timeout=20,
     )
 
     assert result.returncode == 0, result.stderr

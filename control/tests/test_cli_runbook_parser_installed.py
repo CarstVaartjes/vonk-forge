@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import shlex
 import subprocess
@@ -135,7 +134,11 @@ print("parsed", len(examples))
     # Keep the runbook parser and the package under test in the isolated wheel
     # environment. The subprocess invokes argparse only; it never calls CLI
     # dispatch or makes a Controller request.
-    environment = {**os.environ, "PYTHONPATH": ""}
+    from tests.subprocess_environment import isolated_environment
+
+    environment = isolated_environment(
+        tmp_path / "parser-home", extra={"PYTHONPATH": ""}
+    )
     parsed = subprocess.run(
         [str(python), "-c", parser_program],
         input=json.dumps(examples),
