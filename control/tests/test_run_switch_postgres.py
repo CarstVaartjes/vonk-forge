@@ -16,6 +16,7 @@ from vonk_control.models import (
     AgentOperation,
     RecipeRun,
     ResourceReservation,
+    RunNode,
 )
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.run_switch_contract import (
@@ -316,7 +317,6 @@ def test_postgres_final_verification_waits_after_accepted_start_deadline(
         )
         assert reservations
     assert service.tick() is False
-
     recovered_at = next_observation_at + timedelta(seconds=1)
     mark_current_exact_observations(sessions, run_id, recovered_at)
     lifecycle._clock = lambda: recovered_at
@@ -335,6 +335,39 @@ def test_postgres_final_verification_waits_after_accepted_start_deadline(
         and item.run_id == run_id
         for item in recovered.result.phase_results
     )
+
+
+def test_postgres_final_verification_timeout_hands_run_to_recovery(
+    tmp_path, migrated_engine
+):
+    sessions, lifecycle, _routes, _, service, operation = _awaiting_final_verification(
+        tmp_path, migrated_engine, distributed=True
+    )
+    current = service.get(operation.operation_id)
+    assert current.result is not None and current.result.start_deadline is not None
+    observation = current.result.final_observation
+    assert isinstance(observation, RunSwitchFinalVerifyResult)
+    run_id = observation.run_id
+    now = max(
+        current.result.start_deadline + timedelta(seconds=901),
+        NOW + timedelta(seconds=901),
+    )
+    lifecycle._clock = lambda: now
+    service._clock = lambda: now
+
+    assert service.tick() is True
+    failed = service.get(operation.operation_id)
+    assert failed.state == "failed"
+    assert failed.status_reason is not None
+    assert "final-verification-timeout" in failed.status_reason
+    assert "exact workload recovery" in failed.status_reason
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        nodes = tuple(session.scalars(select(RunNode).where(RunNode.run_id == run_id)))
+        assert run is not None and run.state == "running"
+        assert run.route_state == "withdrawn"
+        assert run.route_next_attempt_at == now
+        assert nodes and any(node.state == "failed" for node in nodes)
 
 
 def test_postgres_newer_intent_supersedes_parked_final_verification(

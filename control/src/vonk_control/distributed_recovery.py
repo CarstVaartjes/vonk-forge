@@ -55,6 +55,8 @@ from .recipe_stop_payloads import (
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _SINGLETON_RECOVERY_RECHECK_SECONDS = 5
+_SINGLETON_RECOVERY_MAX_ATTEMPTS = 5
+_SINGLETON_RECOVERY_COOLDOWN_SECONDS = 300
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 _EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
@@ -186,6 +188,57 @@ class DistributedRecoveryCoordinator:
                     worked = True
                 if self._active_recovery(session, run.id):
                     continue
+                try:
+                    run_plan = run_plan_document(run.plan)
+                except RecipeExecutionContractError:
+                    run.state = "failed"
+                    run.route_state = "withdrawn"
+                    run.route_error = "stored run plan is invalid"
+                    run.updated_at = now
+                    worked = True
+                    continue
+                if run_plan.get("execution_mode") == "one-shot-jobs":
+                    run.state = "failed"
+                    run.route_state = "withdrawn"
+                    run.route_error = (
+                        "automatic recovery stopped because a one-shot job may "
+                        "have completed external effects before its result was "
+                        "lost; verify those effects, then submit a new authorized run"
+                    )
+                    run.route_next_attempt_at = None
+                    run.updated_at = now
+                    worked = True
+                    continue
+                if (
+                    singleton
+                    and run.recovery_attempts > _SINGLETON_RECOVERY_MAX_ATTEMPTS
+                ):
+                    run.recovery_attempts = 0
+                    run.route_error = (
+                        "singleton recovery cooldown elapsed; resuming exact inspection"
+                    )
+                    run.route_next_attempt_at = None
+                    run.updated_at = now
+                if (
+                    singleton
+                    and run.recovery_attempts >= _SINGLETON_RECOVERY_MAX_ATTEMPTS
+                ):
+                    # Keep the degraded reason visible during a finite cooldown.
+                    # Once due, reset this retry window and resume automatically.
+                    run.route_error = (
+                        "singleton recovery is degraded after "
+                        f"{_SINGLETON_RECOVERY_MAX_ATTEMPTS} attempts; automatic "
+                        "recovery will resume after a five minute cooldown"
+                    )
+                    run.route_next_attempt_at = now + timedelta(
+                        seconds=_SINGLETON_RECOVERY_COOLDOWN_SECONDS
+                    )
+                    run.updated_at = now
+                    # This marker distinguishes the cooldown row when it becomes
+                    # due; no new operator request or authority is required.
+                    run.recovery_attempts = _SINGLETON_RECOVERY_MAX_ATTEMPTS + 1
+                    worked = True
+                    continue
                 if singleton and not _proves_fresh_absence(run, run_nodes[0], now):
                     worked = (
                         _schedule_singleton_recovery_wait(
@@ -196,15 +249,6 @@ class DistributedRecoveryCoordinator:
                         )
                         or worked
                     )
-                    continue
-                try:
-                    run_plan = run_plan_document(run.plan)
-                except RecipeExecutionContractError:
-                    run.state = "failed"
-                    run.route_state = "withdrawn"
-                    run.route_error = "stored run plan is invalid"
-                    run.updated_at = now
-                    worked = True
                     continue
                 try:
                     if singleton:
@@ -306,7 +350,16 @@ class DistributedRecoveryCoordinator:
                     continue
                 run.route_state = "withdrawn"
                 run.route_error = f"distributed recovery queued: {job.id}"
-                run.route_next_attempt_at = None
+                if singleton:
+                    run.recovery_attempts += 1
+                    backoff = min(
+                        _SINGLETON_RECOVERY_RECHECK_SECONDS
+                        * (2 ** (run.recovery_attempts - 1)),
+                        _SINGLETON_RECOVERY_COOLDOWN_SECONDS,
+                    )
+                    run.route_next_attempt_at = now + timedelta(seconds=backoff)
+                else:
+                    run.route_next_attempt_at = None
                 run.updated_at = now
                 queued = True
                 worked = True
