@@ -4646,6 +4646,30 @@ class RecipeOperationService:
                             raise RecipeOperationConflict(
                                 "recipe run topology is unavailable"
                             )
+                        try:
+                            exact_stop_payloads = durable_run_stop_payloads(
+                                session,
+                                run,
+                                stop_nodes,
+                                run_generation=run.run_generation,
+                                cancel_pending_start=True,
+                                allow_missing_nodes=False,
+                            )
+                        except RecipeStopAuthorityError as error:
+                            raise RecipeOperationConflict(
+                                "failed recipe Start lacks exact cleanup authority"
+                            ) from error
+                        stop_node_payloads = tuple(
+                            (
+                                run_node.node_id,
+                                json.loads(
+                                    canonical_message(
+                                        exact_stop_payloads[run_node.node_id]
+                                    )
+                                ),
+                            )
+                            for run_node in stop_nodes
+                        )
                         self._queue_in_session(
                             session,
                             kind="recipe.stop",
@@ -4654,34 +4678,12 @@ class RecipeOperationService:
                             plan_digest=run.plan_digest,
                             actor=job.actor,
                             request_id=cleanup_request_id,
-                            node_payloads=tuple(
-                                (
-                                    run_node.node_id,
-                                    {
-                                        "schema_version": 1,
-                                        "run_id": owner_id,
-                                        "plan_digest": run.plan_digest,
-                                    },
-                                )
-                                for run_node in stop_nodes
-                            ),
+                            node_payloads=stop_node_payloads,
                             phases=_role_phases(
                                 _topology_order(revision.document, "stop_order"),
-                                tuple(
-                                    (
-                                        run_node.node_id,
-                                        {
-                                            "schema_version": 1,
-                                            "run_id": owner_id,
-                                            "plan_digest": run.plan_digest,
-                                            "role": run_node.role,
-                                        },
-                                    )
-                                    for run_node in stop_nodes
-                                ),
-                                include_role=False,
+                                stop_node_payloads,
                             ),
-                            authority_digest=run.plan_digest,
+                            authority_digest=revision.content_digest,
                             now=now,
                             workload_intent_ordinal=_bound_workload_intent(job),
                         )

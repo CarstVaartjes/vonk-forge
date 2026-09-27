@@ -41,6 +41,10 @@ from .recipe_start_payloads import (
     build_recipe_start_payload,
     validate_distributed_start_timeout_seconds,
 )
+from .recipe_stop_payloads import (
+    RecipeStopAuthorityError,
+    durable_run_stop_payloads,
+)
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 _EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
@@ -147,11 +151,18 @@ class DistributedRecoveryCoordinator:
                     run.updated_at = now
                     worked = True
                     break
+                previous_run_generation = run.run_generation
                 run.run_generation += 1
                 run_plan["run_generation"] = run.run_generation
                 run.plan = run_plan_document(run_plan)
                 try:
-                    authority = _recovery_authority(session, run, now, failed[0].rank)
+                    authority = _recovery_authority(
+                        session,
+                        run,
+                        now,
+                        failed[0].rank,
+                        stop_run_generation=previous_run_generation,
+                    )
                     if authority is None:
                         raise DistributedLifecycleError(
                             "failed rank has no distributed recovery policy"
@@ -264,6 +275,8 @@ def _recovery_authority(
     run: RecipeRun,
     now: datetime,
     failed_rank: int,
+    *,
+    stop_run_generation: int,
 ) -> dict[str, object] | None:
     installation = session.get(RecipeInstallation, run.installation_id)
     resolved = (
@@ -480,6 +493,23 @@ def _recovery_authority(
     if not isinstance(owner_role, str) or owner_role not in start_payloads:
         raise DistributedLifecycleError("distributed recovery endpoint is invalid")
     owner_node_id, owner_payload = start_payloads[owner_role]
+    if type(stop_run_generation) is not int or stop_run_generation < 1:
+        raise DistributedLifecycleError(
+            "distributed recovery prior Start generation is invalid"
+        )
+    try:
+        exact_stop_payloads = durable_run_stop_payloads(
+            session,
+            run,
+            nodes,
+            run_generation=stop_run_generation,
+            cancel_pending_start=True,
+            allow_missing_nodes=False,
+        )
+    except RecipeStopAuthorityError as error:
+        raise DistributedLifecycleError(
+            "distributed recovery lacks exact prior Start Stop authority"
+        ) from error
     return {
         "deadline": start_deadline,
         "workload_intent_ordinal": start_job.payload.get("workload_intent_ordinal"),
@@ -498,11 +528,7 @@ def _recovery_authority(
             [
                 (
                     node.node_id,
-                    {
-                        "schema_version": 1,
-                        "run_id": run.id,
-                        "plan_digest": run.plan_digest,
-                    },
+                    json.loads(canonical_message(exact_stop_payloads[node.node_id])),
                 )
                 for node in nodes
                 if node.role == role

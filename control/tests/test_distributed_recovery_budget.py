@@ -16,6 +16,7 @@ from .test_recipe_operations import (
     ConcurrentPublisher,
     _queued_distributed_recovery_stop,
     _recovery_deadline,
+    _typed_stop_payloads,
     bind_route_publications,
     complete_collective_readiness,
     installed_recipe,
@@ -37,6 +38,31 @@ def test_slow_distributed_restart_retains_accepted_startup_budget(
     )
     stop_finished_at = NOW + timedelta(seconds=45)
     service._clock = lambda: stop_finished_at
+    stop_payloads = _typed_stop_payloads(stop.payload)
+    assert len(stop_payloads) == len(nodes)
+    assert {payload.run_id for payload in stop_payloads} == {started.owner_id}
+    assert {payload.target_runtime_id for payload in stop_payloads} == {
+        started.owner_id
+    }
+    assert {payload.plan_digest for payload in stop_payloads} == {started.plan_digest}
+    assert {payload.run_generation for payload in stop_payloads} == {1}
+    assert all(payload.cancel_pending_start for payload in stop_payloads)
+    with sessions() as session:
+        advanced_run = session.get(RecipeRun, started.owner_id)
+        source_starts = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
+            )
+        )
+        assert advanced_run is not None and advanced_run.run_generation == 2
+        source_generations = {
+            operation.node_id: operation.payload["run_generation"]
+            for operation in source_starts
+        }
+        assert source_generations == {node_id: 1 for node_id in nodes}
+    assert {
+        payload.node_id: payload.run_generation for payload in stop_payloads
+    } == source_generations
     for node_id in nodes:
         service.record_node_result(
             stop.id, node_id, succeeded=True, evidence={"stopped": True}

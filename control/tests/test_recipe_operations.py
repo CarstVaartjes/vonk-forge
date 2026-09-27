@@ -225,6 +225,20 @@ def _job_phases(payload: Mapping[str, object]) -> list[list[Mapping[str, object]
     ]
 
 
+def _typed_stop_payloads(
+    payload: Mapping[str, object],
+) -> tuple[RecipeStopPayload, ...]:
+    """Validate each retained Stop phase through the agent wire contract."""
+
+    return tuple(
+        RecipeStopPayload.model_validate_json(
+            canonical_message(entry["payload"]), strict=True
+        )
+        for phase in _job_phases(payload)
+        for entry in phase
+    )
+
+
 def _synthetic_model_content_sha256() -> str:
     document = json.loads(
         resources.files("vonk_forge_contracts")
@@ -1304,6 +1318,15 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
             )
         )
         assert source is not None
+        source_start = session.scalar(
+            select(Job)
+            .where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_id"].as_string() == source_run_id,
+            )
+            .order_by(Job.created_at, Job.id)
+        )
+        assert source_start is not None
         session.add(
             RecipeRun(
                 id=run_id,
@@ -1312,9 +1335,10 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
                 mapping_generation=source.mapping_generation,
                 alias=alias,
                 plan_digest=authority,
-                plan={**source.plan, "plan_digest": authority},
+                plan={**source.plan, "alias": alias, "plan_digest": authority},
                 state="running",
                 route_state="pending",
+                run_generation=source.run_generation,
                 actor="admin",
                 created_at=NOW,
                 updated_at=NOW,
@@ -1362,6 +1386,79 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
             )
             for node in source_nodes
         )
+        source_phases = source_start.payload.get("phases")
+        assert isinstance(source_phases, list) and source_phases
+        start_job_id = str(uuid.uuid4())
+        cloned_phases: list[list[dict[str, object]]] = []
+        cloned_operations: list[AgentOperation] = []
+        cloned_targets: set[str] = set()
+        for phase in source_phases:
+            assert isinstance(phase, list) and phase
+            cloned_phase: list[dict[str, object]] = []
+            for raw_entry in phase:
+                assert isinstance(raw_entry, Mapping)
+                node_id = raw_entry.get("node_id")
+                raw_payload = raw_entry.get("payload")
+                assert isinstance(node_id, str) and isinstance(raw_payload, Mapping)
+                cloned_targets.add(node_id)
+                source_payload = RecipeStartPayload.model_validate_json(
+                    canonical_message(raw_payload), strict=True
+                )
+                cloned_payload = source_payload.model_copy(
+                    update={"run_id": run_id, "plan_digest": authority, "alias": alias}
+                )
+                payload = json.loads(canonical_message(cloned_payload))
+                operation_id = str(uuid.uuid4())
+                cloned_phase.append(
+                    {
+                        "operation_id": operation_id,
+                        "node_id": node_id,
+                        "payload": payload,
+                    }
+                )
+                cloned_operations.append(
+                    AgentOperation(
+                        id=operation_id,
+                        parent_job_id=start_job_id,
+                        node_id=node_id,
+                        kind="recipe.start",
+                        payload_digest=hashlib.sha256(
+                            canonical_message(payload)
+                        ).hexdigest(),
+                        payload=payload,
+                        authority_revision=source_start.authority_revision,
+                        workload_intent_ordinal=source_start.payload.get(
+                            "workload_intent_ordinal"
+                        ),
+                        state="succeeded",
+                        current_attempt=1,
+                        created_at=NOW,
+                        updated_at=NOW,
+                    )
+                )
+            cloned_phases.append(cloned_phase)
+        cloned_start_payload = dict(source_start.payload)
+        cloned_start_payload["owner_id"] = run_id
+        cloned_start_payload["plan_digest"] = authority
+        cloned_start_payload["phases"] = cloned_phases
+        cloned_start = Job(
+            id=start_job_id,
+            request_id=str(uuid.uuid4()),
+            kind="recipe.start",
+            state="succeeded",
+            actor="admin",
+            authority_revision=source_start.authority_revision,
+            targets=sorted(cloned_targets),
+            payload_digest=hashlib.sha256(
+                canonical_message(cloned_start_payload)
+            ).hexdigest(),
+            payload=cloned_start_payload,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(cloned_start)
+        session.flush()
+        session.add_all(cloned_operations)
     return run_id
 
 
@@ -1593,6 +1690,21 @@ def test_failed_start_phase_never_enqueues_dependent_role(tmp_path: Path) -> Non
         )
         assert {item.payload["role"] for item in starts} == {"worker"}
     assert service.get(start.id).state == "failed"
+    with sessions() as session:
+        cleanup = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.stop",
+                Job.payload["owner_id"].as_string() == start.owner_id,
+            )
+        )
+        assert cleanup is not None
+        stop_payloads = _typed_stop_payloads(cleanup.payload)
+        assert len(stop_payloads) == 2
+        assert {stop.run_id for stop in stop_payloads} == {start.owner_id}
+        assert {stop.target_runtime_id for stop in stop_payloads} == {start.owner_id}
+        assert {stop.plan_digest for stop in stop_payloads} == {start.plan_digest}
+        assert {stop.run_generation for stop in stop_payloads} == {1}
+        assert all(stop.cancel_pending_start for stop in stop_payloads)
 
 
 @pytest.mark.parametrize(
@@ -2243,6 +2355,13 @@ def test_distributed_start_deadline_is_enforced_before_phase_advance(
             )
         )
         assert cleanup is not None
+        stop_payloads = _typed_stop_payloads(cleanup.payload)
+        assert len(stop_payloads) == len(nodes)
+        assert {stop.run_id for stop in stop_payloads} == {start.owner_id}
+        assert {stop.target_runtime_id for stop in stop_payloads} == {start.owner_id}
+        assert {stop.plan_digest for stop in stop_payloads} == {start.plan_digest}
+        assert {stop.run_generation for stop in stop_payloads} == {1}
+        assert all(stop.cancel_pending_start for stop in stop_payloads)
 
 
 def test_distributed_start_capability_is_an_admission_blocker(tmp_path: Path) -> None:
@@ -2817,6 +2936,79 @@ def test_stop_preview_blocks_nonexact_reservation_authority(tmp_path: Path) -> N
     ]
 
 
+@pytest.mark.parametrize("changed_identity", ("run_id", "plan_digest"))
+def test_stop_refuses_durable_start_with_changed_target_or_plan(
+    tmp_path: Path, changed_identity: str
+) -> None:
+    withdrawn: list[str] = []
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, route_withdrawer=withdrawn.append
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="2" * 35 + "8"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="2" * 35 + "9",
+    )
+    with sessions.begin() as session:
+        parent = _required(session.get(Job, run.id))
+        child = _required(
+            session.scalar(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == parent.id)
+                .order_by(AgentOperation.id)
+            )
+        )
+        parent_payload = json.loads(canonical_message(parent.payload))
+        phases = parent_payload["phases"]
+        phase_entry = next(
+            entry
+            for phase in phases
+            for entry in phase
+            if entry["operation_id"] == child.id
+        )
+        changed_start = dict(child.payload)
+        changed_start[changed_identity] = (
+            "different-run" if changed_identity == "run_id" else "0" * 64
+        )
+        phase_entry["payload"] = changed_start
+        child.payload = changed_start
+        child.payload_digest = hashlib.sha256(
+            canonical_message(changed_start)
+        ).hexdigest()
+        parent.payload = parent_payload
+        parent.payload_digest = hashlib.sha256(
+            canonical_message(parent_payload)
+        ).hexdigest()
+
+    plan = service.preview_stop(run.owner_id)
+    with pytest.raises(RecipeOperationConflict, match="exact durable Start authority"):
+        service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="2" * 35 + "a",
+        )
+
+    assert withdrawn == []
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(Job.id).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"].as_string() == run.owner_id,
+                )
+            )
+            is None
+        )
+        stored = _required(session.get(RecipeRun, run.owner_id))
+        assert stored.state == "running"
+
+
 def test_stop_preview_is_stable_exact_and_defers_capacity_release(
     tmp_path: Path,
 ) -> None:
@@ -3014,7 +3206,9 @@ def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
             canonical_message(children[0].payload), strict=True
         )
         assert stop_payload.run_id == first_run.owner_id
+        assert stop_payload.target_runtime_id == first_run.owner_id
         assert stop_payload.plan_digest == first_run.plan_digest
+        assert stop_payload.run_generation == 1
         assert stop_payload.cancel_pending_start is True
         assert {child.authority_revision for child in children} == {
             first_run.plan_digest
@@ -5534,27 +5728,44 @@ def test_failed_multinode_start_queues_idempotent_stop_for_every_rank(
     service.record_node_result(
         start.id, worker.node_id, succeeded=False, evidence={"code": "start.failed"}
     )
+    # A duplicate final failure report must reuse the one deterministic gang
+    # cleanup request instead of creating another stop operation.
+    service.record_node_result(
+        start.id, worker.node_id, succeeded=False, evidence={"code": "start.failed"}
+    )
 
     with sessions() as session:
-        cleanup = session.scalar(
-            select(Job).where(
-                Job.kind == "recipe.stop",
-                Job.payload["owner_id"].as_string() == start.owner_id,
+        cleanups = tuple(
+            session.scalars(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"].as_string() == start.owner_id,
+                )
             )
         )
-        assert cleanup is not None
+        assert len(cleanups) == 1
+        cleanup = cleanups[0]
         assert set(cleanup.targets) == set(nodes)
+        stop_payloads = _typed_stop_payloads(cleanup.payload)
+        assert len(stop_payloads) == len(nodes)
+        assert {stop.run_id for stop in stop_payloads} == {start.owner_id}
+        assert {stop.target_runtime_id for stop in stop_payloads} == {start.owner_id}
+        assert {stop.run_generation for stop in stop_payloads} == {1}
+        assert all(stop.cancel_pending_start for stop in stop_payloads)
         cleanup_children = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == cleanup.id)
             )
         )
         assert [child.node_id for child in cleanup_children] == [nodes[0]]
-        assert set(cleanup_children[0].payload) == {
-            "schema_version",
-            "run_id",
-            "plan_digest",
-        }
+        cleanup_payload = RecipeStopPayload.model_validate_json(
+            canonical_message(cleanup_children[0].payload), strict=True
+        )
+        assert cleanup_payload.run_id == start.owner_id
+        assert cleanup_payload.target_runtime_id == start.owner_id
+        assert cleanup_payload.plan_digest == start.plan_digest
+        assert cleanup_payload.run_generation == 1
+        assert cleanup_payload.cancel_pending_start is True
         assert _required(session.get(RecipeRun, start.owner_id)).state == "stopping"
 
 
@@ -5612,15 +5823,24 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
             future.result(timeout=10)
 
     with sessions() as session:
-        cleanup = session.scalar(
-            select(Job).where(
-                Job.kind == "recipe.stop",
-                Job.payload["owner_id"].as_string() == start.owner_id,
+        cleanups = tuple(
+            session.scalars(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"].as_string() == start.owner_id,
+                )
             )
         )
-        assert cleanup is not None
+        assert len(cleanups) == 1
+        cleanup = cleanups[0]
         assert _required(session.get(RecipeRun, start.owner_id)).state == "stopping"
         assert set(cleanup.targets) == set(nodes)
+        stop_payloads = _typed_stop_payloads(cleanup.payload)
+        assert len(stop_payloads) == len(nodes)
+        assert {stop.run_id for stop in stop_payloads} == {start.owner_id}
+        assert {stop.target_runtime_id for stop in stop_payloads} == {start.owner_id}
+        assert {stop.run_generation for stop in stop_payloads} == {1}
+        assert all(stop.cancel_pending_start for stop in stop_payloads)
 
 
 def test_postgres_disjoint_stops_serialize_one_route_candidate(
@@ -5678,6 +5898,24 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
     assert len(set(operation_ids)) == 2
     assert publisher.aliases[-1] == ()
     with sessions() as session:
+        stop_jobs = tuple(
+            session.scalars(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"]
+                    .as_string()
+                    .in_((first.owner_id, second_run_id)),
+                )
+            )
+        )
+        assert len(stop_jobs) == 2
+        for stop_job in stop_jobs:
+            stop_payloads = _typed_stop_payloads(stop_job.payload)
+            run_id = stop_job.payload["owner_id"]
+            assert len(stop_payloads) == len(nodes)
+            assert {stop.run_id for stop in stop_payloads} == {run_id}
+            assert {stop.target_runtime_id for stop in stop_payloads} == {run_id}
+            assert all(stop.cancel_pending_start for stop in stop_payloads)
         assert [
             (
                 _required(session.get(RecipeRun, run_id)).state,
