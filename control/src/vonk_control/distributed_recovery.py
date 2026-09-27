@@ -630,7 +630,8 @@ def _singleton_recovery_authority(
             )
         if hooks:
             raise DistributedLifecycleError(
-                f"singleton recovery does not replay the recipe {hook_name} hook"
+                f"singleton recovery does not replay the recipe {hook_name} hook; "
+                "reconcile its effects and submit a new authorized run"
             )
     stop_timeout = (
         lifecycle.get("stop_timeout_seconds")
@@ -1418,6 +1419,17 @@ def _recovery_authority(
     )
     if readiness is None:
         return None
+    for hook_name in ("pre_start", "post_stop"):
+        hooks = lifecycle.get(hook_name, [])
+        if not isinstance(hooks, list):
+            raise DistributedLifecycleError(
+                "distributed recovery lifecycle authority is invalid"
+            )
+        if hooks:
+            raise DistributedLifecycleError(
+                f"distributed recovery does not replay the recipe {hook_name} "
+                "hook; reconcile its effects and submit a new authorized run"
+            )
     failure = lifecycle.get("failure")
     if (
         not isinstance(failure, Mapping)
