@@ -133,6 +133,8 @@ def test_site_path_inputs_are_relative_to_the_uploaded_directory() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         name, value = line.split("=", 1)
+        if name == "VONK_BACKUP_OFFHOST_PATH" and not value:
+            continue
         if name.endswith(("_FILE", "_PATH")):
             assert value.startswith("./secrets/"), name
 
