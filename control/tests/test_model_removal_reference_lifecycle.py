@@ -23,6 +23,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
+    FleetProfileSelection,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
@@ -171,6 +172,7 @@ def test_model_removal_reference_scan_failure_rolls_back_and_same_key_recovers(
         # Remove the actual owner tables queried by the production scanner.
         # The owner must turn this incomplete reference observation into a
         # typed blocker; it may not treat the unavailable scan as an empty set.
+        cast(Table, FleetProfileSelection.__table__).drop(postgres_engine)
         cast(Table, FleetProfileApplication.__table__).drop(postgres_engine)
         cast(Table, FleetProfile.__table__).drop(postgres_engine)
         with pytest.raises(ModelCacheConflict) as unavailable:
