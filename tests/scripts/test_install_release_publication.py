@@ -2608,6 +2608,7 @@ def test_public_cli_endpoint_verifies_the_signed_wheel_before_uv_install(
         "VONK_TEST_PUBLIC": str(destination),
         "VONK_TEST_UV_RECEIPT": str(receipt),
         "HOME": str(tmp_path / "home"),
+        "XDG_CONFIG_HOME": str(tmp_path / "home/.config"),
     }
 
     result = subprocess.run(
