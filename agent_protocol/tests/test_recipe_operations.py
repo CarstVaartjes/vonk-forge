@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from vonk_agent_protocol import (
     AgentOperation,
@@ -7,6 +10,7 @@ from vonk_agent_protocol import (
     RecipeOperationRequest,
     RecipeReconcilePayload,
     RecipeReconcileResult,
+    RecipeStopPayload,
     RecipeStopResult,
     RecipeUninstallResult,
     parse_recipe_operation_result,
@@ -28,11 +32,30 @@ RECONCILE = {
     "recipe_content_sha256": RECIPE_DIGEST,
     "compiled_spec_canonical_sha256": "e" * 64,
 }
-STOP = {
-    "schema_version": 1,
-    "run_id": RUN_ID,
-    "plan_digest": PLAN_DIGEST,
-}
+STOP = RecipeStopPayload.model_validate(
+    {
+        "schema_version": 2,
+        "run_id": RUN_ID,
+        "target_runtime_id": RUN_ID,
+        "run_generation": 1,
+        "node_id": NODE_ID,
+        "installation_id": INSTALLATION_ID,
+        "recipe_revision_id": "00000000-0000-4000-8000-000000000004",
+        "recipe_content_sha256": RECIPE_DIGEST,
+        "mapping_id": "00000000-0000-4000-8000-000000000005",
+        "mapping_generation": 1,
+        "plan_digest": PLAN_DIGEST,
+        "rank": 0,
+        "role": "entrypoint",
+        "world_size": 1,
+        "compiled_execution_plan": json.loads(
+            (
+                Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json"
+            ).read_text(encoding="utf-8")
+        ),
+        "cancel_pending_start": False,
+    }
+).model_dump(mode="json")
 UNINSTALL = {
     "schema_version": 1,
     "installation_id": INSTALLATION_ID,
@@ -85,7 +108,9 @@ def test_uninstall_cleanup_key_is_required_and_nullable() -> None:
     assert parsed.cleanup_model_content_sha256 is None
 
 
-def test_reconciliation_payload_requires_exact_node_and_original_install_identity() -> None:
+def test_reconciliation_payload_requires_exact_node_and_original_install_identity() -> (
+    None
+):
     parsed = RecipeOperationRequest.parse(AgentOperation.RECIPE_RECONCILE, RECONCILE)
     assert isinstance(parsed.payload, RecipeReconcilePayload)
     for change in (
@@ -99,9 +124,7 @@ def test_reconciliation_payload_requires_exact_node_and_original_install_identit
                 AgentOperation.RECIPE_RECONCILE, RECONCILE | change
             )
     with pytest.raises(AgentProtocolError):
-        RecipeOperationRequest.parse(
-            AgentOperation.RECIPE_UNINSTALL, RECONCILE
-        )
+        RecipeOperationRequest.parse(AgentOperation.RECIPE_UNINSTALL, RECONCILE)
 
 
 @pytest.mark.parametrize(
