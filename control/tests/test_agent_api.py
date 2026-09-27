@@ -36,6 +36,7 @@ from vonk_agent_protocol import (
     HostHelperSignature,
     InstallVonkDebOperation,
     PackageRollbackAuthority,
+    RecipeStopPayload,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
     SignedPackageObjectReceipt,
@@ -118,11 +119,29 @@ CAPABILITIES = sorted(
         "recipe.uninstall",
     ]
 )
-STOP_PAYLOAD = {
-    "schema_version": 1,
-    "run_id": "00000000-0000-4000-8000-000000000001",
-    "plan_digest": "a" * 64,
-}
+_STOP_PLAN = AgentCompiledExecutionPlan.model_validate_json(
+    (Path(__file__).parent / "fixtures/compiled_workload_v2.json").read_text(
+        encoding="utf-8"
+    )
+)
+STOP_PAYLOAD = RecipeStopPayload(
+    schema_version=2,
+    run_id="00000000-0000-4000-8000-000000000001",
+    target_runtime_id="00000000-0000-4000-8000-000000000001",
+    run_generation=1,
+    node_id=NODE_A,
+    installation_id="00000000-0000-4000-8000-000000000002",
+    recipe_revision_id="00000000-0000-4000-8000-000000000003",
+    recipe_content_sha256=_STOP_PLAN.identity.recipe_revision_sha256,
+    mapping_id="00000000-0000-4000-8000-000000000004",
+    mapping_generation=1,
+    plan_digest=_STOP_PLAN.identity.execution_sha256,
+    rank=_STOP_PLAN.runtime.placement.rank,
+    role=_STOP_PLAN.runtime.placement.role,
+    world_size=_STOP_PLAN.runtime.placement.world_size,
+    compiled_execution_plan=_STOP_PLAN,
+    cancel_pending_start=True,
+).model_dump(mode="json")
 
 
 def image_import_payload(digest: str) -> dict[str, object]:
