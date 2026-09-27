@@ -13,12 +13,12 @@ from vonk_agent_protocol import AgentResult
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import AgentOperation, AgentOperationAttempt, Job
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs_postgres import (
     COMMIT,
     NODE_A,
     NODE_B,
-    STOP_PAYLOAD,
     STOP_RESULT,
     parent,
 )
@@ -78,7 +78,13 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
     sessions, clock = postgres_agent_service
     jobs = AgentJobService(sessions, clock=clock)
     request = parent(sessions, clock)
-    operation = jobs.enqueue(request.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    operation = jobs.enqueue(
+        request.id,
+        NODE_A,
+        "recipe.stop",
+        COMMIT,
+        recipe_stop_payload(NODE_A, plan_digest=COMMIT),
+    )
     database_url = postgres_engine.url.render_as_string(hide_password=False)
     first = None
     last = None
@@ -131,7 +137,11 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
     assert claim_agent(jobs, NODE_A, "serial-a", 30, capabilities=_CAPABILITIES) is None
     unrelated_request = parent(sessions, clock)
     unrelated = jobs.enqueue(
-        unrelated_request.id, NODE_B, "recipe.stop", COMMIT, STOP_PAYLOAD
+        unrelated_request.id,
+        NODE_B,
+        "recipe.stop",
+        COMMIT,
+        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
     )
     other_claim = claim_agent(jobs, NODE_B, "serial-b", 30, capabilities=_CAPABILITIES)
     assert other_claim is not None and other_claim.operation_id == unrelated.id
