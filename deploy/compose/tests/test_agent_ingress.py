@@ -957,7 +957,10 @@ def test_tailnet_and_node_backend_routes_are_on_separate_listeners() -> None:
     assert "enroll.test.example" in backend
     assert "agents.test.example" in backend
     assert "registry.test.example" in backend
-    assert "control.test.example" not in backend
+    # Lab mode also serves the browser surface on the LAN HTTPS listener.
+    # Secure remote browser traffic still enters through the separate tailnet
+    # listener above; node-only agent and registry routes remain on 8443.
+    assert "control.test.example" in backend
     assert "litellm:4000" not in backend
     assert "grafana:3000" not in backend
 

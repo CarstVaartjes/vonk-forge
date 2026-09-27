@@ -390,3 +390,16 @@ def test_installer_compose_tracks_channel_for_every_image(
         assert image.endswith(f":{tag}")
         assert "@" not in image
         assert service["pull_policy"] == "always"
+
+
+def test_only_the_configured_postgres_backup_mount_is_allowed(tmp_path: Path) -> None:
+    rendered = _render(tmp_path)
+    document = yaml.safe_load(rendered.read_text(encoding="utf-8"))
+    builder = _load(SCRIPT, "backup_mount_bundle_builder")
+
+    builder._validate_services(document)
+    document["services"]["litellm"].setdefault("volumes", []).append(
+        {"type": "bind", "source": "./untrusted", "target": "/untrusted"}
+    )
+    with pytest.raises(builder.BundleError, match="host bind mount"):
+        builder._validate_services(document)

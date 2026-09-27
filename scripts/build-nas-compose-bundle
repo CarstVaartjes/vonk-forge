@@ -157,6 +157,12 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
                 "target": "/backups",
             }:
                 continue
+            if name == "postgres" and volume == {
+                "type": "bind",
+                "source": "${VONK_BACKUP_OFFHOST_PATH:-./backups-offhost}",
+                "target": "/offhost",
+            }:
+                continue
             source = _volume_source(volume)
             if source is not None and (
                 source.startswith((".", "/", "~")) or "/" in source

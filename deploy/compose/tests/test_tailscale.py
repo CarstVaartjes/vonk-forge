@@ -417,7 +417,11 @@ def test_gateway_hostname_can_be_isolated_for_acceptance() -> None:
 
 
 def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -> None:
-    configurator = _rendered()["services"]["tailscale-configurator"]
+    environment = _environment()
+    environment["COMPOSE_PROFILES"] = "secure-remote"
+    configurator = _rendered(environment=environment)["services"][
+        "tailscale-configurator"
+    ]
 
     assert configurator["image"] == TAILSCALE_IMAGE
     assert configurator["network_mode"] == "service:tailscale-gateway"
@@ -434,7 +438,7 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
     }
     assert configurator["restart"] == "unless-stopped"
     assert configurator["environment"] == {
-        "VONK_SELECTED_PROFILES": "",
+        "VONK_SELECTED_PROFILES": "secure-remote",
         "VONK_TAILSCALE_EPHEMERAL": "false",
         "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
         "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
@@ -500,7 +504,7 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
 
 def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
     environment = _environment()
-    environment["COMPOSE_PROFILES"] = "hermes"
+    environment["COMPOSE_PROFILES"] = "secure-remote,hermes"
     result = subprocess.run(
         [
             "docker",
@@ -518,7 +522,7 @@ def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
     )
     configurator = json.loads(result.stdout)["services"]["tailscale-configurator"]
     assert configurator["environment"] == {
-        "VONK_SELECTED_PROFILES": "hermes",
+        "VONK_SELECTED_PROFILES": "secure-remote,hermes",
         "VONK_TAILSCALE_EPHEMERAL": "false",
         "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
         "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
