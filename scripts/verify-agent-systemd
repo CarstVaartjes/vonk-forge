@@ -136,7 +136,7 @@ def _security(root: Path, name: str) -> dict[str, object]:
     }
 
 
-def _package_helper_socket(root: Path) -> dict[str, str]:
+def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     unit_root = root / "usr/lib/systemd/system"
     agent = ConfigParser(interpolation=None, strict=False)
     helper = ConfigParser(interpolation=None, strict=False)
@@ -191,19 +191,21 @@ def _package_helper_socket(root: Path) -> dict[str, str]:
         or helper["Service"].get("RuntimeDirectoryPreserve") != "restart"
     ):
         raise RuntimeError("package helper runtime ownership boundary is invalid")
-    return {
-        "agent_boot_recovery": {
+    return (
+        {
+            "directory_mode": expected["DirectoryMode"],
+            "group": expected["SocketGroup"],
+            "listen_stream": expected["ListenStream"],
+            "runtime_owner": expected["SocketUser"],
+        },
+        {
             "restart": agent["Service"].get("Restart"),
             "restart_delay": agent["Service"].get("RestartSec"),
             "start_limit_interval": agent["Unit"].get("StartLimitIntervalSec"),
             "private_devices": agent["Service"].get("PrivateDevices"),
             "device_policy": agent["Service"].get("DevicePolicy"),
         },
-        "directory_mode": expected["DirectoryMode"],
-        "group": expected["SocketGroup"],
-        "listen_stream": expected["ListenStream"],
-        "runtime_owner": expected["SocketUser"],
-    }
+    )
 
 
 def verify(repository: Path) -> dict[str, object]:
@@ -211,7 +213,7 @@ def verify(repository: Path) -> dict[str, object]:
         root = Path(temporary)
         _install(root, repository)
         _verify(root)
-        package_helper_socket = _package_helper_socket(root)
+        package_helper_socket, agent_boot_recovery = _package_helper_socket(root)
         units = {name: _security(root, name) for name in SECURITY_UNITS}
         if any(unit["ambient_capabilities"] for unit in units.values()):
             raise RuntimeError("agent services must not receive ambient capabilities")
@@ -222,6 +224,7 @@ def verify(repository: Path) -> dict[str, object]:
                     f"CAP_SYS_PTRACE boundary for {name} does not match policy"
                 )
     return {
+        "agent_boot_recovery": agent_boot_recovery,
         "package_helper_socket": package_helper_socket,
         "schema_version": 1,
         "security_units": units,

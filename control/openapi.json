@@ -6950,7 +6950,6 @@
               "type": "string"
             },
             "maxItems": 32,
-            "minItems": 1,
             "title": "Node Ids",
             "type": "array"
           }

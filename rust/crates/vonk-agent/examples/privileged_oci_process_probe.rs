@@ -16,7 +16,7 @@ use vonk_agent_helper::protocol::{
 };
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, RecipeStartRequest, canonical_json,
-    compiled_oci::{CompiledOciPaths, project},
+    compiled_oci::{CompiledOciPaths, start_arguments_for_paths},
     hex_sha256,
 };
 
@@ -277,39 +277,24 @@ fn production_start_arguments() -> (Vec<String>, RecipeStartRequest) {
     value["runtime_image"]["distribution_object"]["bytes"] = json!(archive_bytes);
     value["runtime_image"]["runtime_interface_label"] = json!("v1");
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    let invocation = project(
-        &plan,
-        &CompiledOciPaths {
-            image_archive: PathBuf::from(format!(
-                "/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"
-            )),
-            model_root: PathBuf::from(
-                "/var/lib/vonk-forge-agent/installations/proof-install/models",
-            ),
-            input_root: None,
-            output_root: PathBuf::from(format!(
-                "/var/lib/vonk-forge-agent/runs/{PROBE_RUN_ID}/outputs"
-            )),
-            cache_root: PathBuf::from(
-                "/var/lib/vonk-forge-agent/installations/proof-install/runtime-cache",
-            ),
-            runtime_spec: PathBuf::from(format!(
-                "/var/lib/vonk-forge-agent/run-metadata/{PROBE_RUN_ID}/runtime.json"
-            )),
-        },
-    )
-    .unwrap();
+    let paths = CompiledOciPaths {
+        image_archive: PathBuf::from(format!(
+            "/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"
+        )),
+        model_root: PathBuf::from("/var/lib/vonk-forge-agent/installations/proof-install/models"),
+        input_root: None,
+        output_root: PathBuf::from(format!(
+            "/var/lib/vonk-forge-agent/runs/{PROBE_RUN_ID}/outputs"
+        )),
+        cache_root: PathBuf::from(
+            "/var/lib/vonk-forge-agent/installations/proof-install/runtime-cache",
+        ),
+        runtime_spec: PathBuf::from(format!(
+            "/var/lib/vonk-forge-agent/run-metadata/{PROBE_RUN_ID}/runtime.json"
+        )),
+    };
+    let arguments = start_arguments_for_paths(&plan, &paths, PROBE_RUN_ID).unwrap();
     let start_plan = typed_start_plan(&plan);
-    let mut arguments = invocation.podman_arguments();
-    arguments.splice(
-        1..1,
-        [
-            "--name".to_owned(),
-            format!("vonk-{PROBE_RUN_ID}"),
-            "--restart".to_owned(),
-            "no".to_owned(),
-        ],
-    );
     (arguments, start_plan)
 }
 

@@ -2253,9 +2253,9 @@ fn validate_recipe_stop(value: &RecipeStopRequest) -> bool {
             == value.recipe_content_sha256
         && (value.rank, value.role.as_str(), value.world_size)
             == (
-                placement.rank as u64,
+                placement.rank,
                 placement.role.as_str(),
-                placement.world_size as u64,
+                placement.world_size,
             )
 }
 
