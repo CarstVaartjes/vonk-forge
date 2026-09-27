@@ -2408,6 +2408,14 @@ class RunNode(Base):
     evidence_digest: Mapped[str | None] = mapped_column(String(64))
     observed_run_generation: Mapped[int | None] = mapped_column(BigInteger)
     observation_receipt_sha256: Mapped[str | None] = mapped_column(String(64))
+    #: Process presence comes only from the consumed signed helper receipt.
+    #: ``None`` means the current exact observation did not prove either state.
+    observation_process_running: Mapped[bool | None] = mapped_column(Boolean)
+    #: Signed observation time is separate from row updates so unrelated
+    #: lifecycle writes cannot make an old absence receipt look fresh.
+    observation_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     observation_endpoint_ready: Mapped[bool | None] = mapped_column(Boolean)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

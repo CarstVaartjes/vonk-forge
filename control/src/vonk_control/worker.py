@@ -452,6 +452,8 @@ def assemble_production_worker(
             routes=recipe_routes,
             agent_jobs=agent_jobs,
             clock=clock,
+            recovery_run_stops=lifecycle,
+            singleton_start_timeout_seconds=distributed_start_timeout_seconds,
         ),
     )
     failure_evidence = FailureEvidenceService(sessions, clock=clock)

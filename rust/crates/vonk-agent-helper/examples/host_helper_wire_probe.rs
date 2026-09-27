@@ -44,13 +44,18 @@ fn main() {
             },
         ) => {
             let signer = Ed25519KeyPair::from_seed_unchecked(&[23; 32]).unwrap();
+            let outcome = match std::env::var("VONK_HOST_HELPER_WIRE_OUTCOME").as_deref() {
+                Ok("running") | Err(_) => RecipeRunObservationOutcome::Running,
+                Ok("not-running") => RecipeRunObservationOutcome::NotRunning,
+                Ok(_) => panic!("unsupported host helper wire outcome"),
+            };
             let receipt = sign_observation_receipt(
                 &signer,
                 &grant.claims.node_id,
                 grant.claims.request_id,
                 request_sha256,
                 observation_identity_sha256,
-                RecipeRunObservationOutcome::Running,
+                outcome,
                 now + 1,
             )
             .unwrap();

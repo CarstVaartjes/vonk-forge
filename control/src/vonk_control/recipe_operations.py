@@ -2303,90 +2303,16 @@ class RecipeOperationService:
                 )
                 run = session.get(RecipeRun, run_id)
                 assert run is not None
-                installation = session.get(RecipeInstallation, run.installation_id)
-                revision = (
-                    _active_recipe_revision(session, admitted.recipe_revision_id)
-                    if installation is not None
-                    else None
-                )
-                if installation is None or revision is None:
-                    raise RecipeOperationConflict("recipe run topology is unavailable")
-                try:
-                    exact_stop_payloads = durable_run_stop_payloads(
-                        session,
-                        run,
-                        admitted.nodes,
-                        run_generation=run.run_generation,
-                        cancel_pending_start=True,
-                        allow_missing_nodes=False,
-                    )
-                except RecipeStopAuthorityError as error:
-                    raise RecipeOperationConflict(
-                        "recipe Stop lacks its exact durable Start authority"
-                    ) from error
-                target_ids = set(admitted.target_node_ids)
-                if not target_ids <= set(exact_stop_payloads):
-                    raise RecipeOperationConflict(
-                        "recipe Stop target lacks its exact durable Start authority"
-                    )
-                stop_order = _topology_order(revision.document, "stop_order")
-                if profile_target_node_ids is not None:
-                    reachable_roles = {
-                        node.role
-                        for node in admitted.nodes
-                        if node.node_id in admitted.target_node_ids
-                    }
-                    stop_order = tuple(
-                        role for role in stop_order if role in reachable_roles
-                    )
-                run.state = "stopping"
-                run.updated_at = now
-                job = self._queue_in_session(
+                job = self._queue_stop_in_session(
                     session,
-                    kind="recipe.stop",
-                    owner_kind="run",
-                    owner_id=run_id,
-                    plan_digest=admitted.plan_digest,
+                    run=run,
+                    admitted=admitted,
                     actor=actor,
                     request_id=request_id,
-                    node_payloads=tuple(
-                        (
-                            node.node_id,
-                            json.loads(
-                                canonical_message(exact_stop_payloads[node.node_id])
-                            ),
-                        )
-                        for node in admitted.nodes
-                        if node.node_id in target_ids
-                    ),
-                    phases=_role_phases(
-                        stop_order,
-                        tuple(
-                            (
-                                node.node_id,
-                                json.loads(
-                                    canonical_message(exact_stop_payloads[node.node_id])
-                                ),
-                            )
-                            for node in admitted.nodes
-                            if node.node_id in admitted.target_node_ids
-                        ),
-                    ),
-                    authority_digest=admitted.authority_digest,
-                    now=now,
                     workload_intent_ordinal=workload_intent_ordinal,
-                    job_context=(
-                        {
-                            "profile_partial_stop": {
-                                "target_node_ids": list(admitted.target_node_ids),
-                                "missing_node_ids": list(admitted.missing_node_ids),
-                            }
-                        }
-                        if admitted.missing_node_ids
-                        else None
-                    ),
+                    now=now,
+                    profile_target_node_ids=profile_target_node_ids,
                 )
-                session.flush()
                 if self._route_publications is not None:
                     self._route_publications.withdraw_run_in_session(
                         session, run_id, prepared=prepared
@@ -2411,6 +2337,201 @@ class RecipeOperationService:
             ) from error
         self._agent_jobs.notify_available()
         return self.get(job.id)
+
+    def queue_recovery_stop_in_session(
+        self,
+        session: Session,
+        run_id: str,
+        *,
+        recovery_context: Mapping[str, object],
+        workload_intent_ordinal: int,
+        now: datetime,
+    ) -> Job:
+        """Queue an accepted-run recovery through the canonical Stop owner.
+
+        The caller already owns the route-publication transaction and has
+        withdrawn this run's route.  Keeping the Stop admission and queue write
+        in that transaction makes duplicate recovery ticks and newer workload
+        intent serialize against the same run and node facts.
+        """
+
+        run = session.get(RecipeRun, run_id, with_for_update=True)
+        if run is None or run.state != "running" or run.route_state != "withdrawn":
+            raise RecipeOperationConflict("recovery Stop scope is no longer current")
+        if type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1:
+            raise RecipeOperationConflict("recovery workload intent is invalid")
+        try:
+            decoded = recovery_start_plan({"recovery": dict(recovery_context)}, now=now)
+        except DistributedLifecycleError as error:
+            raise RecipeOperationConflict("recovery continuation is invalid") from error
+        if decoded is None:
+            raise RecipeOperationConflict("recovery continuation is missing")
+        start_phases, marker = decoded
+        nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == run.id)
+                .order_by(RunNode.rank, RunNode.node_id)
+            )
+        )
+        if (
+            len(nodes) != 1
+            or len(start_phases) != 1
+            or len(start_phases[0]) != 1
+            or start_phases[0][0][0] != nodes[0].node_id
+        ):
+            raise RecipeOperationConflict("recovery Start rank set is invalid")
+        start_payload = start_phases[0][0][1]
+        try:
+            accepted_start = RecipeStartPayload.model_validate_json(
+                canonical_message(start_payload)
+            )
+        except (TypeError, ValueError) as error:
+            raise RecipeOperationConflict(
+                "recovery Start payload is invalid"
+            ) from error
+        if (
+            str(accepted_start.run_id) != run.id
+            or accepted_start.plan_digest != run.plan_digest
+            or accepted_start.run_generation != run.run_generation
+            or accepted_start.run_generation <= 1
+            or accepted_start.rank != 0
+            or accepted_start.role != "entrypoint"
+        ):
+            raise RecipeOperationConflict("recovery Start differs from accepted run")
+        request_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                "vonk:singleton-recovery-stop:"
+                f"{run.id}:{accepted_start.run_generation}:{marker['deadline']}",
+            )
+        )
+        existing = self._idempotent_job_in_session(
+            session,
+            request_id,
+            "recipe.stop",
+            None,
+            owner_kind="run",
+            owner_id=run.id,
+        )
+        if existing is not None:
+            return existing
+        admitted = self._stop_plan_in_session(session, run.id, lock=True)
+        if (
+            not admitted.allowed
+            or admitted.authority_digest != run.plan_digest
+            or {item.node_id for item in admitted.nodes} != {nodes[0].node_id}
+        ):
+            raise RecipeOperationConflict("recovery Stop admission is blocked")
+        try:
+            return self._queue_stop_in_session(
+                session,
+                run=run,
+                admitted=admitted,
+                actor="system:singleton-recovery",
+                request_id=request_id,
+                workload_intent_ordinal=workload_intent_ordinal,
+                now=now,
+                job_context={"recovery": dict(recovery_context)},
+                stop_run_generation=accepted_start.run_generation - 1,
+            )
+        except RecipeOperationConflict as error:
+            if str(error) == "workload intent was superseded":
+                raise DistributedLifecycleError(
+                    "singleton recovery was superseded by a newer workload intent"
+                ) from error
+            raise
+
+    def _queue_stop_in_session(
+        self,
+        session: Session,
+        *,
+        run: RecipeRun,
+        admitted: StopPlan,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None,
+        now: datetime,
+        job_context: Mapping[str, object] | None = None,
+        stop_run_generation: int | None = None,
+        profile_target_node_ids: Sequence[str] | None = None,
+    ) -> Job:
+        installation = session.get(RecipeInstallation, run.installation_id)
+        revision = _active_recipe_revision(session, admitted.recipe_revision_id)
+        if installation is None or revision is None:
+            raise RecipeOperationConflict("recipe run topology is unavailable")
+        generation = (
+            run.run_generation if stop_run_generation is None else stop_run_generation
+        )
+        try:
+            exact_stop_payloads = durable_run_stop_payloads(
+                session,
+                run,
+                admitted.nodes,
+                run_generation=generation,
+                cancel_pending_start=True,
+                allow_missing_nodes=False,
+            )
+        except RecipeStopAuthorityError as error:
+            raise RecipeOperationConflict(
+                "recipe Stop lacks its exact durable Start authority"
+            ) from error
+        target_ids = set(admitted.target_node_ids)
+        if not target_ids or not target_ids <= set(exact_stop_payloads):
+            raise RecipeOperationConflict(
+                "recipe Stop target lacks its exact durable Start authority"
+            )
+        stop_order = _topology_order(revision.document, "stop_order")
+        if profile_target_node_ids is not None:
+            reachable_roles = {
+                node.role for node in admitted.nodes if node.node_id in target_ids
+            }
+            stop_order = tuple(role for role in stop_order if role in reachable_roles)
+        context = dict(job_context or {})
+        if admitted.missing_node_ids:
+            context["profile_partial_stop"] = {
+                "target_node_ids": list(admitted.target_node_ids),
+                "missing_node_ids": list(admitted.missing_node_ids),
+            }
+        run.state = "stopping"
+        run.route_state = "withdrawn"
+        run.updated_at = now
+        job = self._queue_in_session(
+            session,
+            kind="recipe.stop",
+            owner_kind="run",
+            owner_id=run.id,
+            plan_digest=admitted.plan_digest,
+            actor=actor,
+            request_id=request_id,
+            node_payloads=tuple(
+                (
+                    node.node_id,
+                    json.loads(canonical_message(exact_stop_payloads[node.node_id])),
+                )
+                for node in admitted.nodes
+                if node.node_id in target_ids
+            ),
+            phases=_role_phases(
+                stop_order,
+                tuple(
+                    (
+                        node.node_id,
+                        json.loads(
+                            canonical_message(exact_stop_payloads[node.node_id])
+                        ),
+                    )
+                    for node in admitted.nodes
+                    if node.node_id in target_ids
+                ),
+            ),
+            authority_digest=admitted.authority_digest,
+            now=now,
+            workload_intent_ordinal=workload_intent_ordinal,
+            job_context=context or None,
+        )
+        session.flush()
+        return job
 
     def preview_uninstall(self, installation_id: str) -> UninstallPlan:
         with self._sessions() as session:
@@ -4375,6 +4496,8 @@ class RecipeOperationService:
                     ):
                         started_node.observed_run_generation = None
                         started_node.observation_receipt_sha256 = None
+                        started_node.observation_process_running = None
+                        started_node.observation_observed_at = None
                         started_node.observation_endpoint_ready = None
         elif job.kind == "recipe.reconcile":
             installation = session.get(RecipeInstallation, owner_id)
@@ -7834,6 +7957,11 @@ def prepare_exact_recipe_run_observation_nodes(
         for node in assigned:
             if _aware(node.updated_at) < observed_at:
                 node.state = "failed"
+                node.observed_run_generation = None
+                node.observation_receipt_sha256 = None
+                node.observation_process_running = None
+                node.observation_observed_at = None
+                node.observation_endpoint_ready = None
                 node.updated_at = observed_at
     return assigned
 

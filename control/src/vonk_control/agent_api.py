@@ -356,15 +356,9 @@ class AgentGrantRequest(StrictJSONModel):
 class HostRuntimeGrantRequest(AgentGrantRequest):
     action: ContainerRuntimeActionName
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    start_plan_sha256: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-    stop_plan_sha256: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-    run_generation: int | None = Field(
-        default=None, ge=1, le=2**31 - 1, strict=True
-    )
+    start_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    stop_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_generation: int | None = Field(default=None, ge=1, le=2**31 - 1, strict=True)
     runtime_run_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     runtime_target_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     runtime_installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
@@ -1511,6 +1505,8 @@ def install_agent_routes(
                         node.state = "failed"
                         node.observed_run_generation = None
                         node.observation_receipt_sha256 = None
+                        node.observation_process_running = None
+                        node.observation_observed_at = None
                         node.observation_endpoint_ready = None
                         node.updated_at = max(
                             _now(node.updated_at).astimezone(UTC), evidence_observed_at
@@ -1536,18 +1532,26 @@ def install_agent_routes(
                         or (not owner and evidence.endpoint_ready is not None)
                     ):
                         node.state = "failed"
-                    elif node.state != "failed":
-                        node.state = (
-                            "running"
-                            if process_running
-                            and (not owner or evidence.endpoint_ready is True)
-                            else "failed"
+                        node.observed_run_generation = None
+                        node.observation_receipt_sha256 = None
+                        node.observation_process_running = None
+                        node.observation_observed_at = None
+                        node.observation_endpoint_ready = None
+                    else:
+                        if node.state != "failed":
+                            node.state = (
+                                "running"
+                                if process_running
+                                and (not owner or evidence.endpoint_ready is True)
+                                else "failed"
+                            )
+                        node.observed_run_generation = run.run_generation
+                        node.observation_receipt_sha256 = receipt_sha256
+                        node.observation_process_running = process_running
+                        node.observation_observed_at = evidence_observed_at
+                        node.observation_endpoint_ready = (
+                            evidence.endpoint_ready if owner else None
                         )
-                    node.observed_run_generation = run.run_generation
-                    node.observation_receipt_sha256 = receipt_sha256
-                    node.observation_endpoint_ready = (
-                        evidence.endpoint_ready if owner else None
-                    )
                     node.updated_at = max(
                         _now(node.updated_at).astimezone(UTC), evidence_observed_at
                     )
