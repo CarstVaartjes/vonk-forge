@@ -344,6 +344,33 @@ model-quality acceptance. A passing profile preview or cache operation is not
 physical Spark qualification, and SSH must not become an undocumented
 alternative rollout path.
 
+## Whole-fleet profile membership
+
+The current editor saves drafts and a profile load creates an application. The
+target contract has one durable selected-profile record in PostgreSQL pointing
+to the immutable accepted application snapshot. That snapshot is standing
+desired state for the whole enrolled, non-revoked fleet. Do not infer the
+selected record from latest application or audit history; unselected profiles
+do not drive fleet actions.
+
+The Controller worker must reconcile this snapshot when Spark enrollment or
+revocation changes membership; a roster event is not a new operator decision.
+An unassigned or newly enrolled Spark is idle. A removed Spark's independent
+assignment is ignored without changing the accepted snapshot. If its removal
+leaves a multi-Spark model without a required Spark member, stop and confirm
+the remaining reachable ranks, withdraw that model's route, report the missing
+member, and continue unrelated assignments. Do not claim the removed,
+unreachable Spark stopped or count its historical run as live capacity. If the
+same Spark rejoins, reconcile its actual state against the accepted snapshot
+before scheduling work there.
+
+This continuing policy is separate from review and load: a review binds current
+membership and effects, and any membership change before acceptance requires a
+fresh review. Report cleanup only when the exact effect is confirmed; removal
+or unreachability alone does not prove a Spark stopped. These are target
+semantics; the selected-profile authority and membership worker are under test
+and are not yet shipped.
+
 ## Checkout, pull requests, and worktree lifecycle
 
 `/opt/vonk-forge` is the canonical checkout of local `main`, tracking

@@ -47,8 +47,24 @@ dated implementation descriptions do not override the current architecture:
 - “Installed” means the exact recipe image and artifacts exist on every required Spark. “Running” means every assigned rank is ready with fresh authenticated evidence.
 - Multi-Spark recipes are one atomic placement and one operator action, never a collection of independent healthy-looking ranks.
 - Capacity-sensitive actions use fresh inventory and telemetry, explain blockers, and show a server-authored impact preview before mutation.
-- Saved fleet profiles describe complete desired installed/running recipe placements across selected Sparks, using choices from the local cache. Missing model or recipe-image assets are actionable blockers with a prepare-cache action; a profile is admitted only when the exact NAS assets are ready.
-- Applying a ready profile shows live-versus-desired differences, fans exact model and recipe-image preparation to target Sparks in parallel, skips assets already local, safely stops and replaces workloads, and reports durable progress.
+- A profile review shows all current enrolled, non-revoked Sparks; unassigned
+  Sparks are idle. Saving a profile creates a draft, and loading it currently
+  creates one application. A membership change before load acceptance makes
+  the review stale and requires a new review.
+- Target standing profile behavior: one durable selected-profile record in
+  PostgreSQL points to the immutable accepted application snapshot for the
+  whole fleet. Other saved profiles remain drafts; application history alone
+  does not identify the current policy.
+- The Controller worker should reconcile that snapshot after enrollment or
+  revocation without a new operator decision. New Sparks enter idle; a removed
+  Spark's independent assignment is ignored and the snapshot stays intact. If
+  removal breaks a multi-Spark placement, stop and confirm its reachable ranks,
+  withdraw its route, show a missing-member error, and continue unrelated
+  assignments. This ongoing reconciliation has not shipped.
+- Applying a ready profile shows live-versus-desired differences, prepares
+  exact model and recipe-image assets on target Sparks in parallel, skips assets
+  already local, safely stops and replaces workloads, and reports durable
+  progress.
 - NAS reconciliation removes unused local model-cache entries while preserving profile and active-workload references. Spark-local copies are execution caches, not profile authority, and trusted NAS cache entries do not imply repeated full hashing.
 - Individual Spark management and whole-fleet profiles use the same primitives and terminology.
 - This is a clean-slate product. There are no production installations to migrate and no requirement to retain legacy pages, schemas, adapters, routes, or data.

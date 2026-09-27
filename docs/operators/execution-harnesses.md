@@ -80,6 +80,20 @@ readiness. After the route is active, execute the Recipe's declared HTTP
 serving checks with `scripts/qualify-recipe --serving-url URL --evidence-ledger
 PATH` and retain that bounded result separately.
 
+Target ongoing behavior stores one selected-profile record in PostgreSQL,
+pointing to the immutable accepted application snapshot as standing whole-fleet
+desired state. An application history row does not identify the current
+selection. The Controller worker reconciles the snapshot after enrollment or
+revocation without a new operator decision: a new Spark enters idle; a removed
+Spark's independent assignment is ignored without rewriting the snapshot. If
+removal breaks a multi-Spark group, stop and confirm its reachable ranks,
+withdraw the model route, report the missing member, and continue unrelated
+assignments. Do not count a removed Spark's old run as live capacity; reconcile
+its actual state against the snapshot before scheduling if the same node ID
+rejoins. This selected-profile authority and membership worker are under test
+and have not shipped. The initial review still binds current membership; changes
+before acceptance require a fresh review.
+
 Spark-local copies are derived execution caches only. They do not authorize
 profile choices, pin NAS objects, or provide a fallback source for missing
 Controller/NAS assets. NAS garbage collection removes only unreferenced local
