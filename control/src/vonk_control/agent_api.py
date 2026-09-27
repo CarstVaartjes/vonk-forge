@@ -356,15 +356,60 @@ class AgentGrantRequest(StrictJSONModel):
 class HostRuntimeGrantRequest(AgentGrantRequest):
     action: ContainerRuntimeActionName
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    start_plan_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    stop_plan_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    run_generation: int | None = Field(
+        default=None, ge=1, le=2**31 - 1, strict=True
+    )
+    runtime_run_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
+    runtime_target_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
+    runtime_installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     reconciliation_identity: RecipeReconciliationIdentity | None = None
 
     @model_validator(mode="after")
-    def installation_cleanup_binding(self) -> HostRuntimeGrantRequest:
+    def runtime_binding(self) -> HostRuntimeGrantRequest:
         if (self.installation_id is not None) != (
             self.action == "installation-cleanup"
         ):
             raise ValueError("host runtime installation binding is invalid")
+        has_runtime_binding = any(
+            value is not None
+            for value in (
+                self.start_plan_sha256,
+                self.stop_plan_sha256,
+                self.run_generation,
+                self.runtime_run_id,
+                self.runtime_target_id,
+                self.runtime_installation_id,
+            )
+        )
+        if self.action in {"start", "stop"}:
+            expected_plan = (
+                self.start_plan_sha256
+                if self.action == "start"
+                else self.stop_plan_sha256
+            )
+            unexpected_plan = (
+                self.stop_plan_sha256
+                if self.action == "start"
+                else self.start_plan_sha256
+            )
+            if (
+                expected_plan is None
+                or unexpected_plan is not None
+                or self.run_generation is None
+                or self.runtime_run_id is None
+                or self.runtime_target_id is None
+                or self.runtime_installation_id is None
+            ):
+                raise ValueError("host runtime plan binding is invalid")
+        elif has_runtime_binding:
+            raise ValueError("host runtime plan binding does not match the action")
         if self.reconciliation_identity is not None and (
             self.action != "installation-cleanup"
             or self.reconciliation_identity.installation_id != self.installation_id
@@ -1879,6 +1924,12 @@ def install_agent_routes(
                 fence=body.fence,
                 action=ContainerRuntimeAction(body.action),
                 request_sha256=body.request_sha256,
+                start_plan_sha256=body.start_plan_sha256,
+                stop_plan_sha256=body.stop_plan_sha256,
+                run_generation=body.run_generation,
+                runtime_run_id=body.runtime_run_id,
+                runtime_target_id=body.runtime_target_id,
+                runtime_installation_id=body.runtime_installation_id,
                 installation_id=body.installation_id,
                 reconciliation_identity=body.reconciliation_identity,
                 certificate_serial=identity.certificate_serial,

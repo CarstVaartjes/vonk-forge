@@ -945,6 +945,12 @@ class _HostGrantKwargs(TypedDict):
     fence: str
     action: ContainerRuntimeAction
     request_sha256: str
+    start_plan_sha256: str | None
+    stop_plan_sha256: str | None
+    run_generation: int | None
+    runtime_run_id: str | None
+    runtime_target_id: str | None
+    runtime_installation_id: str | None
     certificate_serial: str
     installation_id: str | None
     reconciliation_identity: RecipeReconciliationIdentity | None
@@ -999,6 +1005,12 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
                 attempt=kwargs["attempt"],
                 fence=kwargs["fence"],
                 request_sha256=kwargs["request_sha256"],
+                start_plan_sha256=kwargs["start_plan_sha256"],
+                stop_plan_sha256=kwargs["stop_plan_sha256"],
+                run_generation=kwargs["run_generation"],
+                runtime_run_id=kwargs["runtime_run_id"],
+                runtime_target_id=kwargs["runtime_target_id"],
+                runtime_installation_id=kwargs["runtime_installation_id"],
             )
             return host_issuer.issue_grant(
                 node_id=kwargs["node_id"],
@@ -1064,6 +1076,27 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     object.__setattr__(services, "host_runtime_authority", host)
     object.__setattr__(services, "workload_helper_authority", package)
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    runtime_request = schemas["HostRuntimeGrantRequest"]
+    runtime_properties = runtime_request["properties"]
+    assert {
+        "start_plan_sha256",
+        "stop_plan_sha256",
+        "run_generation",
+        "runtime_run_id",
+        "runtime_target_id",
+        "runtime_installation_id",
+    } <= runtime_properties.keys()
+    assert not (
+        {
+            "start_plan_sha256",
+            "stop_plan_sha256",
+            "run_generation",
+            "runtime_run_id",
+            "runtime_target_id",
+            "runtime_installation_id",
+        }
+        & set(runtime_request.get("required", ()))
+    )
     assert (
         schemas["PackageHelperSignature"]["properties"]["algorithm"]["const"]
         == "ed25519"
@@ -1108,7 +1141,16 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
     host_response = client.post(
         "/agent/host-runtime/grant",
         headers=headers,
-        json=common | {"action": "start", "request_sha256": "a" * 64},
+        json=common
+        | {
+            "action": "start",
+            "request_sha256": "a" * 64,
+            "start_plan_sha256": "b" * 64,
+            "run_generation": 1,
+            "runtime_run_id": "10000000-0000-4000-8000-000000000001",
+            "runtime_target_id": "10000000-0000-4000-8000-000000000001",
+            "runtime_installation_id": "20000000-0000-4000-8000-000000000002",
+        },
     )
     assert host_response.status_code == 200
     assert isinstance(
@@ -1116,6 +1158,9 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         SignedHostHelperGrant,
     )
     assert host.grant_calls[0]["job_id"] == job_id
+    assert host.grant_calls[0]["runtime_target_id"] == (
+        "10000000-0000-4000-8000-000000000001"
+    )
 
     upgrade_response = client.post(
         "/agent/agent-upgrade/grant",
