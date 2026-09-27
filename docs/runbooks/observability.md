@@ -39,8 +39,12 @@ persisted state; never retry a revoked or stale plan.
 
 ## Stale backup
 
-Run the encrypted backup command, then restore it on a disposable host. The age
-metric advances only after encryption and manifest creation succeed.
+Check `vonk_control_backup_successful`, the backup age, and the isolated restore
+verification age. The backup loop writes its success marker only after the
+PostgreSQL dump is restored successfully and the paired CA archive is copied to
+the configured destination. A missing first backup fires
+`ControlBackupNeverSucceeded`; follow [backup and recovery](../postgres-backups.md)
+to inspect logs, storage capacity, and recovery files.
 
 ## Database unavailable
 

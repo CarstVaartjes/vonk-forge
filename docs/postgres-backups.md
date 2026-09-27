@@ -1,21 +1,32 @@
 # PostgreSQL backups and recovery
 
 The PostgreSQL container writes a compressed SQL dump to `./backups/` beside
-`docker-compose.yaml` after startup, then every 24 hours. It retains the newest
-7 successful dumps. Set `VONK_BACKUP_INTERVAL_SECONDS` and `VONK_BACKUP_KEEP` in
-`.env` to change these positive values. Failures appear in the PostgreSQL logs
-and retry after five minutes. An incomplete dump never replaces a completed
-backup. Dumps contain all databases, roles and password hashes: keep the folder
-private and include it in your NAS backup alongside `.env`, `secrets/`, and the
-Compose file. Copy backups off the NAS too. Model and image caches are excluded.
+`docker-compose.yaml` after startup, then every 24 hours. Each dump is tested by
+restoring it into a disposable PostgreSQL cluster before it is marked successful.
+The same run archives the `step-ca-data` volume beside the dump with a matching
+timestamp. The newest 7 PostgreSQL dumps and CA archives are retained. Set
+`VONK_BACKUP_INTERVAL_SECONDS` and `VONK_BACKUP_KEEP` in `.env` to change these
+positive values. Failures appear in the PostgreSQL logs and retry after five
+minutes. A failed restore check does not advance the success marker.
+
+Set `VONK_BACKUP_OFFHOST_PATH` to an already mounted, private host directory to
+copy PostgreSQL dumps and paired CA archives off the NAS. The copy is pruned to
+the same retention count; a failed off-host copy prevents the backup from being
+marked successful. Keep the destination encrypted and access restricted. Dumps
+contain all databases, roles and password hashes. Model and image caches are
+excluded.
 The NAS installer creates `backups/` before Docker starts with mode `0700` and
 the invoking user's ownership. Completed dumps are returned to that owner with
 mode `0600`; do not create the directory as root or replace it with a broader
 shared-permission directory.
 
-A dump is consistent within each database; it is not an atomic snapshot across
-all databases. For a coordinated maintenance snapshot, stop application writers
-before restarting PostgreSQL to trigger its startup backup.
+The step-ca volume is Badger v2, which does not support a live database backup.
+The scheduled archive includes its files but copying a live Badger directory is
+not an application-consistent snapshot. PostgreSQL's `pg_dumpall` is consistent
+within each database but is not an atomic snapshot across databases. For a
+coordinated recovery point, stop issuance and `control-api`, stop `step-ca`, take
+the volume snapshot and PostgreSQL dump, then restart services. Routine archives
+do not replace this coordinated maintenance procedure before restoring CA data.
 
 ## Backup scope
 
@@ -85,14 +96,25 @@ Start with both files and retain this override for subsequent redeployments:
 docker compose -f docker-compose.yaml -f compose.recovery.yaml up -d
 ```
 
-Check PostgreSQL health, Controller login, Fleet and Library records before
-resuming workloads. Database dumps do not restore certificate-authority volumes
-or other service state; retain those separately for complete system recovery.
+Restore the matching `step-ca-postgres-TIMESTAMP.tar.gz` archive to the
+`step-ca-data` volume only while `step-ca` is stopped. Verify CA health and key
+fingerprints as described in the [agent PKI runbook](runbooks/agent-pki.md).
+The online CA and PostgreSQL archives are not a transactional cross-service
+snapshot; use the coordinated maintenance procedure for a consistent recovery
+point. Keep generated secrets and the offline root in their separate protected
+backups. Then check PostgreSQL health, Controller login, Fleet and Library
+records before resuming workloads.
 
 ## Verifying changes
 
-Run the real isolated container test against OrbStack or another test Docker
-engine (it creates and removes only uniquely named disposable containers):
+The running backup loop performs an isolated restore verification after each
+scheduled dump. The API exports `vonk_control_backup_successful` (including
+zero before the first success), `vonk_control_backup_age_seconds`, and
+`vonk_control_backup_restore_verification_age_seconds`. Alerts cover a missing
+first backup, a stale backup, and a restore verification older than 48 hours.
+
+Run the disposable end-to-end container test against OrbStack or another test
+Docker engine (it creates and removes only uniquely named disposable containers):
 
 ```sh
 VONK_RUN_BACKUP_CONTAINER_TEST=1 uv run --project control --with-editable . \

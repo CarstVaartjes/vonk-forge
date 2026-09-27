@@ -146,6 +146,9 @@ class MetricsRegistry:
         self._runnable_job_ages: dict[str, float] = {}
         self._route_state = "unavailable"
         self._backup_age: float | None = None
+        self._backup_successful = False
+        self._backup_restore_verified = False
+        self._backup_restore_verification_age: float | None = None
         self._api_counts: dict[tuple[str, str], int] = defaultdict(int)
         self._api_durations: dict[tuple[str, str], list[float]] = defaultdict(list)
         self._agent_nodes: dict[str, tuple[str, str, float | None, float | None]] = {}
@@ -244,10 +247,31 @@ class MetricsRegistry:
         with self._lock:
             self._route_state = state
 
-    def set_backup_age(self, age_seconds: float) -> None:
-        age = self._number(age_seconds, "backup age")
+    def set_backup_age(self, age_seconds: float | None) -> None:
+        age = None if age_seconds is None else self._number(age_seconds, "backup age")
         with self._lock:
             self._backup_age = age
+
+    def set_backup_successful(self, successful: bool) -> None:
+        if not isinstance(successful, bool):
+            raise TypeError("backup success must be a boolean")
+        with self._lock:
+            self._backup_successful = successful
+
+    def set_backup_restore_verified(self, verified: bool) -> None:
+        if not isinstance(verified, bool):
+            raise TypeError("backup restore verification must be a boolean")
+        with self._lock:
+            self._backup_restore_verified = verified
+
+    def set_backup_restore_verification_age(self, age_seconds: float | None) -> None:
+        age = (
+            None
+            if age_seconds is None
+            else self._number(age_seconds, "backup restore verification age")
+        )
+        with self._lock:
+            self._backup_restore_verification_age = age
 
     def observe_api(
         self, method: str, status_code: int, duration_seconds: float
@@ -328,6 +352,9 @@ class MetricsRegistry:
             runnable_job_ages = dict(self._runnable_job_ages)
             route_state = self._route_state
             backup_age = self._backup_age
+            backup_successful = self._backup_successful
+            backup_restore_verified = self._backup_restore_verified
+            backup_restore_verification_age = self._backup_restore_verification_age
             api_counts = dict(self._api_counts)
             api_durations = {
                 key: tuple(values) for key, values in self._api_durations.items()
@@ -350,6 +377,24 @@ class MetricsRegistry:
                     "# HELP vonk_control_backup_age_seconds Age of the last successful encrypted control backup.",
                     "# TYPE vonk_control_backup_age_seconds gauge",
                     f"vonk_control_backup_age_seconds {backup_age:g}",
+                )
+            )
+        lines.extend(
+            (
+                "# HELP vonk_control_backup_successful Whether a verified control-plane backup has ever completed.",
+                "# TYPE vonk_control_backup_successful gauge",
+                f"vonk_control_backup_successful {int(backup_successful)}",
+                "# HELP vonk_control_backup_restore_verified Whether an isolated restore has ever succeeded.",
+                "# TYPE vonk_control_backup_restore_verified gauge",
+                f"vonk_control_backup_restore_verified {int(backup_restore_verified)}",
+            )
+        )
+        if backup_restore_verification_age is not None:
+            lines.extend(
+                (
+                    "# HELP vonk_control_backup_restore_verification_age_seconds Age of the last successful isolated backup restore verification.",
+                    "# TYPE vonk_control_backup_restore_verification_age_seconds gauge",
+                    f"vonk_control_backup_restore_verification_age_seconds {backup_restore_verification_age:g}",
                 )
             )
         lines.extend(

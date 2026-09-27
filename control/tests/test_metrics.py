@@ -207,6 +207,24 @@ def test_metrics_do_not_contain_request_content_or_credentials() -> None:
     assert "vonk_control_backup_age_seconds 60" in text
 
 
+def test_backup_metrics_report_never_succeeded_and_restore_verification_age() -> None:
+    metrics = MetricsRegistry()
+    text = metrics.render()
+    assert "vonk_control_backup_successful 0" in text
+    assert "vonk_control_backup_restore_verified 0" in text
+    assert "vonk_control_backup_age_seconds" not in text
+
+    metrics.set_backup_successful(True)
+    metrics.set_backup_restore_verified(True)
+    metrics.set_backup_age(120)
+    metrics.set_backup_restore_verification_age(240)
+    text = metrics.render()
+    assert "vonk_control_backup_successful 1" in text
+    assert "vonk_control_backup_restore_verified 1" in text
+    assert "vonk_control_backup_age_seconds 120" in text
+    assert "vonk_control_backup_restore_verification_age_seconds 240" in text
+
+
 def test_metric_labels_are_allowlisted_and_unknown_values_collapse() -> None:
     metrics = MetricsRegistry()
     metrics.set_job_count("user-supplied-unique-kind", "surprise", 3)

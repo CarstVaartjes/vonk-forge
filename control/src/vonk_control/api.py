@@ -1728,12 +1728,35 @@ def production_app() -> FastAPI:
                 ).items()
             )
         backup_marker = settings.state_path / "last-successful-backup.epoch"
+        backup_completed_at: int | None = None
         if backup_marker.is_file() and not backup_marker.is_symlink():
             try:
-                completed_at = int(backup_marker.read_text().strip())
-                metrics.set_backup_age(max(0, int(time.time()) - completed_at))
+                backup_completed_at = int(backup_marker.read_text().strip())
+                if backup_completed_at < 0:
+                    backup_completed_at = None
             except (OSError, ValueError):
                 pass
+        metrics.set_backup_successful(backup_completed_at is not None)
+        metrics.set_backup_age(
+            None
+            if backup_completed_at is None
+            else max(0, int(time.time()) - backup_completed_at)
+        )
+        restore_marker = settings.state_path / "last-backup-restore-verification.epoch"
+        restore_completed_at: int | None = None
+        if restore_marker.is_file() and not restore_marker.is_symlink():
+            try:
+                restore_completed_at = int(restore_marker.read_text().strip())
+                if restore_completed_at < 0:
+                    restore_completed_at = None
+            except (OSError, ValueError):
+                pass
+        metrics.set_backup_restore_verified(restore_completed_at is not None)
+        metrics.set_backup_restore_verification_age(
+            None
+            if restore_completed_at is None
+            else max(0, int(time.time()) - restore_completed_at)
+        )
 
     recipe_library = RecipePackageClient(
         settings.recipe_library_package_url,
