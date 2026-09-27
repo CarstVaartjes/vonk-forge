@@ -24,17 +24,14 @@ from vonk_agent_protocol import (
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import AgentCertificate, AgentNode, Base, Job
 
+from ..recipe_stop_fixtures import recipe_stop_payload
 from ..runtime_identity_support import claim_agent
 
 ROOT = Path(__file__).resolve().parents[3]
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
-STOP_PAYLOAD = {
-    "schema_version": 1,
-    "run_id": "00000000-0000-4000-8000-000000000001",
-    "plan_digest": COMMIT,
-}
+STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
 STOP_RESULT = {"stopped": True}
 PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
@@ -198,10 +195,10 @@ def test_payload_and_result_documents_are_size_limited(service) -> None:
     with sessions.begin() as session:
         session.add(parent)
 
+    oversized_claim = raw_stop_claim({"value": "x" * (MAX_DOCUMENT_BYTES + 1)})
+    oversized_claim["operation"] = "arbitrary.command"
     with pytest.raises(AgentProtocolError, match="large"):
-        AgentClaim.parse(
-            raw_stop_claim(STOP_PAYLOAD | {"value": "x" * (MAX_DOCUMENT_BYTES + 1)})
-        )
+        AgentClaim.parse(oversized_claim)
 
     jobs.enqueue(parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     claim = claim_agent(jobs, NODE_A, "serial-a", 30)

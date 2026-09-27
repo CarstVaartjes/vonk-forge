@@ -45,6 +45,7 @@ from vonk_control.models import (
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
 NODE_ID = "spk_0123456789abcdef0123456789abcdef"
@@ -779,11 +780,7 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
         NODE_ID,
         "recipe.stop",
         "a" * 64,
-        {
-            "schema_version": 1,
-            "run_id": str(uuid.uuid4()),
-            "plan_digest": "a" * 64,
-        },
+        recipe_stop_payload(NODE_ID, plan_digest="a" * 64),
     )
     old_source = AgentSource(
         AgentIdentity(NODE_ID, issued.serial, issued.fingerprint, True), "192.168.1.10"
