@@ -39,6 +39,7 @@ def setup(
     memory_kind="unified",
     memory_pool: MemoryPool = "shared",
     denied_jurisdictions=(),
+    github_release_source=False,
     engine=None,
 ):
     engine = engine or create_engine(f"sqlite:///{tmp_path / 'run.sqlite'}")
@@ -57,6 +58,21 @@ def setup(
         .joinpath("examples", "model-definition.json")
         .read_text()
     )
+    if github_release_source:
+        model_document["access"] = {
+            "visibility": "public",
+            "gated": False,
+            "authentication": "none",
+        }
+        model_document["source"] = {
+            "provider": "github-release",
+            "repository": "https://github.com/valeoai/NAF",
+            "release_id": 264676230,
+            "assets": [
+                {"file_id": item["id"], "asset_id": 320107386 + index}
+                for index, item in enumerate(model_document["files"])
+            ],
+        }
     if denied_jurisdictions:
         model_document["license"]["territorial_restrictions"] = {
             "denied_jurisdictions": list(denied_jurisdictions),

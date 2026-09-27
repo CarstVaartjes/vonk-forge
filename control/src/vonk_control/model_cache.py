@@ -32,13 +32,13 @@ from typing import cast
 from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import OperationMemberProgress, canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
-from vonk_forge_contracts.model import ModelReference
+from vonk_forge_contracts.model import GitHubReleaseSource, ModelReference
 
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -133,6 +133,11 @@ _TRANSFER_CLAIM_SECONDS = 120
 _UPSTREAM_CHECK_SECONDS = 8.0
 _UPSTREAM_CHECK_WORKERS = 4
 _HF_CANONICAL_HOST = "huggingface.co"
+_GITHUB_API_HOST = "api.github.com"
+_GITHUB_USER_AGENT = "vonk-forge/0.1.1"
+_GITHUB_RELEASE_ASSET_HOST = "release-assets.githubusercontent.com"
+_MAX_GITHUB_RELEASE_METADATA_BYTES = 4 * 1024 * 1024
+_MAX_GITHUB_ERROR_METADATA_BYTES = 64 * 1024
 _USE_MANIFEST_BYTES = object()
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 _LOGGER = logging.getLogger(__name__)
@@ -380,6 +385,35 @@ class ArtifactSpec:
         )
         _validate_artifact(result)
         return result
+
+
+class _GitHubReleaseAssetMetadata(BaseModel):
+    """Required GitHub release asset fields; provider extensions stay allowed."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+    id: StrictInt
+    name: StrictStr
+    size: StrictInt
+    state: StrictStr
+    digest: StrictStr | None = None
+
+
+class _GitHubReleaseMetadata(BaseModel):
+    """Required release fields used by cache verification."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+    id: StrictInt
+    assets: list[_GitHubReleaseAssetMetadata]
+
+
+class _GitHubErrorMetadata(BaseModel):
+    """Bounded GitHub error fields used only to recognize rate limiting."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+    message: StrictStr
 
 
 @dataclass(frozen=True, slots=True)
@@ -764,7 +798,13 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or "\\" in value.path
         or "\x00" in value.path
         or any(part in {"", ".", ".."} for part in value.path.split("/"))
-        or value.kind not in {"huggingface.file", "http.file", "file"}
+        or value.kind
+        not in {
+            "huggingface.file",
+            "github-release.asset",
+            "http.file",
+            "file",
+        }
         or len(value.sha256) != _DIGEST_LENGTH
         or value.sha256 != value.sha256.lower()
         or not _is_hex(value.sha256)
@@ -794,6 +834,8 @@ def _validate_artifact(value: ArtifactSpec) -> None:
             "remote cache artifacts require an immutable revision",
         )
     _validate_source(value.source)
+    if value.kind == "github-release.asset":
+        _github_release_asset_binding(value)
 
 
 def _validate_manifest(value: ArtifactSetManifest) -> None:
@@ -952,6 +994,23 @@ def _source_for_catalog_artifact(
         )
     elif kind == "http.file":
         source = repository
+    elif kind == "github-release.asset":
+        release_id = artifact.get("release_id")
+        asset_id = artifact.get("asset_id")
+        owner_and_name = _github_repository_parts(repository)
+        if (
+            type(release_id) is not int
+            or release_id < 1
+            or type(asset_id) is not int
+            or asset_id < 1
+        ):
+            raise ModelCacheResolutionError(
+                "model_cache.source_invalid",
+                "catalog GitHub release asset identity is invalid",
+            )
+        owner, name = owner_and_name
+        revision = f"github-release:{release_id}"
+        source = f"https://{_GITHUB_API_HOST}/repos/{owner}/{name}/releases/assets/{asset_id}"
     else:
         raise ModelCacheResolutionError(
             "model_cache.source_unsupported",
@@ -968,6 +1027,68 @@ def _valid_repository(value: str) -> bool:
             value,
         )
     )
+
+
+def _github_repository_parts(repository: str) -> tuple[str, str]:
+    """Validate and split the canonical HTTPS GitHub repository URL."""
+
+    try:
+        # Reuse the current published contract's repository validator instead
+        # of keeping a second URL policy for persisted artifact locators.
+        GitHubReleaseSource.canonical_github_repository(repository)
+        parsed = urlsplit(repository)
+    except (TypeError, ValueError, ValidationError) as error:
+        raise ModelCacheResolutionError(
+            "model_cache.source_invalid", "catalog GitHub repository is invalid"
+        ) from error
+    parts = parsed.path.removeprefix("/").split("/")
+    if len(parts) != 2 or parsed.path != f"/{parts[0]}/{parts[1]}":
+        raise ModelCacheResolutionError(
+            "model_cache.source_invalid", "catalog GitHub repository is invalid"
+        )
+    return parts[0], parts[1]
+
+
+def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, str]:
+    """Validate that a persisted GitHub source binds one exact release asset."""
+
+    if spec.kind != "github-release.asset" or not isinstance(spec.repository, str):
+        raise ModelCacheResolutionError(
+            "model_cache.source_invalid", "GitHub release asset identity is invalid"
+        )
+    owner, name = _github_repository_parts(spec.repository)
+    revision_match = (
+        re.fullmatch(r"github-release:([1-9][0-9]*)", spec.revision)
+        if isinstance(spec.revision, str)
+        else None
+    )
+    try:
+        parsed = urlsplit(spec.source)
+        port = parsed.port
+    except (TypeError, ValueError) as error:
+        raise ModelCacheResolutionError(
+            "model_cache.source_invalid", "GitHub release asset URL is invalid"
+        ) from error
+    expected_prefix = f"/repos/{owner}/{name}/releases/assets/"
+    asset_id_text = parsed.path.removeprefix(expected_prefix)
+    if (
+        revision_match is None
+        or parsed.scheme != "https"
+        or parsed.hostname != _GITHUB_API_HOST
+        or parsed.netloc != _GITHUB_API_HOST
+        or port is not None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.startswith(expected_prefix)
+        or re.fullmatch(r"[1-9][0-9]*", asset_id_text) is None
+        or spec.source != f"https://{_GITHUB_API_HOST}{expected_prefix}{asset_id_text}"
+    ):
+        raise ModelCacheResolutionError(
+            "model_cache.source_invalid", "GitHub release asset URL is invalid"
+        )
+    return int(revision_match.group(1)), int(asset_id_text), owner, name
 
 
 def _datetime(value: datetime) -> datetime:
@@ -1056,22 +1177,39 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[dict[str, o
             "model_cache.model_definition_invalid",
             "canonical model definition is invalid",
         ) from error
-    repository = definition.source.repository
-    revision = definition.source.revision
+    if isinstance(definition.source, GitHubReleaseSource):
+        if definition.access.visibility != "public":
+            raise ModelCacheResolutionError(
+                "model_cache.source_untrusted",
+                "anonymous GitHub release downloads require a public model",
+            )
+        repository = definition.source.repository
+        revision = f"github-release:{definition.source.release_id}"
+        release_id = definition.source.release_id
+        assets = {asset.file_id: asset.asset_id for asset in definition.source.assets}
+        provider_kind = "github-release.asset"
+    else:
+        repository = definition.source.repository
+        revision = definition.source.revision
+        release_id = None
+        assets = {}
+        provider_kind = "huggingface.file"
     result: list[dict[str, object]] = []
     for value in definition.files:
-        result.append(
-            {
-                "id": value.id,
-                "path": value.path,
-                "kind": "huggingface.file",
-                "repository": repository,
-                "revision": revision,
-                "sha256": value.sha256,
-                "download_bytes": value.size_bytes,
-                "roles": list(value.roles),
-            }
-        )
+        artifact = {
+            "id": value.id,
+            "path": value.path,
+            "kind": provider_kind,
+            "repository": repository,
+            "revision": revision,
+            "sha256": value.sha256,
+            "download_bytes": value.size_bytes,
+            "roles": list(value.roles),
+        }
+        if release_id is not None:
+            artifact["release_id"] = release_id
+            artifact["asset_id"] = assets[value.id]
+        result.append(artifact)
     return result
 
 
@@ -3552,10 +3690,13 @@ class ModelCacheService:
                 "model_cache.artifact_invalid",
                 "catalog artifact integrity metadata is incomplete",
             )
-        if raw_kind != "huggingface.file" and not self._fixture_sources:
+        if (
+            raw_kind not in {"huggingface.file", "github-release.asset"}
+            and not self._fixture_sources
+        ):
             raise ModelCacheResolutionError(
                 "model_cache.source_untrusted",
-                "production cache downloads require a trusted Hugging Face artifact reference",
+                "production cache downloads require a trusted catalog artifact reference",
             )
         source, revision = _source_for_catalog_artifact(value)
         spec = ArtifactSpec(
@@ -4479,6 +4620,10 @@ class ModelCacheService:
             part.unlink(missing_ok=True)
             received = 0
             offset = 0
+        if spec.kind == "github-release.asset":
+            # Exact local bytes are reusable without provider availability.
+            # Missing or partial objects must revalidate the bound release.
+            self._validate_github_release_asset(spec)
         if (
             spec.expected_bytes >= _PARALLEL_RANGE_MIN_BYTES
             and urlsplit(spec.source).scheme in {"http", "https"}
@@ -4553,7 +4698,7 @@ class ModelCacheService:
                     raise
                 if received > durable_received:
                     sync_received()
-        except (OSError, httpx.HTTPError, ModelCacheError):
+        except (OSError, httpx.HTTPError, ModelCacheError) as error:
             self._checkpoint_artifact(
                 spec,
                 operation_id=operation_id,
@@ -4562,6 +4707,14 @@ class ModelCacheService:
                 state="partial",
                 completed_artifacts=completed_artifacts,
             )
+            if spec.kind == "github-release.asset" and isinstance(
+                error, httpx.HTTPError
+            ):
+                raise ModelCacheStorageError(
+                    "model_cache.source_unavailable",
+                    "GitHub release asset transfer failed",
+                    recovery="resume",
+                ) from error
             raise
         finally:
             close()
@@ -4679,6 +4832,20 @@ class ModelCacheService:
             ) from error
 
     def _validate_http_download(self, spec: ArtifactSpec) -> None:
+        if spec.kind == "github-release.asset":
+            try:
+                _github_release_asset_binding(spec)
+                parsed = urlsplit(spec.source)
+            except (ModelCacheResolutionError, TypeError, ValueError) as error:
+                raise ModelCacheStorageError(
+                    "model_cache.source_invalid", "GitHub release asset URL is invalid"
+                ) from error
+            if parsed.scheme != "https" or parsed.hostname != _GITHUB_API_HOST:
+                raise ModelCacheStorageError(
+                    "model_cache.source_untrusted",
+                    "GitHub release downloads must use the canonical GitHub API host",
+                )
+            return
         try:
             parsed = urlsplit(spec.source)
             hostname = parsed.hostname
@@ -4749,11 +4916,13 @@ class ModelCacheService:
                 )
 
             def open_range(start: int, end: int) -> httpx.Response:
-                return self._open_http_response(
-                    client,
-                    spec.source,
-                    {"Range": f"bytes={start}-{end}", "Accept-Encoding": "identity"},
-                )
+                headers = {
+                    "Range": f"bytes={start}-{end}",
+                    "Accept-Encoding": "identity",
+                }
+                if spec.kind == "github-release.asset":
+                    return self._open_github_release_asset(client, spec, headers)
+                return self._open_http_response(client, spec.source, headers)
 
             with self._sample_transfer(
                 spec,
@@ -4782,7 +4951,7 @@ class ModelCacheService:
                     completed_artifacts=completed_artifacts,
                 )
             return completed
-        except (OSError, httpx.HTTPError, ValueError, ModelCacheError):
+        except (OSError, httpx.HTTPError, ValueError, ModelCacheError) as error:
             self._checkpoint_artifact(
                 spec,
                 operation_id=operation_id,
@@ -4793,6 +4962,14 @@ class ModelCacheService:
                 state="partial",
                 completed_artifacts=completed_artifacts,
             )
+            if spec.kind == "github-release.asset" and isinstance(
+                error, httpx.HTTPError
+            ):
+                raise ModelCacheStorageError(
+                    "model_cache.source_unavailable",
+                    "GitHub release asset transfer failed",
+                    recovery="resume",
+                ) from error
             raise
         finally:
             if owns_client and client is not None:
@@ -4845,13 +5022,21 @@ class ModelCacheService:
                 "production cache HTTP clients must not follow redirects",
             )
         headers = {"Range": f"bytes={offset}-"} if offset else {}
-        response = self._open_http_response(client, spec.source, headers)
+        response = (
+            self._open_github_release_asset(client, spec, headers)
+            if spec.kind == "github-release.asset"
+            else self._open_http_response(client, spec.source, headers)
+        )
         effective_offset = offset
         if offset and response.status_code == 200:
             # The server ignored the range request; restart safely rather than
             # appending a complete payload to a checkpoint.
             response.close()
-            response = self._open_http_response(client, spec.source, {})
+            response = (
+                self._open_github_release_asset(client, spec, {})
+                if spec.kind == "github-release.asset"
+                else self._open_http_response(client, spec.source, {})
+            )
             effective_offset = 0
         if response.status_code == 206:
             content_range = response.headers.get("content-range", "")
@@ -4868,6 +5053,263 @@ class ModelCacheService:
             effective_offset,
             lambda: (response.close(), client.close() if owns_client else None),
         )
+
+    @staticmethod
+    def _send_anonymous_github_request(
+        client: httpx.Client, url: str, headers: Mapping[str, str]
+    ) -> httpx.Response:
+        """Send only these headers, ignoring injected client auth and cookies.
+
+        `Client.build_request` merges client headers and the cookie jar. A raw
+        Request plus explicit `auth=None` keeps caller-level credentials away
+        from GitHub and its signed asset CDN.
+        """
+
+        request_headers = dict(headers)
+        request_headers["User-Agent"] = _GITHUB_USER_AGENT
+        request = httpx.Request("GET", url, headers=request_headers)
+        return client.send(
+            request,
+            stream=True,
+            auth=None,
+            follow_redirects=False,
+        )
+
+    def _validate_github_release_asset(self, spec: ArtifactSpec) -> None:
+        release_id, asset_id, owner, name = _github_release_asset_binding(spec)
+        self._validate_http_download(spec)
+        client = self._http
+        owns_client = client is None
+        if client is None:
+            client = httpx.Client(
+                follow_redirects=False,
+                timeout=httpx.Timeout(30.0),
+                trust_env=False,
+            )
+        release_url = (
+            f"https://{_GITHUB_API_HOST}/repos/{owner}/{name}/releases/{release_id}"
+        )
+        response: httpx.Response | None = None
+        try:
+            response = self._send_anonymous_github_request(
+                client,
+                release_url,
+                {
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            self._raise_github_http_status(response, allow_binary=False)
+            declared_size = response.headers.get("content-length")
+            if (
+                declared_size is not None
+                and declared_size.isdigit()
+                and int(declared_size) > _MAX_GITHUB_RELEASE_METADATA_BYTES
+            ):
+                raise ModelCacheStorageError(
+                    "model_cache.release_metadata_invalid",
+                    "GitHub release metadata exceeds the size limit",
+                    recovery="inspect",
+                )
+            raw = bytearray()
+            try:
+                for chunk in response.iter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) > _MAX_GITHUB_RELEASE_METADATA_BYTES:
+                        raise ModelCacheStorageError(
+                            "model_cache.release_metadata_invalid",
+                            "GitHub release metadata exceeds the size limit",
+                            recovery="inspect",
+                        )
+            except httpx.HTTPError as error:
+                raise ModelCacheStorageError(
+                    "model_cache.source_unavailable",
+                    "GitHub release metadata transfer failed",
+                    recovery="resume",
+                ) from error
+            try:
+                release = _GitHubReleaseMetadata.model_validate_json(raw)
+            except (TypeError, ValueError, ValidationError) as error:
+                raise ModelCacheStorageError(
+                    "model_cache.release_metadata_invalid",
+                    "GitHub release metadata does not match the required response fields",
+                    recovery="inspect",
+                ) from error
+            if release.id != release_id:
+                raise ModelCacheStorageError(
+                    "model_cache.release_metadata_invalid",
+                    "GitHub returned metadata for a different or invalid release",
+                    recovery="inspect",
+                )
+            matches = [asset for asset in release.assets if asset.id == asset_id]
+            if len(matches) != 1:
+                raise ModelCacheStorageError(
+                    "model_cache.release_asset_identity_conflict",
+                    "the pinned asset ID is not a unique member of the pinned GitHub release",
+                    recovery="inspect",
+                )
+            asset = matches[0]
+            if (
+                asset.name != Path(spec.path).name
+                or asset.size != spec.expected_bytes
+                or asset.state != "uploaded"
+            ):
+                raise ModelCacheStorageError(
+                    "model_cache.release_asset_identity_conflict",
+                    "the pinned GitHub release asset name, state, or size does not match the model file",
+                    recovery="inspect",
+                )
+            provider_digest = asset.digest
+            if provider_digest is not None and (
+                not isinstance(provider_digest, str)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", provider_digest) is None
+                or provider_digest.removeprefix("sha256:") != spec.sha256
+            ):
+                raise ModelCacheStorageError(
+                    "model_cache.release_asset_identity_conflict",
+                    "the pinned GitHub release asset digest does not match the model file",
+                    recovery="inspect",
+                )
+        finally:
+            if response is not None:
+                response.close()
+            if owns_client:
+                client.close()
+
+    def _raise_github_http_status(
+        self, response: httpx.Response, *, allow_binary: bool
+    ) -> None:
+        status = response.status_code
+        remaining = response.headers.get("x-ratelimit-remaining")
+        retry_after_header = response.headers.get("retry-after")
+        secondary_rate_limit = False
+        if status in {403, 429} and remaining != "0" and not retry_after_header:
+            secondary_rate_limit = self._github_error_reports_secondary_rate_limit(
+                response
+            )
+        rate_limited = status == 429 or (
+            status == 403
+            and (remaining == "0" or bool(retry_after_header) or secondary_rate_limit)
+        )
+        if rate_limited:
+            retry_after = _retry_after_seconds(response.headers, now=self._clock())
+            if secondary_rate_limit and retry_after is None and remaining != "0":
+                # GitHub's secondary-limit guidance asks clients to wait at
+                # least one minute when it supplies no explicit retry hint.
+                retry_after = 60
+            response.close()
+            raise ModelCacheStorageError(
+                "model_cache.rate_limited",
+                "GitHub rate limited this anonymous release download; it will resume automatically",
+                retry_after_seconds=retry_after,
+                recovery="resume",
+            )
+        if response.status_code in ({200, 206} if allow_binary else {200}):
+            return
+        if response.status_code in {301, 302, 303, 307, 308} and allow_binary:
+            return
+        response.close()
+        if 300 <= status < 400:
+            raise ModelCacheStorageError(
+                "model_cache.redirect_forbidden",
+                "GitHub release request used an unsupported redirect status",
+                recovery="inspect",
+            )
+        if status in {401, 403}:
+            raise ModelCacheStorageError(
+                "model_cache.source_access_denied",
+                "GitHub denied anonymous access to the public release source",
+                recovery="inspect",
+            )
+        raise ModelCacheStorageError(
+            "model_cache.source_unavailable",
+            f"GitHub release request failed with status {status}",
+            recovery="resume",
+        )
+
+    @staticmethod
+    def _github_error_reports_secondary_rate_limit(
+        response: httpx.Response,
+    ) -> bool:
+        """Read only a small typed error body; never persist its message."""
+
+        raw = bytearray()
+        try:
+            for chunk in response.iter_bytes(chunk_size=8192):
+                if len(raw) + len(chunk) > _MAX_GITHUB_ERROR_METADATA_BYTES:
+                    return False
+                raw.extend(chunk)
+            error = _GitHubErrorMetadata.model_validate_json(raw)
+        except (httpx.HTTPError, TypeError, ValueError, ValidationError):
+            return False
+        return "secondary rate limit" in error.message.casefold()
+
+    def _open_github_release_asset(
+        self,
+        client: httpx.Client,
+        spec: ArtifactSpec,
+        headers: Mapping[str, str],
+    ) -> httpx.Response:
+        _github_release_asset_binding(spec)
+        self._validate_http_download(spec)
+        request_headers = {
+            "Accept": "application/octet-stream",
+            "X-GitHub-Api-Version": "2022-11-28",
+            **headers,
+        }
+        try:
+            response = self._send_anonymous_github_request(
+                client, spec.source, request_headers
+            )
+        except httpx.HTTPError as error:
+            raise ModelCacheStorageError(
+                "model_cache.source_unavailable",
+                "GitHub release asset request failed",
+                recovery="resume",
+            ) from error
+        self._raise_github_http_status(response, allow_binary=True)
+        if response.status_code not in {301, 302, 303, 307, 308}:
+            return response
+        location = response.headers.get("location")
+        response.close()
+        if not location:
+            raise ModelCacheStorageError(
+                "model_cache.redirect_forbidden",
+                "GitHub asset redirect did not provide a destination",
+                recovery="inspect",
+            )
+        redirected_url = urljoin(spec.source, location)
+        if not _is_allowed_github_release_redirect(redirected_url):
+            raise ModelCacheStorageError(
+                "model_cache.redirect_forbidden",
+                "GitHub asset redirected outside the trusted release CDN",
+                recovery="inspect",
+            )
+        try:
+            response = self._send_anonymous_github_request(
+                client,
+                redirected_url,
+                {
+                    key: value
+                    for key, value in request_headers.items()
+                    if key in {"Range", "Accept-Encoding"}
+                },
+            )
+        except httpx.HTTPError as error:
+            raise ModelCacheStorageError(
+                "model_cache.source_unavailable",
+                "GitHub release asset transfer failed",
+                recovery="resume",
+            ) from error
+        self._raise_github_http_status(response, allow_binary=True)
+        if 300 <= response.status_code < 400:
+            response.close()
+            raise ModelCacheStorageError(
+                "model_cache.redirect_forbidden",
+                "GitHub release CDN returned a second redirect",
+                recovery="inspect",
+            )
+        return response
 
     def _open_http_response(
         self,
@@ -8309,6 +8751,26 @@ def _is_allowed_huggingface_redirect(value: str) -> bool:
         and not parsed.fragment
         and _is_hf_authority(parsed.hostname)
         and not _is_private_host(parsed.hostname)
+    )
+
+
+def _is_allowed_github_release_redirect(value: str) -> bool:
+    """Release downloads use one exact anonymous CDN authority only."""
+
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname == _GITHUB_RELEASE_ASSET_HOST
+        and parsed.netloc == _GITHUB_RELEASE_ASSET_HOST
+        and port is None
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path.startswith("/")
+        and not parsed.fragment
     )
 
 

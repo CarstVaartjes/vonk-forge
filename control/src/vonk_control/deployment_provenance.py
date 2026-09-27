@@ -21,7 +21,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts.model import GitHubReleaseSource
 
+from .catalog_revision_contract import read_catalog_document
 from .deployment_provenance_contract import (
     AgentDeploymentEvidence,
     ControllerBuildMetadata,
@@ -61,6 +63,14 @@ _INVALID_OPERATION_EVIDENCE_RESPONSE_BYTES = 64 * 1024
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _model_source_provenance(model: ModelDefinition) -> tuple[str, str]:
+    """Project the source's real identity without inventing a Git revision."""
+
+    if isinstance(model.source, GitHubReleaseSource):
+        return model.source.repository, f"github-release:{model.source.release_id}"
+    return model.source.repository, model.source.revision
 
 
 def local_deployment_observations() -> DeploymentObservations:
@@ -457,7 +467,10 @@ class DeploymentProvenanceService:
                 )
                 if revision is None:
                     raise ValueError("Installation recipe revision missing")
-                recipe = RecipeDefinition.model_validate(revision.document)
+                recipe_document = read_catalog_document(revision)
+                if not isinstance(recipe_document, RecipeDefinition):
+                    raise TypeError("Installation revision is not a recipe")
+                recipe = recipe_document
                 if content_sha256(recipe) != revision.content_digest:
                     raise ValueError("Persisted recipe identity mismatch")
                 models = []
@@ -476,17 +489,21 @@ class DeploymentProvenanceService:
                     )
                     if model_revision is None:
                         raise ValueError("Referenced model revision missing")
-                    model = ModelDefinition.model_validate(model_revision.document)
+                    model_document = read_catalog_document(model_revision)
+                    if not isinstance(model_document, ModelDefinition):
+                        raise TypeError("Referenced revision is not a model")
+                    model = model_document
                     if content_sha256(model) != reference.content_sha256:
                         raise ValueError("Persisted model identity mismatch")
+                    source_repository, source_revision = _model_source_provenance(model)
                     models.append(
                         DeploymentModelIdentity(
                             selection_id=selection.id,
                             publisher=model.identity.publisher,
                             slug=model.identity.slug,
                             content_sha256=reference.content_sha256,
-                            repository=model.source.repository,
-                            revision=model.source.revision,
+                            repository=source_repository,
+                            revision=source_revision,
                             artifact_key=model_revision.artifact_key,
                         )
                     )

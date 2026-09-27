@@ -1,12 +1,16 @@
+import json
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 
 import pytest
 from sqlalchemy import select
 from vonk_control.deployment_provenance import (
     DeploymentProvenanceService,
+    _model_source_provenance,
     local_deployment_observations,
 )
 from vonk_control.deployment_provenance_contract import (
+    DeploymentModelIdentity,
     DeploymentObservations,
     DeploymentProvenance,
     PhysicalAcceptanceReceipt,
@@ -20,8 +24,46 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.run_admission import RunAdmissionService
+from vonk_forge_contracts import ModelDefinition, content_sha256
 
 from .test_run_admission import setup
+
+
+def test_github_release_provenance_uses_release_identity_without_fake_git_sha():
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
+    )
+    document["source"] = {
+        "provider": "github-release",
+        "repository": "https://github.com/valeoai/NAF",
+        "release_id": 264676230,
+        "assets": [
+            {"file_id": item["id"], "asset_id": index + 100}
+            for index, item in enumerate(document["files"])
+        ],
+    }
+    model = ModelDefinition.model_validate(document)
+    repository, revision = _model_source_provenance(model)
+    identity = DeploymentModelIdentity(
+        selection_id="primary",
+        publisher=model.identity.publisher,
+        slug=model.identity.slug,
+        content_sha256=content_sha256(model),
+        repository=repository,
+        revision=revision,
+    )
+    assert identity.repository == "https://github.com/valeoai/NAF"
+    assert identity.revision == "github-release:264676230"
+
+
+def test_github_release_provenance_reads_serialized_catalog_documents(tmp_path):
+    sessions, now, _, _ = setup(tmp_path, github_release_source=True)
+    result = DeploymentProvenanceService(sessions, clock=lambda: now).snapshot()
+    model = result.workloads[0].models[0]
+    assert model.repository == "https://github.com/valeoai/NAF"
+    assert model.revision == "github-release:264676230"
 
 
 def deployment(tmp_path):
