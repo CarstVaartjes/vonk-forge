@@ -9,13 +9,16 @@ use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde_json::{Value, json};
 use uuid::Uuid;
-use vonk_agent::compiled_oci::{CompiledOciPaths, project};
 use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_helper::protocol::{
     AUTHORITY, GrantClaims, GrantSignature, HostOperation, SignedGrant, canonical_signing_bytes,
     read_frame, write_frame,
 };
-use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest, canonical_json, hex_sha256};
+use vonk_agent_protocol::{
+    HostRuntimeAction, HostRuntimeRequest, canonical_json,
+    compiled_oci::{CompiledOciPaths, project},
+    hex_sha256,
+};
 
 fn env_required(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("{name} is required"))

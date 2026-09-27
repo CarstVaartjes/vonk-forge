@@ -14,11 +14,14 @@ use thiserror::Error;
 use vonk_agent_protocol::{
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES, RecipeReconciliationIdentity,
     RecipeRunInspectionBinding, canonical_json as canonical_protocol_json,
+    compiled_oci::{
+        CompiledOciPaths, hook_arguments as projected_hook_arguments,
+        start_arguments_for_paths as projected_start_arguments_for_paths,
+    },
     hex_sha256 as protocol_sha256,
 };
 
 use crate::{
-    compiled_oci::{CompiledOciPaths, project},
     health::readiness_endpoint,
     inventory::{available_disk_bytes, available_memory_bytes},
     process::{ProcessError, ProcessRunner, Program},
@@ -292,18 +295,7 @@ pub fn start_arguments_for_paths(
     paths: &CompiledOciPaths,
     run_id: &str,
 ) -> Result<Vec<String>, OciError> {
-    let invocation = project(spec, paths).map_err(|_| OciError::Runtime)?;
-    let mut arguments = invocation.podman_arguments();
-    arguments.splice(
-        1..1,
-        [
-            "--name".to_owned(),
-            format!("vonk-{run_id}"),
-            "--restart".to_owned(),
-            "no".to_owned(),
-        ],
-    );
-    Ok(arguments)
+    projected_start_arguments_for_paths(spec, paths, run_id).map_err(|_| OciError::Runtime)
 }
 
 fn runtime_policy() -> Result<RuntimePolicy, OciError> {
@@ -2308,28 +2300,7 @@ fn timestamp_ns(seconds: i64, nanoseconds: i64) -> i128 {
 }
 
 fn hook_arguments(main: &[String], image: &str, hook: &[String]) -> Result<Vec<String>, OciError> {
-    if hook.is_empty() || main.first().map(String::as_str) != Some("run") {
-        return Err(OciError::Runtime);
-    }
-    let image_index = main
-        .iter()
-        .position(|value| value == image)
-        .ok_or(OciError::Runtime)?;
-    let mut arguments = vec!["run".to_owned(), "--rm".to_owned()];
-    let mut index = 1;
-    while index < image_index {
-        match main[index].as_str() {
-            "--detach" => index += 1,
-            "--name" | "--restart" | "--publish" => index += 2,
-            _ => {
-                arguments.push(main[index].clone());
-                index += 1;
-            }
-        }
-    }
-    arguments.push(image.to_owned());
-    arguments.extend(hook.iter().cloned());
-    Ok(arguments)
+    projected_hook_arguments(main, image, hook).map_err(|_| OciError::Runtime)
 }
 
 fn materialize_compiled_models(

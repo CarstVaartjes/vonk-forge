@@ -12,7 +12,7 @@ use std::{
 
 use thiserror::Error;
 
-use crate::workloads::{
+use crate::compiled_execution_plan::{
     CompiledEndpoint, CompiledEnvironmentEntry, CompiledExecutionPlan, CompiledJob,
     CompiledLifecycle, CompiledModelArtifact, CompiledTopology, WorkloadError,
 };
@@ -353,6 +353,58 @@ pub fn project(
     })
 }
 
+/// Build the exact Podman run vector used for one named compiled workload.
+pub fn start_arguments_for_paths(
+    plan: &CompiledExecutionPlan,
+    paths: &CompiledOciPaths,
+    run_id: &str,
+) -> Result<Vec<String>, CompiledOciError> {
+    let mut arguments = project(plan, paths)?.podman_arguments();
+    arguments.splice(
+        1..1,
+        [
+            "--name".to_owned(),
+            format!("vonk-{run_id}"),
+            "--restart".to_owned(),
+            "no".to_owned(),
+        ],
+    );
+    Ok(arguments)
+}
+
+/// Project a lifecycle hook onto the same image and runtime options as the
+/// compiled workload, while removing options that only apply to its main run.
+pub fn hook_arguments(
+    main: &[String],
+    image: &str,
+    hook: &[String],
+) -> Result<Vec<String>, CompiledOciError> {
+    if hook.is_empty() || main.first().map(String::as_str) != Some("run") {
+        return Err(CompiledOciError::Invalid(
+            "invalid lifecycle hook invocation",
+        ));
+    }
+    let image_index = main
+        .iter()
+        .position(|value| value == image)
+        .ok_or(CompiledOciError::Invalid("compiled image is missing"))?;
+    let mut arguments = vec!["run".to_owned(), "--rm".to_owned()];
+    let mut index = 1;
+    while index < image_index {
+        match main[index].as_str() {
+            "--detach" => index += 1,
+            "--name" | "--restart" | "--publish" => index += 2,
+            _ => {
+                arguments.push(main[index].clone());
+                index += 1;
+            }
+        }
+    }
+    arguments.push(image.to_owned());
+    arguments.extend(hook.iter().cloned());
+    Ok(arguments)
+}
+
 fn validate_paths(paths: &CompiledOciPaths) -> Result<(), CompiledOciError> {
     let mut all = vec![
         ("image archive", &paths.image_archive),
@@ -559,7 +611,7 @@ fn path_prefix_conflict(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{CompiledOciError, CompiledOciPaths, OciNetworkMode, project};
-    use crate::workloads::CompiledExecutionPlan;
+    use crate::compiled_execution_plan::CompiledExecutionPlan;
     use serde_json::{Value, json};
     use std::path::PathBuf;
 
@@ -661,8 +713,8 @@ mod tests {
         // byte budget that merely equalled the helper frame budget could not
         // carry the command line the plan itself admitted.
         use super::OciMount;
+        use crate::{HostRuntimeAction, HostRuntimeRequest};
         use uuid::Uuid;
-        use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest};
 
         let plan: CompiledExecutionPlan = serde_json::from_value(fixture()).unwrap();
         let mut invocation = project(&plan, &paths()).unwrap();
@@ -730,9 +782,9 @@ mod tests {
             reconciliation_identity: None,
         };
         assert_eq!(request.validate(), Ok(()));
-        let body = vonk_agent_protocol::canonical_json(&request).unwrap();
+        let body = crate::canonical_json(&request).unwrap();
         assert!(
-            body.len() <= vonk_agent_protocol::MAX_HOST_RUNTIME_REQUEST_BYTES,
+            body.len() <= crate::MAX_HOST_RUNTIME_REQUEST_BYTES,
             "the plan-admitted command line must fit one bounded helper exchange, got {} bytes",
             body.len()
         );
@@ -822,12 +874,12 @@ mod tests {
         let artifact = &mut value["artifacts"][0];
         artifact["file_id"] = json!("tokenizer-config");
         artifact["path"] = json!("tokenizer_config.json");
-        artifact["sha256"] = json!(crate::workloads::EMPTY_SHA256);
+        artifact["sha256"] = json!(crate::compiled_execution_plan::EMPTY_SHA256);
         artifact["size_bytes"] = json!(0);
         artifact["roles"] = json!(["tokenizer"]);
         artifact["distribution_object"] = json!({
             "name":"tokenizer_config.json",
-            "sha256":crate::workloads::EMPTY_SHA256,
+            "sha256":crate::compiled_execution_plan::EMPTY_SHA256,
             "bytes":0,
             "kind":"model"
         });
@@ -921,11 +973,9 @@ mod tests {
             installed_value["security"]["network_mode"] = json!("none");
             installed_value["security"]["host_network"] = json!(false);
             let installed: CompiledExecutionPlan = serde_json::from_value(installed_value).unwrap();
-            assert!(
-                vonk_agent_protocol::compiled_execution_plan::same_installed_workload(
-                    &installed, &plan
-                )
-            );
+            assert!(crate::compiled_execution_plan::same_installed_workload(
+                &installed, &plan
+            ));
             let invocation = project(&plan, &paths()).unwrap();
             let argv = invocation.podman_arguments();
             assert!(invocation.publishes.is_empty());
