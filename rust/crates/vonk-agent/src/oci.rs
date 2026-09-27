@@ -2755,17 +2755,74 @@ mod tests {
         reconciliation_quarantine_path, release_page_cache, unique_plan_artifacts,
         write_installation_metadata, write_reconciliation_checkpoint,
     };
+    use crate::client::AgentHttpClient;
+    use crate::executor::{Executor, RecipeExecutor};
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
     use serde_json::{Value, json};
     use sha2::Digest;
     use std::{
         fs,
+        io::Write,
+        net::TcpListener,
         os::unix::fs::{MetadataExt, PermissionsExt, symlink},
         path::{Path, PathBuf},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        },
+        thread,
         time::Duration,
     };
     use tempfile::tempdir;
     use uuid::Uuid;
+
+    struct GrantRequestCounter {
+        requests: Arc<AtomicUsize>,
+        stopped: Arc<AtomicBool>,
+        worker: thread::JoinHandle<()>,
+    }
+
+    impl GrantRequestCounter {
+        fn new(node_id: &str) -> (AgentHttpClient, Self) {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let requests = Arc::new(AtomicUsize::new(0));
+            let counted_requests = requests.clone();
+            let stopped = Arc::new(AtomicBool::new(false));
+            let stop_worker = stopped.clone();
+            let worker = thread::spawn(move || {
+                while !stop_worker.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            counted_requests.fetch_add(1, Ordering::SeqCst);
+                            let _ = stream.write_all(
+                                b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                            );
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(1));
+                        }
+                        Err(error) => panic!("grant request listener: {error}"),
+                    }
+                }
+            });
+            (
+                AgentHttpClient::for_http_test(&format!("http://{address}/"), node_id),
+                Self {
+                    requests,
+                    stopped,
+                    worker,
+                },
+            )
+        }
+
+        fn finish(self) -> usize {
+            self.stopped.store(true, Ordering::SeqCst);
+            self.worker.join().unwrap();
+            self.requests.load(Ordering::SeqCst)
+        }
+    }
 
     fn reconciliation_identity(
         installation_id: Uuid,
@@ -3420,6 +3477,105 @@ mod tests {
         ));
         restarted_agent.complete_stop(&run_id).unwrap();
         assert!(!metadata.join("post-stop-hooks.started").exists());
+    }
+
+    #[tokio::test]
+    async fn hook_bearing_stop_fails_closed_before_request_or_metadata_release() {
+        let directory = tempdir().unwrap();
+        let data_root = directory.path().join("data");
+        fs::create_dir_all(&data_root).unwrap();
+        let mut plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        plan.lifecycle.post_stop.push(vec!["/bin/true".to_owned()]);
+        let installation_id = Uuid::new_v4().to_string();
+        let (_, installation, plan) =
+            persisted_plan_installation(&data_root, installation_id.clone(), plan);
+        authorize_installation(&installation, &plan.identity.recipe_revision_sha256);
+
+        let run_id = Uuid::new_v4();
+        let run_id_text = run_id.to_string();
+        let runner = NoProcess;
+        let runtime = runtime(&data_root, &runner);
+        runtime
+            .prepare_start(
+                &plan,
+                &installation_id,
+                &run_id_text,
+                &plan.runtime.placement,
+            )
+            .unwrap();
+        let lifecycle = data_root
+            .join("run-metadata")
+            .join(&run_id_text)
+            .join("lifecycle.json");
+        let lifecycle_before = fs::read(&lifecycle).unwrap();
+
+        let node_id = "spk_11111111111111111111111111111111";
+        let stop_payload = json!({
+            "schema_version": 2,
+            "run_id": run_id,
+            "target_runtime_id": run_id,
+            "run_generation": 1,
+            "node_id": node_id,
+            "installation_id": installation_id,
+            "recipe_revision_id": Uuid::new_v4(),
+            "recipe_content_sha256": plan.identity.recipe_revision_sha256,
+            "mapping_id": Uuid::new_v4(),
+            "mapping_generation": 1,
+            "plan_digest": plan.identity.execution_sha256,
+            "rank": plan.runtime.placement.rank,
+            "role": plan.runtime.placement.role,
+            "world_size": plan.runtime.placement.world_size,
+            "compiled_execution_plan": plan,
+            "cancel_pending_start": false
+        });
+        let mut claim: vonk_agent_protocol::AgentClaim = serde_json::from_value(json!({
+            "schema_version": 1,
+            "job_id": run_id,
+            "operation_id": Uuid::new_v4(),
+            "attempt": 1,
+            "fence": Uuid::new_v4(),
+            "node_id": node_id,
+            "operation": "recipe.stop",
+            "authority_revision": "f".repeat(64),
+            "payload_digest": "0".repeat(64),
+            "payload": stop_payload,
+            "deadline": "2099-01-01T00:00:00+00:00"
+        }))
+        .unwrap();
+        claim.payload_digest = protocol_sha256(&canonical_protocol_json(&claim.payload).unwrap());
+        claim.validate().unwrap();
+        vonk_agent_protocol::RecipeOperationRequest::parse(&claim).unwrap();
+
+        let runtime_root = directory.path().join("agent-runtime");
+        fs::create_dir(&runtime_root).unwrap();
+        let (client, grant_requests) = GrantRequestCounter::new(node_id);
+        let executor = RecipeExecutor {
+            client: &client,
+            runtime,
+            runtime_root: &runtime_root,
+            observation_receipt_public_key: [0; 32],
+        };
+        let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(
+            chrono::DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
+        );
+        let (_cancellation_sender, cancellation) = tokio::sync::watch::channel(false);
+        let result = executor.execute(&claim, lease_deadline, cancellation).await;
+
+        assert_eq!(result.state, "waiting-for-operator");
+        assert_eq!(
+            result.body["reason"],
+            "container runtime stop cannot authorize post-stop hooks"
+        );
+        assert_eq!(grant_requests.finish(), 0);
+        assert_eq!(fs::read(&lifecycle).unwrap(), lifecycle_before);
+        assert!(
+            !lifecycle
+                .parent()
+                .unwrap()
+                .join("post-stop-hooks.started")
+                .exists()
+        );
     }
 
     #[test]

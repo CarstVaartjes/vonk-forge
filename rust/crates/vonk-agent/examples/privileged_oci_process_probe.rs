@@ -15,7 +15,7 @@ use vonk_agent_helper::protocol::{
     read_frame, write_frame,
 };
 use vonk_agent_protocol::{
-    HostRuntimeAction, HostRuntimeRequest, canonical_json,
+    HostRuntimeAction, HostRuntimeRequest, RecipeStartRequest, canonical_json,
     compiled_oci::{CompiledOciPaths, project},
     hex_sha256,
 };
@@ -58,22 +58,29 @@ fn main() {
         "start" => HostRuntimeAction::Start,
         other => panic!("unsupported mode {other}"),
     };
-    let arguments = if action == HostRuntimeAction::ImageImport {
-        vec![
-            format!("/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"),
-            archive_sha.clone(),
-            archive_bytes.to_string(),
-            registry_digest.clone(),
-            platform_digest.clone(),
-            image_ref.clone(),
-        ]
+    let (arguments, start_plan) = if action == HostRuntimeAction::ImageImport {
+        (
+            vec![
+                format!("/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"),
+                archive_sha.clone(),
+                archive_bytes.to_string(),
+                registry_digest.clone(),
+                platform_digest.clone(),
+                image_ref.clone(),
+            ],
+            None,
+        )
     } else {
-        start_request_arguments(
-            &archive_sha,
-            &registry_digest,
-            &platform_digest,
-            &image_ref,
-            production_start_arguments(),
+        let (runtime_arguments, plan) = production_start_arguments();
+        (
+            start_request_arguments(
+                &archive_sha,
+                &registry_digest,
+                &platform_digest,
+                &image_ref,
+                runtime_arguments,
+            ),
+            Some(plan),
         )
     };
     let job_id = Uuid::parse_str(PROBE_RUN_ID).unwrap();
@@ -95,9 +102,13 @@ fn main() {
         attempt: 1,
         fence,
         arguments: arguments.clone(),
+        job_plan: None,
         observation: None,
         installation_id: None,
         reconciliation_identity: None,
+        run_generation: start_plan.as_ref().map(|plan| plan.run_generation),
+        start_plan: start_plan.clone(),
+        stop_plan: None,
     };
     request.validate().unwrap();
     let body = canonical_json(&request).unwrap();
@@ -132,6 +143,14 @@ fn main() {
             observation_identity_sha256: None,
             installation_id: None,
             reconciliation_identity: None,
+            start_plan_sha256: start_plan
+                .as_ref()
+                .map(|plan| hex_sha256(&canonical_json(plan).unwrap())),
+            stop_plan_sha256: None,
+            run_generation: start_plan.as_ref().map(|plan| plan.run_generation),
+            runtime_run_id: start_plan.as_ref().map(|plan| plan.run_id),
+            runtime_target_id: start_plan.as_ref().map(|plan| plan.run_id),
+            runtime_installation_id: start_plan.as_ref().map(|plan| plan.installation_id),
         },
     );
     let claims = GrantClaims {
@@ -229,9 +248,11 @@ fn setup_files() {
     println!("helper proof keys and configuration prepared");
 }
 
-fn production_start_arguments() -> Vec<String> {
+fn production_start_arguments() -> (Vec<String>, RecipeStartRequest) {
     let fixture = fs::read_to_string(env_required("VONK_HELPER_FIXTURE")).unwrap();
     let mut value: Value = serde_json::from_str(&fixture).unwrap();
+    value["runtime"]["placement"]["endpoint_address"] = json!("100.100.20.30");
+    value["security"]["network_mode"] = json!("bridge");
     value["runtime"]["executable"] = json!("/opt/vonk/bin/vllm");
     value["runtime"]["argv"] = json!([
         "-c",
@@ -278,6 +299,7 @@ fn production_start_arguments() -> Vec<String> {
         },
     )
     .unwrap();
+    let start_plan = typed_start_plan(&plan);
     let mut arguments = invocation.podman_arguments();
     arguments.splice(
         1..1,
@@ -288,7 +310,37 @@ fn production_start_arguments() -> Vec<String> {
             "no".to_owned(),
         ],
     );
-    arguments
+    (arguments, start_plan)
+}
+
+fn typed_start_plan(plan: &CompiledExecutionPlan) -> RecipeStartRequest {
+    let placement = &plan.runtime.placement;
+    serde_json::from_value(json!({
+        "schema_version": 2,
+        "run_id": PROBE_RUN_ID,
+        "installation_id": "40000000-0000-4000-8000-000000000001",
+        "recipe_revision_id": "40000000-0000-4000-8000-000000000002",
+        "recipe_content_sha256": plan.identity.recipe_revision_sha256,
+        "mapping_id": "40000000-0000-4000-8000-000000000007",
+        "mapping_generation": 1,
+        "image_digest": plan.runtime.image_digest,
+        "plan_digest": plan.identity.execution_sha256,
+        "alias": "helper-process-proof",
+        "rank": placement.rank,
+        "role": placement.role,
+        "port": placement.port,
+        "reserved_memory_bytes": placement.reserved_memory_bytes,
+        "memory_floor_bytes": placement.memory_floor_bytes,
+        "memory_kind": placement.memory_kind.to_string(),
+        "endpoint_address": placement.endpoint_address,
+        "world_size": placement.world_size,
+        "compiled_execution_plan": plan,
+        "local_address": null,
+        "master_address": null,
+        "master_port": null,
+        "run_generation": 1
+    }))
+    .unwrap()
 }
 
 fn start_request_arguments(

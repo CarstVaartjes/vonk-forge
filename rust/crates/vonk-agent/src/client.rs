@@ -24,9 +24,9 @@ use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
     HostHelperContainerRuntimeAction, HostHelperOperation, HostRuntimeAction, HostRuntimeRequest,
     InventoryRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeReconciliationIdentity,
-    RecipeRunInspectionBinding, RecipeRunObservationWire, RecipeRunObservationsWire,
-    SignedHostHelperGrant, canonical_generated_json, canonical_json, hex_sha256, parse_strict,
+    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
+    RecipeRunObservationsWire, SignedHostHelperGrant, canonical_generated_json, canonical_json,
+    hex_sha256, parse_strict,
 };
 
 use crate::{
@@ -707,27 +707,12 @@ impl AgentHttpClient {
     pub async fn host_runtime_grant(
         &self,
         claim: &AgentClaim,
-        action: HostRuntimeAction,
+        request: &HostRuntimeRequest,
         request_sha256: &str,
-        installation_id: Option<uuid::Uuid>,
-        reconciliation_identity: Option<&RecipeReconciliationIdentity>,
     ) -> Result<SignedHostHelperGrant, ClientError> {
-        if claim.node_id != self.node_id || !valid_sha256(request_sha256) || claim.attempt == 0 {
-            return Err(ClientError::Protocol);
-        }
-        let body = canonical_generated_json(&HostRuntimeGrantRequest {
-            node_id: self.node_id.clone(),
-            job_id: claim.job_id,
-            operation_id: claim.operation_id,
-            attempt: claim.attempt,
-            fence: claim.fence,
-            action: host_runtime_grant_action(action),
-            request_sha256: request_sha256.to_owned(),
-            expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
-            installation_id,
-            reconciliation_identity: reconciliation_identity.cloned(),
-        })
-        .map_err(|_| ClientError::Protocol)?;
+        let grant_request =
+            build_host_runtime_grant_request(claim, &self.node_id, request, request_sha256)?;
+        let body = canonical_generated_json(&grant_request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
             .await
@@ -1965,6 +1950,103 @@ impl AgentHttpClient {
         self.controller
             .join(path)
             .map_err(|_| ClientError::Protocol)
+    }
+}
+
+#[derive(Default)]
+struct HostRuntimePlanBinding {
+    start_plan_sha256: Option<String>,
+    stop_plan_sha256: Option<String>,
+    run_generation: Option<u32>,
+    runtime_run_id: Option<uuid::Uuid>,
+    runtime_target_id: Option<uuid::Uuid>,
+    runtime_installation_id: Option<uuid::Uuid>,
+}
+
+fn build_host_runtime_grant_request(
+    claim: &AgentClaim,
+    node_id: &str,
+    request: &HostRuntimeRequest,
+    request_sha256: &str,
+) -> Result<HostRuntimeGrantRequest, ClientError> {
+    request.validate().map_err(|_| ClientError::Protocol)?;
+    let request_body = canonical_json(request).map_err(|_| ClientError::Protocol)?;
+    if claim.node_id != node_id
+        || !valid_sha256(request_sha256)
+        || hex_sha256(&request_body) != request_sha256
+        || claim.attempt == 0
+        || request.job_id != claim.job_id
+        || request.operation_id != claim.operation_id
+        || request.attempt != claim.attempt
+        || request.fence != claim.fence
+    {
+        return Err(ClientError::Protocol);
+    }
+    let plan_binding = host_runtime_plan_binding(request)?;
+    Ok(HostRuntimeGrantRequest {
+        node_id: node_id.to_owned(),
+        job_id: claim.job_id,
+        operation_id: claim.operation_id,
+        attempt: claim.attempt,
+        fence: claim.fence,
+        action: host_runtime_grant_action(request.action),
+        request_sha256: request_sha256.to_owned(),
+        expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
+        installation_id: request.installation_id,
+        reconciliation_identity: request.reconciliation_identity.clone(),
+        start_plan_sha256: plan_binding.start_plan_sha256,
+        stop_plan_sha256: plan_binding.stop_plan_sha256,
+        run_generation: plan_binding.run_generation,
+        runtime_run_id: plan_binding.runtime_run_id,
+        runtime_target_id: plan_binding.runtime_target_id,
+        runtime_installation_id: plan_binding.runtime_installation_id,
+    })
+}
+
+fn host_runtime_plan_binding(
+    request: &HostRuntimeRequest,
+) -> Result<HostRuntimePlanBinding, ClientError> {
+    match request.action {
+        HostRuntimeAction::Start => {
+            if let Some(plan) = request.start_plan.as_ref() {
+                let plan_bytes =
+                    canonical_generated_json(plan).map_err(|_| ClientError::Protocol)?;
+                Ok(HostRuntimePlanBinding {
+                    start_plan_sha256: Some(hex_sha256(&plan_bytes)),
+                    run_generation: Some(plan.run_generation),
+                    runtime_run_id: Some(plan.run_id),
+                    runtime_target_id: Some(plan.run_id),
+                    runtime_installation_id: Some(plan.installation_id),
+                    ..HostRuntimePlanBinding::default()
+                })
+            } else if let Some(plan) = request.job_plan.as_ref() {
+                let plan_bytes =
+                    canonical_generated_json(plan).map_err(|_| ClientError::Protocol)?;
+                Ok(HostRuntimePlanBinding {
+                    start_plan_sha256: Some(hex_sha256(&plan_bytes)),
+                    run_generation: Some(plan.run_generation),
+                    runtime_run_id: Some(plan.run_id),
+                    runtime_target_id: Some(plan.job_id),
+                    runtime_installation_id: Some(plan.installation_id),
+                    ..HostRuntimePlanBinding::default()
+                })
+            } else {
+                Err(ClientError::Protocol)
+            }
+        }
+        HostRuntimeAction::Stop => {
+            let plan = request.stop_plan.as_ref().ok_or(ClientError::Protocol)?;
+            let plan_bytes = canonical_generated_json(plan).map_err(|_| ClientError::Protocol)?;
+            Ok(HostRuntimePlanBinding {
+                stop_plan_sha256: Some(hex_sha256(&plan_bytes)),
+                run_generation: Some(plan.run_generation),
+                runtime_run_id: Some(plan.run_id),
+                runtime_target_id: Some(plan.target_runtime_id),
+                runtime_installation_id: Some(plan.installation_id),
+                ..HostRuntimePlanBinding::default()
+            })
+        }
+        _ => Ok(HostRuntimePlanBinding::default()),
     }
 }
 
@@ -4497,16 +4579,27 @@ mod tests {
             payload: AgentClaimPayload::RecipeImageImportRequest(payload),
             deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         };
+        let runtime_request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::ImageImport,
+            job_id: claim.job_id,
+            operation_id: claim.operation_id,
+            attempt: claim.attempt,
+            fence: claim.fence,
+            arguments: vec!["image-import".to_owned()],
+            job_plan: None,
+            observation: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: None,
+            start_plan: None,
+            stop_plan: None,
+        };
+        let request_sha256 = hex_sha256(&canonical_json(&runtime_request).unwrap());
         let (client, server) = host_runtime_grant_client();
 
         client
-            .host_runtime_grant(
-                &claim,
-                HostRuntimeAction::ImageImport,
-                &"c".repeat(64),
-                None,
-                None,
-            )
+            .host_runtime_grant(&claim, &runtime_request, &request_sha256)
             .await
             .unwrap();
         let request = server.join().unwrap();
@@ -4518,6 +4611,166 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(body).unwrap();
 
         assert_eq!(body["expires_in_seconds"], 10);
+        for field in [
+            "start_plan_sha256",
+            "stop_plan_sha256",
+            "run_generation",
+            "runtime_run_id",
+            "runtime_target_id",
+            "runtime_installation_id",
+        ] {
+            assert!(
+                body.get(field).is_none(),
+                "unused grant field {field} is omitted"
+            );
+        }
+    }
+
+    fn job_run_plan_fixture() -> (Value, vonk_agent_protocol::RecipeJobRunRequest) {
+        let claim: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        let plan = serde_json::from_value(claim["payload"].clone()).unwrap();
+        (claim, plan)
+    }
+
+    #[test]
+    fn job_run_grant_binding_hashes_the_typed_plan_and_keeps_target_distinct() {
+        let (claim, plan) = job_run_plan_fixture();
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Start,
+            job_id: Uuid::parse_str(claim["job_id"].as_str().unwrap()).unwrap(),
+            operation_id: Uuid::parse_str(claim["operation_id"].as_str().unwrap()).unwrap(),
+            attempt: 1,
+            fence: Uuid::parse_str(claim["fence"].as_str().unwrap()).unwrap(),
+            arguments: vec!["job-run".to_owned()],
+            job_plan: Some(plan.clone()),
+            observation: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: Some(plan.run_generation),
+            start_plan: None,
+            stop_plan: None,
+        };
+        request.validate().unwrap();
+
+        let binding = super::host_runtime_plan_binding(&request).unwrap();
+        let plan_sha256 =
+            hex_sha256(&vonk_agent_protocol::canonical_generated_json(&plan).unwrap());
+        assert_eq!(
+            Some(plan_sha256.as_str()),
+            claim["payload_digest"].as_str(),
+            "Rust plan hashing must match the canonical Python claim digest"
+        );
+        assert_eq!(
+            binding.start_plan_sha256.as_deref(),
+            Some(plan_sha256.as_str())
+        );
+        assert_eq!(binding.stop_plan_sha256, None);
+        assert_eq!(binding.run_generation, Some(plan.run_generation));
+        assert_eq!(binding.runtime_run_id, Some(plan.run_id));
+        assert_eq!(binding.runtime_target_id, Some(plan.job_id));
+        assert_ne!(binding.runtime_run_id, binding.runtime_target_id);
+        assert_eq!(binding.runtime_installation_id, Some(plan.installation_id));
+
+        let agent_claim: AgentClaim = serde_json::from_value(claim.clone()).unwrap();
+        let grant_request = super::build_host_runtime_grant_request(
+            &agent_claim,
+            &agent_claim.node_id,
+            &request,
+            &hex_sha256(&canonical_json(&request).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            grant_request.start_plan_sha256.as_deref(),
+            Some(plan_sha256.as_str())
+        );
+        assert_eq!(grant_request.stop_plan_sha256, None);
+        assert_eq!(grant_request.run_generation, Some(plan.run_generation));
+        assert_eq!(grant_request.runtime_run_id, Some(plan.run_id));
+        assert_eq!(grant_request.runtime_target_id, Some(plan.job_id));
+        assert_eq!(
+            grant_request.runtime_installation_id,
+            Some(plan.installation_id)
+        );
+    }
+
+    #[test]
+    fn job_run_stop_grant_binding_uses_exact_stop_target_and_logical_parent() {
+        let (claim, plan) = job_run_plan_fixture();
+        let stop_plan: vonk_agent_protocol::generated::RecipeStopPayload =
+            serde_json::from_value(json!({
+                "schema_version": 2,
+                "run_id": plan.run_id,
+                "target_runtime_id": plan.job_id,
+                "run_generation": plan.run_generation,
+                "node_id": claim["node_id"],
+                "installation_id": plan.installation_id,
+                "recipe_revision_id": plan.recipe_revision_id,
+                "recipe_content_sha256": plan.recipe_content_sha256,
+                "mapping_id": plan.mapping_id,
+                "mapping_generation": plan.mapping_generation,
+                "plan_digest": plan.plan_digest,
+                "rank": plan.rank,
+                "role": plan.role,
+                "world_size": plan.compiled_execution_plan.runtime.placement.world_size,
+                "compiled_execution_plan": plan.compiled_execution_plan,
+                "cancel_pending_start": false
+            }))
+            .unwrap();
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Stop,
+            job_id: Uuid::parse_str(claim["job_id"].as_str().unwrap()).unwrap(),
+            operation_id: Uuid::parse_str(claim["operation_id"].as_str().unwrap()).unwrap(),
+            attempt: 1,
+            fence: Uuid::parse_str(claim["fence"].as_str().unwrap()).unwrap(),
+            arguments: Vec::new(),
+            job_plan: None,
+            observation: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: Some(stop_plan.run_generation),
+            start_plan: None,
+            stop_plan: Some(stop_plan.clone()),
+        };
+        request.validate().unwrap();
+
+        let binding = super::host_runtime_plan_binding(&request).unwrap();
+        let stop_sha256 =
+            hex_sha256(&vonk_agent_protocol::canonical_generated_json(&stop_plan).unwrap());
+        assert_eq!(binding.start_plan_sha256, None);
+        assert_eq!(
+            binding.stop_plan_sha256.as_deref(),
+            Some(stop_sha256.as_str())
+        );
+        assert_eq!(binding.run_generation, Some(plan.run_generation));
+        assert_eq!(binding.runtime_run_id, Some(plan.run_id));
+        assert_eq!(binding.runtime_target_id, Some(plan.job_id));
+        assert_eq!(binding.runtime_installation_id, Some(plan.installation_id));
+
+        let agent_claim: AgentClaim = serde_json::from_value(claim.clone()).unwrap();
+        let grant_request = super::build_host_runtime_grant_request(
+            &agent_claim,
+            &agent_claim.node_id,
+            &request,
+            &hex_sha256(&canonical_json(&request).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(grant_request.start_plan_sha256, None);
+        assert_eq!(
+            grant_request.stop_plan_sha256.as_deref(),
+            Some(stop_sha256.as_str())
+        );
+        assert_eq!(grant_request.run_generation, Some(plan.run_generation));
+        assert_eq!(grant_request.runtime_run_id, Some(plan.run_id));
+        assert_eq!(grant_request.runtime_target_id, Some(plan.job_id));
+        assert_eq!(
+            grant_request.runtime_installation_id,
+            Some(plan.installation_id)
+        );
     }
 
     #[tokio::test]
@@ -4531,9 +4784,13 @@ mod tests {
             attempt: binding.run_generation,
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
+            job_plan: None,
             observation: Some(binding.clone()),
             installation_id: None,
             reconciliation_identity: None,
+            run_generation: None,
+            start_plan: None,
+            stop_plan: None,
         };
         let digest = hex_sha256(&canonical_json(&request).unwrap());
         let request_id = Uuid::new_v4();
@@ -4686,6 +4943,12 @@ mod tests {
                             observation_identity_sha256: Some("e".repeat(64)),
                             installation_id: None,
                             reconciliation_identity: None,
+                            start_plan_sha256: None,
+                            stop_plan_sha256: None,
+                            run_generation: None,
+                            runtime_run_id: None,
+                            runtime_target_id: None,
+                            runtime_installation_id: None,
                         },
                     ),
                 },

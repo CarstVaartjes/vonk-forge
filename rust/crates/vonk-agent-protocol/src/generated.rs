@@ -2340,6 +2340,18 @@ pub struct HostRuntimeGrantRequest {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub run_generation: ::std::option::Option<u32>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub runtime_run_id: ::std::option::Option<::uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub runtime_target_id: ::std::option::Option<::uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub start_plan_sha256: ::std::option::Option<::std::string::String>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub stop_plan_sha256: ::std::option::Option<::std::string::String>,
 }
 #[derive(
     ::serde::Deserialize,
@@ -8873,6 +8885,18 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub run_generation: ::std::option::Option<u32>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub runtime_run_id: ::std::option::Option<::uuid::Uuid>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub runtime_target_id: ::std::option::Option<::uuid::Uuid>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub start_plan_sha256: ::std::option::Option<::std::string::String>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub stop_plan_sha256: ::std::option::Option<::std::string::String>,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
@@ -8886,6 +8910,12 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             operation_id: raw.operation_id,
             reconciliation_identity: raw.reconciliation_identity,
             request_sha256: raw.request_sha256,
+            run_generation: raw.run_generation,
+            runtime_installation_id: raw.runtime_installation_id,
+            runtime_run_id: raw.runtime_run_id,
+            runtime_target_id: raw.runtime_target_id,
+            start_plan_sha256: raw.start_plan_sha256,
+            stop_plan_sha256: raw.stop_plan_sha256,
         })
     }
 }

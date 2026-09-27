@@ -1753,6 +1753,12 @@ mod recipe_start_tests {
             missing_start.validate(),
             Err(HostRuntimeRequestRule::PlanBinding)
         );
+        let mut mismatched_start_generation = request.clone();
+        mismatched_start_generation.run_generation = Some(start.run_generation + 1);
+        assert_eq!(
+            mismatched_start_generation.validate(),
+            Err(HostRuntimeRequestRule::PlanBinding)
+        );
 
         let stop = parsed_stop(stop_payload()).unwrap();
         let stop_request = HostRuntimeRequest {
@@ -1783,6 +1789,49 @@ mod recipe_start_tests {
         assert_eq!(
             argv_stop.validate(),
             Err(HostRuntimeRequestRule::ArgumentsPresence)
+        );
+    }
+
+    #[test]
+    fn typed_job_run_start_requires_the_exact_job_plan_and_generation() {
+        let claim: AgentClaim = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        let generated::AgentClaimPayload::RecipeJobRunRequest(job) = &claim.payload else {
+            panic!("expected canonical JobRun claim");
+        };
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Start,
+            job_id: claim.job_id,
+            operation_id: claim.operation_id,
+            attempt: claim.attempt,
+            fence: claim.fence,
+            arguments: vec!["sha256:image".to_owned(), "job".to_owned()],
+            job_plan: Some(job.clone()),
+            observation: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: Some(job.run_generation),
+            start_plan: None,
+            stop_plan: None,
+        };
+        assert!(request.validate().is_ok());
+        assert_ne!(job.run_id, job.job_id);
+
+        let mut mismatched_generation = request.clone();
+        mismatched_generation.run_generation = Some(job.run_generation + 1);
+        assert_eq!(
+            mismatched_generation.validate(),
+            Err(HostRuntimeRequestRule::PlanBinding)
+        );
+
+        let mut duplicate_plan = request;
+        duplicate_plan.start_plan = Some(valid_start_plan());
+        assert_eq!(
+            duplicate_plan.validate(),
+            Err(HostRuntimeRequestRule::PlanBinding)
         );
     }
 

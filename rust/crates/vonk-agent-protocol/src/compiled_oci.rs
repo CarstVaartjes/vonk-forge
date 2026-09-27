@@ -1022,6 +1022,7 @@ mod tests {
             "the live many-artifact command must exceed the old cap, got {count}"
         );
 
+        let start_plan = crate::recipe_start_tests::valid_start_plan();
         let request = HostRuntimeRequest {
             schema_version: 1,
             action: HostRuntimeAction::Start,
@@ -1030,9 +1031,13 @@ mod tests {
             attempt: 1,
             fence: Uuid::new_v4(),
             arguments,
+            job_plan: None,
             observation: None,
             installation_id: None,
             reconciliation_identity: None,
+            run_generation: Some(start_plan.run_generation),
+            start_plan: Some(start_plan),
+            stop_plan: None,
         };
         assert_eq!(request.validate(), Ok(()));
         let body = crate::canonical_json(&request).unwrap();
