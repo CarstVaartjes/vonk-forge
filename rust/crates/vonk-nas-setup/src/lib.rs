@@ -1411,9 +1411,9 @@ fn render_ca_config(
                 "name": request.provisioner_name,
                 "key": public_jwk,
                 "claims": {
-                    "minTLSCertDuration": "24h",
-                    "maxTLSCertDuration": "24h",
-                    "defaultTLSCertDuration": "24h",
+                    "minTLSCertDuration": "720h",
+                    "maxTLSCertDuration": "720h",
+                    "defaultTLSCertDuration": "720h",
                     "disableRenewal": true,
                     "disableSmallstepExtensions": true
                 },

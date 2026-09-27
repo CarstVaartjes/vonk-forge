@@ -68,7 +68,7 @@ the package install cannot complete with the indexes already present. There is
 no A/B slot, supervisor, rollback state, migration command, or follow-up setup
 step.
 
-Healthy connected agents rotate their 24-hour client certificate before it
+Healthy connected agents rotate their 30-day client certificate before it
 expires; operators should not normally need to re-enroll them. A package upgrade
 never mints a replacement identity on its own. If an agent missed rotation during
 an outage, or an issued staged generation expired before activation, use Fleet's

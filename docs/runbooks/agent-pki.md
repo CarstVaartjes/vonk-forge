@@ -2,7 +2,9 @@
 
 This runbook operates the recommended Smallstep `step-ca` provider for `vonk-forge`.
 It is written for a small cluster, but contains no GPU node name, address, or count.
-Certificates last exactly 24 hours. The offline root private key never enters the
+Certificates last exactly 30 days (720h); agents rotate them after two thirds
+of that lifetime, so a Controller outage of up to about ten days needs no
+re-enrollment. The offline root private key never enters the
 NAS, Docker, Compose, a job payload, or Git.
 
 The implementation and configuration were checked against `smallstep/certificates`
@@ -120,7 +122,7 @@ chmod 0400 "$STEP_CA_DATA_DIR/ca.json"
 test "$(jq -r '.authority.provisioners[0].key.kid' "$STEP_CA_DATA_DIR/ca.json")" = "$AGENT_CA_PROVISIONER_KID"
 ```
 
-The tracked template fixes the JWK provisioner to 24 hours, disables direct CA
+The tracked template fixes the JWK provisioner to 30 days (720h), disables direct CA
 renewal and Smallstep extensions, and uses a client-auth-only template. Normal
 renewal is a new `/1.0/sign` request: `vonk-forge` first authenticates the existing
 mTLS identity, then submits the new node-signed CSR under fixed policy.
@@ -183,7 +185,7 @@ Create a new encrypted path-length-zero intermediate under the same offline
 root. Stage its certificate/key/password, stop issuance briefly, update both
 step-ca and control-api mounts atomically, and start them together. Caddy trusts
 the offline root, so certificates from the old and new intermediates overlap for
-the old leaf's remaining 24 hours. Verify new issuance, then retain the old
+the old leaf's remaining lifetime (up to 30 days). Verify new issuance, then retain the old
 intermediate certificate for audit until every old leaf has expired. Never run
 two active issuers with the same provisioner private credential.
 
@@ -195,7 +197,7 @@ restore the recorded predecessor; do not mutate the active generation in place.
 
 For root rotation, distribute an overlap trust bundle containing old and new
 root certificates to Caddy first, rotate intermediates and all leaves, wait at
-least 24 hours, then remove the old root.
+least 30 days, then remove the old root.
 
 ## Backup and restore consistency
 
