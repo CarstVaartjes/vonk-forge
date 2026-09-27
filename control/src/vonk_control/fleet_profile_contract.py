@@ -228,7 +228,7 @@ class FleetProfileScope(_StrictModel):
     operation cannot silently expand or shrink with fleet membership changes.
     """
 
-    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    node_ids: list[NodeId] = Field(max_length=32)
 
     @model_validator(mode="after")
     def validate_scope(self) -> FleetProfileScope:

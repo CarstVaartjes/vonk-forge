@@ -1013,10 +1013,12 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
     assert progress.child_progress.phase == "model-download"
     assert adapter.starts[0]["scope_node_ids"] == (_node_id(1),)
     with sessions() as session:
+        # The accepted selection covers the whole fleet, including idle Sparks,
+        # so a later profile load can fence an older effect on either node.
         assert [
             node.workload_intent_ordinal
             for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
-        ] == [1, 0]
+        ] == [1, 1]
 
     observed_phases = [progress.child_progress.phase]
     for _ in range(8):

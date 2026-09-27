@@ -525,6 +525,10 @@ class FleetProfileApplication(Base):
             "length(CAST(plan AS TEXT)) BETWEEN 2 AND 262144",
             name="ck_fleet_profile_applications_plan_size",
         ),
+        CheckConstraint(
+            "selection_generation IS NULL OR selection_generation >= 1",
+            name="ck_fleet_profile_applications_selection_generation",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -539,6 +543,7 @@ class FleetProfileApplication(Base):
     plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     current_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     current_operation_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    selection_generation: Mapped[int | None] = mapped_column(Integer)
     progress: Mapped[dict[str, object]] = mapped_column(
         JSON, nullable=False, default=dict
     )
@@ -548,6 +553,44 @@ class FleetProfileApplication(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class FleetProfileSelection(Base):
+    """The one profile application currently selected for the whole fleet."""
+
+    __tablename__ = "fleet_profile_selection"
+    __table_args__ = (
+        CheckConstraint(
+            "singleton_id = 1",
+            name="ck_fleet_profile_selection_singleton",
+        ),
+        CheckConstraint(
+            "generation >= 1",
+            name="ck_fleet_profile_selection_generation_positive",
+        ),
+        CheckConstraint(
+            "profile_revision >= 1",
+            name="ck_fleet_profile_selection_revision_positive",
+        ),
+        CheckConstraint(
+            _lower_hex("roster_digest", 64),
+            name="ck_fleet_profile_selection_roster_digest",
+        ),
+    )
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    profile_id: Mapped[str] = mapped_column(
+        ForeignKey("fleet_profiles.id", ondelete="RESTRICT"), nullable=False
+    )
+    profile_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    application_id: Mapped[str] = mapped_column(
+        ForeignKey("fleet_profile_applications.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    roster_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
