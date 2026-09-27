@@ -5,14 +5,13 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
-from vonk_control.db import verify_schema_is_current
+from vonk_control.db import initialize_database, verify_schema_is_current
 from vonk_control.models import Base, Job
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,7 +128,7 @@ def test_fresh_sqlite_schema_is_exactly_current_metadata_and_roundtrips_json(
         engine.dispose()
 
 
-def test_existing_database_fails_closed_with_disposable_reset_guidance(
+def test_fresh_baseline_adds_current_tables_to_existing_database(
     tmp_path: Path,
 ) -> None:
     url = f"sqlite:///{tmp_path / 'incompatible-control.sqlite'}"
@@ -142,12 +141,9 @@ def test_existing_database_fails_closed_with_disposable_reset_guidance(
                     "(id VARCHAR(36) PRIMARY KEY)"
                 )
             )
-        with pytest.raises(
-            RuntimeError,
-            match="not compatible.*No migration.*automatic drop.*disposable development",
-        ):
-            _upgrade(url)
-        assert _schema_tables(engine) == {"agent_upgrade_compatibility_recoveries"}
+        _upgrade(url)
+        assert "agent_upgrade_compatibility_recoveries" in _schema_tables(engine)
+        assert set(Base.metadata.tables) <= _schema_tables(engine)
     finally:
         engine.dispose()
 
@@ -179,13 +175,12 @@ def test_postgres_fresh_schema_matches_metadata_has_current_kind_and_roundtrips_
     _assert_current_schema(postgres_engine)
     _assert_model_cache_operation_kind_is_current(postgres_engine)
     _assert_json_roundtrip(postgres_engine)
-    # The reviewed tolerance for the constraint-kind artefact above must not make
-    # the startup gate refuse a freshly created schema.
+    # The reviewed tolerance avoids attempting a redundant uniqueness constraint.
     with postgres_engine.connect() as connection:
         verify_schema_is_current(connection)
 
 
-def test_schema_gate_refuses_a_database_that_only_claims_the_current_revision(
+def test_schema_reconciliation_drops_an_unexpected_column(
     tmp_path: Path,
 ) -> None:
     """``alembic_version`` is not evidence about the physical schema.
@@ -208,19 +203,17 @@ def test_schema_gate_refuses_a_database_that_only_claims_the_current_revision(
                     "ADD COLUMN receipt_id VARCHAR(36)"
                 )
             )
-        with (
-            pytest.raises(RuntimeError) as caught,
-            engine.connect() as connection,
-        ):
+        with engine.begin() as connection:
             verify_schema_is_current(connection)
-        message = str(caught.value)
-        assert "startup is refused" in message
-        assert "runtime_image_authorizations.receipt_id" in message
+        assert "receipt_id" not in {
+            column["name"]
+            for column in inspect(engine).get_columns("runtime_image_authorizations")
+        }
     finally:
         engine.dispose()
 
 
-def test_postgres_schema_gate_refuses_the_retired_receipt_column(
+def test_postgres_schema_reconciliation_drops_the_retired_receipt_column(
     postgres_engine,
 ) -> None:
     """Reproduce the stale ``receipt_id NOT NULL`` column an upgraded NAS kept.
@@ -237,18 +230,20 @@ def test_postgres_schema_gate_refuses_the_retired_receipt_column(
                 "ADD COLUMN receipt_id VARCHAR(36) NOT NULL"
             )
         )
-    with (
-        pytest.raises(RuntimeError) as caught,
-        postgres_engine.connect() as connection,
-    ):
+    with postgres_engine.begin() as connection:
         verify_schema_is_current(connection)
-    assert "unexpected column runtime_image_authorizations.receipt_id" in str(
-        caught.value
-    )
+    assert "receipt_id" not in {
+        column["name"]
+        for column in inspect(postgres_engine).get_columns(
+            "runtime_image_authorizations"
+        )
+    }
 
 
-def test_postgres_schema_gate_refuses_changed_check_expression(postgres_engine) -> None:
-    """A same-named old check must not pass startup and poison profile retries."""
+def test_postgres_schema_reconciliation_replaces_changed_check_expression(
+    postgres_engine,
+) -> None:
+    """A same-named old check is replaced without blocking Controller startup."""
     _upgrade(postgres_engine.url.render_as_string(hide_password=False))
     with postgres_engine.begin() as connection:
         connection.execute(
@@ -261,17 +256,64 @@ def test_postgres_schema_gate_refuses_changed_check_expression(postgres_engine) 
                 "ALTER TABLE resource_reservations ADD CONSTRAINT ck_reservations_state CHECK (state IN ('active','released','expired') AND amount_bytes>=0)"
             )
         )
-    with (
-        postgres_engine.connect() as connection,
-        pytest.raises(
-            RuntimeError,
-            match="changed check constraint resource_reservations.ck_reservations_state",
-        ),
-    ):
+    with postgres_engine.begin() as connection:
+        verify_schema_is_current(connection)
+    with postgres_engine.connect() as connection:
         verify_schema_is_current(connection)
 
 
-def test_postgres_schema_gate_accepts_equivalent_literal_array_casts(
+def test_postgres_startup_repairs_deployed_schema_and_is_idempotent(
+    postgres_engine,
+) -> None:
+    """A prior deployed shape converges on startup and stays converged."""
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE control_process_heartbeats "
+            "DROP CONSTRAINT uq_control_process_heartbeats_instance"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE control_process_heartbeats "
+            "ADD CONSTRAINT uq_control_process_heartbeats_kind UNIQUE (process_kind)"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE recipe_runs DROP CONSTRAINT ck_recipe_runs_recovery_attempts"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE recipe_runs DROP COLUMN recovery_attempts"
+        )
+
+    initialize_database(database_url)
+    _assert_current_schema(postgres_engine)
+    columns = {
+        column["name"]: column
+        for column in inspect(postgres_engine).get_columns("recipe_runs")
+    }
+    assert columns["recovery_attempts"]["nullable"] is False
+    assert columns["recovery_attempts"]["default"] in {"0", "0::integer"}
+    heartbeat_uniques = {
+        item["name"]: set(item["column_names"])
+        for item in inspect(postgres_engine).get_unique_constraints(
+            "control_process_heartbeats"
+        )
+    }
+    assert heartbeat_uniques["uq_control_process_heartbeats_instance"] == {
+        "process_kind",
+        "process_instance_id",
+    }
+    assert "uq_control_process_heartbeats_kind" not in heartbeat_uniques
+    checks = {
+        item["name"]
+        for item in inspect(postgres_engine).get_check_constraints("recipe_runs")
+    }
+    assert "ck_recipe_runs_recovery_attempts" in checks
+
+    initialize_database(database_url)
+    _assert_current_schema(postgres_engine)
+
+
+def test_postgres_reconciliation_keeps_equivalent_literal_array_casts(
     postgres_engine,
 ) -> None:
     """Server rendering changes must not falsely refuse a current database."""
