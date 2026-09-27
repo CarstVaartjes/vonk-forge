@@ -22,7 +22,12 @@ UNITS = (
     "vonk-forge-package-upgrade-recover.service",
     "vonk-forge-package-upgrade-alert@.service",
 )
-SECURITY_UNITS = tuple(name for name in UNITS if name.endswith(".service"))
+# Template units are assessed through the instance systemd actually starts.
+SECURITY_UNITS = tuple(
+    name.replace("@.service", "@vonk-forge-package-upgrade-recover.service")
+    for name in UNITS
+    if name.endswith(".service")
+)
 SUMMARY = re.compile(
     r"Overall exposure level for ([^:]+): ([0-9]+(?:\.[0-9]+)?) ([A-Z]+)"
 )
@@ -68,6 +73,7 @@ def _install(root: Path, repository: Path) -> None:
     )
     for path in (
         "usr/bin/true",
+        "usr/bin/logger",
         "usr/lib/vonk-forge/vonk-agent",
         "usr/lib/vonk-forge/vonk-monitor",
         "usr/lib/vonk-forge/vonk-agent-helper",
