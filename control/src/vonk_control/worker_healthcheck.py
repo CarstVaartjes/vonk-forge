@@ -24,6 +24,7 @@ def verify_worker_ready(
         heartbeat = session.scalar(
             select(ControlProcessHeartbeat).where(
                 ControlProcessHeartbeat.process_kind == "worker",
+                ControlProcessHeartbeat.process_instance_id == process_instance_id,
             )
         )
     if heartbeat is None:
@@ -35,8 +36,7 @@ def verify_worker_ready(
         completed_at = completed_at.replace(tzinfo=UTC)
     age = timestamp - completed_at.astimezone(UTC)
     if (
-        heartbeat.process_instance_id != process_instance_id
-        or heartbeat.loop_sequence < 1
+        heartbeat.loop_sequence < 1
         or age < timedelta(0)
         or age > timedelta(seconds=maximum_age_seconds)
     ):

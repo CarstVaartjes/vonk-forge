@@ -16,6 +16,20 @@ submitting the same load again to recover a lost connection.
 
 ## Agent and Controller restarts
 
+The Controller renews active route leases on a dedicated worker thread, so a
+slow image preparation cannot starve LiteLLM routes. Runtime-image preparation
+runs in a bounded background executor; the durable Run/Switch operation waits,
+reports sampled transfer bytes, and checks its existing filesystem checkpoint,
+which is resumed after a worker restart. OCI helper subprocesses have a one-hour
+timeout and three bounded attempts with backoff. Their redacted stderr tail is
+included in the operation reason and worker logs.
+
+The worker records heartbeats by process instance, allowing overlapping
+instances to remain independently healthy during a restart. A watchdog exits
+the worker with a non-zero status if its scheduler loop does not complete a
+turn for 180 seconds; Compose then restarts the worker under its existing
+restart policy.
+
 The agent keeps completed results in its local journal until the Controller
 acknowledges them. A restart resends those results without executing their effects
 again. If the process died before it recorded a result, it reports an interrupted

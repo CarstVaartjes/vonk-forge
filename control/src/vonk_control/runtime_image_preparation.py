@@ -21,6 +21,8 @@ import os
 import re
 import stat
 import subprocess
+import time
+import traceback
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -49,6 +51,7 @@ from .catalog_revision_contract import (
     read_catalog_projection,
 )
 from .compiled_execution_plan import CompiledRuntimeImage
+from .logging import log_event, redact_text
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
 from .runtime_adapters import (
     RuntimeAdapter,
@@ -61,6 +64,8 @@ _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_CACHE_DIRECTORY = "image-cache"
 _LOGGER = logging.getLogger(__name__)
+_SUBPROCESS_TIMEOUT_SECONDS = 60 * 60
+_SUBPROCESS_ATTEMPTS = 3
 # One rejection detail is enough to name the rule; the document itself is
 # never recorded and the rendered detail is already bounded per issue.
 _MAX_RECEIPT_REJECTION_DETAIL = 512
@@ -2177,6 +2182,7 @@ class RuntimeImagePreparer(Protocol):
         build: RecipeBuild | None,
         *,
         before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
+        progress: Callable[[str, int, int | None], None] | None = None,
     ) -> RuntimeImageReceipt:
         """Prepare and authorize a receipt, with optional owner fencing."""
         ...
@@ -2201,6 +2207,7 @@ def make_runtime_image_receipt_preparer(
         build: RecipeBuild | None,
         *,
         before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
+        progress: Callable[[str, int, int | None], None] | None = None,
     ) -> RuntimeImageReceipt:
         parsed = _canonical_recipe(document)
         runtime = runtime_spec.get("runtime")
@@ -2258,6 +2265,7 @@ def make_runtime_image_receipt_preparer(
             now=clock(),
             receipt_writer=write_receipt,
             before_publish=before_publish,
+            progress=progress,
         )
 
     return prepare
@@ -2708,13 +2716,56 @@ def _run_with_progress(
 
 
 def _run_text(command: list[str]) -> str:
-    try:
-        result = subprocess.run(command, check=True, capture_output=True, text=True)
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise RuntimeImagePreparationError(
-            "runtime_image.transport_failed", "packaged OCI helper command failed"
-        ) from error
-    return result.stdout
+    last_error: BaseException | None = None
+    for attempt in range(1, _SUBPROCESS_ATTEMPTS + 1):
+        try:
+            result = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+            return result.stdout
+        except (
+            OSError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as error:
+            last_error = error
+            if attempt < _SUBPROCESS_ATTEMPTS:
+                time.sleep(2 ** (attempt - 1))
+    assert last_error is not None
+    stderr = getattr(last_error, "stderr", None)
+    stderr_text = (
+        stderr.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes)
+        else str(stderr or "")
+    )
+    safe_stderr_tail = redact_text(stderr_text[-4096:])[-2048:]
+    safe_reason_stderr_tail = redact_text(stderr_text[-1024:])[-320:]
+    detail = "packaged OCI helper command failed"
+    if isinstance(last_error, subprocess.TimeoutExpired):
+        detail += f" after {_SUBPROCESS_TIMEOUT_SECONDS}s timeout"
+    if safe_reason_stderr_tail:
+        detail += f"; stderr tail: {safe_reason_stderr_tail}"
+    log_event(
+        _LOGGER,
+        "runtime_image.subprocess_failed",
+        service="controller",
+        error=type(last_error).__name__,
+        message=redact_text(last_error),
+        stderr_tail=safe_stderr_tail,
+        traceback=redact_text("".join(traceback.format_exception(last_error))),
+        attempts=_SUBPROCESS_ATTEMPTS,
+        timeout_seconds=_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+    raise RuntimeImagePreparationError(
+        "runtime_image.transport_failed",
+        detail,
+        retryable=True,
+        recovery_actions=("retry",),
+    ) from last_error
 
 
 def _run_json_text(value: str) -> object:

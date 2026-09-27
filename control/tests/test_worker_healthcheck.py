@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.models import Base, ControlProcessHeartbeat
 from vonk_control.worker import WorkerHeartbeatRecorder
@@ -69,7 +69,7 @@ def test_worker_readiness_fails_closed_without_current_scheduler_evidence(
         )
 
 
-def test_worker_restart_immediately_revokes_prior_process_readiness(tmp_path) -> None:
+def test_second_worker_instance_does_not_break_first_heartbeat(tmp_path) -> None:
     sessions = _sessions(tmp_path)
     first = WorkerHeartbeatRecorder(
         sessions,
@@ -89,18 +89,21 @@ def test_worker_restart_immediately_revokes_prior_process_readiness(tmp_path) ->
         clock=lambda: NOW + timedelta(seconds=2),
     )
 
-    with pytest.raises(RuntimeError, match="worker readiness"):
-        verify_worker_ready(
-            sessions,
-            process_instance_id=INSTANCE_B,
-            now=NOW + timedelta(seconds=2),
-        )
-    with pytest.raises(RuntimeError, match="process instance"):
-        first.completed_loop()
-
     second.completed_loop()
+    with sessions() as session:
+        heartbeats = tuple(session.scalars(select(ControlProcessHeartbeat)))
+    assert {heartbeat.process_instance_id for heartbeat in heartbeats} == {
+        INSTANCE_A,
+        INSTANCE_B,
+    }
     verify_worker_ready(
         sessions,
         process_instance_id=INSTANCE_B,
+        now=NOW + timedelta(seconds=3),
+    )
+    first.completed_loop()
+    verify_worker_ready(
+        sessions,
+        process_instance_id=INSTANCE_A,
         now=NOW + timedelta(seconds=3),
     )

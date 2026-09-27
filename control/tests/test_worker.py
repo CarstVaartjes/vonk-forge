@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
-from vonk_control.worker import HandlerRequest, Worker
+from vonk_control.worker import HandlerRequest, Worker, WorkerWatchdog
 
 
 def _service(tmp_path):
@@ -140,6 +140,37 @@ def test_worker_contains_a_database_wait_timeout_and_still_heartbeats(
     # loop still heartbeats and the failing source is reported for retry.
     assert calls == ["heartbeat"]
     assert "worker.source_failed" in caplog.text
+
+
+def test_worker_source_failure_logs_redacted_message_and_traceback(
+    tmp_path, caplog
+) -> None:
+    worker = Worker(
+        _service(tmp_path),
+        "worker-1",
+        {},
+        background_services=(
+            lambda: (_ for _ in ()).throw(RuntimeError("Bearer secret-value")),
+        ),
+    )
+
+    with caplog.at_level("INFO", logger="vonk-control-worker"):
+        worker.run_once()
+
+    assert "RuntimeError" in caplog.text
+    assert "Traceback" in caplog.text
+    assert "secret-value" not in caplog.text
+    assert "<redacted>" in caplog.text
+
+
+def test_worker_watchdog_detects_stall_and_resets_after_loop() -> None:
+    now = [10.0]
+    watchdog = WorkerWatchdog(timeout_seconds=30, clock=lambda: now[0])
+
+    now[0] = 40.1
+    assert watchdog.stalled()
+    watchdog.beat()
+    assert not watchdog.stalled()
 
 
 def test_worker_ticks_recipe_operations_before_generic_jobs(tmp_path) -> None:
