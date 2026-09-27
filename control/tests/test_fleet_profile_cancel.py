@@ -31,6 +31,7 @@ from vonk_control.models import (
     ArtifactJob,
     CatalogDocumentRevision,
     FleetProfileApplication,
+    FleetProfileSelection,
     Job,
     RecipeRun,
     ResourceReservation,
@@ -1340,7 +1341,7 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
     assert observations == [application.id]
 
 
-def test_cancellations_rotate_around_waiting_and_active_profile_applications(
+def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1442,11 +1443,27 @@ def test_cancellations_rotate_around_waiting_and_active_profile_applications(
 
     clock_now["now"] = start + timedelta(seconds=3)
     assert service.tick() is True
-    first_id = applications[0][1].id
-    first_child = service.application(first_id).progress.switch_adapter
-    assert first_child is not None and first_child.active_operation_id is not None
+    with sessions() as session:
+        selected = session.get(FleetProfileSelection, 1)
+        rows = tuple(
+            session.scalars(
+                select(FleetProfileApplication).order_by(
+                    FleetProfileApplication.created_at,
+                    FleetProfileApplication.id,
+                )
+            )
+        )
+    assert selected is not None
+    latest_id = applications[2][1].id
+    assert selected.generation == 3
+    assert selected.application_id == latest_id
+    assert [row.state for row in rows] == ["cancelled", "cancelled", "running"]
+    assert [row.selection_generation for row in rows] == [1, 2, 3]
+    assert [row.current_operation_id for row in rows] == [None, None, latest_id]
 
-    active_child_ids = {first_id: first_child.active_operation_id}
+    latest_child = service.application(latest_id).progress.switch_adapter
+    assert latest_child is not None and latest_child.active_operation_id is not None
+    active_child_id = latest_child.active_operation_id
     observations: list[str] = []
     adapter.request_cancellation = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
     original_advance = adapter.advance
@@ -1454,66 +1471,22 @@ def test_cancellations_rotate_around_waiting_and_active_profile_applications(
     def observe_pending(
         application_id: str, *, session=None
     ) -> FleetProfileChildOperation:
-        child_id = active_child_ids.get(application_id)
-        if child_id is not None:
+        if application_id == latest_id:
             observations.append(application_id)
-            return FleetProfileChildOperation(id=child_id, state="running")
+            return FleetProfileChildOperation(id=active_child_id, state="running")
         return original_advance(application_id, session=session)
 
     adapter.advance = observe_pending  # type: ignore[method-assign]
-    first_profile, _ = applications[0]
+    latest_profile, _ = applications[2]
     service.cancel(
-        first_id,
-        profile_number=first_profile.number,
+        latest_id,
+        profile_number=latest_profile.number,
         request_key=_uuid(993),
         actor="admin",
     )
     assert service.tick() is True
-    assert observations == [first_id]
-
-    second_profile, second_application = applications[1]
-    second_id = second_application.id
-    second_child = service.application(second_id).progress.switch_adapter
-    assert second_child is not None and second_child.active_operation_id is not None
-    active_child_ids[second_id] = second_child.active_operation_id
-    with sessions.begin() as session:
-        parked = session.get(FleetProfileApplication, second_id)
-        assert parked is not None
-        parked.state = "waiting-for-operator"
-        parked.status_reason = "Synthetic owner wait before accepted cancellation"
-    service.cancel(
-        second_id,
-        profile_number=second_profile.number,
-        request_key=_uuid(994),
-        actor="admin",
-    )
-    assert service.application(second_id).state == "running"
-    # Model a late parked-child status racing with the accepted cancellation.
-    # The parked observer must leave this row to its exact cancellation owner.
-    with sessions.begin() as session:
-        cancelling_parked = session.get(FleetProfileApplication, second_id)
-        assert cancelling_parked is not None
-        cancelling_parked.state = "waiting-for-operator"
-        cancelling_parked.status_reason = "Late parked child observation"
-    assert service.tick() is True
-    assert observations == [first_id, second_id]
-    second_pending = service.application(second_id).cancellation
-    assert second_pending is not None
-    assert second_pending.state == "cancelling"
-    assert second_pending.pending_effects[0].operation_id == active_child_ids[second_id]
-
-    third_id = applications[2][1].id
-    third = service.application(third_id)
-    third_switch = third.progress.switch_adapter
-    assert third.state == "running"
-    assert third_switch is not None and third_switch.active_operation_id is not None
-
-    # Once both pending owners are due, each gets an observation before the
-    # first can monopolize later scheduler passes; ordinary app three remains
-    # eligible in the same passes.
-    clock_now["now"] = start + timedelta(seconds=9)
-    assert service.tick() is True
-    assert observations == [first_id, second_id, first_id]
-    assert service.tick() is True
-    assert observations == [first_id, second_id, first_id, second_id]
-    assert service.application(third_id).state == "running"
+    assert observations == [latest_id]
+    cancellation = service.application(latest_id).cancellation
+    assert cancellation is not None
+    assert cancellation.state == "cancelling"
+    assert cancellation.pending_effects[0].operation_id == active_child_id

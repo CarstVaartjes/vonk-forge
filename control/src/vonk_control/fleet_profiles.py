@@ -3246,7 +3246,16 @@ class FleetProfileService:
                 # there rather than blocking an otherwise idle plan.
                 requires_preparation = not state.installation_ready
                 active_node_ids = {node.node_id for node in roster}
-                unknown_nodes = sorted(set(expected_nodes) - active_node_ids)
+                unavailable_nodes = sorted(set(expected_nodes) - active_node_ids)
+                known_node_ids = set(
+                    session.scalars(
+                        select(AgentNode.node_id).where(
+                            AgentNode.node_id.in_(unavailable_nodes)
+                        )
+                    )
+                )
+                unknown_nodes = sorted(set(unavailable_nodes) - known_node_ids)
+                removed_nodes = sorted(known_node_ids)
                 revision = session.get(
                     CatalogDocumentRevision, assignment.recipe_revision_id
                 )
@@ -3256,6 +3265,17 @@ class FleetProfileService:
                     value = topology.get("node_count")
                     required_count = value if type(value) is int else None
                 if unknown_nodes:
+                    item_reasons.append(
+                        FleetProfileReason(
+                            code="profile.spark_unavailable",
+                            detail=(
+                                "Assignment references Spark IDs that are not enrolled: "
+                                + ", ".join(unknown_nodes)
+                            ),
+                            severity="error",
+                        )
+                    )
+                if removed_nodes:
                     item_reasons.append(
                         FleetProfileReason(
                             code=(
@@ -3272,7 +3292,7 @@ class FleetProfileService:
                                 if required_count is not None and required_count > 1
                                 else "Assignment includes a Spark outside the live fleet and will be ignored: "
                             )
-                            + ", ".join(unknown_nodes),
+                            + ", ".join(removed_nodes),
                             severity="warning",
                         )
                     )
@@ -3287,10 +3307,11 @@ class FleetProfileService:
                             severity="error",
                         )
                     )
-                if unknown_nodes:
+                if unavailable_nodes:
                     # A profile still covers the current fleet.  An assignment
                     # that refers to a removed Spark is deliberately not
                     # relaunched or allowed to block the other assignments.
+                    # IDs that were never enrolled remain errors above.
                     # Any reachable rank cleanup was already reviewed in the
                     # profile effects above.
                     preparation = None

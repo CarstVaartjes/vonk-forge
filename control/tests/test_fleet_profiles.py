@@ -1185,9 +1185,16 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
     first = service.application(first.id)
     assert first.progress.workload_intent_ordinal == 1
 
+    refreshed = service.preview(profile.id)
+    assert refreshed.allowed is True
+    assert refreshed.plan_digest != preview.plan_digest
+    assert any(
+        effect.kind == "profile-application" and effect.id == first.id
+        for effect in refreshed.effects.superseded
+    )
     second = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
+        plan_digest=refreshed.plan_digest,
         request_key=_uuid(977),
         actor="admin",
     )
