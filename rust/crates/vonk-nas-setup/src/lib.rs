@@ -86,8 +86,25 @@ pub struct CanonicalTemplatePayload {
     generated_secrets: GeneratedSecrets,
     #[serde(default)]
     runtime_files: Vec<RuntimeFile>,
+    install_modes: Option<InstallModes>,
     step_ca_controller: Option<StepCaControllerRequest>,
     hermes: Option<HermesPrompt>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallModes {
+    prompt: String,
+    #[serde(default = "default_install_mode")]
+    default: String,
+    lab_value: String,
+    secure_remote_value: String,
+    lab_required_values: Vec<RequiredValuePrompt>,
+    lab_values: Vec<InternalValue>,
+}
+
+fn default_install_mode() -> String {
+    "lab".to_owned()
 }
 
 #[derive(Debug, Deserialize)]
@@ -216,6 +233,10 @@ struct SecretPrompt {
     prefix: Option<String>,
     #[serde(default)]
     optional: bool,
+    #[serde(default)]
+    secure_remote_only: bool,
+    #[serde(default)]
+    generate_in_lab: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -311,6 +332,35 @@ impl CanonicalTemplatePayload {
                 &mut environment,
                 &mut secrets,
             )?;
+        }
+        if let Some(modes) = &self.install_modes {
+            if modes.prompt.trim().is_empty()
+                || modes.lab_value.trim().is_empty()
+                || modes.secure_remote_value.trim().is_empty()
+                || modes.lab_value == modes.secure_remote_value
+                || ![modes.lab_value.as_str(), modes.secure_remote_value.as_str()]
+                    .contains(&modes.default.as_str())
+            {
+                return Err(SetupError::InvalidPayload(
+                    "install mode choices are invalid".to_owned(),
+                ));
+            }
+            validate_prompts(
+                &modes.lab_required_values,
+                &[],
+                &mut HashSet::new(),
+                &mut HashSet::new(),
+            )?;
+            let mut lab_environment = HashSet::new();
+            for value in &modes.lab_values {
+                validate_env_name(&value.env)?;
+                if !lab_environment.insert(&value.env) {
+                    return Err(SetupError::InvalidPayload(format!(
+                        "duplicate lab environment value {}",
+                        value.env
+                    )));
+                }
+            }
         }
         for request in &self.generated_secrets.random_text {
             validate_generated_file(&request.file, &mut secrets)?;
@@ -795,6 +845,47 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
         }
     }
 
+    fn optional_secret(&mut self, prompt: &SecretPrompt) -> Result<String, SetupError> {
+        let label = if prompt.prompt.to_ascii_lowercase().contains("optional") {
+            prompt.prompt.clone()
+        } else {
+            format!("{} (optional; leave blank to skip)", prompt.prompt)
+        };
+        loop {
+            let value = self.read_hidden_value(&label)?;
+            if value.is_empty() {
+                return Ok(value);
+            }
+            validate_single_line_secret(&value, &prompt.file)?;
+            return Ok(value);
+        }
+    }
+
+    fn install_mode(&mut self, modes: &InstallModes) -> Result<bool, SetupError> {
+        loop {
+            let value = self.line(&format!(
+                "{} [{} / {}]",
+                modes.prompt, modes.default, modes.secure_remote_value
+            ))?;
+            let selected = if value.trim().is_empty() {
+                modes.default.as_str()
+            } else {
+                value.trim()
+            };
+            if selected == modes.lab_value {
+                return Ok(true);
+            }
+            if selected == modes.secure_remote_value {
+                return Ok(false);
+            }
+            writeln!(
+                self.writer,
+                "Choose {} or {}.",
+                modes.lab_value, modes.secure_remote_value
+            )?;
+        }
+    }
+
     fn generated_text<G: SecretGenerator>(
         &mut self,
         request: &RandomTextRequest,
@@ -986,14 +1077,52 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
 
     let staging = create_staging_directory(bundle.parent().expect("bundle has output parent"))?;
     let result = (|| {
-        prompt.preflight(&payload.preflight)?;
+        let lab_mode = payload
+            .install_modes
+            .as_ref()
+            .map(|modes| prompt.install_mode(modes))
+            .transpose()?
+            .unwrap_or(false);
+        if !lab_mode {
+            prompt.preflight(&payload.preflight)?;
+        }
         let mut environment = payload
             .internal_values
             .iter()
             .map(|value| (value.env.clone(), value.value.clone()))
             .collect::<Vec<_>>();
+        if let Some(modes) = &payload.install_modes {
+            set_environment_value(
+                &mut environment,
+                "COMPOSE_PROFILES",
+                if lab_mode {
+                    String::new()
+                } else {
+                    modes.secure_remote_value.clone()
+                },
+            );
+        }
         let mut secret_values = Vec::new();
-        for value in &payload.required_values {
+        let required_values = if lab_mode {
+            &payload
+                .install_modes
+                .as_ref()
+                .expect("lab mode requires install mode metadata")
+                .lab_required_values
+        } else {
+            &payload.required_values
+        };
+        if lab_mode {
+            for value in &payload
+                .install_modes
+                .as_ref()
+                .expect("lab mode requires install mode metadata")
+                .lab_values
+            {
+                set_environment_value(&mut environment, &value.env, value.value.clone());
+            }
+        }
+        for value in required_values {
             let default = required_value_default(value, &environment);
             environment.push((
                 value.env.clone(),
@@ -1001,10 +1130,16 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
             ));
         }
         for secret in &payload.secrets {
+            if lab_mode && secret.secure_remote_only {
+                secret_values.push((secret.file.clone(), String::new()));
+                continue;
+            }
             secret_values.push((
                 secret.file.clone(),
                 if secret.optional {
-                    String::new()
+                    prompt.optional_secret(secret)?
+                } else if lab_mode && secret.generate_in_lab {
+                    generator.generate(secret.generate_bytes.unwrap_or(24))?
                 } else {
                     prompt.secret(secret, generator)?
                 },
@@ -1013,11 +1148,23 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         for request in &payload.generated_secrets.random_text {
             secret_values.push((
                 request.file.clone(),
-                prompt.generated_text(request, generator)?,
+                if lab_mode {
+                    generator.generate(request.bytes)?
+                } else {
+                    prompt.generated_text(request, generator)?
+                },
             ));
         }
         for request in &payload.generated_secrets.ed25519_pkcs8_pem {
-            secret_values.push((request.file.clone(), prompt.ed25519_private_key(request)?));
+            secret_values.push((
+                request.file.clone(),
+                if lab_mode {
+                    let signing_key = ed25519_dalek::SigningKey::generate(&mut OsRng);
+                    canonical_ed25519_pkcs8_pem(&signing_key)
+                } else {
+                    prompt.ed25519_private_key(request)?
+                },
+            ));
         }
         for request in &payload.generated_secrets.postgres_urls {
             let password = secret_value(&secret_values, &request.password_file)?.to_owned();
@@ -1027,7 +1174,11 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
             ));
         }
         if let Some(request) = &payload.step_ca_controller {
-            let material = prepare_pki(request, &environment, prompt, generator)?;
+            let material = if lab_mode {
+                generate_pki(request, &environment, generator)?
+            } else {
+                prepare_pki(request, &environment, prompt, generator)?
+            };
             environment.push((request.kid_env.clone(), material.kid));
             secret_values.extend(material.files);
         }
@@ -1035,16 +1186,25 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         let hermes_enabled = if let Some(hermes) = &payload.hermes {
             let enabled = match requested_hermes_enabled {
                 Some(enabled) => enabled,
+                None if lab_mode => false,
                 None => prompt.confirm(&hermes.prompt)?,
             };
-            environment.push((
-                hermes.env.clone(),
-                if enabled {
-                    hermes.enabled_value.clone()
-                } else {
-                    hermes.disabled_value.clone()
-                },
-            ));
+            let current_profiles = environment_value(&environment, &hermes.env)
+                .unwrap_or_default()
+                .split(',')
+                .filter(|profile| !profile.is_empty() && *profile != hermes.enabled_value)
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let mut profiles = current_profiles;
+            if enabled {
+                profiles.push(hermes.enabled_value.clone());
+            }
+            let profile_value = if profiles.is_empty() {
+                hermes.disabled_value.clone()
+            } else {
+                profiles.join(",")
+            };
+            set_environment_value(&mut environment, &hermes.env, profile_value);
             if enabled {
                 for value in &hermes.required_values {
                     environment.push((value.env.clone(), prompt.required(value)?));
@@ -1072,7 +1232,11 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         // cannot materialize a root-owned host directory on first start.
         create_secure_directory(&staging.join("backups"))?;
         for (name, value) in secret_values {
-            let content = secret_file_content(value);
+            let content = if value.is_empty() {
+                Vec::new()
+            } else {
+                secret_file_content(value)
+            };
             write_secret_file(&secret_directory, &name, &content)?;
         }
         for runtime_file in &payload.runtime_files {

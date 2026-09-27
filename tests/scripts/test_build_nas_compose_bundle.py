@@ -141,6 +141,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     }
     secret_prompts = {item["file"]: item for item in payload["secrets"]}
     assert secret_prompts["admin-password"]["generate_bytes"] == 24
+    assert secret_prompts["admin-password"]["generate_in_lab"] is True
     assert secret_prompts["hf-token"] == {
         "file": "hf-token",
         "prompt": "Hugging Face access token (optional; leave blank for public models)",
@@ -153,6 +154,22 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "litellm-upstream-key",
     ):
         assert secret_prompts[external]["generate_bytes"] is None
+    assert secret_prompts["tailscale-oauth-client-id"]["secure_remote_only"] is True
+    assert secret_prompts["tailscale-oauth-client-secret"]["secure_remote_only"] is True
+    assert secret_prompts["litellm-upstream-key"]["secure_remote_only"] is True
+    assert payload["install_modes"]["default"] == "lab"
+    assert payload["install_modes"]["secure_remote_value"] == "secure-remote"
+    assert [
+        item["env"] for item in payload["install_modes"]["lab_required_values"]
+    ] == ["NAS_LAN_IP"]
+    assert {item["env"] for item in payload["install_modes"]["lab_values"]} == {
+        "VONK_MANAGEMENT_CIDRS",
+        "VONK_DIRECT_FABRIC_CIDRS",
+        "VONK_CONTROL_HOSTNAME",
+        "VONK_AGENT_ENROLL_HOSTNAME",
+        "VONK_AGENT_HOSTNAME",
+        "VONK_REGISTRY_HOSTNAME",
+    }
     generated = payload["generated_secrets"]
     assert {item["file"] for item in generated["random_text"]} == {
         "postgres-password",
@@ -229,6 +246,10 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     assert compose["services"]["hermes-agent"]["profiles"] == ["hermes"]
     assert compose["services"]["hermes-litellm-key-provisioner"]["profiles"] == [
         "hermes"
+    ]
+    assert compose["services"]["tailscale-gateway"]["profiles"] == ["secure-remote"]
+    assert compose["services"]["tailscale-configurator"]["profiles"] == [
+        "secure-remote"
     ]
     assert compose["services"]["caddy"]["ports"] == [
         {

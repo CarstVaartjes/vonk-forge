@@ -220,6 +220,10 @@ def nas_responses(
         f"Registry hostname (registry.<tailnet>.ts.net) [{derived_registry_hostname}]": registry_hostname,
     }
     responses = [
+        (
+            "Install mode: lab (LAN only) or secure-remote (Tailscale) [lab / secure-remote]: ",
+            "secure-remote",
+        ),
         ("Reserved NAS LAN IP: ", nas_ip),
         ("Trusted Spark management CIDRs: ", "192.168.1.0/24"),
         (
@@ -231,6 +235,10 @@ def nas_responses(
         ("Tailscale OAuth client ID: ", oauth_client_id),
         ("Tailscale OAuth client secret: ", oauth_client_secret),
         ("LiteLLM upstream provider API key: ", upstream_key),
+        (
+            "Hugging Face access token (optional; leave blank for public models): ",
+            "",
+        ),
     ]
     for label in (
         "PostgreSQL control password",
