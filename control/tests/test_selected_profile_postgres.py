@@ -4,7 +4,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import create_engine, text
+import pytest
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.fleet_profile_contract import FleetProfileInput
@@ -18,7 +19,10 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     FleetProfileApplication,
     FleetProfileSelection,
+    Job,
+    User,
 )
+from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .test_fleet_profiles import (
@@ -61,6 +65,32 @@ class _BusyOnceAdapter(_SwitchAdapter):
         if self._busy:
             self._busy = False
             raise FleetProfileAdmissionEffectBusy("temporary test admission block")
+
+
+class _DueDatabaseWork:
+    """A sibling coordinator that advances one already-due PostgreSQL job."""
+
+    def __init__(self, sessions: sessionmaker[Session], job_id: str) -> None:
+        self._sessions = sessions
+        self._job_id = job_id
+
+    def tick(self) -> bool:
+        with self._sessions.begin() as session:
+            job = session.get(Job, self._job_id)
+            if job is None or job.state != "queued":
+                return False
+            job.state = "succeeded"
+            return True
+
+
+class _NoopRoutes:
+    def publish_run(self, run_id: str) -> object:
+        del run_id
+        raise AssertionError("the roster-authority test has no running recipe")
+
+    def maintain(self, *, renew_before_seconds: int = 10) -> bool:
+        del renew_before_seconds
+        return False
 
 
 def _selected(engine: Engine) -> dict[str, object]:
@@ -220,6 +250,114 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
     current = service.application(str(reconciled["application_id"]))
     assert current.progress.intended_profile is not None
     assert current.progress.intended_profile.scope.node_ids == sorted(
+        (_node_id(1), joined_node)
+    )
+
+
+@pytest.mark.parametrize("authority_change", ["disabled", "demoted"])
+def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recovers(
+    postgres_engine: Engine, authority_change: str
+) -> None:
+    """A revoked author blocks only roster effects, not unrelated due work."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _seed(sessions)
+    service = _service(sessions)
+    profile = service.create(
+        FleetProfileInput(name="Idle fleet", assignments=[]), actor="admin"
+    )
+    accepted_preview = service.preview(profile.id)
+    accepted = service.apply(
+        profile.id,
+        plan_digest=accepted_preview.plan_digest,
+        request_key=_uuid(889),
+        actor="admin",
+    )
+    assert accepted.state == "succeeded"
+    original_selection = _selected(postgres_engine)
+    original_generation = original_selection["generation"]
+    assert isinstance(original_generation, int)
+
+    joined_node = _node_id(2)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=joined_node,
+                state="active",
+                protocol_version=1,
+                architecture="linux-arm64",
+                capabilities=[],
+                last_seen_at=NOW,
+            )
+        )
+        author = session.scalar(select(User).where(User.subject == "admin"))
+        assert author is not None
+        if authority_change == "disabled":
+            author.disabled_at = NOW
+        else:
+            author.role = "viewer"
+        due_job_id = _uuid(890)
+        session.add(
+            Job(
+                id=due_job_id,
+                request_id=_uuid(891),
+                kind="recipe.run-switch.v2",
+                state="queued",
+                actor="admin",
+                authority_revision="a" * 64,
+                targets=[_node_id(1)],
+                payload_digest="b" * 64,
+                payload={"workload_intent_ordinal": 0},
+                result={},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    sibling = _DueDatabaseWork(sessions, due_job_id)
+    worker = RecipeOperationWorker(
+        sessions,
+        _NoopRoutes(),
+        clock=lambda: NOW,
+        fleet_profiles=service,
+        run_switches=sibling,
+    )
+
+    # Before the fix, the permission exception escaped the profile coordinator
+    # and prevented RecipeOperationWorker from reaching the sibling job.
+    assert worker.tick() is True
+    with sessions() as session:
+        due = session.get(Job, due_job_id)
+        assert due is not None and due.state == "succeeded"
+        assert len(tuple(session.scalars(select(FleetProfileApplication.id)))) == 1
+    still_selected = _selected(postgres_engine)
+    assert still_selected == original_selection
+
+    blocked_view = service.get(profile.id)
+    assert any(
+        "automatic reconciliation is blocked" in warning.lower()
+        and "restore" in warning.lower()
+        for warning in blocked_view.warnings
+    )
+    assert any("restore" in action.lower() for action in blocked_view.next_actions)
+
+    # Restoring authority lets the same durable selection reconcile the roster
+    # without a new profile revision or a second operator load.
+    with sessions.begin() as session:
+        author = session.scalar(select(User).where(User.subject == "admin"))
+        assert author is not None
+        author.role = "administrator"
+        author.disabled_at = None
+    assert worker.tick() is True
+    reconciled_selection = _selected(postgres_engine)
+    assert reconciled_selection["generation"] == original_generation + 1
+    assert reconciled_selection["profile_id"] == profile.id
+    application = service.application(str(reconciled_selection["application_id"]))
+    assert application.state == "succeeded"
+    assert application.progress.intended_profile is not None
+    assert application.progress.intended_profile.assignments == []
+    assert application.progress.intended_profile.scope.node_ids == sorted(
         (_node_id(1), joined_node)
     )
 

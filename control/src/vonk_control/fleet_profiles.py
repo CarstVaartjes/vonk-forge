@@ -2473,6 +2473,18 @@ class FleetProfileService:
         if mutation:
             serialize_user_authority(session)
         user = session.scalar(select(User).where(User.subject == actor))
+        if not FleetProfileService._user_has_profile_authority(user, mutation=mutation):
+            raise FleetProfilePermissionDenied(
+                "Current profile authority is unavailable"
+            )
+
+    @staticmethod
+    def _user_has_profile_authority(user: User | None, *, mutation: bool) -> bool:
+        """Check current profile authority without acquiring mutation fences.
+
+        Read-only views use this to explain a blocked roster reconciliation;
+        mutation callers still serialize authority changes before checking it.
+        """
         if (
             user is None
             or user.disabled_at is not None
@@ -2482,15 +2494,12 @@ class FleetProfileService:
                 not in MUTATION_ROLES[("POST", "/api/profile/{number}/load")]
             )
         ):
-            raise FleetProfilePermissionDenied(
-                "Current profile authority is unavailable"
-            )
+            return False
         try:
             Actor(user.subject, user.role)
         except ValueError:
-            raise FleetProfilePermissionDenied(
-                "Current profile authority is unavailable"
-            ) from None
+            return False
+        return True
 
     def _set_application_state(
         self,
@@ -5896,6 +5905,14 @@ class FleetProfileService:
             )
             if roster == selected.roster_node_ids:
                 return False
+            if not self._user_has_profile_authority(
+                session.scalar(select(User).where(User.subject == selected.actor)),
+                mutation=True,
+            ):
+                # Do not repeatedly preview or persist pending admissions
+                # under revoked authority. The view derives the blocker from
+                # this same roster mismatch and current authority state.
+                return False
 
         # Preserve the accepted topology exactly. Preview compares it with the
         # current roster and owns the incomplete multi-Spark cleanup decision.
@@ -5922,15 +5939,16 @@ class FleetProfileService:
             # rechecks the same roster change after cache, capacity or roster
             # blockers clear; no failed application can poison reconciliation.
             return False
-        pending = self._create_pending_application(
-            preview,
-            request_key=request_key,
-            actor=selected.actor,
-            operation_kind="fleet-profile.apply",
-            select_profile=True,
-            selection_precondition=selected,
-        )
+        pending: FleetProfileApplicationView | None = None
         try:
+            pending = self._create_pending_application(
+                preview,
+                request_key=request_key,
+                actor=selected.actor,
+                operation_kind="fleet-profile.apply",
+                select_profile=True,
+                selection_precondition=selected,
+            )
             self._queue_application(
                 preview,
                 request_key=request_key,
@@ -5938,23 +5956,48 @@ class FleetProfileService:
                 operation_kind="fleet-profile.apply",
                 pending_application_id=pending.id,
             )
+        except FleetProfilePermissionDenied:
+            # The accepted snapshot remains selected, but revoked authority
+            # cannot authorize a roster effect. Retire only this unbound
+            # admission receipt so it cannot become a retrying shadow intent.
+            self._discard_pending_application_by_request_key(request_key)
+            return False
         except (FleetProfileAdmissionBusy, FleetProfileAdmissionEffectBusy) as error:
+            if pending is None:
+                raise
             self._defer_pending_application(pending.id, str(error))
         except FleetProfileAdmissionStorageError as error:
+            if pending is None:
+                raise
             self._defer_pending_application(
                 pending.id, str(error), retry_delay=timedelta(seconds=60)
             )
         except _FleetProfileSupersededIntentConflict as error:
+            if pending is None:
+                raise
             self._finish_pending_admission(
                 pending.id, state="cancelled", reason=str(error)
             )
         except FleetProfileConflict as error:
+            if pending is None:
+                raise
             self._finish_pending_admission(
                 pending.id,
                 state="failed",
                 reason=str(error) or "Profile reconcile failed",
             )
         return True
+
+    def _discard_pending_application_by_request_key(self, request_key: str) -> None:
+        """Remove this roster attempt only if it still owns an unbound receipt."""
+        with self._sessions() as session:
+            application_id = session.scalar(
+                select(FleetProfileApplication.id).where(
+                    FleetProfileApplication.request_key == request_key
+                )
+            )
+        if application_id is not None:
+            self._discard_pending_application(application_id)
 
     def tick(self) -> bool:
         """Observe one due cancellation, then advance one ordinary work item."""
@@ -7036,6 +7079,25 @@ class FleetProfileService:
                 .order_by(AgentNode.node_id)
             )
         )
+        roster_node_ids = tuple(node.node_id for node in roster)
+        roster_authority_blocked = bool(
+            selection is not None
+            and selection.profile_id == row.id
+            and roster_node_ids != selection.roster_node_ids
+            and not self._user_has_profile_authority(
+                session.scalar(select(User).where(User.subject == selection.actor)),
+                mutation=True,
+            )
+        )
+        if roster_authority_blocked:
+            warnings.append(
+                "Fleet membership changed since this profile was loaded, but "
+                "automatic reconciliation is blocked because the original "
+                "profile author no longer has profile-load authority. Restore "
+                "that authority or explicitly load this profile as an "
+                "authorized administrator; roster reconciliation will retry "
+                "automatically when authority is available."
+            )
         display_names = {
             item.node_id: item.display_name
             for item in session.scalars(
@@ -7080,7 +7142,20 @@ class FleetProfileService:
                 "unknown": cache_unknown,
             },
             warnings=sorted(set(warnings)),
-            next_actions=[f"vonkctl --profile {row.number} profile load"],
+            next_actions=[
+                *(
+                    [
+                        (
+                            "Restore the original profile author's profile-load "
+                            "authority or explicitly load this profile as an "
+                            "authorized administrator."
+                        )
+                    ]
+                    if roster_authority_blocked
+                    else []
+                ),
+                f"vonkctl --profile {row.number} profile load",
+            ],
             profile_digest=_digest(document),
             created_by=row.created_by,
             created_at=_aware(row.created_at),
