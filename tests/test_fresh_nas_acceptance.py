@@ -111,7 +111,8 @@ def test_nas_responses_accept_explicit_spark_service_hostnames() -> None:
         registry_hostname="registry.spark.localhost",
     )
 
-    assert [answer for _, answer in responses[4:7]] == [
+    assert responses[0][1] == "secure-remote"
+    assert [answer for _, answer in responses[5:8]] == [
         "enroll.spark.localhost",
         "agents.spark.localhost",
         "registry.spark.localhost",
@@ -156,12 +157,19 @@ def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> 
         hermes=False,
     )
 
-    assert [prompt for prompt, _ in responses[: len(required)]] == canonical_prompts
-    assert responses[1] == (
+    # The installer asks for the install mode before the bundle's required values.
+    assert responses[0] == (
+        "Install mode: lab (LAN only) or secure-remote (Tailscale) [lab / secure-remote]: ",
+        "secure-remote",
+    )
+    assert [
+        prompt for prompt, _ in responses[1 : 1 + len(required)]
+    ] == canonical_prompts
+    assert responses[2] == (
         "Trusted Spark management CIDRs: ",
         "192.168.1.0/24",
     )
-    assert responses[2] == (
+    assert responses[3] == (
         "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ",
         "",
     )

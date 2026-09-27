@@ -77,8 +77,11 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
         "watchdog": "15min",
         "package_recovery_alert": "vonk-forge-package-upgrade-alert@%n.service",
     }
+    # Template units are assessed through the instance systemd starts.
     assert set(report["security_units"]) == {
-        unit for unit in PACKAGED_UNITS if unit.endswith(".service")
+        unit.replace("@.service", "@vonk-forge-package-upgrade-recover.service")
+        for unit in PACKAGED_UNITS
+        if unit.endswith(".service")
     }
     assert all(
         not unit["ambient_capabilities"] for unit in report["security_units"].values()
