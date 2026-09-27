@@ -853,11 +853,10 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
         };
         loop {
             let value = self.read_hidden_value(&label)?;
-            if value.is_empty() {
+            if value.is_empty() || validate_single_line_secret(&value, &prompt.file).is_ok() {
                 return Ok(value);
             }
-            validate_single_line_secret(&value, &prompt.file)?;
-            return Ok(value);
+            writeln!(self.writer, "The value is invalid.")?;
         }
     }
 
