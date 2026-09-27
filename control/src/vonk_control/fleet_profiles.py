@@ -5960,7 +5960,8 @@ class FleetProfileService:
             # The accepted snapshot remains selected, but revoked authority
             # cannot authorize a roster effect. Retire only this unbound
             # admission receipt so it cannot become a retrying shadow intent.
-            self._discard_pending_application_by_request_key(request_key)
+            if pending is not None:
+                self._discard_pending_application(pending.id)
             return False
         except (FleetProfileAdmissionBusy, FleetProfileAdmissionEffectBusy) as error:
             if pending is None:
@@ -5987,17 +5988,6 @@ class FleetProfileService:
                 reason=str(error) or "Profile reconcile failed",
             )
         return True
-
-    def _discard_pending_application_by_request_key(self, request_key: str) -> None:
-        """Remove this roster attempt only if it still owns an unbound receipt."""
-        with self._sessions() as session:
-            application_id = session.scalar(
-                select(FleetProfileApplication.id).where(
-                    FleetProfileApplication.request_key == request_key
-                )
-            )
-        if application_id is not None:
-            self._discard_pending_application(application_id)
 
     def tick(self) -> bool:
         """Observe one due cancellation, then advance one ordinary work item."""
