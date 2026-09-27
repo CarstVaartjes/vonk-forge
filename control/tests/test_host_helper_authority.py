@@ -77,13 +77,22 @@ RUNTIME_RUN_ID = "70000000-0000-4000-8000-000000000007"
 RUNTIME_INSTALLATION_ID = "80000000-0000-4000-8000-000000000008"
 
 
+class _RuntimePlanBinding(TypedDict):
+    start_plan_sha256: str | None
+    stop_plan_sha256: str | None
+    run_generation: int | None
+    runtime_run_id: str | None
+    runtime_target_id: str | None
+    runtime_installation_id: str | None
+
+
 def runtime_plan_binding(
     service: HostRuntimeAuthorityService,
     action: ContainerRuntimeAction,
     *,
     job_id: str = "20000000-0000-4000-8000-000000000002",
     operation_id: str = "30000000-0000-4000-8000-000000000003",
-) -> dict[str, object]:
+) -> _RuntimePlanBinding:
     with service._sessions() as session:
         parent = session.get(Job, job_id)
         operation = session.get(AgentOperation, operation_id)
@@ -970,21 +979,22 @@ def test_job_run_stop_rejects_wrong_runtime_target() -> None:
         operation_kind="recipe.job.run.v1", cancel_requested=True
     )
     binding = runtime_plan_binding(service, ContainerRuntimeAction.STOP)
-    arguments = {
-        "node_id": "spk_" + "1" * 32,
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 2,
-        "fence": "40000000-0000-4000-8000-000000000004",
-        "action": ContainerRuntimeAction.STOP,
-        "request_sha256": "e" * 64,
-        "certificate_serial": "certificate-1",
+    wrong_target_binding: _RuntimePlanBinding = {
+        **binding,
+        "runtime_target_id": RUNTIME_RUN_ID,
     }
 
     with pytest.raises(HostHelperAuthorityError, match="lifecycle binding"):
         service.issue_grant(
-            **arguments,
-            **(binding | {"runtime_target_id": RUNTIME_RUN_ID}),
+            node_id="spk_" + "1" * 32,
+            job_id="20000000-0000-4000-8000-000000000002",
+            operation_id="30000000-0000-4000-8000-000000000003",
+            attempt=2,
+            fence="40000000-0000-4000-8000-000000000004",
+            action=ContainerRuntimeAction.STOP,
+            request_sha256="e" * 64,
+            certificate_serial="certificate-1",
+            **wrong_target_binding,
         )
 
 
