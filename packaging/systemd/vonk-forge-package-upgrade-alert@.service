@@ -1,0 +1,22 @@
+[Unit]
+Description=Vonk Forge package recovery failure alert for %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -p daemon.crit -t vonk-forge-agent-recovery "Recovery unit %i entered failed state; inspect /var/lib/vonk-forge/package-upgrade.status and the recovery journal"
+User=root
+Group=root
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native

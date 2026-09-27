@@ -24,6 +24,7 @@ pub mod runtime_identity;
 pub mod self_test;
 pub mod source_policy;
 pub mod state;
+pub mod systemd_notify;
 pub mod telemetry;
 pub mod workloads;
 

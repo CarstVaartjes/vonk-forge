@@ -17,7 +17,10 @@ use vonk_agent::{
         ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError,
         run_once_with_claim_hook,
     },
-    inventory::{InventoryCollector, InventoryError},
+    inventory::{
+        Inventory, InventoryCollector, InventoryError, STATE_DATABASE_DISK_RESERVE_BYTES,
+        disk_reserve_degraded, prepare_state_database_reserve,
+    },
     oci::OciRuntime,
     pair::{collect_evidence, pair},
     process::SystemProcessRunner,
@@ -26,6 +29,7 @@ use vonk_agent::{
     runtime_identity::AgentRuntimeIdentity,
     self_test,
     state::{StateStore, backoff_delay},
+    systemd_notify,
 };
 
 use vonk_agent::CLAIM_CAPABILITIES;
@@ -148,8 +152,19 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         || rotate_if_due(config, &client),
     )
     .await?;
+    if !matches!(prepare_state_database_reserve(&config.data_dir), Ok(true)) {
+        eprintln!(
+            "vonk-agent: degraded: state database disk reserve is unavailable; attempting state recovery with measured free space"
+        );
+        systemd_notify::notify(
+            "STATUS=Degraded: state database disk reserve is unavailable; attempting recovery",
+        );
+    }
     let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
     state.recover_interrupted()?;
+    systemd_notify::notify(
+        "READY=1\nSTATUS=Agent initialized; waiting for Controller and host prerequisites",
+    );
     let control = run_control_lane(config, runtime_identity, client.clone(), state);
     let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
     match supervise_lanes_with_rotation(
@@ -192,32 +207,43 @@ async fn run_control_lane(
                 fabric_address: config.fabric_address,
                 fabric_bandwidth_mbps: config.fabric_bandwidth_mbps,
             };
-            let inventory = match collector.collect() {
-                Ok(inventory) => inventory,
-                Err(error @ InventoryError::PrerequisiteUnavailable(_)) => {
-                    eprintln!(
-                        "vonk-agent: {error}; exiting so systemd can recreate the private device namespace before retrying"
-                    );
-                    return Err(error.into());
-                }
-                Err(error) => return Err(error.into()),
-            };
+            let inventory = collect_inventory_until_ready(
+                || collector.collect(),
+                &mut failures,
+                config.poll_min_seconds,
+                config.poll_max_seconds,
+            )
+            .await;
+            if disk_reserve_degraded(inventory.disk_available_bytes)
+                || !inventory.state_database_reserve_held
+            {
+                eprintln!(
+                    "vonk-agent: degraded: {} bytes remain on the state database filesystem; the {} byte reserve is not held",
+                    inventory.disk_available_bytes, STATE_DATABASE_DISK_RESERVE_BYTES
+                );
+                systemd_notify::notify(&format!(
+                    "STATUS=Degraded: {} bytes free on state database filesystem; 64 MiB reserve is not held",
+                    inventory.disk_available_bytes,
+                ));
+            }
             match client.report_inventory(&inventory).await {
                 Ok(()) => {
                     failures = 0;
                     inventory_reported_at = Some(Instant::now());
+                    systemd_notify::watchdog();
                 }
                 Err(error) if error.retryable() => {
                     failures = failures.saturating_add(1);
                     let entropy =
                         SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64;
-                    tokio::time::sleep(backoff_delay(
+                    let delay = backoff_delay(
                         failures,
                         entropy,
                         config.poll_min_seconds,
                         config.poll_max_seconds,
-                    ))
-                    .await;
+                    );
+                    systemd_notify::progress("Controller inventory report retrying");
+                    tokio::time::sleep(delay).await;
                     continue;
                 }
                 Err(error) => return Err(error.into()),
@@ -308,21 +334,59 @@ async fn run_control_lane(
             Ok(()) => {
                 failures = 0;
                 readiness_published = true;
+                systemd_notify::progress("Agent control loop progressing");
             }
             Err(error) if matches!(&error, vonk_agent::executor::LoopError::Client(inner) if inner.retryable()) =>
             {
                 failures = failures.saturating_add(1);
                 inventory_reported_at = None;
                 let entropy = SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64;
-                tokio::time::sleep(backoff_delay(
+                let delay = backoff_delay(
                     failures,
                     entropy,
                     config.poll_min_seconds,
                     config.poll_max_seconds,
-                ))
-                .await;
+                );
+                systemd_notify::progress("Controller unavailable; control loop retrying");
+                tokio::time::sleep(delay).await;
             }
             Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+fn inventory_retry_delay(failures: u32, minimum: u64, maximum: u64) -> Duration {
+    let entropy = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |value| value.subsec_nanos() as u64);
+    backoff_delay(failures, entropy, minimum, maximum)
+}
+
+async fn collect_inventory_until_ready<Collect>(
+    mut collect: Collect,
+    failures: &mut u32,
+    minimum: u64,
+    maximum: u64,
+) -> Inventory
+where
+    Collect: FnMut() -> Result<Inventory, InventoryError>,
+{
+    loop {
+        match collect() {
+            Ok(inventory) => return inventory,
+            Err(error) => {
+                *failures = (*failures).saturating_add(1);
+                let delay = inventory_retry_delay(*failures, minimum, maximum);
+                eprintln!(
+                    "vonk-agent: degraded: host inventory unavailable ({error}); retrying in {} seconds",
+                    delay.as_secs()
+                );
+                systemd_notify::progress(&format!(
+                    "Degraded: host inventory unavailable ({error}); retrying in {} seconds",
+                    delay.as_secs()
+                ));
+                tokio::time::sleep(delay).await;
+            }
         }
     }
 }
@@ -489,11 +553,12 @@ fn claim_wait_seconds(
 #[cfg(test)]
 mod tests {
     use super::{
-        LaneExitWithRotation, claim_wait_seconds, ensure_startup_identity,
-        exact_observation_disposition, inventory_refresh_due, retry_rotation_while_valid,
-        supervise_lanes_with_rotation,
+        LaneExitWithRotation, claim_wait_seconds, collect_inventory_until_ready,
+        ensure_startup_identity, exact_observation_disposition, inventory_refresh_due,
+        inventory_retry_delay, retry_rotation_while_valid, supervise_lanes_with_rotation,
     };
     use std::{
+        cell::Cell,
         future,
         sync::{
             Arc, Barrier,
@@ -505,6 +570,7 @@ mod tests {
     use vonk_agent::{
         executor::RecipeObservationError, host_runtime::HostRuntimeError, rotation::RotationError,
     };
+    use vonk_agent::{inventory::Inventory, inventory::InventoryError};
 
     #[test]
     fn idle_agent_refreshes_inventory_before_controller_admission_expires() {
@@ -522,6 +588,56 @@ mod tests {
         let refreshed_at = reported_at + Duration::from_secs(180);
         assert!(!inventory_refresh_due(Some(refreshed_at), refreshed_at));
         assert!(inventory_refresh_due(None, refreshed_at));
+    }
+
+    #[test]
+    fn startup_inventory_retry_backoff_is_bounded_by_agent_poll_limits() {
+        for failure in [1, 2, 3, 20, u32::MAX] {
+            let delay = inventory_retry_delay(failure, 2, 30);
+            assert!(delay >= Duration::from_secs(2));
+            assert!(delay <= Duration::from_secs(30));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn startup_inventory_retries_host_prerequisite_failures_until_recovery() {
+        let attempts = Cell::new(0_u32);
+        let mut failures = 0_u32;
+        let inventory = collect_inventory_until_ready(
+            || {
+                let attempt = attempts.get() + 1;
+                attempts.set(attempt);
+                if attempt <= 7 {
+                    Err(InventoryError::PrerequisiteUnavailable("Podman"))
+                } else {
+                    Ok(Inventory {
+                        memory_total_bytes: 100,
+                        memory_available_bytes: 90,
+                        disk_total_bytes: 1000,
+                        disk_available_bytes: 900,
+                        state_database_reserve_held: true,
+                        gpu_count: 1,
+                        gpu_memory_total_bytes: 100,
+                        gpu_memory_free_bytes: 90,
+                        memory_pool: vonk_agent_protocol::MemoryPool::Separate,
+                        nvidia_driver_version: "test".to_owned(),
+                        container_runtime_version: "test".to_owned(),
+                        artifact_store_read_only: false,
+                        capabilities: vec![],
+                        fabric_address: None,
+                        fabric_bandwidth_mbps: None,
+                    })
+                }
+            },
+            &mut failures,
+            1,
+            1,
+        )
+        .await;
+
+        assert_eq!(attempts.get(), 8);
+        assert_eq!(failures, 7);
+        assert_eq!(inventory.disk_available_bytes, 900);
     }
 
     #[test]
