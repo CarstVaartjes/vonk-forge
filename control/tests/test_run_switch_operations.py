@@ -753,6 +753,52 @@ def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> Non
     assert service.get(second.operation_id).state == "queued"
 
 
+def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    with sessions.begin() as session:
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.observed_at = NOW - timedelta(days=1)
+    now = [NOW]
+    executor = RecordingArtifactExecutor()
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(),
+    )
+    service._clock = lambda: now[0]
+    request = _request(sessions, nodes[0])
+    blocked = service.preview(request, actor="admin")
+    assert blocked.allowed is False
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    assert operation.state == "waiting"
+    with sessions.begin() as session:
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.observed_at = NOW
+    now[0] = NOW + timedelta(seconds=16)
+    assert service._advance(operation.operation_id) is True
+    refreshed = service.get(operation.operation_id)
+    assert refreshed.state == "queued"
+
+
 def test_child_activity_change_persists_without_clock_only_writes(
     tmp_path: Path,
 ) -> None:
@@ -2994,7 +3040,7 @@ def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
     assert [stop.run_id for stop in plan.stops] == [run_id]
 
 
-def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(
+def test_artifact_child_checkpoint_retries_digest_mismatch_without_accepting_bytes(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -3053,9 +3099,13 @@ def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(
     )
     assert bad_service._advance(bad_operation.operation_id) is True
     assert bad_service._advance(bad_operation.operation_id) is True
-    failed = bad_service.get(bad_operation.operation_id)
-    assert failed.state == "failed"
-    assert failed.status_reason == "run-switch.artifact-digest-verification-mismatch"
+    waiting = bad_service.get(bad_operation.operation_id)
+    assert waiting.state == "running"
+    assert waiting.status_reason is not None
+    assert "artifact-digest-verification-mismatch" in waiting.status_reason
+    assert waiting.result is not None
+    assert waiting.result.retry_attempt is not None
+    assert waiting.result.retry_attempt > 1
 
 
 def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -> None:
@@ -3162,7 +3212,7 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert "verify" in _result(verified).completed_phases
 
 
-def test_transient_distribution_child_is_not_replayed_by_parent(
+def test_typed_transient_child_failure_is_retried_automatically(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -3181,69 +3231,8 @@ def test_transient_distribution_child_is_not_replayed_by_parent(
         artifact_executor,
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
-    request = _request(sessions, nodes[0])
-    plan = service.preview(request, actor="admin")
-    operation = service.apply(
-        RunSwitchApplyRequest(
-            **request.model_dump(),
-            plan_digest=plan.plan_digest,
-            request_key=str(uuid.uuid4()),
-        ),
-        actor="admin",
-    )
-    assert service.tick() is True
-    child_id = _child_operation_id(service.get(operation.operation_id))
-    artifact_executor.children[child_id].state = "failed"
-    artifact_executor.children[child_id].result = {
-        "error_code": "agent.copy.timeout",
-        "failure_kind": "temporary-dependency",
-        "progress": {
-            "completed_bytes": 512,
-            "total_bytes": 1024,
-            "members": [
-                {
-                    "node_id": nodes[0],
-                    "state": "unknown",
-                    "completed_bytes": 512,
-                    "total_bytes": 1024,
-                }
-            ],
-        },
-    }
-    assert service.tick() is True
-    failed = service.get(operation.operation_id)
-    assert failed.state == "failed"
-    assert failed.plan_digest == plan.plan_digest
-    assert failed.progress.completed_bytes == 512
-    assert failed.result is not None and failed.result.retryable
-    with sessions() as session:
-        row = session.get(Job, operation.operation_id)
-        assert row is not None
-        assert row.current_attempt <= 1
-        assert row.result is not None
-        assert row.result["child_operation_id"] == child_id
-    assert service.tick() is False
-
-
-def test_operator_retry_uses_a_new_request_after_typed_transient_failure(
-    tmp_path: Path,
-) -> None:
-    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(
-        lifecycle,
-        mapping_id,
-        build_id,
-        nodes,
-        request_id=str(uuid.uuid4()),
-    )
-    artifact_executor = RecordingArtifactExecutor(child_transfer=True)
-    service = _service(
-        sessions,
-        lifecycle._clock(),
-        lifecycle,
-        artifact_executor,
-        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
-    )
+    now = [NOW]
+    service._clock = lambda: now[0]
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
     operation = service.apply(
@@ -3255,51 +3244,28 @@ def test_operator_retry_uses_a_new_request_after_typed_transient_failure(
         actor="admin",
     )
 
-    assert service.tick() is True
+    assert service._advance(operation.operation_id) is True
     child_id = _child_operation_id(service.get(operation.operation_id))
     artifact_executor.children[child_id].state = "failed"
     artifact_executor.children[child_id].result = {
         "error_code": "agent.copy.timeout",
         "failure_kind": "temporary-dependency",
     }
-    assert service.tick() is True
-    exhausted = service.get(operation.operation_id)
-    assert exhausted.state == "failed"
-    retry = service.retry(
-        exhausted.operation_id,
-        actor="operator",
-        request_key=str(uuid.uuid4()),
-    )
-    assert retry.state == "queued"
-    assert retry.plan_digest == plan.plan_digest
-    with sessions() as session:
-        row = session.get(Job, retry.operation_id)
-        assert row is not None
-        assert row.current_attempt == 1
-        retry_payload = row.payload["retry"]
-        assert isinstance(retry_payload, dict)
-        assert retry_payload["operator_retries"] == 1
-
-    assert service.tick() is True
-    retried_child = _child_operation_id(service.get(retry.operation_id))
-    artifact_executor.children[retried_child].state = "succeeded"
-    assert plan.preparation is not None
-    retried_image = plan.preparation.runtime_image
-    assert retried_image is not None
-    artifact_executor.children[retried_child].result = {
-        "copied_bytes": 1024,
-        "evidence": [
-            {
-                "node_id": nodes[0],
-                "verified": True,
-                "verified_digests": [MODEL_ARTIFACT],
-                "verified_image_digest": "sha256:" + "1" * 64,
-                "imported_image_digest": "sha256:" + "1" * 64,
-                "verified_oci_layout_sha256": retried_image.oci_layout_sha256,
-            }
-        ],
-    }
-    assert service.tick() is True
+    assert service._advance(operation.operation_id) is True
+    retrying = service.get(operation.operation_id)
+    assert retrying.state == "running"
+    assert retrying.result is not None
+    assert retrying.result.child_operation_id is None
+    assert retrying.result.retry_attempt is not None
+    assert retrying.result.retry_attempt > 1
+    assert retrying.status_reason is not None
+    assert retrying.result.observation_due_at is not None
+    assert retrying.result.observation_due_at > now[0]
+    now[0] = retrying.result.observation_due_at
+    assert service._advance(operation.operation_id) is True
+    resumed = service.get(operation.operation_id)
+    assert resumed.state == "running"
+    assert _child_operation_id(resumed) != child_id
 
 
 def test_run_switch_retry_classification_rejects_terminal_http_and_storage_errors() -> (
@@ -4003,7 +3969,7 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
         assert installed.state == "installed"
 
 
-def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_path):
+def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_path):
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
@@ -4045,13 +4011,15 @@ def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_
         actor="admin",
     )
     service.tick()
-    with pytest.raises(RunSwitchOperationConflict, match="explicit Stop"):
-        service.cancel(
-            active.operation_id,
-            actor="admin",
-            request_key=str(uuid.uuid4()),
-            reason="Stop running",
-        )
+    stopped = service.cancel(
+        active.operation_id,
+        actor="admin",
+        request_key=str(uuid.uuid4()),
+        reason="Stop running",
+    )
+    assert stopped.kind == "recipe.stop.v2"
+    assert stopped.state == "queued"
+    assert service.get(active.operation_id).state == "cancelled"
 
 
 def test_production_build_queue_receipt_survives_phase_handoff_and_completion(

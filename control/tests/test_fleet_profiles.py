@@ -2871,18 +2871,13 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
         }
 
 
-def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
+def test_profile_apply_uses_latest_saved_profile_when_digest_is_stale() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-
-    with pytest.raises(FleetProfileConflict, match="stale"):
-        service.apply(
-            profile.id, plan_digest="f" * 64, request_key=_uuid(5), actor="admin"
-        )
 
     updated = service.update(
         profile.id,
@@ -2892,6 +2887,11 @@ def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
         actor="admin",
     )
     assert updated.profile_digest != profile.profile_digest
+    application = service.apply(
+        profile.id, plan_digest="f" * 64, request_key=_uuid(5), actor="admin"
+    )
+    assert application.profile_digest == updated.profile_digest
+    assert application.state == "queued"
 
 
 def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation() -> (
@@ -3268,13 +3268,14 @@ def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -
     )
     assert reason.severity == "error"
     assert "cannot attest" in reason.detail
-    with pytest.raises(FleetProfileConflict, match="preview is blocked"):
-        service.apply(
-            profile.id,
-            plan_digest=preview.plan_digest,
-            request_key=_uuid(41),
-            actor="admin",
-        )
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(41),
+        actor="admin",
+    )
+    assert application.state == "waiting-for-operator"
+    assert application.status_reason is not None
 
 
 def test_profile_preview_projects_exact_preparation_from_run_switch_authority(

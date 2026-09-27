@@ -1258,6 +1258,8 @@ class RunSwitchOperationResult(_StrictModel):
     total_bytes_known: bool = False
     members: list[RunSwitchMemberReceipt] = Field(default_factory=list, max_length=32)
     retryable: bool = False
+    phase_retry_generation: int = Field(default=0, ge=0)
+    force_replan: bool = False
     failure_code: (
         Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")] | None
     ) = None

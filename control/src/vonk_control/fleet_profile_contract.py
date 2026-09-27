@@ -728,6 +728,13 @@ class FleetProfileSwitchChildState(_StrictModel):
     result: FleetProfileSwitchChildResult | None = None
 
 
+class FleetProfileAssignmentFailure(_StrictModel):
+    assignment_id: UuidId | None = None
+    operation_id: UuidId | None = None
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    terminal: bool = False
+
+
 class FleetProfileSwitchAdapterResult(_StrictModel):
     """Complete result of reconciling every assignment in a profile scope."""
 
@@ -754,6 +761,9 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     active_operation_id: UuidId | None = None
     active_kind: FleetProfileSwitchChildKind | None = None
     children: list[FleetProfileSwitchChildState] = Field(
+        default_factory=list, max_length=128
+    )
+    assignment_failures: list[FleetProfileAssignmentFailure] = Field(
         default_factory=list, max_length=128
     )
     actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
