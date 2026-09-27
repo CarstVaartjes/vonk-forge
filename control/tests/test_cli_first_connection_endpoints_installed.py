@@ -195,7 +195,8 @@ def test_installed_cli_first_connection_requires_a_valid_controller_token(
                 tmp_path,
             )
             assert rejected.returncode == 2, label
-            assert "401" in json.loads(rejected.stdout)["error"], label
+            payload = json.loads(rejected.stdout)
+            assert payload["code"] == "controller.authentication_required", label
             assert token not in rejected.stdout + rejected.stderr
             assert peer.calls[-1] == ("GET", "/api/fleet", None)
 
