@@ -44,8 +44,9 @@ On Linux, this runs both suites in full. On macOS, it runs portable tests on
 the host and sends tests marked `linux_only`, `needs_systemd`,
 `needs_rust_probe`, or `postgres` to the `vonk-ci` OrbStack VM when available.
 It prints an explicit prerequisite skip if the VM is unavailable; CI must
-provide the VM and required recipe checkout. The VM uses task-specific uv and
-Cargo directories under `$HOME` to isolate Python and Rust artifacts. Set
+provide its equivalent Linux lane and required recipe checkout, and fail when
+either is missing. The VM uses task-specific uv and Cargo directories under
+`$HOME` to isolate Python and Rust artifacts. Set
 `VONK_RECIPE_LIBRARY_ROOT` when the sibling
 checkout is outside `/opt/vonk-forge-recipes`.
 
