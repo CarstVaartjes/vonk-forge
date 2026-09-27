@@ -16,13 +16,19 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::{
-    ConfirmPackageActivationOperation, ExecuteContainerRuntimeRequestOperation,
-    HostHelperProcessLogs, InstallVonkDebOperation, RestartVonkUnitOperation,
+    CompiledExecutionPlan, ConfirmPackageActivationOperation,
+    ExecuteContainerRuntimeRequestOperation, HostHelperProcessLogs, InstallVonkDebOperation,
+    RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload, RestartVonkUnitOperation,
     ScheduleRebootOperation,
 };
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeReconciliationIdentity,
-    RecipeRunObservationOutcome, canonical_json, hex_sha256, parse_strict,
+    RecipeRunObservationOutcome, canonical_json,
+    compiled_oci::{
+        CompiledOciError, CompiledOciPaths, ExecInvocationLimits, measure_exec_invocation,
+        start_arguments_for_paths,
+    },
+    hex_sha256, parse_strict,
 };
 use wait_timeout::ChildExt;
 
@@ -44,11 +50,21 @@ const MAX_COMPILED_MODEL_FILES: usize = 4096;
 const MAX_COMPILED_MODEL_PATH_CHARS: usize = 512;
 const MAX_COMPILED_MODEL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const INSTALLATION_RECONCILIATION_DIRECTORY: &str = "installation-reconciliation";
+const RUNTIME_GENERATION_FENCE_DIRECTORY: &str = "runtime-generation-fences";
 const MAX_INSTALLATION_RECONCILIATION_IDENTITY_BYTES: u64 = 16 * 1024;
+const MAX_RUNTIME_GENERATION_FENCE_BYTES: u64 = 1024;
+const LINUX_ARG_MAX_FLOOR_BYTES: u64 = 128 * 1024;
+const LINUX_STACK_LIMIT_BYTES: u64 = 8 * 1024 * 1024;
+const LINUX_ARG_MAX_CEILING_BYTES: u64 = LINUX_STACK_LIMIT_BYTES / 4 * 3;
 const DOCKER_FIREWALL: &str = "/usr/lib/vonk-forge/vonk-forge-docker-firewall";
 const DOCKER_FIREWALL_CONFIG: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
 const NATIVE_FABRIC_ROOT: &str = "/sys/class/infiniband";
 const RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION: u8 = 2;
+const HELPER_COMMAND_ENV: [(&str, &str); 3] = [
+    ("LANG", "C.UTF-8"),
+    ("LC_ALL", "C.UTF-8"),
+    ("PATH", ROOT_COMMAND_PATH),
+];
 
 #[derive(Debug, Error)]
 pub enum OperationError {
@@ -69,6 +85,14 @@ pub enum OperationError {
     },
     #[error("compiled command failed")]
     CommandFailed,
+    #[error("projected runtime invocation exceeds a host argument limit")]
+    RuntimeInvocationLimitExceeded {
+        string_limit: bool,
+        limit_bytes: u64,
+        observed_bytes: u64,
+    },
+    #[error("host runtime argument limits could not be determined")]
+    RuntimeInvocationLimitsUnavailable,
     #[error("runtime image load failed")]
     RuntimeImageLoadFailed,
     #[error("runtime image inspection failed")]
@@ -111,6 +135,16 @@ impl OperationError {
             Self::PackagePreflightFailed => "helper.package_preflight_failed",
             Self::PackageInstallFailed { .. } => "helper.package_install_failed",
             Self::CommandFailed => "helper.command_failed",
+            Self::RuntimeInvocationLimitExceeded {
+                string_limit: false,
+                ..
+            } => "helper.runtime_invocation_limit_exceeded",
+            Self::RuntimeInvocationLimitExceeded {
+                string_limit: true, ..
+            } => "helper.runtime_invocation_string_limit_exceeded",
+            Self::RuntimeInvocationLimitsUnavailable => {
+                "helper.runtime_invocation_limits_unavailable"
+            }
             Self::RuntimeImageLoadFailed => "helper.runtime_image_load_failed",
             Self::RuntimeImageInspectFailed => "helper.runtime_image_inspect_failed",
             Self::RuntimeImageIdentityInvalid => "helper.runtime_image_identity_invalid",
@@ -137,6 +171,16 @@ impl OperationError {
             Self::PackagePreflightFailed => "package activation prerequisites failed",
             Self::PackageInstallFailed { .. } => "package installation failed",
             Self::CommandFailed => "compiled command failed",
+            Self::RuntimeInvocationLimitExceeded {
+                string_limit: false,
+                ..
+            } => "projected runtime invocation exceeds the host argument limit",
+            Self::RuntimeInvocationLimitExceeded {
+                string_limit: true, ..
+            } => "projected runtime argument exceeds the host per-string limit",
+            Self::RuntimeInvocationLimitsUnavailable => {
+                "host runtime argument limits could not be determined"
+            }
             Self::RuntimeImageLoadFailed => "runtime image load failed",
             Self::RuntimeImageInspectFailed => "runtime image inspection failed",
             Self::RuntimeImageIdentityInvalid => "runtime image identity is invalid",
@@ -463,6 +507,7 @@ struct DockerSaveManifestEntry {
     config: String,
 }
 
+#[derive(Clone, Copy)]
 struct RuntimeRequestGrantBinding<'a> {
     job_id: &'a uuid::Uuid,
     operation_id: &'a uuid::Uuid,
@@ -470,6 +515,33 @@ struct RuntimeRequestGrantBinding<'a> {
     fence: &'a uuid::Uuid,
     installation_id: Option<&'a uuid::Uuid>,
     reconciliation_identity: Option<&'a RecipeReconciliationIdentity>,
+    start_plan_sha256: Option<&'a str>,
+    stop_plan_sha256: Option<&'a str>,
+    run_generation: Option<u32>,
+    runtime_run_id: Option<&'a uuid::Uuid>,
+    runtime_target_id: Option<&'a uuid::Uuid>,
+    runtime_installation_id: Option<&'a uuid::Uuid>,
+}
+
+enum AuthorizedRuntimeEffect {
+    Start {
+        identity: RuntimeEffectIdentity,
+        logical_run_id: uuid::Uuid,
+        plan_digest: String,
+    },
+    Stop {
+        identity: RuntimeEffectIdentity,
+        logical_run_id: uuid::Uuid,
+        plan_digest: String,
+        stop_timeout_seconds: u16,
+        cancel_pending_start: bool,
+    },
+}
+
+enum RuntimeStartLaunch {
+    Service,
+    Job { timeout_seconds: u16 },
+    TimedOut,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -482,11 +554,35 @@ struct InstallationReconciliationReceipt {
 }
 
 const INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION: u8 = 2;
+const RUNTIME_GENERATION_FENCE_SCHEMA_VERSION: u8 = 2;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct RuntimeGenerationFence {
+    schema_version: u8,
+    installation_id: uuid::Uuid,
+    runtime_id: uuid::Uuid,
+    highest_generation: u32,
+    cancelled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct RuntimeEffectIdentity {
+    runtime_id: uuid::Uuid,
+    installation_id: uuid::Uuid,
+    run_generation: u32,
+}
+
+#[derive(Clone, Copy)]
+enum RuntimeGenerationFenceUse {
+    Start,
+    Stop { cancel_pending_start: bool },
+}
 
 #[derive(Default)]
 struct JobCancellationState {
-    active_starts: HashSet<String>,
-    cancelled: HashSet<String>,
+    active_starts: HashSet<RuntimeEffectIdentity>,
+    cancelled: HashSet<RuntimeEffectIdentity>,
 }
 
 #[derive(Default)]
@@ -496,47 +592,73 @@ struct JobCancellationFence {
 
 struct ActiveJobStart<'a> {
     fence: &'a JobCancellationFence,
-    run_id: String,
+    identity: RuntimeEffectIdentity,
 }
 
 impl JobCancellationFence {
-    fn begin(&self, run_id: &str) -> Result<ActiveJobStart<'_>, OperationError> {
+    fn begin(&self, identity: RuntimeEffectIdentity) -> Result<ActiveJobStart<'_>, OperationError> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| OperationError::CommandFailed)?;
-        if state.cancelled.contains(run_id) || !state.active_starts.insert(run_id.to_owned()) {
+        if state.cancelled.contains(&identity) || !state.active_starts.insert(identity) {
             return Err(OperationError::CommandFailed);
         }
         Ok(ActiveJobStart {
             fence: self,
-            run_id: run_id.to_owned(),
+            identity,
         })
     }
 
-    fn cancel(&self, run_id: &str) -> Result<(), OperationError> {
-        self.state
+    fn cancel(&self, identity: RuntimeEffectIdentity) -> Result<(), OperationError> {
+        let mut state = self
+            .state
             .lock()
-            .map_err(|_| OperationError::CommandFailed)?
-            .cancelled
-            .insert(run_id.to_owned());
+            .map_err(|_| OperationError::CommandFailed)?;
+        if state.active_starts.contains(&identity) {
+            state.cancelled.insert(identity);
+        }
         Ok(())
     }
 
-    fn is_active(&self, run_id: &str) -> Result<bool, OperationError> {
+    fn is_active(&self, identity: RuntimeEffectIdentity) -> Result<bool, OperationError> {
         Ok(self
             .state
             .lock()
             .map_err(|_| OperationError::CommandFailed)?
             .active_starts
-            .contains(run_id))
+            .contains(&identity))
+    }
+
+    fn was_cancelled(&self, identity: RuntimeEffectIdentity) -> Result<bool, OperationError> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| OperationError::CommandFailed)?
+            .cancelled
+            .contains(&identity))
+    }
+
+    fn wait_for_active_start(
+        &self,
+        identity: RuntimeEffectIdentity,
+        deadline: Instant,
+    ) -> Result<(), OperationError> {
+        while self.is_active(identity)? {
+            if Instant::now() >= deadline {
+                return Err(OperationError::StopUncertain);
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        Ok(())
     }
 }
 
 impl Drop for ActiveJobStart<'_> {
     fn drop(&mut self) {
         if let Ok(mut state) = self.fence.state.lock() {
-            state.active_starts.remove(&self.run_id);
+            state.active_starts.remove(&self.identity);
+            state.cancelled.remove(&self.identity);
         }
     }
 }
@@ -774,6 +896,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     observation_identity_sha256,
                     installation_id,
                     reconciliation_identity,
+                    start_plan_sha256,
+                    stop_plan_sha256,
+                    run_generation,
+                    runtime_run_id,
+                    runtime_target_id,
+                    runtime_installation_id,
                     ..
                 },
             ) => {
@@ -786,6 +914,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         fence,
                         installation_id: installation_id.as_ref(),
                         reconciliation_identity: reconciliation_identity.as_ref(),
+                        start_plan_sha256: start_plan_sha256.as_deref(),
+                        stop_plan_sha256: stop_plan_sha256.as_deref(),
+                        run_generation: *run_generation,
+                        runtime_run_id: runtime_run_id.as_ref(),
+                        runtime_target_id: runtime_target_id.as_ref(),
+                        runtime_installation_id: runtime_installation_id.as_ref(),
                     },
                     request_sha256,
                     observation_identity_sha256.as_deref(),
@@ -1098,6 +1232,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
             _ => return Err(OperationError::InvalidOperation),
         }
+        let authorized_effect =
+            self.authorize_runtime_effect(&request, binding, observation_node_id)?;
         match request.action {
             HostRuntimeAction::RuntimePreflight => {
                 let code = crate::runtime_preflight::run(
@@ -1147,26 +1283,47 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 })
             }
             HostRuntimeAction::Start => {
-                self.runtime_start(&request.arguments, true)
-                    .map(|exit_code| RuntimeRequestOutcome {
-                        exit_code,
-                        recipe_run_observation: None,
-                    })
+                let Some(AuthorizedRuntimeEffect::Start {
+                    identity,
+                    logical_run_id,
+                    plan_digest,
+                }) = authorized_effect
+                else {
+                    return Err(OperationError::InvalidOperation);
+                };
+                self.runtime_start_authorized(
+                    &request.arguments,
+                    identity,
+                    logical_run_id,
+                    &plan_digest,
+                )
+                .map(|exit_code| RuntimeRequestOutcome {
+                    exit_code,
+                    recipe_run_observation: None,
+                })
             }
             HostRuntimeAction::Stop => {
-                if request.arguments.get(1).map(String::as_str) == Some("run") {
-                    self.runtime_start(&request.arguments, false)
-                        .map(|exit_code| RuntimeRequestOutcome {
-                            exit_code,
-                            recipe_run_observation: None,
-                        })
-                } else {
-                    self.runtime_stop(&request.arguments)
-                        .map(|()| RuntimeRequestOutcome {
-                            exit_code: None,
-                            recipe_run_observation: None,
-                        })
-                }
+                let Some(AuthorizedRuntimeEffect::Stop {
+                    identity,
+                    logical_run_id,
+                    plan_digest,
+                    stop_timeout_seconds,
+                    cancel_pending_start,
+                }) = authorized_effect
+                else {
+                    return Err(OperationError::InvalidOperation);
+                };
+                self.runtime_stop_authorized(
+                    identity,
+                    logical_run_id,
+                    &plan_digest,
+                    stop_timeout_seconds,
+                    cancel_pending_start,
+                )
+                .map(|()| RuntimeRequestOutcome {
+                    exit_code: None,
+                    recipe_run_observation: None,
+                })
             }
             HostRuntimeAction::InstallationCleanup => {
                 let installation_id = request
@@ -1189,6 +1346,214 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 })
             }
         }
+    }
+
+    fn authorize_runtime_effect(
+        &self,
+        request: &HostRuntimeRequest,
+        grant: RuntimeRequestGrantBinding<'_>,
+        node_id: Option<&str>,
+    ) -> Result<Option<AuthorizedRuntimeEffect>, OperationError> {
+        match request.action {
+            HostRuntimeAction::Start => {
+                if request.installation_id.is_some()
+                    || request.reconciliation_identity.is_some()
+                    || request.observation.is_some()
+                    || request.stop_plan.is_some()
+                    || request.run_generation.is_none()
+                    || (request.start_plan.is_some() == request.job_plan.is_some())
+                    || grant.start_plan_sha256.is_none()
+                    || grant.stop_plan_sha256.is_some()
+                {
+                    return Err(OperationError::InvalidOperation);
+                }
+                let (plan, compiled, logical_run_id, target_id, installation_id, generation) =
+                    if let Some(plan) = request.start_plan.as_ref() {
+                        validate_runtime_start_plan(plan)?;
+                        if plan.compiled_execution_plan.job.is_some() {
+                            return Err(OperationError::InvalidOperation);
+                        }
+                        (
+                            canonical_json(plan).map_err(|_| OperationError::InvalidOperation)?,
+                            &plan.compiled_execution_plan,
+                            plan.run_id,
+                            plan.run_id,
+                            plan.installation_id,
+                            plan.run_generation,
+                        )
+                    } else {
+                        let plan = request
+                            .job_plan
+                            .as_ref()
+                            .ok_or(OperationError::InvalidOperation)?;
+                        validate_runtime_job_plan(plan)?;
+                        (
+                            canonical_json(plan).map_err(|_| OperationError::InvalidOperation)?,
+                            &plan.compiled_execution_plan,
+                            plan.run_id,
+                            plan.job_id,
+                            plan.installation_id,
+                            plan.run_generation,
+                        )
+                    };
+                let grant_target = grant
+                    .runtime_target_id
+                    .ok_or(OperationError::InvalidOperation)?;
+                if generation == 0
+                    || generation > i32::MAX as u32
+                    || request.run_generation != Some(generation)
+                    || grant.run_generation != Some(generation)
+                    || grant.runtime_run_id != Some(&logical_run_id)
+                    || grant_target != &target_id
+                    || grant.runtime_installation_id != Some(&installation_id)
+                    || grant.installation_id.is_some()
+                    || grant.reconciliation_identity.is_some()
+                    || grant.stop_plan_sha256.is_some()
+                    || !grant
+                        .start_plan_sha256
+                        .is_some_and(|digest| lower_hex(digest, 64) && hex_sha256(&plan) == digest)
+                    || !valid_oci_digest(&compiled.runtime_image.image_digest)
+                    || !compiled.lifecycle.pre_start.is_empty()
+                {
+                    return Err(OperationError::InvalidOperation);
+                }
+                let expected_arguments =
+                    self.projected_runtime_arguments(compiled, installation_id, target_id)?;
+                if request.arguments != expected_arguments {
+                    return Err(OperationError::InvalidOperation);
+                }
+                Ok(Some(AuthorizedRuntimeEffect::Start {
+                    identity: RuntimeEffectIdentity {
+                        runtime_id: target_id,
+                        installation_id,
+                        run_generation: generation,
+                    },
+                    logical_run_id,
+                    plan_digest: if let Some(plan) = request.start_plan.as_ref() {
+                        plan.plan_digest.clone()
+                    } else {
+                        request
+                            .job_plan
+                            .as_ref()
+                            .ok_or(OperationError::InvalidOperation)?
+                            .plan_digest
+                            .clone()
+                    },
+                }))
+            }
+            HostRuntimeAction::Stop => {
+                let plan = request
+                    .stop_plan
+                    .as_ref()
+                    .ok_or(OperationError::InvalidOperation)?;
+                validate_runtime_stop_plan(plan)?;
+                if request.arguments.len() != 0
+                    || request.installation_id.is_some()
+                    || request.reconciliation_identity.is_some()
+                    || request.start_plan.is_some()
+                    || request.job_plan.is_some()
+                    || request.observation.is_some()
+                    || request.run_generation != Some(plan.run_generation)
+                    || grant.run_generation != Some(plan.run_generation)
+                    || grant.runtime_run_id != Some(&plan.run_id)
+                    || grant.runtime_target_id != Some(&plan.target_runtime_id)
+                    || grant.runtime_installation_id != Some(&plan.installation_id)
+                    || grant.installation_id.is_some()
+                    || grant.reconciliation_identity.is_some()
+                    || grant.start_plan_sha256.is_some()
+                    || !grant.stop_plan_sha256.is_some_and(|digest| {
+                        lower_hex(digest, 64)
+                            && canonical_json(plan)
+                                .ok()
+                                .is_some_and(|encoded| hex_sha256(&encoded) == digest)
+                    })
+                    || plan.node_id != node_id.ok_or(OperationError::InvalidOperation)?
+                    || (plan.compiled_execution_plan.job.is_none()
+                        && plan.target_runtime_id != plan.run_id)
+                    || !plan.compiled_execution_plan.lifecycle.post_stop.is_empty()
+                {
+                    return Err(OperationError::InvalidOperation);
+                }
+                let stop_timeout_seconds =
+                    u16::try_from(plan.compiled_execution_plan.lifecycle.stop_timeout_seconds)
+                        .ok()
+                        .filter(|seconds| (1..=600).contains(seconds))
+                        .ok_or(OperationError::InvalidOperation)?;
+                Ok(Some(AuthorizedRuntimeEffect::Stop {
+                    identity: RuntimeEffectIdentity {
+                        runtime_id: plan.target_runtime_id,
+                        installation_id: plan.installation_id,
+                        run_generation: plan.run_generation,
+                    },
+                    logical_run_id: plan.run_id,
+                    plan_digest: plan.plan_digest.clone(),
+                    stop_timeout_seconds,
+                    cancel_pending_start: plan.cancel_pending_start,
+                }))
+            }
+            _ => {
+                if request.start_plan.is_some()
+                    || request.job_plan.is_some()
+                    || request.stop_plan.is_some()
+                    || request.run_generation.is_some()
+                    || grant.start_plan_sha256.is_some()
+                    || grant.stop_plan_sha256.is_some()
+                    || grant.run_generation.is_some()
+                    || grant.runtime_run_id.is_some()
+                    || grant.runtime_target_id.is_some()
+                    || grant.runtime_installation_id.is_some()
+                {
+                    return Err(OperationError::InvalidOperation);
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    fn projected_runtime_arguments(
+        &self,
+        plan: &CompiledExecutionPlan,
+        installation_id: uuid::Uuid,
+        target_runtime_id: uuid::Uuid,
+    ) -> Result<Vec<String>, OperationError> {
+        plan.validate()
+            .map_err(|_| OperationError::InvalidOperation)?;
+        let installation = installation_id.to_string();
+        let target = target_runtime_id.to_string();
+        let run_root = self.roots.agent_data.join("runs").join(&target);
+        let main = start_arguments_for_paths(
+            plan,
+            &CompiledOciPaths {
+                image_archive: self
+                    .roots
+                    .agent_data
+                    .join("oci-archives")
+                    .join(&plan.runtime_image.oci_layout_sha256),
+                model_root: self
+                    .roots
+                    .agent_data
+                    .join("installations")
+                    .join(&installation)
+                    .join("models"),
+                input_root: plan.job.as_ref().map(|_| run_root.join("inputs")),
+                output_root: run_root.join("outputs"),
+                cache_root: self
+                    .roots
+                    .agent_data
+                    .join("installations")
+                    .join(&installation)
+                    .join("runtime-cache"),
+                runtime_spec: self
+                    .roots
+                    .agent_data
+                    .join("run-metadata")
+                    .join(&target)
+                    .join("runtime.json"),
+            },
+            &target,
+        )
+        .map_err(|_| OperationError::InvalidOperation)?;
+        Ok(runtime_plan_prefix(plan, main))
     }
 
     fn runtime_installation_cleanup(&self, installation_id: &str) -> Result<(), OperationError> {
@@ -1420,6 +1785,179 @@ impl<R: CommandRunner> OperationExecutor<R> {
         ensure_runtime_directory(&root)?;
         require_exact_directory(&root, Some(rustix::process::geteuid().as_raw()), 0o700)?;
         Ok(root)
+    }
+
+    fn runtime_generation_fence_root(&self) -> Result<PathBuf, OperationError> {
+        let root = self.roots.data.join(RUNTIME_GENERATION_FENCE_DIRECTORY);
+        let created = match fs::symlink_metadata(&root) {
+            Ok(_) => false,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(error) => return Err(error.into()),
+        };
+        ensure_runtime_directory(&root)?;
+        require_exact_directory(&root, Some(rustix::process::geteuid().as_raw()), 0o700)?;
+        if created {
+            let parent = root.parent().ok_or(OperationError::UnsafePath)?;
+            sync_directory(parent)?;
+        }
+        Ok(root)
+    }
+
+    fn read_runtime_generation_fence(
+        &self,
+        installation_id: uuid::Uuid,
+        runtime_id: uuid::Uuid,
+    ) -> Result<Option<RuntimeGenerationFence>, OperationError> {
+        let root = self.runtime_generation_fence_root()?;
+        let path = root.join(runtime_generation_fence_filename(
+            installation_id,
+            runtime_id,
+        ));
+        let path_metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if path_metadata.file_type().is_symlink()
+            || !path_metadata.is_file()
+            || path_metadata.nlink() != 1
+            || path_metadata.len() == 0
+            || path_metadata.len() > MAX_RUNTIME_GENERATION_FENCE_BYTES
+            || path_metadata.uid() != rustix::process::geteuid().as_raw()
+            || path_metadata.mode() & 0o777 != 0o600
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(&path)?;
+        let opened = file.metadata()?;
+        if artifact_identity(&opened) != artifact_identity(&path_metadata) {
+            return Err(OperationError::InvalidArtifact);
+        }
+        let mut bytes = Vec::with_capacity(path_metadata.len() as usize);
+        Read::by_ref(&mut file)
+            .take(MAX_RUNTIME_GENERATION_FENCE_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        let after = file.metadata()?;
+        if bytes.len() as u64 != path_metadata.len()
+            || artifact_identity(&after) != artifact_identity(&path_metadata)
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        let fence: RuntimeGenerationFence =
+            parse_strict(&bytes).map_err(|_| OperationError::InvalidArtifact)?;
+        if fence.schema_version != RUNTIME_GENERATION_FENCE_SCHEMA_VERSION
+            || fence.installation_id != installation_id
+            || fence.runtime_id != runtime_id
+            || fence.highest_generation == 0
+            || fence.highest_generation > i32::MAX as u32
+            || canonical_json(&fence).map_err(|_| OperationError::InvalidArtifact)? != bytes
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        Ok(Some(fence))
+    }
+
+    fn write_runtime_generation_fence(
+        &self,
+        fence: &RuntimeGenerationFence,
+    ) -> Result<(), OperationError> {
+        let root = self.runtime_generation_fence_root()?;
+        let path = root.join(runtime_generation_fence_filename(
+            fence.installation_id,
+            fence.runtime_id,
+        ));
+        let bytes = canonical_json(fence).map_err(|_| OperationError::InvalidOperation)?;
+        if fence.schema_version != RUNTIME_GENERATION_FENCE_SCHEMA_VERSION
+            || fence.highest_generation == 0
+            || fence.highest_generation > i32::MAX as u32
+            || bytes.len() as u64 > MAX_RUNTIME_GENERATION_FENCE_BYTES
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        let temporary = root.join(format!(
+            ".runtime-generation-fence-{}.tmp",
+            uuid::Uuid::new_v4()
+        ));
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .mode(0o600)
+                .open(&temporary)?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            fs::rename(&temporary, &path)?;
+            sync_directory(&root)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+
+    fn update_runtime_generation_fence(
+        &self,
+        identity: &RuntimeEffectIdentity,
+        use_kind: RuntimeGenerationFenceUse,
+    ) -> Result<(), OperationError> {
+        if identity.run_generation == 0 || identity.run_generation > i32::MAX as u32 {
+            return Err(OperationError::InvalidOperation);
+        }
+        let current =
+            self.read_runtime_generation_fence(identity.installation_id, identity.runtime_id)?;
+        if let Some(mut current) = current {
+            if identity.run_generation < current.highest_generation {
+                return match use_kind {
+                    // An exact older Stop may clean up the container whose
+                    // labels carry this generation. It cannot rewind the
+                    // high-water mark, so a delayed older Start remains
+                    // fenced after restart.
+                    RuntimeGenerationFenceUse::Stop { .. } => Ok(()),
+                    RuntimeGenerationFenceUse::Start => Err(OperationError::InvalidOperation),
+                };
+            }
+            if identity.run_generation == current.highest_generation {
+                match use_kind {
+                    RuntimeGenerationFenceUse::Start if current.cancelled => {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                    RuntimeGenerationFenceUse::Stop {
+                        cancel_pending_start: true,
+                    } if !current.cancelled => {
+                        current.cancelled = true;
+                    }
+                    RuntimeGenerationFenceUse::Start | RuntimeGenerationFenceUse::Stop { .. } => {
+                        return Ok(());
+                    }
+                }
+            } else {
+                current.highest_generation = identity.run_generation;
+                current.cancelled = matches!(
+                    use_kind,
+                    RuntimeGenerationFenceUse::Stop {
+                        cancel_pending_start: true
+                    }
+                );
+            }
+            self.write_runtime_generation_fence(&current)
+        } else {
+            self.write_runtime_generation_fence(&RuntimeGenerationFence {
+                schema_version: RUNTIME_GENERATION_FENCE_SCHEMA_VERSION,
+                installation_id: identity.installation_id,
+                runtime_id: identity.runtime_id,
+                highest_generation: identity.run_generation,
+                cancelled: matches!(
+                    use_kind,
+                    RuntimeGenerationFenceUse::Stop {
+                        cancel_pending_start: true
+                    }
+                ),
+            })
+        }
     }
 
     fn lock_installation_runtime(&self, installation_id: &str) -> Result<File, OperationError> {
@@ -1799,11 +2337,46 @@ impl<R: CommandRunner> OperationExecutor<R> {
         )
     }
 
-    fn runtime_start(
+    fn runtime_start_authorized(
         &self,
         arguments: &[String],
-        fence_start: bool,
+        identity: RuntimeEffectIdentity,
+        logical_run_id: uuid::Uuid,
+        plan_digest: &str,
     ) -> Result<Option<i32>, OperationError> {
+        let installation_id = identity.installation_id.to_string();
+        let started_at = Instant::now();
+        let (launch, active_start) = {
+            let _installation_guard = self.lock_installation_runtime(&installation_id)?;
+            self.refuse_reconciled_runtime(&installation_id)?;
+            self.update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)?;
+            let active_start = self.job_cancellation.begin(identity)?;
+            let launch =
+                self.runtime_start_locked(arguments, identity, logical_run_id, plan_digest)?;
+            (launch, active_start)
+        };
+        let outcome = match launch {
+            RuntimeStartLaunch::Job { timeout_seconds } => self.runtime_wait_for_job(
+                identity,
+                logical_run_id,
+                plan_digest,
+                timeout_seconds,
+                started_at,
+            ),
+            RuntimeStartLaunch::TimedOut => Ok(Some(124)),
+            RuntimeStartLaunch::Service => Ok(None),
+        };
+        drop(active_start);
+        outcome
+    }
+
+    fn runtime_start_locked(
+        &self,
+        arguments: &[String],
+        identity: RuntimeEffectIdentity,
+        logical_run_id: uuid::Uuid,
+        plan_digest: &str,
+    ) -> Result<RuntimeStartLaunch, OperationError> {
         let [
             archive_sha256,
             registry_index_digest,
@@ -1825,23 +2398,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || archive_sha256 != &validated.archive_sha256
             || registry_index_digest != &validated.registry_index_digest
             || platform_manifest_digest != &validated.platform_manifest_digest
+            || validated.run_id != identity.runtime_id.to_string()
+            || validated.installation_id != identity.installation_id.to_string()
+            || !lower_hex(plan_digest, 64)
         {
             return Err(OperationError::InvalidOperation);
         }
-        let _installation_guard = if fence_start {
-            let guard = self.lock_installation_runtime(&validated.installation_id)?;
-            self.refuse_reconciled_runtime(&validated.installation_id)?;
-            Some(guard)
-        } else {
-            None
-        };
-        // Every START, including a pre-start hook, remains registered through
-        // its Docker call. STOP hooks use the STOP action and do not acquire
-        // the start fence. An exact cancellation STOP must wait out active
-        // work before treating temporary container absence as quiescence.
-        let _active_start = fence_start
-            .then(|| self.job_cancellation.begin(&validated.run_id))
-            .transpose()?;
         self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
         let (inspected, operational_image) =
             self.inspect_runtime_image_for_reference(&validated.local_image_reference)?;
@@ -1855,84 +2417,174 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let semantic_digest = hex_sha256(
             &canonical_json(&validated.arguments).map_err(|_| OperationError::InvalidOperation)?,
         );
-        let existing = self.run_docker(&[
-            "container".to_owned(),
-            "inspect".to_owned(),
-            "--format".to_owned(),
-            "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}".to_owned(),
-            format!("vonk-{}", validated.run_id),
-        ])?;
+        let target = format!("vonk-{}", identity.runtime_id);
+        let expected_labels = "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.run-generation\"}}\t{{index .Config.Labels \"ai.vonkforge.plan-digest\"}}";
+        let existing = self.run_docker_with_timeout(
+            &[
+                "container".to_owned(),
+                "inspect".to_owned(),
+                "--format".to_owned(),
+                expected_labels.to_owned(),
+                target.clone(),
+            ],
+            Duration::from_secs(15),
+        )?;
         if existing.success {
             let expected = format!(
-                "true\t{semantic_digest}\ttrue\t{}\t{}",
-                validated.run_id, validated.installation_id
+                "true\t{semantic_digest}\ttrue\t{logical_run_id}\t{}\t{}\t{}\t{plan_digest}",
+                identity.runtime_id, identity.installation_id, identity.run_generation
             );
-            if !validated.detached
-                || std::str::from_utf8(&existing.stdout).ok().map(str::trim)
-                    != Some(expected.as_str())
-            {
+            let fields = std::str::from_utf8(&existing.stdout)
+                .ok()
+                .map(str::trim)
+                .unwrap_or("");
+            if fields != expected {
                 return Err(OperationError::InvalidArtifact);
             }
-            return Ok(None);
+            return if validated.job_timeout_seconds.is_some() {
+                Ok(RuntimeStartLaunch::Job {
+                    timeout_seconds: validated.job_timeout_seconds.unwrap(),
+                })
+            } else if validated.detached {
+                Ok(RuntimeStartLaunch::Service)
+            } else {
+                Err(OperationError::InvalidArtifact)
+            };
         }
-        if !self.prove_container_absent(&format!("vonk-{}", validated.run_id), &existing)? {
+        if !self.prove_container_absent(&target, &existing)? {
             return Err(OperationError::CommandFailed);
         }
         self.reset_runtime_tmp_if_requested(&validated.run_id)?;
         self.prepare_runtime_access(&validated)?;
-        // The signed wire shape carries the executable once after the image as
-        // an explicit marker for validation. Docker already receives that
-        // executable through --entrypoint, so consume the marker here to keep
-        // the actual process argv from running it twice. Keep
-        // validated.arguments unchanged: the semantic receipt identity is
-        // bound to the signed request plus its verified native fabric binding.
+        // The signed wire shape includes the executable once after the image
+        // as a validation marker; Docker already receives it via --entrypoint.
         let mut compiled = validated.docker_arguments()?;
         compiled[validated.image_index] = operational_image;
-        if validated.detached || validated.job_timeout_seconds.is_some() {
-            compiled.splice(
-                validated.image_index..validated.image_index,
-                [
-                    "--label".to_owned(),
-                    format!("ai.vonkforge.runtime-request-sha256={semantic_digest}"),
-                    "--label".to_owned(),
-                    "ai.vonkforge.managed=true".to_owned(),
-                    "--label".to_owned(),
-                    format!("ai.vonkforge.run-id={}", validated.run_id),
-                    "--label".to_owned(),
-                    format!("ai.vonkforge.installation-id={}", validated.installation_id),
-                ],
-            );
+        let labels = vec![
+            "--label".to_owned(),
+            format!("ai.vonkforge.runtime-request-sha256={semantic_digest}"),
+            "--label".to_owned(),
+            "ai.vonkforge.managed=true".to_owned(),
+            "--label".to_owned(),
+            format!("ai.vonkforge.run-id={logical_run_id}"),
+            "--label".to_owned(),
+            format!("ai.vonkforge.target-id={}", identity.runtime_id),
+            "--label".to_owned(),
+            format!("ai.vonkforge.installation-id={}", identity.installation_id),
+            "--label".to_owned(),
+            format!("ai.vonkforge.run-generation={}", identity.run_generation),
+            "--label".to_owned(),
+            format!("ai.vonkforge.plan-digest={plan_digest}"),
+        ];
+        if validated.job_timeout_seconds.is_some() && !validated.detached {
+            // JobRun retains its canonical attached contract; detached Docker
+            // launch is only the helper transport that permits concurrent Stop.
+            compiled.insert(1, "--detach".to_owned());
         }
-        let output = if let Some(timeout) = validated.job_timeout_seconds {
-            match self.runner.run_with_timeout(
-                Path::new("/usr/bin/docker"),
-                &compiled,
-                Duration::from_secs(timeout.into()),
-            ) {
-                Ok(output) => output,
-                Err(_) => {
-                    return finish_timed_out_job(
-                        self.runtime_stop(&[validated.run_id.clone(), "30".to_owned()]),
-                    );
-                }
-            }
+        compiled.splice(validated.image_index..validated.image_index, labels);
+        validate_runtime_invocation(&compiled)?;
+        let timeout = if validated.job_timeout_seconds.is_some() {
+            Duration::from_secs(30)
         } else {
-            self.run_docker(&compiled)?
+            Duration::from_secs(60)
+        };
+        let output = match self.run_docker_with_timeout(&compiled, timeout) {
+            Ok(output) => output,
+            Err(_) if validated.job_timeout_seconds.is_some() => {
+                self.update_runtime_generation_fence(
+                    &identity,
+                    RuntimeGenerationFenceUse::Stop {
+                        cancel_pending_start: true,
+                    },
+                )?;
+                self.job_cancellation.cancel(identity)?;
+                self.runtime_stop_once(identity, logical_run_id, plan_digest, 30)
+                    .map_err(|_| OperationError::StopUncertain)?;
+                return Ok(RuntimeStartLaunch::TimedOut);
+            }
+            Err(_) => return Err(OperationError::CommandFailed),
         };
         let identifier = std::str::from_utf8(&output.stdout)
             .ok()
             .map(str::trim)
             .unwrap_or("");
-        if validated.detached && (!output.success || !lower_hex(identifier, 64)) {
+        if !output.success || !lower_hex(identifier, 64) {
             return Err(OperationError::CommandFailed);
         }
-        if validated.job_timeout_seconds.is_some() {
-            self.runtime_stop(&[validated.run_id.clone(), "30".to_owned()])
-                .map_err(|_| OperationError::StopUncertain)?;
+        if let Some(timeout_seconds) = validated.job_timeout_seconds {
+            Ok(RuntimeStartLaunch::Job { timeout_seconds })
+        } else {
+            Ok(RuntimeStartLaunch::Service)
         }
-        Ok(validated
-            .job_timeout_seconds
-            .map(|_| bounded_container_exit_code(&output)))
+    }
+
+    fn runtime_wait_for_job(
+        &self,
+        identity: RuntimeEffectIdentity,
+        logical_run_id: uuid::Uuid,
+        plan_digest: &str,
+        timeout_seconds: u16,
+        started_at: Instant,
+    ) -> Result<Option<i32>, OperationError> {
+        let remaining =
+            Duration::from_secs(u64::from(timeout_seconds)).saturating_sub(started_at.elapsed());
+        let target = format!("vonk-{}", identity.runtime_id);
+        let waited = if remaining.is_zero() {
+            Err("runtime job deadline elapsed".to_owned())
+        } else {
+            self.runner.run_with_timeout(
+                Path::new("/usr/bin/docker"),
+                &["wait".to_owned(), target],
+                remaining,
+            )
+        };
+        match waited {
+            Ok(output) if output.success => {
+                let exit_code = bounded_container_wait_exit_code(&output);
+                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, false)?;
+                if self.job_cancellation.was_cancelled(identity)? {
+                    Ok(Some(124))
+                } else {
+                    Ok(Some(exit_code))
+                }
+            }
+            Ok(_) => {
+                let cancelled = self.job_cancellation.was_cancelled(identity)?;
+                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, !cancelled)?;
+                if cancelled {
+                    Ok(Some(124))
+                } else {
+                    Err(OperationError::CommandFailed)
+                }
+            }
+            Err(_) => {
+                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, true)?;
+                Ok(Some(124))
+            }
+        }
+    }
+
+    fn cleanup_runtime_after_job(
+        &self,
+        identity: RuntimeEffectIdentity,
+        logical_run_id: uuid::Uuid,
+        plan_digest: &str,
+        cancel_pending_start: bool,
+    ) -> Result<(), OperationError> {
+        let installation_id = identity.installation_id.to_string();
+        let _installation_guard = self.lock_installation_runtime(&installation_id)?;
+        self.refuse_reconciled_runtime(&installation_id)?;
+        self.update_runtime_generation_fence(
+            &identity,
+            RuntimeGenerationFenceUse::Stop {
+                cancel_pending_start,
+            },
+        )?;
+        if cancel_pending_start {
+            self.job_cancellation.cancel(identity)?;
+        }
+        self.runtime_stop_once(identity, logical_run_id, plan_digest, 30)
+            .map_err(|_| OperationError::StopUncertain)
     }
 
     fn bind_native_fabric(
@@ -2246,39 +2898,60 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(())
     }
 
-    fn runtime_stop(&self, arguments: &[String]) -> Result<(), OperationError> {
-        self.runtime_stop_until(arguments, Instant::now() + Duration::from_secs(30))
-    }
-
-    fn runtime_stop_until(
+    fn runtime_stop_authorized(
         &self,
-        arguments: &[String],
-        deadline: Instant,
+        identity: RuntimeEffectIdentity,
+        logical_run_id: uuid::Uuid,
+        plan_digest: &str,
+        timeout: u16,
+        cancel_pending_start: bool,
     ) -> Result<(), OperationError> {
-        let (run_id, timeout, cancel_job) = parse_runtime_stop(arguments)?;
-        if cancel_job {
-            self.job_cancellation.cancel(run_id)?;
-        }
-        loop {
-            self.runtime_stop_once(run_id, timeout)?;
-            if !cancel_job || !self.job_cancellation.is_active(run_id)? {
-                return Ok(());
+        let installation_id = identity.installation_id.to_string();
+        let deadline = Instant::now() + Duration::from_secs(u64::from(timeout) + 15);
+        {
+            let _installation_guard = self.lock_installation_runtime(&installation_id)?;
+            self.refuse_reconciled_runtime(&installation_id)?;
+            // Advance the durable generation fence before even inspecting for
+            // absence. A delayed old Start therefore cannot recreate a run
+            // after this Stop has been acknowledged or the helper restarts.
+            self.update_runtime_generation_fence(
+                &identity,
+                RuntimeGenerationFenceUse::Stop {
+                    cancel_pending_start,
+                },
+            )?;
+            if cancel_pending_start {
+                self.job_cancellation.cancel(identity)?;
             }
-            if Instant::now() >= deadline {
-                return Err(OperationError::StopUncertain);
-            }
-            thread::sleep(Duration::from_millis(50));
+            self.runtime_stop_once(identity, logical_run_id, plan_digest, timeout)?;
         }
+        if cancel_pending_start {
+            self.job_cancellation
+                .wait_for_active_start(identity, deadline)?;
+        }
+        Ok(())
     }
 
-    fn runtime_stop_once(&self, run_id: &str, timeout: u16) -> Result<(), OperationError> {
-        let name = format!("vonk-{run_id}");
+    fn runtime_stop_once(
+        &self,
+        identity: RuntimeEffectIdentity,
+        logical_run_id: uuid::Uuid,
+        plan_digest: &str,
+        timeout: u16,
+    ) -> Result<(), OperationError> {
+        if !lower_hex(plan_digest, 64)
+            || identity.run_generation == 0
+            || identity.run_generation > i32::MAX as u32
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        let name = format!("vonk-{}", identity.runtime_id);
         let existing = self.run_docker_with_timeout(
             &[
             "container".to_owned(),
             "inspect".to_owned(),
             "--format".to_owned(),
-            "{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            "{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.run-generation\"}}\t{{index .Config.Labels \"ai.vonkforge.plan-digest\"}}".to_owned(),
             name.clone(),
             ],
             Duration::from_secs(15),
@@ -2293,7 +2966,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 Err(OperationError::CommandFailed)
             };
         }
-        let expected = format!("true\t{run_id}");
+        let expected = format!(
+            "true\t{logical_run_id}\t{}\t{}\t{}\t{plan_digest}",
+            identity.runtime_id, identity.installation_id, identity.run_generation
+        );
         if std::str::from_utf8(&existing.stdout).ok().map(str::trim) != Some(expected.as_str()) {
             return Err(OperationError::InvalidArtifact);
         }
@@ -2756,9 +3432,11 @@ fn config_member_name(path: &Path) -> Option<String> {
     lower_hex(digest, 64).then(|| digest.to_owned())
 }
 
-fn bounded_container_exit_code(output: &CommandOutput) -> i32 {
-    output
-        .exit_code
+fn bounded_container_wait_exit_code(output: &CommandOutput) -> i32 {
+    std::str::from_utf8(&output.stdout)
+        .ok()
+        .map(str::trim)
+        .and_then(|value| value.parse::<i32>().ok())
         .filter(|code| (0..=255).contains(code))
         .unwrap_or(1)
 }
@@ -3420,36 +4098,234 @@ fn parse_mount(value: &str) -> Result<(PathBuf, &str, bool), OperationError> {
     Ok((source, target, readonly))
 }
 
-fn parse_runtime_stop(arguments: &[String]) -> Result<(&str, u16, bool), OperationError> {
-    let (run_id, timeout, cancel_job) = match arguments {
-        [run_id, timeout] => (run_id.as_str(), timeout.as_str(), false),
-        [run_id, timeout, marker] if marker == "job-cancel" => {
-            (run_id.as_str(), timeout.as_str(), true)
-        }
-        _ => return Err(OperationError::InvalidOperation),
+fn validate_runtime_start_plan(plan: &RecipeStartPayload) -> Result<(), OperationError> {
+    let encoded_plan = canonical_json(&plan.compiled_execution_plan)
+        .map_err(|_| OperationError::InvalidOperation)?;
+    let encoded_claim = canonical_json(plan).map_err(|_| OperationError::InvalidOperation)?;
+    let compiled = &plan.compiled_execution_plan;
+    compiled
+        .validate()
+        .map_err(|_| OperationError::InvalidOperation)?;
+    let placement = &compiled.runtime.placement;
+    let expected_endpoint = placement.endpoint_address.or_else(|| {
+        (plan.world_size > 1)
+            .then_some(placement.local_address)
+            .flatten()
+    });
+    let phase_binding_valid = match (plan.phase, plan.start_deadline.as_deref()) {
+        (None, None) => true,
+        (Some(_), Some(deadline)) => !deadline.is_empty() && deadline.len() <= 64,
+        _ => false,
     };
-    let timeout = timeout
-        .parse::<u16>()
-        .ok()
-        .filter(|value| (1..=600).contains(value))
-        .ok_or(OperationError::InvalidOperation)?;
-    if uuid::Uuid::parse_str(run_id)
-        .ok()
-        .map(|value| value.to_string())
-        .as_deref()
-        != Some(run_id)
+    if plan.schema_version != 2
+        || plan.run_generation == 0
+        || plan.run_generation > i32::MAX as u32
+        || plan.mapping_generation == 0
+        || plan.rank >= plan.world_size
+        || plan.world_size == 0
+        || !valid_recipe_alias(&plan.alias)
+        || !lower_hex(&plan.recipe_content_sha256, 64)
+        || !lower_hex(&plan.plan_digest, 64)
+        || !valid_oci_digest(&plan.image_digest)
+        || compiled.job.is_some()
+        || compiled.endpoint.is_none()
+        || compiled.identity.recipe_revision_sha256 != plan.recipe_content_sha256
+        || compiled.runtime.image_digest != plan.image_digest
+        || compiled.runtime_image.image_digest != plan.image_digest
+        || plan.rank != placement.rank
+        || plan.role != placement.role
+        || plan.world_size != placement.world_size
+        || expected_endpoint != Some(plan.endpoint_address)
+        || plan.port != placement.port.unwrap_or_default()
+        || plan.local_address != placement.local_address
+        || plan.master_address != placement.master_address
+        || plan.master_port != placement.master_port
+        || plan.reserved_memory_bytes != placement.reserved_memory_bytes
+        || plan.memory_floor_bytes != placement.memory_floor_bytes
+        || plan.memory_kind.to_string() != placement.memory_kind.to_string()
+        || (plan.world_size == 1
+            && (plan.rank != 0
+                || plan.local_address.is_some()
+                || plan.master_address.is_some()
+                || plan.master_port.is_some()
+                || plan.phase.is_some()
+                || plan.start_deadline.is_some()))
+        || (plan.world_size > 1
+            && (plan.local_address.is_none()
+                || plan.master_address.is_none()
+                || plan.master_port.is_none()))
+        || !phase_binding_valid
+        || encoded_plan.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+        || encoded_claim.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
     {
         return Err(OperationError::InvalidOperation);
     }
-    Ok((run_id, timeout, cancel_job))
+    Ok(())
 }
 
-fn finish_timed_out_job(
-    stop_result: Result<(), OperationError>,
-) -> Result<Option<i32>, OperationError> {
-    stop_result
-        .map(|()| Some(124))
-        .map_err(|_| OperationError::StopUncertain)
+fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<(), OperationError> {
+    let encoded_plan = canonical_json(&plan.compiled_execution_plan)
+        .map_err(|_| OperationError::InvalidOperation)?;
+    let encoded_claim = canonical_json(plan).map_err(|_| OperationError::InvalidOperation)?;
+    let compiled = &plan.compiled_execution_plan;
+    compiled
+        .validate()
+        .map_err(|_| OperationError::InvalidOperation)?;
+    let placement = &compiled.runtime.placement;
+    let job = compiled
+        .job
+        .as_ref()
+        .ok_or(OperationError::InvalidOperation)?;
+    if plan.schema_version != 1
+        || plan.run_generation == 0
+        || plan.run_generation > i32::MAX as u32
+        || plan.mapping_generation == 0
+        || !lower_hex(&plan.recipe_content_sha256, 64)
+        || !lower_hex(&plan.plan_digest, 64)
+        || !lower_hex(&plan.contract_sha256, 64)
+        || !valid_oci_digest(&plan.image_digest)
+        || plan.recipe_content_sha256 != compiled.identity.recipe_revision_sha256
+        || plan.image_digest != compiled.runtime.image_digest
+        || plan.image_digest != compiled.runtime_image.image_digest
+        || job.interface.to_string() != plan.interface.to_string()
+        || job.timeout_seconds != plan.timeout_seconds
+        || !(1..=3600).contains(&plan.timeout_seconds)
+        || plan.rank != 0
+        || plan.role != "entrypoint"
+        || u64::from(plan.rank) != placement.rank
+        || plan.role != placement.role
+        || plan.reserved_memory_bytes != placement.reserved_memory_bytes
+        || plan.memory_floor_bytes != placement.memory_floor_bytes
+        || plan.memory_kind.to_string() != placement.memory_kind.to_string()
+        || plan.input_total_bytes > 1024 * 1024 * 1024
+        || plan.inputs.iter().try_fold(0_u64, |total, file| {
+            total.checked_add(u64::from(file.size_bytes))
+        }) != Some(u64::from(plan.input_total_bytes))
+        || encoded_plan.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+        || encoded_claim.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
+    {
+        return Err(OperationError::InvalidOperation);
+    }
+    Ok(())
+}
+
+fn validate_runtime_stop_plan(plan: &RecipeStopPayload) -> Result<(), OperationError> {
+    let encoded_plan = canonical_json(&plan.compiled_execution_plan)
+        .map_err(|_| OperationError::InvalidOperation)?;
+    let encoded_claim = canonical_json(plan).map_err(|_| OperationError::InvalidOperation)?;
+    let compiled = &plan.compiled_execution_plan;
+    compiled
+        .validate_storage()
+        .map_err(|_| OperationError::InvalidOperation)?;
+    let placement = &compiled.runtime.placement;
+    if plan.schema_version != 2
+        || plan.run_generation == 0
+        || plan.run_generation > i32::MAX as u32
+        || plan.mapping_generation == 0
+        || plan.world_size == 0
+        || plan.rank >= plan.world_size
+        || !lower_hex(&plan.recipe_content_sha256, 64)
+        || !lower_hex(&plan.plan_digest, 64)
+        || plan.recipe_content_sha256 != compiled.identity.recipe_revision_sha256
+        || plan.rank != placement.rank
+        || plan.role != placement.role
+        || plan.world_size != placement.world_size
+        || !valid_recipe_node_id(&plan.node_id)
+        || (compiled.job.is_none() && plan.target_runtime_id != plan.run_id)
+        || !(1..=600).contains(&compiled.lifecycle.stop_timeout_seconds)
+        || encoded_plan.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+        || encoded_claim.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
+    {
+        return Err(OperationError::InvalidOperation);
+    }
+    Ok(())
+}
+
+fn valid_recipe_node_id(value: &str) -> bool {
+    value
+        .strip_prefix("spk_")
+        .is_some_and(|suffix| lower_hex(suffix, 32))
+}
+
+fn valid_recipe_alias(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 63
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte)
+        })
+        && value
+            .as_bytes()
+            .last()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+}
+
+fn runtime_plan_prefix(plan: &CompiledExecutionPlan, command: Vec<String>) -> Vec<String> {
+    let mut arguments = vec![
+        plan.runtime_image.oci_layout_sha256.clone(),
+        plan.runtime_image
+            .registry_manifest_digest
+            .clone()
+            .unwrap_or_else(|| plan.runtime_image.platform_manifest_digest.clone()),
+        plan.runtime_image.platform_manifest_digest.clone(),
+        plan.runtime_image.local_image_reference.clone(),
+    ];
+    arguments.extend(command);
+    arguments
+}
+
+/// Compute Linux exec limits from this helper process' current stack limit
+/// and page size. The kernel's aggregate rule is
+/// `max(ARG_MAX, min(_STK_LIM * 3/4, RLIMIT_STACK / 4))`; `ARG_MAX` is the
+/// documented 128 KiB floor and `_STK_LIM` is the Linux 8 MiB stack ceiling.
+/// Each individual argument/environment string is separately limited to 32
+/// pages. This measures the invocation the helper will actually launch.
+fn current_linux_exec_invocation_limits() -> Result<ExecInvocationLimits, OperationError> {
+    let page_size = u64::try_from(rustix::param::page_size())
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or(OperationError::RuntimeInvocationLimitsUnavailable)?;
+    let string_bytes = page_size
+        .checked_mul(32)
+        .ok_or(OperationError::RuntimeInvocationLimitsUnavailable)?;
+    let stack_bytes = rustix::process::getrlimit(rustix::process::Resource::Stack)
+        .current
+        .unwrap_or(u64::MAX);
+    let total_bytes =
+        LINUX_ARG_MAX_FLOOR_BYTES.max((stack_bytes / 4).min(LINUX_ARG_MAX_CEILING_BYTES));
+    Ok(ExecInvocationLimits {
+        total_bytes,
+        string_bytes,
+    })
+}
+
+fn validate_runtime_invocation(arguments: &[String]) -> Result<(), OperationError> {
+    match measure_exec_invocation(
+        "/usr/bin/docker",
+        arguments,
+        &HELPER_COMMAND_ENV,
+        current_linux_exec_invocation_limits()?,
+    ) {
+        Ok(_) => Ok(()),
+        Err(CompiledOciError::InvocationBytes { limit, observed }) => {
+            Err(OperationError::RuntimeInvocationLimitExceeded {
+                string_limit: false,
+                limit_bytes: limit,
+                observed_bytes: observed,
+            })
+        }
+        Err(CompiledOciError::InvocationStringBytes { limit, observed }) => {
+            Err(OperationError::RuntimeInvocationLimitExceeded {
+                string_limit: true,
+                limit_bytes: limit,
+                observed_bytes: observed,
+            })
+        }
+        Err(_) => Err(OperationError::InvalidOperation),
+    }
 }
 
 fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool {
@@ -3910,6 +4786,13 @@ fn valid_artifact_id(value: &str) -> bool {
         })
 }
 
+fn runtime_generation_fence_filename(
+    installation_id: uuid::Uuid,
+    runtime_id: uuid::Uuid,
+) -> String {
+    format!("{installation_id}-{runtime_id}.json")
+}
+
 fn parse_numeric_user(value: &str) -> Result<(u32, Option<u32>), OperationError> {
     if !numeric_non_root_user(value) {
         return Err(OperationError::InvalidOperation);
@@ -4207,12 +5090,16 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        CommandOutput, CommandRunner, HostRuntimeAction, HostRuntimeRequest,
-        INSTALLATION_RECONCILIATION_DIRECTORY, JobCancellationFence, MAX_COMMAND_OUTPUT_BYTES,
-        MAX_COMPILED_MODEL_PATH_CHARS, ManagedRoots, OperationError, OperationExecutor,
-        RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION, RuntimeImageReceipt, bounded_container_exit_code,
-        finish_timed_out_job, hex_sha256, loaded_image_source, parse_publication,
-        parse_runtime_stop, validate_docker_run,
+        AuthorizedRuntimeEffect, CommandOutput, CommandRunner, HostRuntimeAction,
+        HostRuntimeRequest, INSTALLATION_RECONCILIATION_DIRECTORY, JobCancellationFence,
+        MAX_COMMAND_OUTPUT_BYTES, MAX_COMPILED_MODEL_PATH_CHARS, ManagedRoots, OperationError,
+        OperationExecutor, RUNTIME_GENERATION_FENCE_DIRECTORY,
+        RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION, RuntimeEffectIdentity, RuntimeGenerationFenceUse,
+        RuntimeImageReceipt, RuntimeRequestGrantBinding, bounded_container_wait_exit_code,
+        hex_sha256, loaded_image_source, parse_publication, validate_docker_run,
+    };
+    use vonk_agent_protocol::generated::{
+        CompiledExecutionPlan, RecipeStartPayload, RecipeStartPayloadMemoryKind, RecipeStopPayload,
     };
     use vonk_agent_protocol::{RecipeReconciliationIdentity, canonical_json};
 
@@ -4236,6 +5123,45 @@ mod tests {
                 } else {
                     1
                 }),
+            })
+        }
+    }
+
+    struct ExistingRuntimeGenerationRunner {
+        logical_run_id: uuid::Uuid,
+        target_id: uuid::Uuid,
+        installation_id: uuid::Uuid,
+        run_generation: u32,
+        plan_digest: String,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl CommandRunner for ExistingRuntimeGenerationRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(executable, Path::new("/usr/bin/docker"));
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            let (success, stdout, exit_code) = match arguments.first().map(String::as_str) {
+                Some("container") if arguments.get(1).map(String::as_str) == Some("inspect") => (
+                    true,
+                    format!(
+                        "true\t{}\t{}\t{}\t{}\t{}\n",
+                        self.logical_run_id,
+                        self.target_id,
+                        self.installation_id,
+                        self.run_generation,
+                        self.plan_digest
+                    )
+                    .into_bytes(),
+                    0,
+                ),
+                Some("stop" | "rm") => (true, b"container-id\n".to_vec(), 0),
+                _ => return Err("unexpected command".to_owned()),
+            };
+            Ok(CommandOutput {
+                success,
+                stdout,
+                stderr: Vec::new(),
+                exit_code: Some(exit_code),
             })
         }
     }
@@ -4633,40 +5559,134 @@ mod tests {
     }
 
     #[test]
-    fn job_cancellation_fence_blocks_late_start_and_tracks_active_start() {
+    fn job_cancellation_fence_tracks_only_the_exact_runtime_generation() {
         let fence = JobCancellationFence::default();
-        let active = fence.begin(RUN_ID).unwrap();
-        assert!(fence.is_active(RUN_ID).unwrap());
+        let identity = runtime_effect_identity(1);
+        let active = fence.begin(identity).unwrap();
+        assert!(fence.is_active(identity).unwrap());
+        fence.cancel(identity).unwrap();
+        assert!(fence.was_cancelled(identity).unwrap());
+        assert!(fence.begin(identity).is_err());
         drop(active);
-        assert!(!fence.is_active(RUN_ID).unwrap());
-
-        fence.cancel(RUN_ID).unwrap();
-        assert!(fence.begin(RUN_ID).is_err());
+        assert!(!fence.is_active(identity).unwrap());
+        assert!(!fence.was_cancelled(identity).unwrap());
     }
 
-    #[test]
-    fn only_exact_job_cancel_marker_enables_the_late_start_fence() {
-        assert_eq!(
-            parse_runtime_stop(&[RUN_ID.to_owned(), "5".to_owned()]).unwrap(),
-            (RUN_ID, 5, false)
-        );
-        assert_eq!(
-            parse_runtime_stop(&[RUN_ID.to_owned(), "5".to_owned(), "job-cancel".to_owned(),])
+    fn runtime_effect_identity(run_generation: u32) -> RuntimeEffectIdentity {
+        RuntimeEffectIdentity {
+            runtime_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
+            installation_id: uuid::Uuid::parse_str("50000000-0000-4000-8000-000000000005").unwrap(),
+            run_generation,
+        }
+    }
+
+    fn compiled_plan_for_runtime_authority() -> CompiledExecutionPlan {
+        let mut value: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/compiled_workload_v2.json"))
+                .unwrap();
+        value["runtime"]["placement"]["endpoint_address"] = serde_json::json!("100.100.20.30");
+        value["security"]["network_mode"] = serde_json::json!("bridge");
+        let compiled: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        compiled.validate().unwrap();
+        compiled
+    }
+
+    fn recipe_start_plan_for_authority(run_generation: u32) -> RecipeStartPayload {
+        let compiled = compiled_plan_for_runtime_authority();
+        let placement = &compiled.runtime.placement;
+        let memory_kind = match placement.memory_kind.to_string().as_str() {
+            "unified" => RecipeStartPayloadMemoryKind::Unified,
+            "host" => RecipeStartPayloadMemoryKind::Host,
+            "accelerator" => RecipeStartPayloadMemoryKind::Accelerator,
+            other => panic!("unexpected compiled memory kind {other}"),
+        };
+        RecipeStartPayload {
+            alias: "test-model".to_owned(),
+            compiled_execution_plan: compiled.clone(),
+            endpoint_address: "100.100.20.30".parse().unwrap(),
+            image_digest: compiled.runtime.image_digest.clone(),
+            installation_id: runtime_effect_identity(run_generation).installation_id,
+            local_address: placement.local_address,
+            mapping_generation: 1,
+            mapping_id: uuid::Uuid::parse_str("70000000-0000-4000-8000-000000000007").unwrap(),
+            master_address: placement.master_address,
+            master_port: placement.master_port,
+            memory_floor_bytes: placement.memory_floor_bytes,
+            memory_kind,
+            phase: None,
+            plan_digest: "c".repeat(64),
+            port: placement.port.unwrap(),
+            rank: placement.rank,
+            recipe_content_sha256: compiled.identity.recipe_revision_sha256.clone(),
+            recipe_revision_id: uuid::Uuid::parse_str("60000000-0000-4000-8000-000000000006")
                 .unwrap(),
-            (RUN_ID, 5, true)
-        );
-        assert!(
-            parse_runtime_stop(&[
-                RUN_ID.to_owned(),
-                "5".to_owned(),
-                "service-cancel".to_owned(),
-            ])
-            .is_err()
-        );
+            reserved_memory_bytes: placement.reserved_memory_bytes,
+            role: placement.role.clone(),
+            run_generation,
+            run_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
+            schema_version: 2,
+            start_deadline: None,
+            world_size: placement.world_size,
+        }
+    }
+
+    fn recipe_stop_plan_for_authority(
+        run_generation: u32,
+        cancel_pending_start: bool,
+    ) -> RecipeStopPayload {
+        let compiled = compiled_plan_for_runtime_authority();
+        let placement = &compiled.runtime.placement;
+        RecipeStopPayload {
+            cancel_pending_start,
+            compiled_execution_plan: compiled.clone(),
+            installation_id: runtime_effect_identity(run_generation).installation_id,
+            mapping_generation: 1,
+            mapping_id: uuid::Uuid::parse_str("70000000-0000-4000-8000-000000000007").unwrap(),
+            node_id: "spk_11111111111111111111111111111111".to_owned(),
+            plan_digest: "c".repeat(64),
+            rank: placement.rank,
+            recipe_content_sha256: compiled.identity.recipe_revision_sha256.clone(),
+            recipe_revision_id: uuid::Uuid::parse_str("60000000-0000-4000-8000-000000000006")
+                .unwrap(),
+            role: placement.role.clone(),
+            run_generation,
+            run_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
+            schema_version: 2,
+            target_runtime_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
+            world_size: placement.world_size,
+        }
+    }
+
+    fn runtime_request_identity(
+        job_id: &uuid::Uuid,
+        operation_id: &uuid::Uuid,
+        fence: &uuid::Uuid,
+        action: HostRuntimeAction,
+        arguments: Vec<String>,
+        run_generation: u32,
+        start_plan: Option<RecipeStartPayload>,
+        stop_plan: Option<RecipeStopPayload>,
+    ) -> HostRuntimeRequest {
+        HostRuntimeRequest {
+            schema_version: 1,
+            action,
+            job_id: *job_id,
+            operation_id: *operation_id,
+            attempt: 1,
+            fence: *fence,
+            arguments,
+            observation: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            job_plan: None,
+            run_generation: Some(run_generation),
+            start_plan,
+            stop_plan,
+        }
     }
 
     #[test]
-    fn stop_deadline_never_reports_success_while_a_slow_start_remains_active() {
+    fn start_authority_binds_generation_plan_identity_and_projected_arguments() {
         let temp = tempfile::tempdir().unwrap();
         let executor = OperationExecutor::new(
             ManagedRoots::under(temp.path()),
@@ -4675,13 +5695,400 @@ mod tests {
             None,
         )
         .unwrap();
-        let _active = executor.job_cancellation.begin(RUN_ID).unwrap();
+        let start_plan = recipe_start_plan_for_authority(1);
+        let arguments = executor
+            .projected_runtime_arguments(
+                &start_plan.compiled_execution_plan,
+                start_plan.installation_id,
+                start_plan.run_id,
+            )
+            .unwrap();
+        let job_id = uuid::Uuid::new_v4();
+        let operation_id = uuid::Uuid::new_v4();
+        let fence = uuid::Uuid::new_v4();
+        let request = runtime_request_identity(
+            &job_id,
+            &operation_id,
+            &fence,
+            HostRuntimeAction::Start,
+            arguments,
+            start_plan.run_generation,
+            Some(start_plan.clone()),
+            None,
+        );
+        let plan_sha256 = hex_sha256(&canonical_json(&start_plan).unwrap());
+        let grant = RuntimeRequestGrantBinding {
+            job_id: &job_id,
+            operation_id: &operation_id,
+            attempt: 1,
+            fence: &fence,
+            installation_id: None,
+            reconciliation_identity: None,
+            start_plan_sha256: Some(&plan_sha256),
+            stop_plan_sha256: None,
+            run_generation: Some(start_plan.run_generation),
+            runtime_run_id: Some(&start_plan.run_id),
+            runtime_target_id: Some(&start_plan.run_id),
+            runtime_installation_id: Some(&start_plan.installation_id),
+        };
+        let authorized = executor
+            .authorize_runtime_effect(
+                &request,
+                grant,
+                Some("spk_11111111111111111111111111111111"),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            authorized,
+            AuthorizedRuntimeEffect::Start {
+                identity: RuntimeEffectIdentity {
+                    runtime_id,
+                    installation_id,
+                    run_generation: 1,
+                },
+                logical_run_id,
+                plan_digest,
+            } if runtime_id == start_plan.run_id
+                && installation_id == start_plan.installation_id
+                && logical_run_id == start_plan.run_id
+                && plan_digest == start_plan.plan_digest
+        ));
+
+        let mut caller_argv = request.clone();
+        caller_argv.arguments.push("--privileged".to_owned());
+        assert!(matches!(
+            executor.authorize_runtime_effect(&caller_argv, grant, None),
+            Err(OperationError::InvalidOperation)
+        ));
+
+        let mut stale_grant = request.clone();
+        stale_grant.run_generation = Some(2);
+        assert!(matches!(
+            executor.authorize_runtime_effect(&stale_grant, grant, None),
+            Err(OperationError::InvalidOperation)
+        ));
+
+        let mut mutated_plan = request.clone();
+        mutated_plan.start_plan.as_mut().unwrap().plan_digest = "d".repeat(64);
+        assert!(matches!(
+            executor.authorize_runtime_effect(&mutated_plan, grant, None),
+            Err(OperationError::InvalidOperation)
+        ));
+
+        let mut hook_plan = start_plan.clone();
+        hook_plan
+            .compiled_execution_plan
+            .lifecycle
+            .pre_start
+            .push(vec!["/usr/bin/true".to_owned()]);
+        let hook_arguments = executor
+            .projected_runtime_arguments(
+                &hook_plan.compiled_execution_plan,
+                hook_plan.installation_id,
+                hook_plan.run_id,
+            )
+            .unwrap();
+        let hook_request = runtime_request_identity(
+            &job_id,
+            &operation_id,
+            &fence,
+            HostRuntimeAction::Start,
+            hook_arguments,
+            hook_plan.run_generation,
+            Some(hook_plan.clone()),
+            None,
+        );
+        let hook_sha256 = hex_sha256(&canonical_json(&hook_plan).unwrap());
+        let hook_grant = RuntimeRequestGrantBinding {
+            start_plan_sha256: Some(&hook_sha256),
+            ..grant
+        };
+        assert!(matches!(
+            executor.authorize_runtime_effect(&hook_request, hook_grant, None),
+            Err(OperationError::InvalidOperation)
+        ));
+    }
+
+    #[test]
+    fn stop_authority_binds_exact_target_node_plan_and_cancellation_semantics() {
+        let temp = tempfile::tempdir().unwrap();
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            MissingContainerRunner,
+            None,
+        )
+        .unwrap();
+        let stop_plan = recipe_stop_plan_for_authority(1, true);
+        let job_id = uuid::Uuid::new_v4();
+        let operation_id = uuid::Uuid::new_v4();
+        let fence = uuid::Uuid::new_v4();
+        let request = runtime_request_identity(
+            &job_id,
+            &operation_id,
+            &fence,
+            HostRuntimeAction::Stop,
+            Vec::new(),
+            stop_plan.run_generation,
+            None,
+            Some(stop_plan.clone()),
+        );
+        let plan_sha256 = hex_sha256(&canonical_json(&stop_plan).unwrap());
+        let grant = RuntimeRequestGrantBinding {
+            job_id: &job_id,
+            operation_id: &operation_id,
+            attempt: 1,
+            fence: &fence,
+            installation_id: None,
+            reconciliation_identity: None,
+            start_plan_sha256: None,
+            stop_plan_sha256: Some(&plan_sha256),
+            run_generation: Some(stop_plan.run_generation),
+            runtime_run_id: Some(&stop_plan.run_id),
+            runtime_target_id: Some(&stop_plan.target_runtime_id),
+            runtime_installation_id: Some(&stop_plan.installation_id),
+        };
+        let authorized = executor
+            .authorize_runtime_effect(&request, grant, Some(&stop_plan.node_id))
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            authorized,
+            AuthorizedRuntimeEffect::Stop {
+                identity: RuntimeEffectIdentity {
+                    runtime_id,
+                    installation_id,
+                    run_generation: 1,
+                },
+                logical_run_id,
+                cancel_pending_start: true,
+                ..
+            } if runtime_id == stop_plan.target_runtime_id
+                && installation_id == stop_plan.installation_id
+                && logical_run_id == stop_plan.run_id
+        ));
+        assert!(matches!(
+            executor.authorize_runtime_effect(
+                &request,
+                grant,
+                Some("spk_22222222222222222222222222222222")
+            ),
+            Err(OperationError::InvalidOperation)
+        ));
+
+        let mut empty_argv = request.clone();
+        empty_argv.arguments.push("ignored-argv".to_owned());
+        assert!(matches!(
+            executor.authorize_runtime_effect(&empty_argv, grant, Some(&stop_plan.node_id)),
+            Err(OperationError::InvalidOperation)
+        ));
+
+        let mut different_generation = request.clone();
+        different_generation.run_generation = Some(2);
+        assert!(matches!(
+            executor.authorize_runtime_effect(
+                &different_generation,
+                grant,
+                Some(&stop_plan.node_id)
+            ),
+            Err(OperationError::InvalidOperation)
+        ));
+
+        let mut different_target = request.clone();
+        different_target
+            .stop_plan
+            .as_mut()
+            .unwrap()
+            .target_runtime_id = uuid::Uuid::new_v4();
+        assert!(matches!(
+            executor.authorize_runtime_effect(&different_target, grant, Some(&stop_plan.node_id)),
+            Err(OperationError::InvalidOperation)
+        ));
+
+        let mut hook_plan = stop_plan.clone();
+        hook_plan
+            .compiled_execution_plan
+            .lifecycle
+            .post_stop
+            .push(vec!["/usr/bin/true".to_owned()]);
+        let hook_request = runtime_request_identity(
+            &job_id,
+            &operation_id,
+            &fence,
+            HostRuntimeAction::Stop,
+            Vec::new(),
+            hook_plan.run_generation,
+            None,
+            Some(hook_plan.clone()),
+        );
+        let hook_sha256 = hex_sha256(&canonical_json(&hook_plan).unwrap());
+        let hook_grant = RuntimeRequestGrantBinding {
+            stop_plan_sha256: Some(&hook_sha256),
+            ..grant
+        };
+        assert!(matches!(
+            executor.authorize_runtime_effect(&hook_request, hook_grant, Some(&hook_plan.node_id)),
+            Err(OperationError::InvalidOperation)
+        ));
+    }
+
+    #[test]
+    fn cancelled_generation_fence_survives_helper_restart_and_allows_newer_start() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        let first_helper =
+            OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
+        let old = runtime_effect_identity(1);
+
+        first_helper
+            .update_runtime_generation_fence(
+                &old,
+                RuntimeGenerationFenceUse::Stop {
+                    cancel_pending_start: true,
+                },
+            )
+            .expect("Stop(true) durably cancels its generation before checking effects");
+        assert!(
+            temp.path()
+                .join(RUNTIME_GENERATION_FENCE_DIRECTORY)
+                .is_dir()
+        );
+        let stored = first_helper
+            .read_runtime_generation_fence(old.installation_id, old.runtime_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.highest_generation, old.run_generation);
+        assert!(stored.cancelled);
+
+        let restarted_helper =
+            OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+        assert!(matches!(
+            restarted_helper
+                .update_runtime_generation_fence(&old, RuntimeGenerationFenceUse::Start),
+            Err(OperationError::InvalidOperation)
+        ));
+        let current = RuntimeEffectIdentity {
+            run_generation: 2,
+            ..old
+        };
+        restarted_helper
+            .update_runtime_generation_fence(&current, RuntimeGenerationFenceUse::Start)
+            .expect("a newer authorized generation replaces the cancellation fence");
+        let stored = restarted_helper
+            .read_runtime_generation_fence(current.installation_id, current.runtime_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.highest_generation, 2);
+        assert!(!stored.cancelled);
+    }
+
+    #[test]
+    fn ordinary_stop_keeps_same_generation_retry_available_after_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        let first_helper =
+            OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
+        let identity = runtime_effect_identity(1);
+
+        first_helper
+            .update_runtime_generation_fence(
+                &identity,
+                RuntimeGenerationFenceUse::Stop {
+                    cancel_pending_start: false,
+                },
+            )
+            .unwrap();
+        let restarted_helper =
+            OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+        restarted_helper
+            .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
+            .expect("ordinary Stop must not cancel a retry in its authorized generation");
+        let stored = restarted_helper
+            .read_runtime_generation_fence(identity.installation_id, identity.runtime_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.highest_generation, identity.run_generation);
+        assert!(!stored.cancelled);
+    }
+
+    #[test]
+    fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_fence() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        let old = runtime_effect_identity(1);
+        let current = runtime_effect_identity(2);
+        let old_plan_digest = "a".repeat(64);
+        let current_plan_digest = "b".repeat(64);
+        let runner = ExistingRuntimeGenerationRunner {
+            logical_run_id: old.runtime_id,
+            target_id: old.runtime_id,
+            installation_id: old.installation_id,
+            run_generation: old.run_generation,
+            plan_digest: old_plan_digest.clone(),
+            calls: Arc::default(),
+        };
+        let calls = runner.calls.clone();
+        let executor = OperationExecutor::new(roots, &[0; 32], runner, None).unwrap();
+        // A new authorized Start reserves its generation before validating or
+        // invoking Docker. Force it to fail at the malformed launch boundary,
+        // then prove the old named container is still rejected as generation
+        // 1 and can only be removed by its own exact Stop.
+        assert!(matches!(
+            executor.runtime_start_authorized(
+                &[],
+                current,
+                current.runtime_id,
+                &current_plan_digest,
+            ),
+            Err(OperationError::InvalidOperation)
+        ));
+
+        // The old container cannot be mistaken for generation 2 or removed
+        // by a Stop for that generation.
+        assert!(matches!(
+            executor.runtime_stop_once(current, current.runtime_id, &current_plan_digest, 1,),
+            Err(OperationError::InvalidArtifact)
+        ));
+        executor
+            .runtime_stop_authorized(old, old.runtime_id, &old_plan_digest, 1, true)
+            .expect("a stale exact Stop may clean its own generation");
+        let recorded_calls = calls.lock().unwrap();
+        assert!(
+            recorded_calls
+                .iter()
+                .any(|call| call.first().map(String::as_str) == Some("stop"))
+        );
+        assert!(
+            recorded_calls
+                .iter()
+                .any(|call| call.first().map(String::as_str) == Some("rm"))
+        );
+        drop(recorded_calls);
+        let stored = executor
+            .read_runtime_generation_fence(current.installation_id, current.runtime_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.highest_generation, 2);
+        assert!(!stored.cancelled);
+        assert!(matches!(
+            executor.update_runtime_generation_fence(&old, RuntimeGenerationFenceUse::Start),
+            Err(OperationError::InvalidOperation)
+        ));
+        executor
+            .update_runtime_generation_fence(&current, RuntimeGenerationFenceUse::Start)
+            .expect("the newer generation remains eligible for retry");
+    }
+
+    #[test]
+    fn stop_deadline_never_reports_success_while_a_slow_start_remains_active() {
+        let fence = JobCancellationFence::default();
+        let identity = runtime_effect_identity(1);
+        let _active = fence.begin(identity).unwrap();
+        fence.cancel(identity).unwrap();
 
         assert!(matches!(
-            executor.runtime_stop_until(
-                &[RUN_ID.to_owned(), "5".to_owned(), "job-cancel".to_owned(),],
-                Instant::now(),
-            ),
+            fence.wait_for_active_start(identity, Instant::now()),
             Err(OperationError::StopUncertain)
         ));
     }
@@ -4689,35 +6096,38 @@ mod tests {
     #[test]
     fn exact_cancel_stop_waits_for_active_start_then_blocks_late_start() {
         let temp = tempfile::tempdir().unwrap();
-        let executor = OperationExecutor::new(
-            ManagedRoots::under(temp.path()),
-            &[0; 32],
-            MissingContainerRunner,
-            None,
-        )
-        .unwrap();
-        let active = executor.job_cancellation.begin(RUN_ID).unwrap();
-        let stop_arguments = [RUN_ID.to_owned(), "5".to_owned(), "job-cancel".to_owned()];
+        let roots = ManagedRoots::under(temp.path());
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
+        let identity = runtime_effect_identity(1);
+        executor
+            .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
+            .unwrap();
+        let active = executor.job_cancellation.begin(identity).unwrap();
         std::thread::scope(|scope| {
             let stop = scope.spawn(|| {
-                executor
-                    .runtime_stop_until(&stop_arguments, Instant::now() + Duration::from_secs(10))
+                executor.runtime_stop_authorized(
+                    identity,
+                    identity.runtime_id,
+                    &"a".repeat(64),
+                    1,
+                    true,
+                )
             });
-            while !executor
-                .job_cancellation
-                .state
-                .lock()
-                .unwrap()
-                .cancelled
-                .contains(RUN_ID)
-            {
+            while !executor.job_cancellation.was_cancelled(identity).unwrap() {
                 std::thread::yield_now();
             }
             assert!(!stop.is_finished(), "stop acknowledged an active START");
             drop(active);
             stop.join().unwrap().unwrap();
         });
-        assert!(executor.job_cancellation.begin(RUN_ID).is_err());
+        let restarted_helper =
+            OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+        assert!(matches!(
+            restarted_helper
+                .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start),
+            Err(OperationError::InvalidOperation)
+        ));
     }
 
     #[test]
@@ -4731,13 +6141,13 @@ mod tests {
         )
         .unwrap();
 
+        let identity = runtime_effect_identity(1);
         executor
-            .runtime_stop_until(
-                &[RUN_ID.to_owned(), "5".to_owned()],
-                Instant::now() + Duration::from_secs(1),
-            )
+            .runtime_stop_authorized(identity, identity.runtime_id, &"a".repeat(64), 1, false)
             .unwrap();
-        assert!(executor.job_cancellation.begin(RUN_ID).is_ok());
+        executor
+            .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
+            .expect("ordinary Stop does not cancel a same-generation retry");
     }
 
     #[test]
@@ -4752,37 +6162,33 @@ mod tests {
         .unwrap();
 
         assert!(matches!(
-            executor.runtime_stop_once(RUN_ID, 5),
+            executor.runtime_stop_once(
+                runtime_effect_identity(1),
+                uuid::Uuid::parse_str(RUN_ID).unwrap(),
+                &"a".repeat(64),
+                5,
+            ),
             Err(OperationError::CommandFailed)
         ));
     }
 
     #[test]
-    fn timeout_stop_failure_is_never_downgraded_to_exit_124() {
-        assert!(matches!(
-            finish_timed_out_job(Err(OperationError::CommandFailed)),
-            Err(OperationError::StopUncertain)
-        ));
-        assert_eq!(finish_timed_out_job(Ok(())).unwrap(), Some(124));
-    }
-
-    #[test]
-    fn attached_job_preserves_a_bounded_container_exit_status() {
+    fn job_wait_preserves_only_bounded_container_exit_statuses() {
         assert_eq!(
-            bounded_container_exit_code(&CommandOutput {
-                success: false,
-                stdout: Vec::new(),
-                exit_code: Some(37),
+            bounded_container_wait_exit_code(&CommandOutput {
+                success: true,
+                stdout: b"37\n".to_vec(),
+                exit_code: Some(0),
                 stderr: Vec::new(),
             }),
             37
         );
-        for exit_code in [None, Some(-1), Some(256)] {
+        for output in [b"".as_slice(), b"-1", b"256", b"invalid"] {
             assert_eq!(
-                bounded_container_exit_code(&CommandOutput {
-                    success: false,
-                    stdout: Vec::new(),
-                    exit_code,
+                bounded_container_wait_exit_code(&CommandOutput {
+                    success: true,
+                    stdout: output.to_vec(),
+                    exit_code: Some(0),
                     stderr: Vec::new(),
                 }),
                 1
@@ -6419,7 +7825,7 @@ mod tests {
         fs::create_dir_all(&requests).unwrap();
         let request = HostRuntimeRequest {
             schema_version: 1,
-            action: HostRuntimeAction::Start,
+            action: HostRuntimeAction::ImageImport,
             job_id: uuid::Uuid::new_v4(),
             operation_id: uuid::Uuid::new_v4(),
             attempt: 1,
@@ -6430,6 +7836,10 @@ mod tests {
             observation: None,
             installation_id: None,
             reconciliation_identity: None,
+            job_plan: None,
+            run_generation: None,
+            start_plan: None,
+            stop_plan: None,
         };
         let body = vonk_agent_protocol::canonical_json(&request).unwrap();
         assert!(
@@ -6718,71 +8128,21 @@ mod tests {
         executor.runtime_reconcile_installation(&identity).unwrap();
         assert!(!runtime_cache.exists());
 
-        // A stale, already-issued START may attempt to recreate the mount path
-        // after cleanup. Recreate only that path to exercise runtime_start's
-        // real lock/tombstone gate after normal request validation.
-        let installation = roots
-            .agent_data
-            .join("installations")
-            .join(&installation_id);
-        let model = installation
-            .join("models")
-            .join(uuid::Uuid::new_v4().to_string())
-            .join("model.gguf");
-        fs::create_dir_all(model.parent().unwrap()).unwrap();
-        fs::write(&model, b"model").unwrap();
-        fs::create_dir_all(installation.join("runtime-cache/home")).unwrap();
-        fs::set_permissions(
-            installation.join("runtime-cache"),
-            fs::Permissions::from_mode(0o700),
-        )
-        .unwrap();
-        fs::set_permissions(
-            installation.join("runtime-cache/home"),
-            fs::Permissions::from_mode(0o700),
-        )
-        .unwrap();
-        let run_root = roots.agent_data.join("runs").join(RUN_ID);
-        fs::create_dir_all(run_root.join("outputs/tmp")).unwrap();
-        fs::create_dir_all(run_root.join("inputs")).unwrap();
-        let run_metadata = roots.agent_data.join("run-metadata").join(RUN_ID);
-        fs::create_dir_all(&run_metadata).unwrap();
-        fs::write(run_metadata.join("runtime.json"), b"{}").unwrap();
-        let mut docker_arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
-        for argument in &mut docker_arguments {
-            *argument = argument.replace(
-                "installations/installation-1/runtime-cache",
-                &format!("installations/{installation_id}/runtime-cache"),
-            );
-        }
-        let image_reference = docker_arguments
-            .iter()
-            .find(|argument| argument.starts_with("localhost/vonk/"))
-            .unwrap()
-            .clone();
-        let archive_sha256 = "4".repeat(64);
-        let registry_index_digest = format!("sha256:{}", "5".repeat(64));
-        let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
-        let mut start_arguments = vec![
-            archive_sha256,
-            registry_index_digest,
-            platform_manifest_digest,
-            image_reference,
-        ];
-        start_arguments.extend(docker_arguments);
-        super::validate_docker_run(&start_arguments[4..], &roots, None)
-            .expect("stale START fixture passes base Docker request validation");
-        super::validate_docker_run_with_archive(
-            &start_arguments[4..],
-            &roots,
-            None,
-            Some(&start_arguments[0]),
-            Some(&start_arguments[1]),
-        )
-        .expect("stale START fixture passes ordinary request validation");
-
+        // A stale signed START may still arrive after installation cleanup.
+        // The exact per-installation tombstone must refuse it before the
+        // helper validates paths or attempts to create a runtime.
+        let start_identity = RuntimeEffectIdentity {
+            runtime_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
+            installation_id: identity.installation_id,
+            run_generation: 1,
+        };
         assert!(matches!(
-            executor.runtime_start(&start_arguments, true),
+            executor.runtime_start_authorized(
+                &[],
+                start_identity,
+                start_identity.runtime_id,
+                &"d".repeat(64),
+            ),
             Err(OperationError::InvalidArtifact)
         ));
     }
