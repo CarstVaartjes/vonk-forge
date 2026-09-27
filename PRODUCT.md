@@ -60,7 +60,9 @@ dated implementation descriptions do not override the current architecture:
   Spark's independent assignment is ignored and the snapshot stays intact. If
   removal breaks a multi-Spark placement, stop and confirm its reachable ranks,
   withdraw its route, show a missing-member error, and continue unrelated
-  assignments. This ongoing reconciliation has not shipped.
+  assignments. The Controller also checks accepted running assignments for
+  live-state drift and reconciles them through the existing run and route
+  recovery paths.
 - Applying a ready profile shows live-versus-desired differences, prepares
   exact model and recipe-image assets on target Sparks in parallel, skips assets
   already local, safely stops and replaces workloads, and reports durable

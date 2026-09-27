@@ -80,8 +80,9 @@ capacity is free. If the same node ID rejoins, reconcile its actual state
 against the accepted snapshot before scheduling work there. Report only
 confirmed cleanup.
 
-The selected-profile authority and membership worker are target behavior; they
-are under test and have not shipped.
+The selected-profile authority and membership worker also check accepted
+running assignments for live-state drift and use the existing run and route
+recovery paths.
 
 NAS garbage collection may remove local model objects that are no longer
 referenced by a saved profile, active workload, or preparation operation. It

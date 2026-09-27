@@ -491,6 +491,7 @@ _INSTALL_PREFLIGHT_REFRESH_REASON = (
 )
 _RUNTIME_IMAGE_OWNER_CHANGED = "run-switch.runtime-image-owner-changed"
 _LOGGER = logging.getLogger("vonk-control-run-switch")
+_FINAL_VERIFICATION_MAX_SECONDS = 900
 _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "transfer",
     "verify",
@@ -7408,6 +7409,51 @@ class RunSwitchOperationService:
                         and start_deadline is not None
                         and now >= start_deadline
                     )
+                    if (
+                        deadline_expired
+                        and now.timestamp() - started >= _FINAL_VERIFICATION_MAX_SECONDS
+                    ):
+                        phase_evidence = execution.result or {}
+                        run_id = phase_evidence.get("run_id")
+                        run = (
+                            session.get(RecipeRun, run_id)
+                            if isinstance(run_id, str)
+                            else None
+                        )
+                        if run is not None and run.state == "running":
+                            run.route_state = "withdrawn"
+                            run.route_error = (
+                                "final verification exceeded its 15 minute bound; "
+                                "exact workload recovery is inspecting this run"
+                            )
+                            run.route_next_attempt_at = now
+                            failed_node = session.scalar(
+                                select(RunNode)
+                                .where(RunNode.run_id == run.id)
+                                .order_by(RunNode.rank)
+                                .limit(1)
+                            )
+                            if failed_node is not None:
+                                # This marks the accepted run degraded, not absent.
+                                # The recovery coordinator must obtain fresh exact
+                                # signed evidence and reconcile Stop before Start.
+                                failed_node.state = "failed"
+                                failed_node.updated_at = now
+                            run.updated_at = now
+                        reason = (
+                            "run-switch.final-verification-timeout: exact run and "
+                            "route evidence did not arrive within 15 minutes; the "
+                            "route is withdrawn and exact workload recovery has "
+                            "been queued"
+                        )
+                        self._mark_failed(
+                            job,
+                            reason,
+                            now=now,
+                            failure_code="run-switch.final-verification-timeout",
+                            progress=progress,
+                        )
+                        return True
                     due = now + timedelta(
                         seconds=(
                             60

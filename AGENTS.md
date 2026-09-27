@@ -367,9 +367,9 @@ before scheduling work there.
 This continuing policy is separate from review and load: a review binds current
 membership and effects, and any membership change before acceptance requires a
 fresh review. Report cleanup only when the exact effect is confirmed; removal
-or unreachability alone does not prove a Spark stopped. These are target
-semantics; the selected-profile authority and membership worker are under test
-and are not yet shipped.
+or unreachability alone does not prove a Spark stopped. The selected-profile
+worker also checks accepted running assignments for live-state drift and uses
+the existing run and route recovery paths.
 
 ## Checkout, pull requests, and worktree lifecycle
 

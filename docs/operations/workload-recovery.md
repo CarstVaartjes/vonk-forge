@@ -64,6 +64,14 @@ later reboots only through the latest verified successful recovery Start and
 its exact completed Stop. A newer workload intent or cancellation fences this
 path, and an uncertain Stop keeps the run's resource claims active.
 
+Singleton recovery allows five attempts in a window, with exponential delays
+between attempts. After the fifth attempt it exposes a degraded reason and
+waits five minutes, then resets the window and resumes exact inspection
+automatically. Retry state and next-check time are durable. The coordinator also
+uses the exact Stop/Start path for eligible persistent multi-Spark runs; it
+retains the accepted topology and authorization and does not infer absence from
+a lost rank.
+
 The Controller does not infer process absence from an expired lease, stale
 observation, or offline Spark. If the signed absence becomes stale, it waits
 for a fresh read-only exact inspection grant for the still-current run
@@ -74,11 +82,24 @@ fails closed when the exact accepted compiled lifecycle plan differs from the
 installed plan or declares `pre_start` or `post_stop` hooks; this release does
 not replay hooks during recovery.
 
-An incomplete hook can remain blocked when its external effect cannot be proved.
-Builds, arbitrary jobs and package upgrades do not inherit automatic workload
-replay. Invalid ownership, revoked authorization, malformed contracts, integrity
-failures and denied access also remain explicit blockers. These conditions need
-their specific corrective action; repeated retries cannot make them valid.
+Hook-bearing plans remain fail-closed because their external effects cannot be
+replayed safely; the run reports which hook blocks recovery. One-shot jobs also
+remain fail-closed after a lost result because the job may already have produced
+external effects. Verify those effects before submitting a new authorized run.
+Builds and package upgrades do not inherit automatic workload replay. Invalid
+ownership, revoked authorization, malformed contracts, integrity failures and
+denied access remain explicit blockers.
+
+Final run verification waits for exact evidence for at most 15 minutes after
+the accepted start deadline. If it expires, the Controller fails the switch
+operation with a visible reason, withdraws the route, marks the run degraded,
+and hands it to exact workload recovery. Recovery still obtains signed
+observations and reconciles Stop before any replacement Start.
+
+The standing-profile worker checks accepted running assignments even when the
+enrolled roster is unchanged. Missing or degraded assignments are reconciled
+through profile application, run recovery, and route recovery as appropriate;
+this does not change the accepted profile or grant new authority.
 
 ## Cancellation and replacement
 

@@ -590,7 +590,8 @@ model's route, report the missing member, and continue unrelated assignments.
 Do not count a removed Spark's old run as live capacity or report an unreachable
 Spark as stopped without confirmed cleanup. If the same node ID rejoins,
 reconcile its actual state against the accepted snapshot before scheduling work
-there. This ongoing reconciliation is under test and has not shipped.
+there. The worker also checks accepted running assignments for live-state drift
+and reconciles them through the existing run and route recovery paths.
 
 ```bash
 vonkctl profile
