@@ -1,5 +1,33 @@
 # `vonkctl` operator CLI
 
+## Install without a checkout
+
+On macOS or Linux, install the latest accepted stable CLI without cloning the
+repository. The workstation needs `curl`, `openssl`, Python 3, and `uv`; the CLI
+requires Python 3.14 or newer, which `uv` can manage for its tool environment:
+
+```sh
+curl -fsSL https://install.vonkforge.ai/vonkctl | sh
+```
+
+The channel endpoint embeds the trusted installer public key. It verifies the
+channel signature, immutable release signature and canonical encoding, and the
+exact wheel path, size, SHA-256 digest, and embedded source/version identity
+before passing the local wheel to `uv tool install`. A bad or unavailable
+artifact stops installation; no checkout is needed. For the accepted
+development channel, use
+`curl -fsSL https://install.vonkforge.ai/dev/vonkctl | sh`.
+
+`uv` resolves the CLI's declared Python dependencies during installation. This
+is a workstation install and does not change the Controller or Sparks. The
+verified release public key is saved as
+`${XDG_CONFIG_HOME:-$HOME/.config}/vonkforge/installer-public.pem`; use it for
+later signed updates:
+
+```sh
+vonkctl update --apply --public-key "${XDG_CONFIG_HOME:-$HOME/.config}/vonkforge/installer-public.pem"
+```
+
 `vonkctl` is the local, authenticated CLI for the Controller. It has four
 singular operator areas: Fleet, Model, Recipe, and Profile. The CLI uses the
 same current Controller routes as the operator API: `/api/fleet`,
@@ -12,12 +40,14 @@ The CLI accepts an HTTPS Controller origin and reads its bearer credential from
 a private regular file. It never accepts a token on the command line.
 
 ```bash
-uv tool install .
 export VONK_CONTROL_URL=https://forge.example.test
 export VONK_CONTROL_TOKEN_FILE="$PWD/.dev/admin-token"
 chmod 600 "$VONK_CONTROL_TOKEN_FILE"
 vonkctl --help
 ```
+
+For development from a source checkout, install that checkout with
+`uv tool install .` before setting these connection variables.
 
 Use `--json` for one parseable object on stdout. Use `--profile N` to select a
 stable numbered Profile for that invocation; the default is Profile 1.

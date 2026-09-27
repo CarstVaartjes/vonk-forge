@@ -182,6 +182,7 @@ export interface ControlApi extends LibraryApi {
   profileApplicationByRequest(number: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
+  enrollFleetNode(input: {name: string; request_key: string; ttl_seconds: number}, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
   jobs(cursor?: string): Promise<JobsResponse>;
   operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse>;
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;
