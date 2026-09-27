@@ -212,7 +212,7 @@ def _leaf(
     *,
     now: datetime = NOW,
     serial: int = 1234,
-    lifetime_seconds: int = 86400,
+    lifetime_seconds: int = 2592000,
 ) -> x509.Certificate:
     request = x509.load_pem_x509_csr(csr_pem)
     return (
@@ -244,7 +244,7 @@ def _provider(
     tmp_path: Path,
     handler,
     *,
-    certificate_lifetime_seconds: int = 86400,
+    certificate_lifetime_seconds: int = 2592000,
     max_response_bytes: int = 64 * 1024,
 ) -> tuple[StepCertificateAuthority, _Material]:
     material = _write_material(tmp_path)
@@ -287,7 +287,7 @@ def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleName
         agent_ca_provisioner_kid=material["kid"],
         agent_ca_timeout_seconds=2.0,
         agent_ca_max_response_bytes=4096,
-        agent_ca_certificate_lifetime_seconds=86400,
+        agent_ca_certificate_lifetime_seconds=2592000,
         agent_artifact_root=tmp_path / "artifacts",
         management_cidrs="10.0.0.0/24",
         direct_fabric_cidrs=direct_fabric_cidrs,
@@ -340,7 +340,7 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     assert set(seen[0]["body"]) == {"csr", "ott", "notBefore", "notAfter"}
     assert seen[0]["body"]["csr"] == request_pem.decode()
     assert seen[0]["body"]["notBefore"] == "2026-08-04T12:00:00Z"
-    assert seen[0]["body"]["notAfter"] == "2026-08-05T12:00:00Z"
+    assert seen[0]["body"]["notAfter"] == "2026-09-03T12:00:00Z"
     token = seen[0]["body"]["ott"]
     header = jwt.get_unverified_header(token)
     claims = jwt.decode(token, options={"verify_signature": False})
@@ -399,7 +399,7 @@ def test_sign_uses_and_validates_configured_certificate_lifetime(
     assert issued.not_after - issued.not_before == timedelta(seconds=90)
 
 
-@pytest.mark.parametrize("lifetime", (True, 89, 86401))
+@pytest.mark.parametrize("lifetime", (True, 89, 2592001))
 def test_rejects_invalid_configured_certificate_lifetime(
     tmp_path: Path,
     lifetime: int,
@@ -600,9 +600,9 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(
                 .not_valid_after(
                     NOW
                     + (
-                        timedelta(hours=25)
+                        timedelta(days=30, hours=1)
                         if mutation == "lifetime"
-                        else timedelta(hours=24)
+                        else timedelta(days=30)
                     )
                 )
                 .add_extension(
@@ -853,9 +853,9 @@ def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation
     assert provisioner["type"] == "JWK" and provisioner["name"] == "vonk-forge-agent"
     assert "encryptedKey" not in provisioner and "d" not in provisioner["key"]
     assert provisioner["claims"] == {
-        "minTLSCertDuration": "24h",
-        "maxTLSCertDuration": "24h",
-        "defaultTLSCertDuration": "24h",
+        "minTLSCertDuration": "720h",
+        "maxTLSCertDuration": "720h",
+        "defaultTLSCertDuration": "720h",
         "disableRenewal": True,
         "disableSmallstepExtensions": True,
     }

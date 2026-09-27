@@ -129,9 +129,9 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
                         {
                             "name": "vonk-forge-agent",
                             "claims": {
-                                "minTLSCertDuration": "24h",
-                                "maxTLSCertDuration": "24h",
-                                "defaultTLSCertDuration": "24h",
+                                "minTLSCertDuration": "720h",
+                                "maxTLSCertDuration": "720h",
+                                "defaultTLSCertDuration": "720h",
                                 "disableRenewal": True,
                                 "disableSmallstepExtensions": True,
                             },

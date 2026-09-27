@@ -428,19 +428,19 @@ class Settings:
             try:
                 agent_ca_certificate_lifetime_seconds = int(
                     os.environ.get(
-                        "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "86400"
+                        "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "2592000"
                     )
                 )
             except ValueError as error:
                 raise SettingsError(
-                    "Smallstep certificate lifetime must be an integer between 90 and 86400 seconds"
+                    "Smallstep certificate lifetime must be an integer between 90 and 2592000 seconds"
                 ) from error
-            if not 90 <= agent_ca_certificate_lifetime_seconds <= 86400:
+            if not 90 <= agent_ca_certificate_lifetime_seconds <= 2592000:
                 raise SettingsError(
-                    "Smallstep certificate lifetime must be between 90 and 86400 seconds"
+                    "Smallstep certificate lifetime must be between 90 and 2592000 seconds"
                 )
         else:
-            agent_ca_certificate_lifetime_seconds = 86400
+            agent_ca_certificate_lifetime_seconds = 2592000
         agent_proxy_auth = (
             _agent_proxy_auth_secret("VONK_AGENT_PROXY_AUTH_FILE", production=True)
             if agent_enabled

@@ -410,13 +410,13 @@ def test_agent_certificate_lifetime_defaults_and_is_bounded(
     monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
 
     assert (
-        Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 86400
+        Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 2592000
     )
 
     monkeypatch.setenv("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "90")
     assert Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 90
 
-    for value in ("not-a-number", "89", "86401"):
+    for value in ("not-a-number", "89", "2592001"):
         monkeypatch.setenv("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", value)
         with pytest.raises(SettingsError, match="certificate lifetime") as caught:
             Settings.from_env_and_secrets()
