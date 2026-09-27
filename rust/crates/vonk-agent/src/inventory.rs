@@ -447,18 +447,33 @@ fn parse_gpus(
             || fields[3].is_empty()
             || shared_memory_pool(Some(fields[0]))
         {
-            return Err(InventoryError::Parse);
+            eprintln!("vonk-agent: skipping malformed GPU inventory row");
+            continue;
+        }
+        let (gpu_total, gpu_free) = match mib(fields[1]).and_then(|gpu_total| {
+            mib(fields[2]).and_then(|gpu_free| {
+                (gpu_free <= gpu_total)
+                    .then_some((gpu_total, gpu_free))
+                    .ok_or(InventoryError::Parse)
+            })
+        }) {
+            Ok(memory) => memory,
+            Err(_) => {
+                eprintln!("vonk-agent: skipping GPU inventory row with invalid memory evidence");
+                continue;
+            }
+        };
+        if driver
+            .as_ref()
+            .is_some_and(|current: &String| current != fields[3])
+        {
+            eprintln!("vonk-agent: skipping GPU inventory row with inconsistent driver evidence");
+            continue;
         }
         count = count.checked_add(1).ok_or(InventoryError::Parse)?;
-        total = total
-            .checked_add(mib(fields[1])?)
-            .ok_or(InventoryError::Parse)?;
-        free = free
-            .checked_add(mib(fields[2])?)
-            .ok_or(InventoryError::Parse)?;
-        if driver.get_or_insert_with(|| fields[3].to_owned()) != fields[3] {
-            return Err(InventoryError::Parse);
-        }
+        total = total.checked_add(gpu_total).ok_or(InventoryError::Parse)?;
+        free = free.checked_add(gpu_free).ok_or(InventoryError::Parse)?;
+        driver.get_or_insert_with(|| fields[3].to_owned());
     }
     if count == 0 || free > total {
         return Err(InventoryError::Parse);

@@ -111,11 +111,17 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
             &identity(&started),
         )
         .unwrap();
-    // One unrelated malformed directory must not prevent the valid managed
-    // run from reaching the Controller's observation sweep.
+    // One historical run with invalid metadata must not prevent the valid
+    // managed run from reaching the Controller's observation sweep.
+    let invalid_run = "e85c4710-e437-4d12-8191-499596aa2a4c";
+    fs::create_dir_all(root.path().join("runs").join(invalid_run)).unwrap();
+    let invalid_metadata = root.path().join("run-metadata").join(invalid_run);
+    fs::create_dir_all(&invalid_metadata).unwrap();
+    fs::write(invalid_metadata.join("lifecycle.json"), b"not-json").unwrap();
     fs::create_dir_all(root.path().join("runs").join("not-a-run-id")).unwrap();
     let inspections = runtime.recipe_run_inspection_plans().unwrap();
     assert_eq!(inspections.len(), 1);
+    assert_eq!(inspections[0].binding.run_id.to_string(), RUN);
     assert_eq!(&inspections[0].arguments[4..], launched.main.as_slice());
     assert_eq!(runtime.load_spec(INSTALLATION).unwrap(), installed);
 
