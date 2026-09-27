@@ -17,6 +17,15 @@ registry_name=vonk-helper-proof-registry
 run_id=40000000-0000-4000-8000-000000000004
 installation_id=40000000-0000-4000-8000-000000000001
 installation_root="/var/lib/vonk-forge-agent/installations/$installation_id"
+endpoint_address=$(ip -4 route get 1.1.1.1 | awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')
+python3 - "$endpoint_address" <<'PY'
+import ipaddress
+import sys
+
+address = ipaddress.IPv4Address(sys.argv[1])
+if address.is_loopback or address.is_unspecified or address.is_multicast or address.is_link_local:
+    raise SystemExit("helper proof requires an assigned non-loopback IPv4 endpoint")
+PY
 run_name=vonk-$run_id
 image_base=localhost:5001/vonk/helper-tiny
 image_name="$image_base:v1"
@@ -267,6 +276,7 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_CONFIG_ID="$config_id" \
   VONK_HELPER_IMAGE_REF="$image_ref" \
   VONK_HELPER_FIXTURE="$fixture" \
+  VONK_HELPER_PROBE_ENDPOINT_ADDRESS="$endpoint_address" \
   VONK_HELPER_SOCKET="$VONK_HELPER_SOCKET" \
   VONK_HELPER_REQUEST_ROOT="$VONK_HELPER_REQUEST_ROOT" \
   "$probe_binary" start | tee "$report_root/start.log"
@@ -286,6 +296,7 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_CONFIG_ID="$config_id" \
   VONK_HELPER_IMAGE_REF="$image_ref" \
   VONK_HELPER_FIXTURE="$fixture" \
+  VONK_HELPER_PROBE_ENDPOINT_ADDRESS="$endpoint_address" \
   VONK_HELPER_SOCKET="$VONK_HELPER_SOCKET" \
   VONK_HELPER_REQUEST_ROOT="$VONK_HELPER_REQUEST_ROOT" \
   "$probe_binary" start | tee "$report_root/start-reuse.log"
@@ -295,7 +306,7 @@ sleep 6
 docker logs "$run_name" >"$report_root/container.log" 2>&1 || true
 
 grep -q '"--network","bridge"' "$report_root/start.log"
-grep -q '"--publish","127.0.0.1:8000:8000"' "$report_root/start.log"
+grep -Fq "\"--publish\",\"${endpoint_address}:8000:8000\"" "$report_root/start.log"
 grep -q '"--tmpfs"' "$report_root/start.log"
 grep -q '"--read-only"' "$report_root/start.log"
 grep -q '"--cap-drop=ALL"' "$report_root/start.log"

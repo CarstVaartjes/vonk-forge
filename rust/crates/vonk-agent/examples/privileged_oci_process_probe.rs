@@ -252,7 +252,8 @@ fn setup_files() {
 fn production_start_arguments() -> (Vec<String>, RecipeStartRequest) {
     let fixture = fs::read_to_string(env_required("VONK_HELPER_FIXTURE")).unwrap();
     let mut value: Value = serde_json::from_str(&fixture).unwrap();
-    value["runtime"]["placement"]["endpoint_address"] = json!("127.0.0.1");
+    value["runtime"]["placement"]["endpoint_address"] =
+        json!(env_required("VONK_HELPER_PROBE_ENDPOINT_ADDRESS"));
     value["security"]["network_mode"] = json!("bridge");
     value["runtime"]["executable"] = json!("/opt/vonk/bin/vllm");
     value["runtime"]["argv"] = json!([
