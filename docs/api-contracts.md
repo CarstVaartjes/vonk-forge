@@ -58,6 +58,31 @@ Controller then stops and replaces conflicting workloads and reports durable
 per-Spark transfer progress and serving readiness. Spark-local copies are
 execution evidence only, never an alternate persisted authority.
 
+### Whole-fleet membership
+
+Each profile review and load uses the current enrolled, non-revoked fleet, with
+unassigned Sparks idle. The preview binds current membership and planned
+effects. If membership changes before acceptance, reject that preview and
+require a new review.
+
+Target ongoing behavior uses one durable selected-profile record in PostgreSQL
+pointing to the immutable accepted application snapshot as whole-fleet desired
+state. Profile saves are drafts and a load application is one-shot; neither the
+latest application nor audit history can stand in for the selected-profile
+fact. The Controller worker reconciles the accepted snapshot after enrollment
+or revocation changes membership; no new operator decision is required. A new
+Spark enters idle. A removed Spark leaves the scope, so ignore its independent
+assignment without changing the snapshot. If removal leaves a multi-Spark
+model without a required member, stop and confirm its remaining reachable
+ranks, withdraw its route, report the missing member, and continue unrelated
+assignments. A removed Spark's old run is not proof that it stopped or that its
+capacity is free. If the same node ID rejoins, reconcile its actual state
+against the accepted snapshot before scheduling work there. Report only
+confirmed cleanup.
+
+The selected-profile authority and membership worker are target behavior; they
+are under test and have not shipped.
+
 NAS garbage collection may remove local model objects that are no longer
 referenced by a saved profile, active workload, or preparation operation. It
 must not remove referenced cache objects, and Spark copies do not pin or replace

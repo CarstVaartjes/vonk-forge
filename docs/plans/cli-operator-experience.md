@@ -140,7 +140,10 @@ completion generation require neither credentials nor network access.
 Retain `--profile N` for invocation-scoped selection. Read-only inspection
 may default to Profile 1, visibly identifying it. Saving, loading, importing,
 or cancelling profile work requires an explicit positive `--profile N`.
-There is no hidden persistent selected profile.
+There is no hidden persistent CLI invocation default: `--profile N` applies
+only to that command. This is separate from the target Controller-owned
+standing Fleet profile that governs later membership changes; see the
+[profile policy](../architecture-overview.md#ongoing-whole-fleet-profile-policy-target).
 
 ### 4.2 Terminal and automation output
 

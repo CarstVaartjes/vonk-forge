@@ -78,7 +78,7 @@ global repository metadata that the Controller refreshes at startup and every
 until the production `CompiledExecutionPlan` materializer is linked; do not
 treat the current `environment-limited` result as a pass. Execute the physical
 lifecycle through a numbered whole-fleet profile. Prepare the profile cache,
-then apply it; unassigned Sparks in the explicit profile scope become idle:
+then apply it; every current Spark without an assignment remains idle:
 
 ```sh
 vonkctl --profile 1 profile add RECIPE --spark SPARK

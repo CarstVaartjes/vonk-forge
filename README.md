@@ -24,6 +24,11 @@ preview changes, and operate one Spark or a fleet.
 - **Cache-backed profiles.** Profile choices and apply admission come from the
   trusted local NAS/Controller cache, which resolves exact model and
   recipe-image identities.
+- **One profile for the fleet.** Reviews include every current enrolled,
+  non-revoked Spark and show unassigned Sparks as idle. A membership change
+  before applying requires a fresh review. The
+  [operator guide](docs/runbooks/vonkctl.md#profile) describes target behavior
+  when Sparks later join or leave.
 - **A safer change path.** See compatibility, placement, downloads, memory,
   and the exact planned change before you apply it.
 - **Reproducible model recipes.** Recipes bind model, runtime, topology,
