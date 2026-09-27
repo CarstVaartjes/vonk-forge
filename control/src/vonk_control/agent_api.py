@@ -1525,26 +1525,31 @@ def install_agent_routes(
                         mapping is not None
                         and mapping.endpoint_owner_node_id == identity.node_id
                     )
-                    if (
-                        initial_observation_late
-                        or observed_identity != evidence.observation_identity_sha256
+                    observation_identity_mismatch = (
+                        observed_identity != evidence.observation_identity_sha256
                         or (owner and type(evidence.endpoint_ready) is not bool)
                         or (not owner and evidence.endpoint_ready is not None)
-                    ):
+                    )
+                    if observation_identity_mismatch:
                         node.state = "failed"
                         node.observed_run_generation = None
                         node.observation_receipt_sha256 = None
                         node.observation_process_running = None
                         node.observation_observed_at = None
                         node.observation_endpoint_ready = None
-                    else:
-                        if node.state != "failed":
-                            node.state = (
-                                "running"
-                                if process_running
-                                and (not owner or evidence.endpoint_ready is True)
-                                else "failed"
-                            )
+                    elif initial_observation_late:
+                        # Late first evidence cannot make the run routable, but
+                        # its exact signed process result remains valid evidence
+                        # for Controller-owned recovery.
+                        node.state = "failed"
+                    elif node.state != "failed":
+                        node.state = (
+                            "running"
+                            if process_running
+                            and (not owner or evidence.endpoint_ready is True)
+                            else "failed"
+                        )
+                    if not observation_identity_mismatch:
                         node.observed_run_generation = run.run_generation
                         node.observation_receipt_sha256 = receipt_sha256
                         node.observation_process_running = process_running
@@ -1555,6 +1560,12 @@ def install_agent_routes(
                     node.updated_at = max(
                         _now(node.updated_at).astimezone(UTC), evidence_observed_at
                     )
+                    if (
+                        run.route_state == "withdrawn"
+                        and run.route_next_attempt_at is not None
+                    ):
+                        run.route_next_attempt_at = None
+                        run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -47,6 +47,10 @@ from .agent_jobs import (
     _WORKLOAD_INTENT_OPERATIONS,
     superseded_cancellation_deadline,
 )
+from .distributed_recovery import (
+    _accepted_start_authority,
+    _accepted_start_authority_payload,
+)
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
@@ -567,7 +571,8 @@ class HostRuntimeAuthorityService:
             or node is None
             or certificate is None
             or run.state != "running"
-            or run_node.state != "running"
+            or run_node.state not in {"running", "failed"}
+            or (run_node.state == "failed" and run.route_state != "withdrawn")
             or not exact_observations
             or installation.state != "installed"
             or revision.kind != "recipe"
@@ -591,26 +596,29 @@ class HostRuntimeAuthorityService:
             ) from error
         if content_sha256(recipe) != revision.content_digest:
             raise HostHelperAuthorityError("recipe run observation authority is stale")
-        jobs = session.scalars(
-            select(Job)
-            .where(Job.kind == "recipe.start", Job.state == "succeeded")
-            .order_by(Job.updated_at.desc(), Job.id.desc())
+        try:
+            start, workload_intent_ordinal = _accepted_start_authority(
+                session, run, revision.content_digest, node_id
+            )
+            _accepted_start_authority_payload(session, start, node_id)
+        except RuntimeError as error:
+            raise HostHelperAuthorityError(
+                "recipe run launch evidence is unavailable"
+            ) from error
+        if node.workload_intent_ordinal != workload_intent_ordinal or (
+            isinstance(start.result, Mapping)
+            and start.result.get("cancel_requested") is True
+        ):
+            raise HostHelperAuthorityError("recipe run launch evidence is unavailable")
+        result = start.result
+        evidence = (
+            result.get("launch_evidence") if isinstance(result, Mapping) else None
         )
-        launch: Mapping[str, object] | None = None
-        for job in jobs:
-            if job.payload.get("owner_id") != run.id or not isinstance(
-                job.result, Mapping
-            ):
-                continue
-            evidence = job.result.get("launch_evidence")
-            candidate = evidence.get(node_id) if isinstance(evidence, Mapping) else None
-            if (
-                isinstance(candidate, Mapping)
-                and candidate.get("run_generation") == run.run_generation
-            ):
-                launch = candidate
-                break
-        if launch is None:
+        launch = evidence.get(node_id) if isinstance(evidence, Mapping) else None
+        if (
+            not isinstance(launch, Mapping)
+            or launch.get("run_generation") != run.run_generation
+        ):
             raise HostHelperAuthorityError("recipe run launch evidence is unavailable")
         expected = RecipeRunObservationIdentity.model_validate(
             {
