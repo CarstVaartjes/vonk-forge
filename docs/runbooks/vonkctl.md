@@ -611,7 +611,33 @@ vonkctl --profile 2 profile progress --request-key REQUEST_UUID --follow
 vonkctl --profile 2 profile cancel APPLICATION_UUID --yes --request-key CANCEL_UUID
 vonkctl --profile 2 profile endpoint
 vonkctl --profile 2 profile endpoint coding
+vonkctl --profile 2 run "Qwen Code" --spark Atlas
+vonkctl --profile 2 run google/gemma-4-26B-A4B-it --yes
 ```
+
+`run` accepts one unambiguous recipe or model from the active library. It
+prepares the recipe and its model, adds the assignment to the selected saved
+profile (profile 1 by default), previews the complete profile change, asks for
+confirmation, follows the application, and prints the current endpoints. Use
+`--spark` more than once to choose the target group; without it, every enrolled
+Spark is included. The profile edit is saved before the preview so the
+Controller can review the exact whole-profile effects. If the review is
+blocked, the saved draft remains and the fleet is unchanged.
+
+For scripts, JSON, redirected input, or `--no-input`, pass `--yes`. The command
+still obtains a fresh Controller review and binds its exact plan before it
+starts. It waits for the application before looking up the endpoint.
+
+The CLI currently runs recipes from the active catalog. It does not turn an
+arbitrary Hugging Face repository into a runnable unqualified recipe. The
+existing recipe generator requires an immutable model definition, sizing data,
+and a pinned runtime image, while profile execution accepts only exact active
+catalog revisions. A BYO path needs a Controller-owned way to register and
+label an unqualified generated recipe while preserving the signed catalog
+path for qualified recipes.
+
+When a run or enrollment is refused, the CLI gives a short next step and keeps
+the Controller error code and original detail in JSON output for debugging.
 
 In an interactive terminal, load shows the current review and asks for one
 default-no confirmation. `--detach` returns the accepted application instead

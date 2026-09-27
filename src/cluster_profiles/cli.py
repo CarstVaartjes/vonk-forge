@@ -64,7 +64,7 @@ class _CliParser(argparse.ArgumentParser):
 def _parser() -> argparse.ArgumentParser:
     parser = _CliParser(
         prog="vonkctl",
-        description="Inspect Sparks, prepare assets, and manage whole-fleet profiles.",
+        description="Inspect Sparks, prepare assets, and run whole-fleet profiles.",
         epilog="Start with vonkctl fleet or vonkctl model library. "
         "Use vonkctl COMMAND --help for details. Connection: VONK_CONTROL_URL "
         "and VONK_CONTROL_TOKEN_FILE (a private file).",
@@ -147,16 +147,19 @@ def _arguments_may_contain_secrets(argv: Sequence[str]) -> bool:
 def _control_error(
     error: BaseException, args: argparse.Namespace | None = None
 ) -> dict[str, object]:
+    code = getattr(error, "code", None) or "control.api_error"
+    detail = getattr(error, "detail", str(error))
+    message = _plain_language_error(code, detail)
     message = (
         "control API unavailable"
         if isinstance(error, (ControlUnavailable, ControlTransportError, OSError))
-        else _sanitize_text(error)
+        else message
     )
     result: dict[str, object] = {
         "error": message,
         "error_type": "control_api",
-        "code": getattr(error, "code", None) or "control.api_error",
-        "detail": getattr(error, "detail", message),
+        "code": code,
+        "detail": _sanitize_text(detail),
         "recovery_actions": list(getattr(error, "recovery", ()) or ()),
         "retryable": getattr(error, "retryable", False) is True,
         "retry_time": getattr(error, "retry_time", None),
@@ -401,6 +404,82 @@ def _control_error(
     return result
 
 
+def _plain_language_error(code: object, detail: object) -> str:
+    """Translate common operator refusals while retaining the wire detail."""
+    messages = {
+        "profile.stale_plan": (
+            "The saved profile changed after it was reviewed. Review the latest "
+            "changes, then run it again."
+        ),
+        "profile.admission_busy": (
+            "Another workload change is using a selected Spark. Wait for it to "
+            "finish, then try again."
+        ),
+        "profile.admission_effect_busy": (
+            "A selected Spark is still cleaning up an earlier workload. Wait "
+            "for cleanup to finish, then try again."
+        ),
+        "profile.spark_unavailable": (
+            "A selected Spark is unreachable. Restore its connection or choose "
+            "a reachable Spark, then review the run again."
+        ),
+        "profile.topology_incomplete": (
+            "This model needs more Sparks than are available in the selected "
+            "group. Add the missing Sparks and review the run again."
+        ),
+        "profile.preparation_unavailable": (
+            "A required model file or runtime image is not ready. Prepare the "
+            "named asset, then review the run again."
+        ),
+        "controller.fleet.enrollment_denied": (
+            "The Controller did not accept this Spark enrollment. Check that "
+            "the Spark is reachable and has a current enrollment grant, then "
+            "request a new grant if needed."
+        ),
+        "controller.authentication_required": (
+            "Vonk could not authenticate this request. Check the configured "
+            "Controller token and try again."
+        ),
+        "controller.request_rejected": (
+            "The Controller rejected this request. Check your access and the "
+            "requested action, then try again."
+        ),
+        "catalog.reference_missing": (
+            "This recipe refers to a model version that is not available in "
+            "the active library. Choose a current recipe or update the library."
+        ),
+    }
+    if isinstance(code, str) and code in messages:
+        return messages[code]
+    text = _sanitize_text(detail)
+    replacements = (
+        ("digest-bound", "tied to the reviewed plan"),
+        ("authority revision", "current Controller authorization"),
+        ("provenance", "verified source details"),
+        ("admission", "run check"),
+    )
+    for technical, plain in replacements:
+        text = re.sub(re.escape(technical), plain, text, flags=re.IGNORECASE)
+    return text
+
+
+def _plain_language_document(value: object) -> object:
+    """Translate user-visible reason text without changing stable codes."""
+    if isinstance(value, Mapping):
+        code = value.get("code")
+        return {
+            str(key): (
+                _plain_language_error(code, item)
+                if key == "detail" and isinstance(item, str)
+                else _plain_language_document(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_plain_language_document(item) for item in value]
+    return value
+
+
 def _emit(
     payload: Mapping[str, object], args: argparse.Namespace, *, error: bool = False
 ) -> None:
@@ -415,6 +494,12 @@ def _emit(
     if args.global_json or getattr(args, "json", False):
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
         return
+    if error:
+        code = safe.get("code")
+        if isinstance(safe.get("detail"), str):
+            safe["detail"] = _plain_language_error(code, safe["detail"])
+    else:
+        safe = cast(dict[str, object], _plain_language_document(safe))
     preview = (
         getattr(args, "dry_run", False)
         or getattr(args, "outcome_context", None) == "preview"
