@@ -19820,8 +19820,16 @@
             "type": "integer"
           },
           "state": {
-            "maxLength": 32,
-            "minLength": 1,
+            "enum": [
+              "queued",
+              "running",
+              "waiting",
+              "waiting-for-operator",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "unknown"
+            ],
             "title": "State",
             "type": "string"
           },
@@ -20922,6 +20930,7 @@
             "enum": [
               "queued",
               "running",
+              "waiting",
               "waiting-for-operator",
               "succeeded",
               "failed",

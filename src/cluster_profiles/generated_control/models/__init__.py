@@ -523,6 +523,7 @@ from .run_switch_operation_result_completed_phases_item import RunSwitchOperatio
 from .run_switch_operation_result_failed_phase_type_0 import RunSwitchOperationResultFailedPhaseType0
 from .run_switch_operation_result_phase_type_0 import RunSwitchOperationResultPhaseType0
 from .run_switch_operation_result_subphase_type_0 import RunSwitchOperationResultSubphaseType0
+from .run_switch_operation_state import RunSwitchOperationState
 from .run_switch_phase import RunSwitchPhase
 from .run_switch_phase_kind import RunSwitchPhaseKind
 from .run_switch_phase_state import RunSwitchPhaseState
@@ -1145,6 +1146,7 @@ __all__ = (
     "RunSwitchOperationResultFailedPhaseType0",
     "RunSwitchOperationResultPhaseType0",
     "RunSwitchOperationResultSubphaseType0",
+    "RunSwitchOperationState",
     "RunSwitchPhase",
     "RunSwitchPhaseKind",
     "RunSwitchPhaseState",

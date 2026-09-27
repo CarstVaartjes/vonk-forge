@@ -102,6 +102,7 @@ RunSwitchMemberState = Literal["pending", "running", "succeeded", "failed", "unk
 RunSwitchProgressState = Literal[
     "queued",
     "running",
+    "waiting",
     "waiting-for-operator",
     "succeeded",
     "failed",
@@ -1284,7 +1285,7 @@ class RunSwitchOperation(_StrictModel):
     operation_id: UuidId
     kind: RunSwitchOperationKind
     action: RunSwitchAction
-    state: Annotated[str, StringConstraints(min_length=1, max_length=32)]
+    state: RunSwitchProgressState
     plan_digest: Digest
     request_key: UuidId
     cleanup_mode: Literal["uninstall", "reconcile"] | None = None

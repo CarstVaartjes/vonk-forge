@@ -122,6 +122,48 @@ def test_generated_fleet_upgrade_request_rejects_retired_strategy() -> None:
         )
 
 
+def test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait() -> (
+    None
+):
+    from cluster_profiles.generated_control.models.run_switch_operation import (
+        RunSwitchOperation,
+    )
+
+    node_id = f"spk_{'1' * 32}"
+    progress = {
+        "phase": "final_verify",
+        "phase_count": 1,
+        "phase_index": 0,
+        "members": [{"node_id": node_id, "state": "pending"}],
+        "state": "waiting",
+        "total_bytes_known": False,
+    }
+    payload = {
+        "action": "run",
+        "completed_phases": [],
+        "kind": "recipe.run-switch.v2",
+        "node_ids": [node_id],
+        "operation_id": "11111111-1111-4111-8111-111111111111",
+        "plan_digest": "a" * 64,
+        "progress": progress,
+        "request_key": "22222222-2222-4222-8222-222222222222",
+        "state": "waiting",
+    }
+
+    operation = RunSwitchOperation.from_dict(payload)
+    assert operation.state == "waiting"
+    assert operation.progress.state == "waiting"
+
+    manual_wait = {
+        **payload,
+        "state": "waiting-for-operator",
+        "progress": {**progress, "state": "waiting-for-operator"},
+    }
+    projected = RunSwitchOperation.from_dict(manual_wait)
+    assert projected.state == "waiting-for-operator"
+    assert projected.progress.state == "waiting-for-operator"
+
+
 def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None:
     schema = json.loads(OPENAPI.read_text())
     components = schema["components"]["schemas"]

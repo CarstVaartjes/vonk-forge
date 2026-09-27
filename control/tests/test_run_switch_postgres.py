@@ -285,8 +285,8 @@ def test_postgres_final_verification_waits_after_accepted_start_deadline(
     assert run_id in expiry_log
 
     expired = service.get(operation.operation_id)
-    assert expired.state == "waiting-for-operator"
-    assert expired.progress.state == "waiting-for-operator"
+    assert expired.state == "waiting"
+    assert expired.progress.state == "waiting"
     assert expired.status_reason is not None
     assert "final-verification-expired" in expired.status_reason
     assert "accepted start deadline" in expired.status_reason
@@ -353,7 +353,7 @@ def test_postgres_newer_intent_supersedes_parked_final_verification(
     assert service.tick() is True
 
     expired = service.get(operation.operation_id)
-    assert expired.state == "waiting-for-operator"
+    assert expired.state == "waiting"
     assert expired.result is not None
     next_observation_at = expired.result.observation_due_at
     assert next_observation_at is not None

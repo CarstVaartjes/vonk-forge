@@ -22,7 +22,7 @@ from typing import Any, Literal, Protocol, TypeGuard, runtime_checkable
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -3306,7 +3306,7 @@ class RunSwitchOperationService:
                         "run-switch cancellation request was already used differently"
                     )
                 return self._operation_view(job)
-            if job.state not in {"queued", "running"}:
+            if job.state not in {"queued", "running", "waiting"}:
                 raise RunSwitchOperationConflict(
                     "run-switch operation is not cancellable"
                 )
@@ -3330,11 +3330,16 @@ class RunSwitchOperationService:
             ]
             if "start" in require_sequence(
                 progress.get("completed_phases", []), "completed phases"
-            ) or (job.state == "running" and phase.kind in {"start", "final_verify"}):
+            ) or (
+                job.state in {"running", "waiting"}
+                and phase.kind in {"start", "final_verify"}
+            ):
                 raise RunSwitchOperationConflict(
                     "run-switch runtime is starting or active; use the explicit Stop operation"
                 )
             progress["cancellation"] = cancellation.model_dump(mode="json")
+            if job.state == "waiting":
+                progress["observation_due_at"] = cancellation.requested_at.isoformat()
             job.status_reason = (
                 "Cancellation requested; finishing the current preparation safely."
             )
@@ -3542,7 +3547,13 @@ class RunSwitchOperationService:
                 select(Job.id)
                 .where(
                     Job.kind.in_(_OPERATION_KINDS),
-                    Job.state.in_(("queued", "running", "waiting-for-operator")),
+                    or_(
+                        Job.state.in_(("queued", "running", "waiting")),
+                        and_(
+                            Job.state == "waiting-for-operator",
+                            due_at.is_not(None),
+                        ),
+                    ),
                     or_(due_at.is_(None), due_at <= _now(self._clock).isoformat()),
                 )
                 .order_by(Job.id)
@@ -6710,7 +6721,12 @@ class RunSwitchOperationService:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
                 return True
-            if job.state not in {"queued", "running", "waiting-for-operator"}:
+            if job.state not in {
+                "queued",
+                "running",
+                "waiting",
+                "waiting-for-operator",
+            }:
                 return False
             payload = job.payload
             raw_plan = payload.get("plan")
@@ -6761,6 +6777,11 @@ class RunSwitchOperationService:
                 job.updated_at = now
                 session.commit()
                 return True
+            if (
+                job.state == "waiting-for-operator"
+                and progress.get("observation_due_at") is None
+            ):
+                return False
             observation_due = progress.get("observation_due_at")
             if isinstance(observation_due, str) and now < _aware(
                 datetime.fromisoformat(observation_due)
@@ -6769,7 +6790,7 @@ class RunSwitchOperationService:
             raw_phase_index = progress.get("phase_index", 0)
             raw_item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
-            if job.state == "waiting-for-operator":
+            if job.state in {"waiting", "waiting-for-operator"}:
                 if not child_id:
                     # Final verification observes an existing run and route;
                     # reopening this checkpoint cannot issue a new workload.
@@ -6989,7 +7010,7 @@ class RunSwitchOperationService:
                             job, progress, phase_index, item_index, child_id
                         ):
                             return False
-                        job.state = "waiting-for-operator"
+                        job.state = "waiting"
                         due = now + timedelta(seconds=60)
                         progress["observation_due_at"] = due.isoformat()
                         job.result = _persisted_result(progress)
@@ -7397,7 +7418,7 @@ class RunSwitchOperationService:
                             f"{owner_reason[:220]}; exact reconciliation retains the "
                             f"run and reservations; next observation at {due.isoformat()}"
                         )[:512]
-                        job.state = "waiting-for-operator"
+                        job.state = "waiting"
                         if not (
                             isinstance(previous_status_reason, str)
                             and previous_status_reason.startswith(
@@ -7589,7 +7610,7 @@ class RunSwitchOperationService:
                 progress["observation_deadline_at"] = deadline.isoformat()
                 due = now + timedelta(seconds=60)
                 progress["observation_due_at"] = due.isoformat()
-                job.state = "waiting-for-operator"
+                job.state = "waiting"
                 job.status_reason = (
                     "run-switch.start-observation-expired: exact effect remains "
                     f"unresolved; next observation at {due.isoformat()}"
@@ -7860,11 +7881,20 @@ class RunSwitchOperationService:
         completed = (
             persisted_result.completed_phases if persisted_result is not None else []
         )
+        projected_state = _progress_operation_state(job.state)
+        if (
+            projected_state == "waiting-for-operator"
+            and persisted_result is not None
+            and persisted_result.observation_due_at is not None
+        ):
+            # Existing accepted rows parked by the prior automatic-observation
+            # state are still auto-observed; present their actual behavior.
+            projected_state = "waiting"
         return RunSwitchOperation(
             operation_id=job.id,
             kind=_OPERATION_KIND_ADAPTER.validate_python(job.kind, strict=True),
             action=plan.action,
-            state=job.state,
+            state=projected_state,
             plan_digest=plan.plan_digest,
             request_key=job.request_id,
             cleanup_mode=(plan.cleanup_mode if plan.action == "cleanup" else None),
@@ -7877,7 +7907,7 @@ class RunSwitchOperationService:
             progress=_progress_view(
                 plan,
                 progress,
-                job.state,
+                projected_state,
                 job.status_reason,
             ),
             status_reason=job.status_reason,
@@ -8046,7 +8076,7 @@ class RunSwitchOperationProvider:
                 and operation.result
                 and operation.result.retryable
                 else ["cancel"]
-                if operation.state in {"queued", "running"}
+                if operation.state in {"queued", "running", "waiting"}
                 and not (operation.result and operation.result.cancellation)
                 and (
                     operation.state == "queued"
