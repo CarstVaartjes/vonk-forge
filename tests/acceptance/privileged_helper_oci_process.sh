@@ -294,7 +294,8 @@ docker inspect "$run_name" >"$report_root/container-inspect.json"
 sleep 6
 docker logs "$run_name" >"$report_root/container.log" 2>&1 || true
 
-grep -q '"--network","none"' "$report_root/start.log"
+grep -q '"--network","bridge"' "$report_root/start.log"
+grep -q '"--publish","127.0.0.1:8000:8000"' "$report_root/start.log"
 grep -q '"--tmpfs"' "$report_root/start.log"
 grep -q '"--read-only"' "$report_root/start.log"
 grep -q '"--cap-drop=ALL"' "$report_root/start.log"
