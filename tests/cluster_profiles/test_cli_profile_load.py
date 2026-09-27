@@ -202,6 +202,56 @@ def test_generic_conflict_does_not_trigger_an_automatic_fresh_review(capsys):
     ]
 
 
+def test_control_error_uses_plain_language_and_keeps_debug_code_and_detail():
+    from cluster_profiles.control_client import ControlHTTPError
+
+    error = ControlHTTPError(
+        409,
+        "profile preview changed because the admission authority revision is stale",
+        code="profile.stale_plan",
+    )
+    result = cli._control_error(error)
+    assert "saved profile changed" in str(result["error"]).lower()
+    assert result["code"] == "profile.stale_plan"
+    assert "admission authority revision" in str(result["detail"])
+
+
+def test_control_error_translates_internal_terms_when_no_known_code_matches():
+    from cluster_profiles.control_client import ControlHTTPError
+
+    error = ControlHTTPError(
+        409,
+        "digest-bound plan provenance failed during admission",
+        code="profile.unknown_refusal",
+    )
+    result = cli._control_error(error)
+    assert "tied to the reviewed plan" in str(result["error"])
+    assert "verified source details" in str(result["error"])
+    assert "run check" in str(result["error"])
+    assert result["code"] == "profile.unknown_refusal"
+
+
+def test_human_error_output_hides_internal_words_but_keeps_the_next_step(capsys):
+    from argparse import Namespace
+
+    from cluster_profiles.control_client import ControlHTTPError
+
+    error = ControlHTTPError(
+        409,
+        "digest-bound plan provenance failed during admission",
+        code="profile.unknown_refusal",
+    )
+    cli._emit(
+        cli._control_error(error),
+        Namespace(global_json=False, json=False, command="profile"),
+        error=True,
+    )
+    rendered = capsys.readouterr().err.lower()
+    assert "tied to the reviewed plan" in rendered
+    assert "provenance" not in rendered
+    assert "admission" not in rendered
+
+
 @pytest.mark.parametrize(
     "options",
     [
