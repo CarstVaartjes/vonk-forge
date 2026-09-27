@@ -157,6 +157,34 @@ class SparkGroup(_StrictModel):
         return self
 
 
+class RunSwitchProfileStopScope(_StrictModel):
+    """Reviewed profile-only cleanup of the reachable ranks in a lost group.
+
+    The full accepted topology remains visible even though only its reachable
+    subset is sent Stop work.  Missing ranks are explicit so a partial cleanup
+    can never be presented as a successful full-group stop.
+    """
+
+    original_group: SparkGroup
+    target_node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    missing_node_ids: list[NodeId] = Field(min_length=1, max_length=31)
+
+    @model_validator(mode="after")
+    def exact_partition(self) -> RunSwitchProfileStopScope:
+        original = [node.node_id for node in self.original_group.nodes]
+        targets = self.target_node_ids
+        missing = self.missing_node_ids
+        if targets != sorted(set(targets)) or missing != sorted(set(missing)):
+            raise ValueError("profile Stop scope node IDs must be sorted and unique")
+        if len(original) < 2:
+            raise ValueError("profile partial Stop requires a multi-Spark group")
+        if set(targets) & set(missing) or set(targets) | set(missing) != set(original):
+            raise ValueError(
+                "profile Stop targets and missing ranks must partition the group"
+            )
+        return self
+
+
 class RunMemoryResidualRange(_StrictModel):
     """Possible remaining bytes for one exact active run reservation."""
 
@@ -622,6 +650,10 @@ class RunSwitchPlan(RunSwitchAssessment):
     recipe_content_sha256: Digest | None
     run_id: UuidId | None
     spark_group: SparkGroup
+    # Present only when FleetProfile has reviewed a multi-Spark cleanup after
+    # one or more ranks left the live fleet. The rest of the plan and its Job
+    # targets cover reachable Sparks only.
+    profile_stop_scope: RunSwitchProfileStopScope | None = None
     mapping: MappingSelection | None
     installation_id: UuidId | None
     installation_state: (
@@ -655,6 +687,23 @@ class RunSwitchPlan(RunSwitchAssessment):
 
     @model_validator(mode="after")
     def cleanup_authority_matches_effect(self) -> RunSwitchPlan:
+        scope = self.profile_stop_scope
+        if scope is not None:
+            target_ids = scope.target_node_ids
+            if (
+                self.action != "stop"
+                or self.run_id is None
+                or self.spark_group != scope.original_group
+                or len(self.stops) != 1
+                or self.stops[0].run_id != self.run_id
+                or self.stops[0].node_ids != target_ids
+                or self.mapping is None
+                or [node.model_dump(mode="json") for node in self.mapping.nodes]
+                != [node.model_dump(mode="json") for node in scope.original_group.nodes]
+            ):
+                raise ValueError(
+                    "profile partial Stop plan does not match its reviewed scope"
+                )
         if self.cleanup_mode == "uninstall":
             if self.reconciliation_authority is not None:
                 raise ValueError(

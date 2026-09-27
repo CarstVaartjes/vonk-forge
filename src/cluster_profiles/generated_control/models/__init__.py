@@ -532,6 +532,7 @@ from .run_switch_plan_action import RunSwitchPlanAction
 from .run_switch_plan_cleanup_disposition import RunSwitchPlanCleanupDisposition
 from .run_switch_plan_cleanup_mode import RunSwitchPlanCleanupMode
 from .run_switch_prepared_result import RunSwitchPreparedResult
+from .run_switch_profile_stop_scope import RunSwitchProfileStopScope
 from .run_switch_progress import RunSwitchProgress
 from .run_switch_progress_phase_type_0 import RunSwitchProgressPhaseType0
 from .run_switch_progress_state import RunSwitchProgressState
@@ -1153,6 +1154,7 @@ __all__ = (
     "RunSwitchPlanCleanupDisposition",
     "RunSwitchPlanCleanupMode",
     "RunSwitchPreparedResult",
+    "RunSwitchProfileStopScope",
     "RunSwitchProgress",
     "RunSwitchProgressPhaseType0",
     "RunSwitchProgressState",

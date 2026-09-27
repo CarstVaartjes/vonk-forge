@@ -487,6 +487,22 @@ def _workload_owner_scope(
     return targets
 
 
+def _profile_effect_scope(
+    owner_scope: tuple[str, ...], profile_target_node_ids: Sequence[str] | None
+) -> tuple[str, ...]:
+    """Validate FleetProfile's reachable effect subset against the full owner."""
+    if profile_target_node_ids is None:
+        return owner_scope
+    targets = tuple(profile_target_node_ids)
+    if (
+        not targets
+        or targets != tuple(sorted(set(targets)))
+        or not set(targets) < set(owner_scope)
+    ):
+        raise RecipeOperationConflict("profile Stop target scope is invalid")
+    return targets
+
+
 def _active_owned_workload_jobs(
     session: Session,
     kind: str,
@@ -1957,7 +1973,12 @@ class RecipeOperationService:
             )
 
     def assess_superseded_issued(
-        self, kind: str, owner_id: str, workload_intent_ordinal: int | None = None
+        self,
+        kind: str,
+        owner_id: str,
+        workload_intent_ordinal: int | None = None,
+        *,
+        profile_target_node_ids: Sequence[str] | None = None,
     ) -> IssuedWorkloadReconciliation | None:
         """Name exact issued work that needs fresh observation before resumption."""
         if workload_intent_ordinal is not None and (
@@ -1967,8 +1988,9 @@ class RecipeOperationService:
         now = _aware(self._clock())
         with self._sessions() as session:
             scope = _workload_owner_scope(session, kind, owner_id)
+            intent_scope = _profile_effect_scope(scope, profile_target_node_ids)
             if workload_intent_ordinal is not None and not _intent_is_current(
-                session, workload_intent_ordinal, scope
+                session, workload_intent_ordinal, intent_scope
             ):
                 raise RecipeOperationConflict("workload intent was superseded")
             pending: list[IssuedWorkloadReconciliation] = []
@@ -2055,7 +2077,12 @@ class RecipeOperationService:
             return pending[0] if pending else None
 
     def reconcile_superseded_unissued(
-        self, kind: str, owner_id: str, workload_intent_ordinal: int
+        self,
+        kind: str,
+        owner_id: str,
+        workload_intent_ordinal: int,
+        *,
+        profile_target_node_ids: Sequence[str] | None = None,
     ) -> bool:
         """Retire only exact older workload jobs with no issued agent attempt."""
         if type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1:
@@ -2064,15 +2091,16 @@ class RecipeOperationService:
         retired = False
         with self._sessions.begin() as session:
             scope = _workload_owner_scope(session, kind, owner_id)
+            intent_scope = _profile_effect_scope(scope, profile_target_node_ids)
             nodes = tuple(
                 session.scalars(
                     select(AgentNode)
-                    .where(AgentNode.node_id.in_(scope))
+                    .where(AgentNode.node_id.in_(intent_scope))
                     .order_by(AgentNode.node_id)
                     .with_for_update(of=AgentNode)
                 )
             )
-            if tuple(node.node_id for node in nodes) != scope or any(
+            if tuple(node.node_id for node in nodes) != intent_scope or any(
                 node.workload_intent_ordinal != workload_intent_ordinal
                 or node.state != "active"
                 or node.revoked_at is not None
@@ -2103,9 +2131,19 @@ class RecipeOperationService:
                 retired = True
         return retired
 
-    def preview_stop(self, run_id: str) -> StopPlan:
+    def preview_stop(
+        self,
+        run_id: str,
+        *,
+        profile_target_node_ids: Sequence[str] | None = None,
+    ) -> StopPlan:
         with self._sessions() as session:
-            return self._stop_plan_in_session(session, run_id, lock=False)
+            return self._stop_plan_in_session(
+                session,
+                run_id,
+                lock=False,
+                profile_target_node_ids=profile_target_node_ids,
+            )
 
     def stop(
         self,
@@ -2115,6 +2153,7 @@ class RecipeOperationService:
         actor: str,
         request_id: str,
         workload_intent_ordinal: int | None = None,
+        profile_target_node_ids: Sequence[str] | None = None,
     ) -> RecipeOperationView:
         existing = self._idempotent(
             request_id,
@@ -2133,6 +2172,7 @@ class RecipeOperationService:
             actor=actor,
             request_id=request_id,
             workload_intent_ordinal=workload_intent_ordinal,
+            profile_target_node_ids=profile_target_node_ids,
         )
         if isinstance(logical, RecipeArtifactJobCancellationPending):
             raise logical
@@ -2156,7 +2196,12 @@ class RecipeOperationService:
                 )
                 if existing is not None:
                     return existing
-                admitted = self._stop_plan_in_session(session, run_id, lock=True)
+                admitted = self._stop_plan_in_session(
+                    session,
+                    run_id,
+                    lock=True,
+                    profile_target_node_ids=profile_target_node_ids,
+                )
                 if not admitted.allowed or admitted.plan_digest != plan_digest:
                     raise RecipeOperationConflict("stop plan is stale or blocked")
                 prepared = (
@@ -2172,6 +2217,15 @@ class RecipeOperationService:
                 if revision is None:
                     raise RecipeOperationConflict("recipe run topology is unavailable")
                 stop_order = _topology_order(revision.document, "stop_order")
+                if profile_target_node_ids is not None:
+                    reachable_roles = {
+                        node.role
+                        for node in admitted.nodes
+                        if node.node_id in admitted.target_node_ids
+                    }
+                    stop_order = tuple(
+                        role for role in stop_order if role in reachable_roles
+                    )
                 run.state = "stopping"
                 run.updated_at = now
                 job = self._queue_in_session(
@@ -2193,6 +2247,7 @@ class RecipeOperationService:
                             },
                         )
                         for node in admitted.nodes
+                        if node.node_id in admitted.target_node_ids
                     ),
                     phases=_role_phases(
                         stop_order,
@@ -2208,12 +2263,23 @@ class RecipeOperationService:
                                 },
                             )
                             for node in admitted.nodes
+                            if node.node_id in admitted.target_node_ids
                         ),
                         include_role=False,
                     ),
                     authority_digest=admitted.authority_digest,
                     now=now,
                     workload_intent_ordinal=workload_intent_ordinal,
+                    job_context=(
+                        {
+                            "profile_partial_stop": {
+                                "target_node_ids": list(admitted.target_node_ids),
+                                "missing_node_ids": list(admitted.missing_node_ids),
+                            }
+                        }
+                        if admitted.missing_node_ids
+                        else None
+                    ),
                 )
                 session.flush()
                 if self._route_publications is not None:
@@ -4570,6 +4636,7 @@ class RecipeOperationService:
             elif job.kind == "recipe.stop":
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
+                partial_scope = job.payload.get("profile_partial_stop")
                 recovery = None
                 recovery_error: DistributedLifecycleError | None = None
                 try:
@@ -4632,13 +4699,67 @@ class RecipeOperationService:
                     run.updated_at = now
                     cleanup_queued = True
                 else:
-                    run.state = "failed" if failed or recovery_error else "stopped"
-                    run.stopped_at = now if not failed else None
+                    partial_targets = (
+                        partial_scope.get("target_node_ids")
+                        if isinstance(partial_scope, Mapping)
+                        else None
+                    )
+                    partial_missing = (
+                        partial_scope.get("missing_node_ids")
+                        if isinstance(partial_scope, Mapping)
+                        else None
+                    )
+                    full_run_nodes = tuple(
+                        session.scalars(
+                            select(RunNode).where(RunNode.run_id == owner_id)
+                        )
+                    )
+                    valid_partial_scope = (
+                        isinstance(partial_targets, list)
+                        and isinstance(partial_missing, list)
+                        and partial_targets == sorted(set(partial_targets))
+                        and partial_missing == sorted(set(partial_missing))
+                        and partial_targets == sorted(job.targets)
+                        and set(partial_targets).isdisjoint(partial_missing)
+                        and set(partial_targets) | set(partial_missing)
+                        == {node.node_id for node in full_run_nodes}
+                        and bool(partial_missing)
+                        and all(
+                            node.state == "stopped"
+                            for node in full_run_nodes
+                            if node.node_id in partial_targets
+                        )
+                        and all(
+                            node.state != "stopped"
+                            for node in full_run_nodes
+                            if node.node_id in partial_missing
+                        )
+                    )
+                    partial_success = (
+                        valid_partial_scope and not failed and recovery_error is None
+                    )
+                    run.state = (
+                        "lost"
+                        if partial_success
+                        else "failed"
+                        if failed or recovery_error or partial_scope is not None
+                        else "stopped"
+                    )
+                    run.stopped_at = now if not failed and not partial_scope else None
                     run.route_state = "withdrawn"
-                    if recovery_error is not None:
+                    if partial_success:
+                        run.route_error = "incomplete multi-Spark model; missing ranks were not stopped"
+                        self._release_node_reservations(
+                            session, owner_id, job.targets, now
+                        )
+                    elif recovery_error is not None:
                         run.route_error = str(recovery_error)[:512]
+                    elif partial_scope is not None and not valid_partial_scope:
+                        run.route_error = (
+                            "profile partial Stop scope no longer matches the full run"
+                        )
                     run.updated_at = now
-                    if not failed:
+                    if not failed and recovery_error is None and not partial_scope:
                         self._release(session, "run", owner_id, now)
             elif job.kind == "recipe.uninstall":
                 installation = session.get(RecipeInstallation, owner_id)
@@ -5227,6 +5348,7 @@ class RecipeOperationService:
         actor: str,
         request_id: str,
         workload_intent_ordinal: int | None,
+        profile_target_node_ids: Sequence[str] | None = None,
     ) -> RecipeOperationView | RecipeArtifactJobCancellationPending | None:
         now = self._clock()
         with self._sessions() as session:
@@ -5236,6 +5358,12 @@ class RecipeOperationService:
                 or _stored_run_plan(existing_run.plan).get("execution_mode")
                 != "one-shot-jobs"
             ):
+                return None
+            if profile_target_node_ids is not None:
+                # A reviewed partial profile Stop still requires exact receipts
+                # from each reachable rank. Route it through the ordinary
+                # distributed Stop job instead of using the logical one-shot
+                # shortcut, which can only issue a whole-run completion.
                 return None
         with self._sessions.begin() as session:
             pending_job = session.scalar(
@@ -5267,7 +5395,12 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(
                     "logical recipe run changed while stopping"
                 )
-            admitted = self._stop_plan_in_session(session, run_id, lock=True)
+            admitted = self._stop_plan_in_session(
+                session,
+                run_id,
+                lock=True,
+                profile_target_node_ids=profile_target_node_ids,
+            )
             if not admitted.allowed or admitted.plan_digest != plan_digest:
                 raise RecipeOperationConflict("stop plan is stale or blocked")
             installation = session.get(RecipeInstallation, run.installation_id)
@@ -5285,7 +5418,7 @@ class RecipeOperationService:
                     .order_by(RunNode.rank)
                 )
             )
-            targets = tuple(sorted(node.node_id for node in nodes))
+            targets = admitted.target_node_ids
             target_nodes = tuple(
                 session.scalars(
                     select(AgentNode)
@@ -5322,7 +5455,12 @@ class RecipeOperationService:
                 "execution_mode": "one-shot-jobs",
                 "workload_intent_ordinal": workload_intent_ordinal,
             }
-            pending = self._one_shot_stop_prerequisite(session, run_id, now)
+            pending = self._one_shot_stop_prerequisite(
+                session,
+                run_id,
+                now,
+                target_node_ids=targets if admitted.missing_node_ids else None,
+            )
             if pending is not None:
                 if pending_job is None:
                     session.add(
@@ -5346,13 +5484,21 @@ class RecipeOperationService:
                     session.flush()
                 return pending
             for node in nodes:
-                node.state = "stopped"
-                node.updated_at = now
-            run.state = "stopped"
+                if node.node_id in targets:
+                    node.state = "stopped"
+                    node.updated_at = now
+            run.state = "lost" if admitted.missing_node_ids else "stopped"
             run.route_state = "withdrawn"
-            run.stopped_at = now
+            run.stopped_at = None if admitted.missing_node_ids else now
+            if admitted.missing_node_ids:
+                run.route_error = (
+                    "incomplete multi-Spark model; missing ranks were not stopped"
+                )
             run.updated_at = now
-            self._release(session, "run", run_id, now)
+            if admitted.missing_node_ids:
+                self._release_node_reservations(session, run_id, targets, now)
+            else:
+                self._release(session, "run", run_id, now)
             job = pending_job or Job(
                 id=str(uuid.uuid4()),
                 request_id=request_id,
@@ -5388,8 +5534,13 @@ class RecipeOperationService:
 
     @staticmethod
     def _one_shot_stop_prerequisite(
-        session: Session, run_id: str, now: datetime
+        session: Session,
+        run_id: str,
+        now: datetime,
+        *,
+        target_node_ids: Sequence[str] | None = None,
     ) -> RecipeArtifactJobCancellationPending | None:
+        target_scope = set(target_node_ids) if target_node_ids is not None else None
         uncertain = tuple(
             session.scalars(
                 select(ArtifactJob)
@@ -5399,6 +5550,13 @@ class RecipeOperationService:
             )
         )
         for artifact in uncertain:
+            if (
+                target_scope is not None
+                and not RecipeOperationService._artifact_job_targets(
+                    session, artifact, target_scope
+                )
+            ):
+                continue
             evidence = artifact.result_evidence
             if isinstance(evidence, Mapping) and (
                 evidence.get("active_scope_may_remain") is True
@@ -5435,6 +5593,13 @@ class RecipeOperationService:
         )
         pending: RecipeArtifactJobCancellationPending | None = None
         for artifact in active:
+            if (
+                target_scope is not None
+                and not RecipeOperationService._artifact_job_targets(
+                    session, artifact, target_scope
+                )
+            ):
+                continue
             if artifact.operation_id is None:
                 if artifact.state not in {"draft", "ready"}:
                     raise RecipeOperationConflict(
@@ -5493,8 +5658,22 @@ class RecipeOperationService:
                 )
         return pending
 
+    @staticmethod
+    def _artifact_job_targets(
+        session: Session, artifact: ArtifactJob, target_node_ids: set[str]
+    ) -> bool:
+        if artifact.operation_id is None:
+            return False
+        parent = session.get(Job, artifact.operation_id)
+        return bool(parent is not None and set(parent.targets) & target_node_ids)
+
     def _stop_plan_in_session(
-        self, session: Session, run_id: str, *, lock: bool
+        self,
+        session: Session,
+        run_id: str,
+        *,
+        lock: bool,
+        profile_target_node_ids: Sequence[str] | None = None,
     ) -> StopPlan:
         run_statement = select(RecipeRun).where(RecipeRun.id == run_id)
         if lock:
@@ -5555,6 +5734,54 @@ class RecipeOperationService:
             if reservation.node_id in active_by_node:
                 active_by_node[reservation.node_id] += reservation.amount_bytes
 
+        full_node_ids = {node.node_id for node in nodes}
+        target_node_ids = tuple(
+            sorted(
+                profile_target_node_ids
+                if profile_target_node_ids is not None
+                else full_node_ids
+            )
+        )
+        missing_node_ids = tuple(sorted(full_node_ids - set(target_node_ids)))
+        profile_scope_exact = profile_target_node_ids is None or (
+            len(target_node_ids) == len(set(target_node_ids))
+            and bool(target_node_ids)
+            and set(target_node_ids) <= full_node_ids
+        )
+        if profile_target_node_ids is not None and profile_scope_exact:
+            target_rows = tuple(
+                session.scalars(
+                    select(AgentNode)
+                    .where(
+                        AgentNode.node_id.in_(target_node_ids),
+                        AgentNode.revoked_at.is_(None),
+                    )
+                    .order_by(AgentNode.node_id)
+                    .with_for_update(of=AgentNode)
+                    if lock
+                    else select(AgentNode)
+                    .where(
+                        AgentNode.node_id.in_(target_node_ids),
+                        AgentNode.revoked_at.is_(None),
+                    )
+                    .order_by(AgentNode.node_id)
+                )
+            )
+            removed_active_rows = tuple(
+                session.scalars(
+                    select(AgentNode.node_id).where(
+                        AgentNode.node_id.in_(missing_node_ids),
+                        AgentNode.revoked_at.is_(None),
+                    )
+                )
+            )
+            profile_scope_exact = (
+                tuple(row.node_id for row in target_rows) == target_node_ids
+                and not removed_active_rows
+                and len(full_node_ids) >= 2
+                and bool(missing_node_ids)
+            )
+
         stored_run_plan = _stored_run_plan(run.plan)
         expected_nodes = stored_run_plan.get("nodes")
         expected_identity = (
@@ -5578,6 +5805,7 @@ class RecipeOperationService:
             and stored_run_plan.get("mapping_generation") == run.mapping_generation
             and stored_run_plan.get("recipe_revision_id") == revision.id
             and stored_run_plan.get("plan_digest") == run.plan_digest
+            and profile_scope_exact
         )
         reservation_membership_exact = (
             len(reservations) == len(nodes)
@@ -5625,6 +5853,8 @@ class RecipeOperationService:
                 )
                 for node in nodes
             ),
+            target_node_ids=target_node_ids,
+            missing_node_ids=missing_node_ids,
             immutable_membership_exact=immutable_membership_exact,
             reservation_membership_exact=reservation_membership_exact,
             reservation_facts=reservation_facts,
@@ -6205,6 +6435,28 @@ class RecipeOperationService:
         session: Session, owner_kind: str, owner_id: str, now: datetime
     ) -> None:
         release_owned_reservations_in_session(session, owner_kind, owner_id, now)
+
+    @staticmethod
+    def _release_node_reservations(
+        session: Session,
+        run_id: str,
+        node_ids: Sequence[str],
+        now: datetime,
+    ) -> None:
+        """Release only the ranks whose Stop receipts are proven."""
+
+        if not node_ids:
+            return
+        for reservation in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.node_id.in_(node_ids),
+                ResourceReservation.state == "active",
+            )
+        ):
+            reservation.state = "released"
+            reservation.released_at = now
 
 
 def _required_string(value: Mapping[str, object], key: str) -> str:

@@ -138,6 +138,7 @@ from .run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchPlacementAction,
     RunSwitchPlan,
+    RunSwitchProfileStopScope,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
     SparkGroup,
@@ -245,6 +246,7 @@ class _ProfileControlEffects:
     states: dict[str, FleetProfileService._AssignmentState]
     effects: FleetProfileEffects
     changed_nodes: set[str]
+    unavailable_assignment_ids: set[str]
     switch_needed: bool
     reasons: list[FleetProfileReason]
 
@@ -989,6 +991,7 @@ class RunSwitchFleetProfileAdapter:
         assignments: tuple[FleetProfileAssignment, ...],
         reviewed: FleetProfilePreview,
     ) -> None:
+        live_scope = set(reviewed.scope.node_ids)
         node_ids = tuple(
             sorted(
                 {
@@ -996,6 +999,7 @@ class RunSwitchFleetProfileAdapter:
                     for assignment in assignments
                     for node in assignment.nodes
                 }
+                & live_scope
             )
         )
         if node_ids:
@@ -1035,7 +1039,10 @@ class RunSwitchFleetProfileAdapter:
             if item.current_state != item.desired_state
         }
         for assignment in assignments:
-            if assignment.id not in changing:
+            if (
+                assignment.id not in changing
+                or not {node.node_id for node in assignment.nodes} <= live_scope
+            ):
                 continue
             previous = assessments.get(assignment.id)
             decision = decisions.get(assignment.id)
@@ -1110,6 +1117,7 @@ class RunSwitchFleetProfileAdapter:
         cancelling = _persisted_profile_progress(application).cancellation is not None
         active = state.get("active_operation_id")
         position = state.get("position")
+        expected_partial_failure = False
         if isinstance(active, str):
             try:
                 child = self._run_switch.get(active)
@@ -1173,11 +1181,48 @@ class RunSwitchFleetProfileAdapter:
                     return self._finish_cancelled_in_session(
                         session, application, state
                     )
-                reason = child.status_reason or (
-                    f"Run/Switch child ended in {child.state}"
+                queue = sequence(state.get("queue")) or ()
+                current_item = (
+                    queue[integer(position) or 0]
+                    if (integer(position) or 0) < len(queue)
+                    else None
                 )
-                return self._failed_in_session(session, application, state, reason)
-            if child.state != "succeeded":
+                expected_partial_failure = (
+                    child.state == "failed"
+                    and state.get("active_kind") == "stop"
+                    and isinstance(current_item, Mapping)
+                    and isinstance(current_item.get("profile_stop_scope"), Mapping)
+                    and child.result is not None
+                    and child.result.failure_code
+                    == "run-switch.profile.incomplete_multi_spark_model"
+                )
+                if not expected_partial_failure:
+                    reason = child.status_reason or (
+                        f"Run/Switch child ended in {child.state}"
+                    )
+                    return self._failed_in_session(session, application, state, reason)
+                children = list(sequence(state.get("children")) or ())
+                receipt = self._child_receipt(child)
+                children.append(
+                    {
+                        "operation_id": child.operation_id,
+                        "kind": state.get("active_kind"),
+                        "state": child.state,
+                        "result": (
+                            receipt.model_dump(mode="json")
+                            if receipt is not None
+                            else None
+                        ),
+                    }
+                )
+                state["children"] = children
+                state["active_operation_id"] = None
+                state["active_kind"] = None
+                state["position"] = (integer(position) or 0) + 1
+                self._write_state(session, application, state)
+                session.flush()
+                position = state["position"]
+            if child.state != "succeeded" and not expected_partial_failure:
                 if cancelling:
                     state["state"] = "waiting-for-operator"
                     state["status_reason"] = (
@@ -1193,29 +1238,32 @@ class RunSwitchFleetProfileAdapter:
                     state,
                     f"Run/Switch child returned {child.state}",
                 )
-            children = list(sequence(state.get("children")) or ())
-            # Record the child's public result tree with the child.  A profile
-            # step receipt is read back from this mirror, so a completion that
-            # only updated progress would lose the Run/Switch receipt on the
-            # very tick the child finishes, and again after any restart.
-            receipt = self._child_receipt(child)
-            children.append(
-                {
-                    "operation_id": child.operation_id,
-                    "kind": state.get("active_kind"),
-                    "state": child.state,
-                    "result": (
-                        receipt.model_dump(mode="json") if receipt is not None else None
-                    ),
-                }
-            )
-            state["children"] = children
-            state["active_operation_id"] = None
-            state["active_kind"] = None
-            state["position"] = (integer(position) or 0) + 1
-            self._write_state(session, application, state)
-            session.flush()
-            position = state["position"]
+            if not expected_partial_failure:
+                children = list(sequence(state.get("children")) or ())
+                # Record the child's public result tree with the child. A
+                # profile step receipt is read back from this mirror, so a
+                # completion that only updated progress would lose the child
+                # receipt on this tick and again after restart.
+                receipt = self._child_receipt(child)
+                children.append(
+                    {
+                        "operation_id": child.operation_id,
+                        "kind": state.get("active_kind"),
+                        "state": child.state,
+                        "result": (
+                            receipt.model_dump(mode="json")
+                            if receipt is not None
+                            else None
+                        ),
+                    }
+                )
+                state["children"] = children
+                state["active_operation_id"] = None
+                state["active_kind"] = None
+                state["position"] = (integer(position) or 0) + 1
+                self._write_state(session, application, state)
+                session.flush()
+                position = state["position"]
             if cancelling:
                 pending_cancellation = self._observe_superseded_agent_effects(
                     session, application, state
@@ -1237,7 +1285,19 @@ class RunSwitchFleetProfileAdapter:
             )
             if pending_cancellation is not None:
                 return pending_cancellation
-            state["state"] = "succeeded"
+            reviewed = self._child_review(session, application_id)
+            incomplete_model = next(
+                (
+                    reason
+                    for reason in reviewed.reasons
+                    if reason.code == "profile.incomplete_multi_spark_model"
+                ),
+                None,
+            )
+            state["state"] = "failed" if incomplete_model is not None else "succeeded"
+            state["status_reason"] = (
+                incomplete_model.detail if incomplete_model is not None else None
+            )
             state["result"] = {
                 "children": list(sequence(state.get("children")) or ()),
                 "assignment_ids": list(sequence(state.get("assignment_ids")) or ()),
@@ -1408,10 +1468,34 @@ class RunSwitchFleetProfileAdapter:
                 raise FleetProfileConflict(
                     "Profile switch stop item has no run identity"
                 )
-            preview = self._run_switch.preview_stop(
-                RunSwitchStopPreviewRequest(run_id=run_id), actor=actor
+            raw_scope = item.get("profile_stop_scope")
+            profile_stop_scope = (
+                RunSwitchProfileStopScope.model_validate_json(
+                    canonical_message(raw_scope), strict=True
+                )
+                if isinstance(raw_scope, Mapping)
+                else None
+            )
+            preview = (
+                self._run_switch.preview_stop(
+                    RunSwitchStopPreviewRequest(run_id=run_id), actor=actor
+                )
+                if profile_stop_scope is None
+                else self._run_switch.preview_profile_stop(
+                    run_id, profile_stop_scope, actor=actor
+                )
             )
             self._validate_child_effects(reviewed, preview)
+            if profile_stop_scope is not None:
+                return self._run_switch.apply_profile_stop(
+                    run_id,
+                    profile_stop_scope,
+                    plan_digest=preview.plan_digest,
+                    request_key=child_request_key,
+                    actor=actor,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    profile_application_id=application_id,
+                )
             return self._run_switch.apply_stop(
                 RunSwitchStopApplyRequest(
                     run_id=run_id,
@@ -1480,7 +1564,12 @@ class RunSwitchFleetProfileAdapter:
     ) -> None:
         """A fresh child plan cannot enlarge the accepted parent's consent."""
         execution_nodes = {node for step in reviewed.steps for node in step.node_ids}
-        if not {node.node_id for node in child.spark_group.nodes} <= execution_nodes:
+        child_targets = (
+            set(child.profile_stop_scope.target_node_ids)
+            if child.profile_stop_scope is not None
+            else {node.node_id for node in child.spark_group.nodes}
+        )
+        if not child_targets <= execution_nodes:
             raise FleetProfileConflict("Profile child exceeds its reviewed Spark scope")
         stops = {
             effect.run_id: effect
@@ -1489,13 +1578,22 @@ class RunSwitchFleetProfileAdapter:
         }
         for stop in child.stops:
             expected = stops.get(stop.run_id)
-            if (
-                expected is None
-                or expected.alias != stop.alias
-                or sorted(expected.node_ids) != sorted(stop.node_ids)
-            ):
+            if expected is None or expected.alias != stop.alias:
                 raise FleetProfileConflict(
                     "Profile child would stop an unreviewed workload; review again"
+                )
+            if expected.profile_stop_scope is None:
+                valid_stop_scope = child.profile_stop_scope is None and sorted(
+                    expected.node_ids
+                ) == sorted(stop.node_ids)
+            else:
+                valid_stop_scope = (
+                    child.profile_stop_scope == expected.profile_stop_scope
+                    and stop.node_ids == expected.profile_stop_scope.target_node_ids
+                )
+            if not valid_stop_scope:
+                raise FleetProfileConflict(
+                    "Profile child changed its reviewed Stop target scope"
                 )
         if child.action == "cleanup" and not any(
             effect.action == "remove"
@@ -1550,7 +1648,13 @@ class RunSwitchFleetProfileAdapter:
                 raise FleetProfileConflict(
                     "Persisted Run/Switch child plan is invalid"
                 ) from error
-            child_nodes = tuple(sorted(node.node_id for node in plan.spark_group.nodes))
+            child_nodes = tuple(
+                sorted(
+                    plan.profile_stop_scope.target_node_ids
+                    if plan.profile_stop_scope is not None
+                    else [node.node_id for node in plan.spark_group.nodes]
+                )
+            )
             if child_nodes != tuple(sorted(job.targets)) or not set(child_nodes) <= set(
                 scope_node_ids
             ):
@@ -1561,7 +1665,23 @@ class RunSwitchFleetProfileAdapter:
             if kind == "cleanup":
                 valid = plan.action == "cleanup" and plan.installation_id == owner_id
             elif kind == "stop":
-                valid = plan.action == "stop" and plan.run_id == owner_id
+                raw_scope = item.get("profile_stop_scope")
+                expected_scope = (
+                    RunSwitchProfileStopScope.model_validate_json(
+                        canonical_message(raw_scope), strict=True
+                    )
+                    if isinstance(raw_scope, Mapping)
+                    else None
+                )
+                valid = (
+                    plan.action == "stop"
+                    and plan.run_id == owner_id
+                    and plan.profile_stop_scope == expected_scope
+                    and (
+                        expected_scope is None
+                        or child_nodes == tuple(expected_scope.target_node_ids)
+                    )
+                )
             else:
                 receipt = RunSwitchOperationResult.model_validate_json(
                     canonical_message(job.result), strict=True
@@ -1625,7 +1745,19 @@ class RunSwitchFleetProfileAdapter:
         _validate_remaining_effects(reviewed_effects, control.effects)
         return [
             *(
-                {"kind": "stop", "id": effect.run_id}
+                {
+                    "kind": "stop",
+                    "id": effect.run_id,
+                    **(
+                        {
+                            "profile_stop_scope": effect.profile_stop_scope.model_dump(
+                                mode="json"
+                            )
+                        }
+                        if effect.profile_stop_scope is not None
+                        else {}
+                    ),
+                }
                 for effect in control.effects.runs
                 if effect.action == "stop"
             ),
@@ -1637,6 +1769,7 @@ class RunSwitchFleetProfileAdapter:
                     "id": assignment.id,
                 }
                 for assignment in assignments
+                if assignment.id not in control.unavailable_assignment_ids
                 if control.states[assignment.id].current_state
                 != assignment.desired_state
             ),
@@ -3121,12 +3254,22 @@ class FleetProfileService:
                 if unknown_nodes:
                     item_reasons.append(
                         FleetProfileReason(
-                            code="profile.spark_unavailable",
-                            detail=(
-                                "Assignment references inactive or unknown Sparks: "
-                                + ", ".join(unknown_nodes)
+                            code=(
+                                "profile.incomplete_multi_spark_model"
+                                if required_count is not None and required_count > 1
+                                else "profile.spark_removed"
                             ),
-                            severity="error",
+                            detail=(
+                                (
+                                    "Multi-Spark model cannot run because the profile "
+                                    "no longer has a Spark for every rank; reachable "
+                                    "ranks will be stopped. Missing Sparks: "
+                                )
+                                if required_count is not None and required_count > 1
+                                else "Assignment includes a Spark outside the live fleet and will be ignored: "
+                            )
+                            + ", ".join(unknown_nodes),
+                            severity="warning",
                         )
                     )
                 if required_count is None or len(assignment.nodes) != required_count:
@@ -3140,7 +3283,14 @@ class FleetProfileService:
                             severity="error",
                         )
                     )
-                if self._assessment_provider is None:
+                if unknown_nodes:
+                    # A profile still covers the current fleet.  An assignment
+                    # that refers to a removed Spark is deliberately not
+                    # relaunched or allowed to block the other assignments.
+                    # Any reachable rank cleanup was already reviewed in the
+                    # profile effects above.
+                    preparation = None
+                elif self._assessment_provider is None:
                     if not preparation_unavailable_reported:
                         reasons.append(
                             FleetProfileReason(
@@ -3282,7 +3432,9 @@ class FleetProfileService:
                         )
                     )
                 actions: list[FleetProfileAction] = []
-                if state.current_state == assignment.desired_state:
+                if unknown_nodes:
+                    actions = []
+                elif state.current_state == assignment.desired_state:
                     actions.append("keep")
                 else:
                     actions.append("switch")
@@ -3431,9 +3583,15 @@ class FleetProfileService:
         installation_effects: list[FleetProfileInstallationEffect] = []
         reasons: list[FleetProfileReason] = []
         changed_nodes: set[str] = set()
+        unavailable_assignment_ids: set[str] = set()
         adapter_switch_needed = False
         for assignment in resolved_assignments:
             state = states[assignment.id]
+            unavailable_assignment_ids.update(
+                (assignment.id,)
+                if {node.node_id for node in assignment.nodes} - target_nodes
+                else ()
+            )
             if state.installation is not None:
                 desired_installation_ids.add(state.installation.id)
                 installation_effects.append(
@@ -3452,8 +3610,12 @@ class FleetProfileService:
             ):
                 desired_run_ids.add(state.run.id)
             if state.current_state != assignment.desired_state:
-                adapter_switch_needed = True
-                changed_nodes.update(node.node_id for node in assignment.nodes)
+                assignment_targets = {
+                    node.node_id for node in assignment.nodes
+                } & target_nodes
+                if assignment_targets:
+                    adapter_switch_needed = True
+                    changed_nodes.update(assignment_targets)
 
         # Every active run intersecting scope is reconciled to the desired
         # running set, independent of installation retention policy.  A
@@ -3564,18 +3726,57 @@ class FleetProfileService:
             intersection = members & target_nodes
             if not intersection:
                 continue
-            if not members <= target_nodes:
-                reasons.append(
-                    FleetProfileReason(
-                        code="profile.distributed_cross_scope",
-                        detail=(
-                            f"Running workload {run.alias} uses Sparks outside "
-                            "the profile scope; review the complete distributed group."
-                        ),
-                        severity="error",
+            profile_stop_scope = None
+            missing_members = members - target_nodes
+            if missing_members:
+                mapping_members = tuple(
+                    session.scalars(
+                        select(ClusterMappingNode)
+                        .where(ClusterMappingNode.mapping_id == run.mapping_id)
+                        .order_by(ClusterMappingNode.rank, ClusterMappingNode.node_id)
                     )
                 )
-                continue
+                active_missing = tuple(
+                    session.scalars(
+                        select(AgentNode).where(
+                            AgentNode.node_id.in_(missing_members),
+                            AgentNode.revoked_at.is_(None),
+                        )
+                    )
+                )
+                if (
+                    not intersection
+                    or len(members) < 2
+                    or {node.node_id for node in mapping_members} != members
+                    or active_missing
+                ):
+                    reasons.append(
+                        FleetProfileReason(
+                            code="profile.distributed_cross_scope",
+                            detail=(
+                                f"Running workload {run.alias} uses Sparks outside "
+                                "the profile scope; review the complete distributed group."
+                            ),
+                            severity="error",
+                        )
+                    )
+                    continue
+                original_group = SparkGroup(
+                    nodes=[
+                        SparkGroupNode(
+                            node_id=node.node_id,
+                            rank=node.rank,
+                            role=node.role,
+                            endpoint_owner=node.endpoint_owner,
+                        )
+                        for node in mapping_members
+                    ]
+                )
+                profile_stop_scope = RunSwitchProfileStopScope(
+                    original_group=original_group,
+                    target_node_ids=sorted(intersection),
+                    missing_node_ids=sorted(missing_members),
+                )
             run_effects.append(
                 FleetProfileRunEffect(
                     run_id=run.id,
@@ -3583,11 +3784,14 @@ class FleetProfileService:
                     alias=run.alias,
                     node_ids=sorted(members),
                     action="keep" if run.id in desired_run_ids else "stop",
+                    profile_stop_scope=profile_stop_scope
+                    if run.id not in desired_run_ids
+                    else None,
                 )
             )
             if run_effects[-1].action == "stop":
                 adapter_switch_needed = True
-                changed_nodes.update(members)
+                changed_nodes.update(intersection)
 
         if installation_policy == "exact" and target_nodes:
             installations = tuple(
@@ -3663,6 +3867,7 @@ class FleetProfileService:
                 superseded=cls._pending_effects(session, changed_nodes),
             ),
             changed_nodes=changed_nodes,
+            unavailable_assignment_ids=unavailable_assignment_ids,
             switch_needed=adapter_switch_needed,
             reasons=reasons,
         )
@@ -6934,10 +7139,19 @@ class FleetProfileService:
         run_members = tuple(
             session.scalars(select(RunNode).where(RunNode.run_id == run.id))
         )
+        live_run_node_ids = set(
+            session.scalars(
+                select(AgentNode.node_id).where(
+                    AgentNode.node_id.in_(tuple(node.node_id for node in run_members)),
+                    AgentNode.revoked_at.is_(None),
+                )
+            )
+        )
         healthy = (
             run.state == "running"
             and run.route_state == "published"
             and len(run_members) == len(expected)
+            and live_run_node_ids == {node.node_id for node in run_members}
             and {(node.node_id, node.rank, node.role) for node in run_members}
             == {(node.node_id, node.rank, node.role) for node in assignment.nodes}
             and all(node.state == "running" for node in run_members)

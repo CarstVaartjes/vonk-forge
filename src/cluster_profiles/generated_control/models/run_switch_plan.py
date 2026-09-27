@@ -33,6 +33,7 @@ if TYPE_CHECKING:
   from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
   from ..models.rollout_preparation import RolloutPreparation
   from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
+  from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
   from ..models.invocation_metadata import InvocationMetadata
   from ..models.spark_fit import SparkFit
   from ..models.freshness_evidence import FreshnessEvidence
@@ -87,6 +88,7 @@ class RunSwitchPlan:
             freshness (Union[Unset, list['FreshnessEvidence']]):
             post_stop_memory_check (Union['ConditionalPostStopMemoryCheck', None, Unset]):
             preparation (Union['RolloutPreparation', None, Unset]):
+            profile_stop_scope (Union['RunSwitchProfileStopScope', None, Unset]):
             reconciliation_authority (Union['RunSwitchReconciliationAuthority', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             stop_before_prepare (Union[Unset, bool]):  Default: False.
@@ -130,6 +132,7 @@ class RunSwitchPlan:
     freshness: Union[Unset, list['FreshnessEvidence']] = UNSET
     post_stop_memory_check: Union['ConditionalPostStopMemoryCheck', None, Unset] = UNSET
     preparation: Union['RolloutPreparation', None, Unset] = UNSET
+    profile_stop_scope: Union['RunSwitchProfileStopScope', None, Unset] = UNSET
     reconciliation_authority: Union['RunSwitchReconciliationAuthority', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
     stop_before_prepare: Union[Unset, bool] = False
@@ -152,6 +155,7 @@ class RunSwitchPlan:
         from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
         from ..models.rollout_preparation import RolloutPreparation
         from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
+        from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
         from ..models.invocation_metadata import InvocationMetadata
         from ..models.spark_fit import SparkFit
         from ..models.freshness_evidence import FreshnessEvidence
@@ -314,6 +318,14 @@ class RunSwitchPlan:
         else:
             preparation = self.preparation
 
+        profile_stop_scope: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.profile_stop_scope, Unset):
+            profile_stop_scope = UNSET
+        elif isinstance(self.profile_stop_scope, RunSwitchProfileStopScope):
+            profile_stop_scope = self.profile_stop_scope.to_dict()
+        else:
+            profile_stop_scope = self.profile_stop_scope
+
         reconciliation_authority: Union[None, Unset, dict[str, Any]]
         if isinstance(self.reconciliation_authority, Unset):
             reconciliation_authority = UNSET
@@ -376,6 +388,8 @@ class RunSwitchPlan:
             field_dict["post_stop_memory_check"] = post_stop_memory_check
         if preparation is not UNSET:
             field_dict["preparation"] = preparation
+        if profile_stop_scope is not UNSET:
+            field_dict["profile_stop_scope"] = profile_stop_scope
         if reconciliation_authority is not UNSET:
             field_dict["reconciliation_authority"] = reconciliation_authority
         if schema_version is not UNSET:
@@ -403,6 +417,7 @@ class RunSwitchPlan:
         from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
         from ..models.rollout_preparation import RolloutPreparation
         from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
+        from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
         from ..models.invocation_metadata import InvocationMetadata
         from ..models.spark_fit import SparkFit
         from ..models.freshness_evidence import FreshnessEvidence
@@ -735,6 +750,26 @@ class RunSwitchPlan:
         preparation = _parse_preparation(d.pop("preparation", UNSET))
 
 
+        def _parse_profile_stop_scope(data: object) -> Union['RunSwitchProfileStopScope', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                profile_stop_scope_type_0 = RunSwitchProfileStopScope.from_dict(data)
+
+
+
+                return profile_stop_scope_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['RunSwitchProfileStopScope', None, Unset], data)
+
+        profile_stop_scope = _parse_profile_stop_scope(d.pop("profile_stop_scope", UNSET))
+
+
         def _parse_reconciliation_authority(data: object) -> Union['RunSwitchReconciliationAuthority', None, Unset]:
             if data is None:
                 return data
@@ -801,6 +836,7 @@ class RunSwitchPlan:
             freshness=freshness,
             post_stop_memory_check=post_stop_memory_check,
             preparation=preparation,
+            profile_stop_scope=profile_stop_scope,
             reconciliation_authority=reconciliation_authority,
             schema_version=schema_version,
             stop_before_prepare=stop_before_prepare,
