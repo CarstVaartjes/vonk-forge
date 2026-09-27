@@ -587,8 +587,8 @@ before scheduling work there.
 This ongoing reconciliation is separate from review and load: a review binds
 the current membership and planned effects, and a membership change before
 acceptance requires a fresh review. The selected-profile record and the
-worker's enrollment and revocation reconciliation are target behavior under
-test; they have not shipped.
+worker's enrollment and revocation reconciliation, and drift checks for accepted
+running assignments are implemented by the worker.
 
 The run alias is the stable client-facing model name. A recipe may serve a
 different implementation-local model name: the first ordered value in

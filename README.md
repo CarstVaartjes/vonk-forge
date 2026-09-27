@@ -63,7 +63,12 @@ costly repeated full hashing.
 
 ### 1. Prepare the controller project
 
-Before the first run, complete the mandatory
+Choose **Lab mode** for a LAN-only setup, or **Secure remote** to connect the
+existing Tailscale gateway. Lab mode needs only the NAS LAN address and an
+optional Hugging Face token; internal passwords, keys, and the local CA are
+generated for you. See the [Lab quickstart](docs/QUICKSTART.md).
+
+For Secure remote, complete the
 [Tailscale preflight](docs/runbooks/tailscale.md#fresh-install-preflight): enable
 MagicDNS and HTTPS, define the exact unsuffixed Services, apply the reviewed
 grants and auto-approvals, and create the scoped gateway OAuth client. Never
@@ -105,16 +110,33 @@ start `docker-compose.yaml`. Keep `.env` and `secrets/` beside it.
 ### 3. Add a Spark
 
 Open the controller's private Web address, go to **Fleet**, and create a one-use
-enrollment grant. Run the generated command on the Spark. It has this shape:
+enrollment grant with **Enroll Spark**. Enter a display name, then run the
+generated command on the Spark before the displayed expiry. The installer asks
+for the one-use pairing token shown with the command. It has this shape:
 
 ```bash
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
 ```
 
 Use the stable LAN address of your laptop, NAS, or server. The installer verifies
 the immutable release, enrolls the native agent, writes the required agent and
 firewall configuration, and checks service health. Repeat with a new one-use
 grant for each additional Spark.
+
+### Install `vonkctl`
+
+Install the latest accepted stable CLI without cloning the repository. This
+requires `curl`, `openssl`, Python 3, and `uv` on your workstation. The CLI
+requires Python 3.14 or newer, which `uv` can manage for its tool environment:
+
+```sh
+curl -fsSL https://install.vonkforge.ai/vonkctl | sh
+```
+
+The installer verifies the signed channel and immutable release, then checks
+the wheel's digest, size, and build identity before `uv` installs it. See the
+[`vonkctl` runbook](docs/runbooks/vonkctl.md) for development-channel and
+verification details.
 
 The same controller command prepares upgrades while preserving local identity
 and secrets. Running the Spark installer on an enrolled node performs an in-place

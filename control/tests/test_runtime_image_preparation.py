@@ -2228,6 +2228,43 @@ def test_native_transfer_continues_while_progress_observer_is_busy(
     assert reports[-1] == ("download", len(destination.read_bytes()), None)
 
 
+def test_runtime_subprocess_retries_with_timeout_and_surfaces_redacted_stderr(
+    monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    import subprocess
+
+    from vonk_control.runtime_image_preparation import (
+        _SUBPROCESS_ATTEMPTS,
+        _SUBPROCESS_TIMEOUT_SECONDS,
+        _run_text,
+    )
+
+    calls = []
+
+    def fail(command, **kwargs):
+        calls.append(kwargs)
+        raise subprocess.CalledProcessError(
+            1, command, stderr="Bearer private-value\nregistry refused copy"
+        )
+
+    monkeypatch.setattr("vonk_control.runtime_image_preparation.subprocess.run", fail)
+    monkeypatch.setattr(
+        "vonk_control.runtime_image_preparation.time.sleep", lambda _: None
+    )
+    with (
+        caplog.at_level("INFO", logger="vonk_control.runtime_image_preparation"),
+        pytest.raises(RuntimeImagePreparationError) as raised,
+    ):
+        _run_text(["skopeo", "copy"])
+
+    assert len(calls) == _SUBPROCESS_ATTEMPTS
+    assert all(call["timeout"] == _SUBPROCESS_TIMEOUT_SECONDS for call in calls)
+    assert "registry refused copy" in raised.value.detail
+    assert "private-value" not in raised.value.detail
+    assert "private-value" not in caplog.text
+    assert "runtime_image.subprocess_failed" in caplog.text
+
+
 def test_runtime_image_storage_types_only_clean_absence_as_cache_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

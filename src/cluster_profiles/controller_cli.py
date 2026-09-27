@@ -744,6 +744,18 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _add_output(profile_endpoint)
 
+    run = commands.add_parser(
+        "run", help="Prepare a catalog recipe, review it, and start it"
+    )
+    run.set_defaults(outcome_context="mutation")
+    run.add_argument("selector", help="Recipe name or exact model/recipe selector")
+    run.add_argument("--spark", action="append", default=[])
+    run.add_argument("--as", dest="assignment_name")
+    run.add_argument("--yes", action="store_true")
+    run.add_argument("--request-key")
+    _watch_controls(run)
+    _add_output(run)
+
 
 def _uuid_selector(value: str) -> str:
     try:
@@ -3631,12 +3643,193 @@ def _profile(
     raise ValueError(f"unsupported profile action: {action}")
 
 
+def _run(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    factory: Callable[[], str],
+) -> dict[str, object]:
+    """Run one exact library recipe using the ordinary cache/profile contracts."""
+    number = _profile_number(args)
+    deadline = time.monotonic() + args.timeout_seconds
+    selector = _resolve_run_recipe(client, args.selector, deadline=deadline)
+
+    spark_names = list(args.spark)
+    if not spark_names:
+        fleet = client.request(
+            "GET", "/api/fleet", timeout_seconds=_selection_remaining(deadline)
+        )
+        nodes = fleet.get("nodes")
+        if not isinstance(nodes, list) or not nodes:
+            raise ValueError(
+                "no Sparks are enrolled; enroll a Spark before running a model"
+            )
+        spark_names = [
+            str(node.get("display_name") or node.get("id"))
+            for node in nodes
+            if isinstance(node, Mapping)
+        ]
+        if len(spark_names) != len(nodes):
+            raise ControlMalformedResponse("fleet response contains an invalid Spark")
+
+    download_args = argparse.Namespace(
+        command="recipe",
+        recipe_action="download",
+        selector=selector,
+        request_key=None,
+        detach=False,
+        follow=True,
+        watch=getattr(args, "watch", False),
+        timeout_seconds=args.timeout_seconds,
+        interval_seconds=args.interval_seconds,
+        global_json=getattr(args, "global_json", False),
+        json=getattr(args, "json", False),
+        no_input=getattr(args, "no_input", False),
+        _watch_callback=getattr(args, "_watch_callback", None),
+    )
+    prepared = _follow_mutation(
+        client,
+        "recipe",
+        _submit_cache_request(client, "recipe", download_args, factory),
+        download_args,
+    )
+    prepared_state = operation_state(prepared)
+    if prepared_state not in {"succeeded", "completed"}:
+        args.outcome_context = "mutation"
+        if isinstance(getattr(download_args, "observation", None), Observation):
+            args.observation = download_args.observation
+        return {"state": prepared_state or "unknown", "prepared": prepared}
+
+    edit_args = argparse.Namespace(
+        command="profile",
+        profile_number=number,
+        profile_action="add",
+        recipe_selector=selector,
+        spark=spark_names,
+        assignment_name=args.assignment_name,
+        model_variant=None,
+        desired_state="running",
+        expected_revision=None,
+        timeout_seconds=max(0.01, _selection_remaining(deadline)),
+    )
+    _profile_authoring(edit_args, client)
+
+    preview = client.request("POST", f"/api/profile/{number}/preview")
+    if preview.get("allowed") is not True:
+        args.outcome_context = "preview"
+        return preview
+    digest = preview.get("plan_digest")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ControlMalformedResponse("profile review has no valid plan identity")
+    if not (args.global_json or getattr(args, "json", False)):
+        with redirect_stdout(sys.stderr):
+            render_payload(preview, "profile", action="preview")
+    _confirm_action(
+        args, f"Start {selector} on profile {number} with this reviewed plan?"
+    )
+
+    load_args = argparse.Namespace(
+        command="profile",
+        profile_number=number,
+        profile_action="load",
+        dry_run=False,
+        expected_plan=digest,
+        yes=True,
+        request_key=args.request_key,
+        detach=False,
+        follow=True,
+        watch=getattr(args, "watch", False),
+        timeout_seconds=args.timeout_seconds,
+        interval_seconds=args.interval_seconds,
+        global_json=getattr(args, "global_json", False),
+        json=getattr(args, "json", False),
+        no_input=getattr(args, "no_input", False),
+        _watch_callback=getattr(args, "_watch_callback", None),
+    )
+    application = _profile(load_args, client, factory)
+    application_state = operation_state(application)
+    if application_state not in {"succeeded", "completed"}:
+        if isinstance(getattr(load_args, "observation", None), Observation):
+            args.observation = load_args.observation
+        return {
+            "recipe": selector,
+            "prepared": prepared,
+            "application": application,
+            "state": application_state or "unknown",
+        }
+    endpoint_args = argparse.Namespace(
+        command="profile", profile_number=number, profile_action="endpoint", alias=None
+    )
+    endpoints = _profile(endpoint_args, client, factory)
+    return {
+        "recipe": selector,
+        "prepared": prepared,
+        "application": application,
+        "state": application_state,
+        "endpoints": endpoints,
+    }
+
+
+def _resolve_run_recipe(
+    client: ControllerClient, requested: str, *, deadline: float
+) -> str:
+    """Accept a recipe selector or resolve a model name to one unique recipe."""
+    needle = requested.strip().casefold()
+    if not needle:
+        raise SelectorError("model or recipe name cannot be empty")
+    matches: set[str] = set()
+    model_matches: set[str] = set()
+    for row in _recipe_rows(client, deadline=deadline):
+        selector = cast(str, row["selector"])
+        identity = cast(Mapping[str, object], row["identity"])
+        if any(
+            isinstance(value, str) and value.casefold() == needle
+            for value in (
+                selector,
+                identity.get("recipe_id"),
+                identity.get("slug"),
+                identity.get("title"),
+            )
+        ):
+            matches.add(selector)
+        models = row.get("models", [])
+        if isinstance(models, list):
+            for selected in models:
+                if not isinstance(selected, Mapping):
+                    continue
+                document = selected.get("model_document")
+                model_identity = (
+                    document.get("identity") if isinstance(document, Mapping) else None
+                )
+                if isinstance(model_identity, Mapping) and any(
+                    isinstance(value, str) and value.casefold() == needle
+                    for value in (
+                        model_identity.get("slug"),
+                        model_identity.get("title"),
+                        f"{model_identity.get('publisher')}/{model_identity.get('slug')}",
+                    )
+                ):
+                    model_matches.add(selector)
+    candidates = matches or model_matches
+    if len(candidates) == 1:
+        return next(iter(candidates))
+    if not candidates:
+        raise SelectorError(
+            f"no runnable catalog recipe matches {requested}; choose a recipe from `vonkctl recipe library`"
+        )
+    raise SelectorError(
+        f"{requested} matches multiple recipes; choose one exact recipe selector",
+        candidates=tuple(sorted(candidates)),
+    )
+
+
 def run_controller(
     args: argparse.Namespace,
     client: ControllerClient,
     request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
     command = getattr(args, "command", None) or "profile"
+    if command == "run":
+        return _run(args, client, request_id_factory)
     if command == "fleet":
         return _fleet(args, client, request_id_factory)
     if command == "model":

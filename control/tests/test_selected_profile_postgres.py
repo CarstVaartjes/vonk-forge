@@ -108,6 +108,46 @@ def _selected(engine: Engine) -> dict[str, object]:
     return dict(row)
 
 
+def test_selected_running_profile_reconciles_drift_without_roster_change(
+    postgres_engine: Engine,
+) -> None:
+    """A lost/dead run with the same roster reuses the accepted profile intent."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _recipe_id, recipe_revision_id = _seed(sessions)
+    service = _service(sessions)
+    profile = service.create(_input(recipe_revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    assert preview.allowed is True, preview.reasons
+    accepted = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(881),
+        actor="admin",
+    )
+    for _ in range(8):
+        if accepted.state == "succeeded":
+            break
+        service.tick()
+        accepted = service.application(accepted.id)
+    assert accepted.state == "succeeded"
+    initial_selection = _selected(postgres_engine)
+    initial_generation = initial_selection["generation"]
+    assert isinstance(initial_generation, int)
+
+    # The accepted assignment is still desired, but its run/runtime has
+    # disappeared. The enrolled roster remains exactly the same.
+    assert service.tick() is True
+    reconciled_selection = _selected(postgres_engine)
+    assert reconciled_selection["generation"] == initial_generation + 1
+    assert reconciled_selection["profile_id"] == profile.id
+    assert reconciled_selection["roster_digest"] == initial_selection["roster_digest"]
+    assert reconciled_selection["application_id"] != accepted.id
+    reconciled = service.application(str(reconciled_selection["application_id"]))
+    assert reconciled.state in {"queued", "running", "succeeded"}
+
+
 def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edit(
     postgres_engine: Engine,
 ) -> None:

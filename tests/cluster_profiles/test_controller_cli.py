@@ -4,10 +4,12 @@ import argparse
 import json
 import re
 import uuid
+from collections.abc import Mapping
 from contextlib import redirect_stdout
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from io import StringIO
+from typing import cast
 
 import pytest
 from vonk_forge_contracts import ModelDefinition, content_sha256
@@ -817,6 +819,7 @@ def test_parser_exposes_current_singular_operator_roots_and_update() -> None:
         "model",
         "recipe",
         "profile",
+        "run",
         "update",
         "completion",
     }
@@ -4026,3 +4029,195 @@ def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
     assert status == 2
     assert "another job" in str(payload).lower()
     assert [call[1] for call in client.calls] == [path] * (2 if follow else 1)
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        ("vonk-forge/qwen-code", "vonk-forge/qwen-code"),
+        ("Qwen 3", "vonk-forge/qwen-code"),
+    ],
+)
+def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
+    requested: str, expected: str
+) -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    {
+                        "selector": "vonk-forge/qwen-code",
+                        "identity": {
+                            "publisher": "vonk-forge",
+                            "slug": "qwen-code",
+                            "title": "Qwen Code",
+                        },
+                        "models": [
+                            {
+                                "model_document": {
+                                    "identity": {
+                                        "publisher": "Qwen",
+                                        "slug": "qwen3",
+                                        "title": "Qwen 3",
+                                    }
+                                }
+                            }
+                        ],
+                    }
+                ],
+                "next_cursor": None,
+            }
+        }
+    )
+    assert (
+        controller_cli._resolve_run_recipe(
+            cast(controller_cli.ControllerClient, client),
+            requested,
+            deadline=controller_cli.time.monotonic() + 30,
+        )
+        == expected
+    )
+
+
+def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:
+    args = cli._parser().parse_args(
+        ["--profile", "3", "run", "Qwen Code", "--spark", "Atlas", "--yes"]
+    )
+    assert args.command == "run"
+    assert args.profile_number == 3
+    assert args.selector == "Qwen Code"
+    assert args.spark == ["Atlas"]
+    assert args.yes is True
+    assert args.timeout_seconds == 30
+
+
+@pytest.mark.parametrize("blocked", [True, False])
+def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
+    blocked: bool, capsys
+) -> None:
+    profile = {
+        "name": "Default",
+        "description": "",
+        "favorite": False,
+        "installation_policy": "keep-cached",
+        "labels": {},
+        "assignments": [],
+    }
+    paths: list[str] = []
+    decision = {"blocked": blocked}
+    application_id = "33333333-3333-4333-8333-333333333333"
+
+    class RunClient:
+        request_timeout_seconds = 1.0
+
+        def request(
+            self,
+            method: str,
+            path: str,
+            payload: Mapping[str, object] | None = None,
+            *,
+            extra_headers: Mapping[str, str] | None = None,
+            query: Mapping[str, object] | None = None,
+            timeout_seconds: float | None = None,
+        ) -> dict[str, object]:
+            del extra_headers, query, timeout_seconds
+            paths.append(path)
+            if path == "/api/recipe/library":
+                return {
+                    "recipes": [
+                        {
+                            "selector": "vonk-forge/qwen-code",
+                            "identity": {
+                                "publisher": "vonk-forge",
+                                "slug": "qwen-code",
+                                "title": "Qwen Code",
+                            },
+                            "models": [],
+                        }
+                    ],
+                    "next_cursor": None,
+                }
+            if path == "/api/fleet":
+                return {"nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]}
+            if path == "/api/recipe/vonk-forge%2Fqwen-code/download":
+                return {
+                    "kind": "recipe.image.availability.v2",
+                    "id": "recipe-op",
+                    "request_id": "11111111-1111-4111-8111-111111111111",
+                    "request": {
+                        "kind": "selector",
+                        "selector": "vonk-forge/qwen-code",
+                        "force": False,
+                    },
+                }
+            if path == "/api/recipe/operations/recipe-op":
+                return {
+                    "kind": "recipe.image.availability.v2",
+                    "id": "recipe-op",
+                    "state": "succeeded",
+                }
+            if path == "/api/profile/1/definition":
+                return {
+                    "schema_version": 2,
+                    "id": "22222222-2222-4222-8222-222222222222",
+                    "number": 1,
+                    "revision": 0,
+                    "definition": profile,
+                }
+            if method == "PUT" and path == "/api/profile/1":
+                assert payload is not None
+                profile.update(payload)
+                profile.pop("expected_revision", None)
+                return {"number": 1, "revision": 1, "definition": profile}
+            if path == "/api/profile/1/preview":
+                return {
+                    "allowed": not decision["blocked"],
+                    "plan_digest": "b" * 64,
+                    "reasons": [{"detail": "Spark is offline"}],
+                }
+            if method == "POST" and path == "/api/profile/1/load":
+                assert payload is not None
+                return {
+                    "id": application_id,
+                    "request_key": payload["request_key"],
+                    "state": "running",
+                    "progress": {
+                        "intended_profile": {
+                            "reviewed_plan_digest": payload["plan_digest"]
+                        }
+                    },
+                }
+            if path == f"/api/profile/applications/{application_id}":
+                return {"id": application_id, "state": "succeeded"}
+            raise AssertionError((method, path, payload))
+
+        def profile_endpoints(self, number, alias=None):
+            assert number == 1 and alias is None
+            return FleetProfileEndpointsView.from_dict(
+                {
+                    "assignments": [],
+                    "number": 1,
+                    "observed_at": "2026-09-27T10:00:00Z",
+                    "application_id": application_id,
+                    "application_state": "succeeded",
+                }
+            )
+
+    args = cli._parser().parse_args(
+        ["--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes", "--json"]
+    )
+    result = controller_cli.run_controller(
+        args,
+        cast(controller_cli.ControllerClient, RunClient()),
+        lambda: "11111111-1111-4111-8111-111111111111",
+    )
+    capsys.readouterr()
+    if blocked:
+        assert result["allowed"] is False
+    else:
+        assert result["state"] == "succeeded"
+        endpoints = result["endpoints"]
+        assert isinstance(endpoints, Mapping)
+        assert endpoints["application_id"] == application_id
+    assert profile["assignments"][0]["recipe_selector"] == "vonk-forge/qwen-code"
+    assert ("/api/profile/1/load" not in paths) is blocked

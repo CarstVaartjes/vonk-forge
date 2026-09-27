@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import re
+import traceback
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -490,6 +491,7 @@ _INSTALL_PREFLIGHT_REFRESH_REASON = (
 )
 _RUNTIME_IMAGE_OWNER_CHANGED = "run-switch.runtime-image-owner-changed"
 _LOGGER = logging.getLogger("vonk-control-run-switch")
+_FINAL_VERIFICATION_MAX_SECONDS = 900
 _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "transfer",
     "verify",
@@ -1456,11 +1458,15 @@ class RecipeLifecyclePhaseExecutor:
                 request_key=request_key,
                 progress=progress,
             )
-            if execution.operation_id is None and execution.waiting:
+            if (
+                execution.operation_id is None
+                and execution.waiting
+                and phase.subphase != "runtime-image"
+            ):
                 raise RunSwitchOperationConflict(
                     "run-switch.runtime-image-waiting-without-child"
                 )
-            if execution.operation_id is None:
+            if execution.operation_id is None and not execution.waiting:
                 _validate_artifact_execution(plan, phase, execution.result)
             return execution
         if phase.kind == "stop":
@@ -3589,6 +3595,8 @@ class RunSwitchOperationService:
                     service="control-worker",
                     job_id=str(job_id),
                     error=type(error).__name__,
+                    message=redact_text(error),
+                    traceback=redact_text(traceback.format_exc()),
                 )
                 continue
         return advanced
@@ -7324,6 +7332,7 @@ class RunSwitchOperationService:
             execution.waiting
             and execution.operation_id is None
             and phase.kind != "final_verify"
+            and not (phase.kind == "prepare" and phase.subphase == "runtime-image")
         ):
             fail(f"run-switch.{phase.kind}-waiting-without-child")
             return True
@@ -7400,6 +7409,51 @@ class RunSwitchOperationService:
                         and start_deadline is not None
                         and now >= start_deadline
                     )
+                    if (
+                        deadline_expired
+                        and now.timestamp() - started >= _FINAL_VERIFICATION_MAX_SECONDS
+                    ):
+                        phase_evidence = execution.result or {}
+                        run_id = phase_evidence.get("run_id")
+                        run = (
+                            session.get(RecipeRun, run_id)
+                            if isinstance(run_id, str)
+                            else None
+                        )
+                        if run is not None and run.state == "running":
+                            run.route_state = "withdrawn"
+                            run.route_error = (
+                                "final verification exceeded its 15 minute bound; "
+                                "exact workload recovery is inspecting this run"
+                            )
+                            run.route_next_attempt_at = now
+                            failed_node = session.scalar(
+                                select(RunNode)
+                                .where(RunNode.run_id == run.id)
+                                .order_by(RunNode.rank)
+                                .limit(1)
+                            )
+                            if failed_node is not None:
+                                # This marks the accepted run degraded, not absent.
+                                # The recovery coordinator must obtain fresh exact
+                                # signed evidence and reconcile Stop before Start.
+                                failed_node.state = "failed"
+                                failed_node.updated_at = now
+                            run.updated_at = now
+                        reason = (
+                            "run-switch.final-verification-timeout: exact run and "
+                            "route evidence did not arrive within 15 minutes; the "
+                            "route is withdrawn and exact workload recovery has "
+                            "been queued"
+                        )
+                        self._mark_failed(
+                            job,
+                            reason,
+                            now=now,
+                            failure_code="run-switch.final-verification-timeout",
+                            progress=progress,
+                        )
+                        return True
                     due = now + timedelta(
                         seconds=(
                             60
@@ -7452,6 +7506,14 @@ class RunSwitchOperationService:
                     )
                     results.append(_phase_result(execution.result, phase=phase))
                     progress["phase_results"] = results
+                elif phase.kind == "prepare" and phase.subphase == "runtime-image":
+                    due = now + timedelta(seconds=5)
+                    progress["observation_due_at"] = due.isoformat()
+                    job.status_reason = execution.status_reason or (
+                        "Runtime image preparation is running in the background; "
+                        f"next check at {due.isoformat()}"
+                    )
+                    job.state = "waiting"
             elif execution.operation_id is not None:
                 progress["child_operation_id"] = execution.operation_id
                 progress["phase"] = phase.kind
@@ -7536,7 +7598,11 @@ class RunSwitchOperationService:
                     if next_index < len(plan.phases)
                     else None
                 )
-            if not deadline_expired:
+            if not deadline_expired and not (
+                execution.waiting
+                and phase.kind == "prepare"
+                and phase.subphase == "runtime-image"
+            ):
                 job.state = "running"
             job.result = _persisted_result(progress)
             job.updated_at = now

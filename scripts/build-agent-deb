@@ -1250,6 +1250,7 @@ def build(
             "vonk-forge-package-helper.socket",
             "vonk-forge-package-rollback.service",
             "vonk-forge-package-upgrade-recover.service",
+            "vonk-forge-package-upgrade-alert@.service",
         ):
             install_file(
                 stage,

@@ -41,7 +41,14 @@ def verify(unit_path: Path) -> dict[str, object]:
         raise RuntimeError("packaged agent unit is unavailable")
     start_limit_interval = unit["Unit"].get("StartLimitIntervalSec")
     restart = unit["Service"].get("Restart")
-    if start_limit_interval != "0" or restart != "on-failure":
+    service_type = unit["Service"].get("Type")
+    watchdog = unit["Service"].get("WatchdogSec")
+    if (
+        start_limit_interval != "0"
+        or restart != "on-failure"
+        or service_type != "notify"
+        or watchdog != "15min"
+    ):
         raise RuntimeError("packaged unit does not allow automatic boot recovery")
 
     with tempfile.TemporaryDirectory(prefix="vonk-agent-boot-retry-") as temporary:
@@ -94,6 +101,8 @@ def verify(unit_path: Path) -> dict[str, object]:
         "failed_starts_before_success": TRANSIENT_FAILURES,
         "manual_reset_failed_used": False,
         "start_limit_interval": start_limit_interval,
+        "service_type": service_type,
+        "watchdog": watchdog,
         "systemd_attempts": attempts,
     }
 

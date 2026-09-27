@@ -39,6 +39,9 @@ validate_arguments() {
                 *) fail "this installer accepts only --enroll" ;;
             esac
             ;;
+        cli)
+            [ "$#" -eq 0 ] || fail "this installer accepts no arguments"
+            ;;
         *) fail "the installer kind is invalid" ;;
     esac
 }
@@ -50,7 +53,9 @@ done
 
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/vonk-${kind}-channel.XXXXXX") ||
     fail "cannot create a temporary directory"
+saved_key_tmp=
 cleanup() {
+    if [ -n "$saved_key_tmp" ]; then rm -f -- "$saved_key_tmp"; fi
     rm -rf -- "$temporary"
 }
 trap cleanup EXIT HUP INT TERM
@@ -147,6 +152,86 @@ openssl dgst -sha256 -verify "$public_key" -signature "$signature" "$release" \
     >/dev/null 2>&1 ||
     fail "the immutable release signature is invalid"
 
+if [ "$kind" = cli ]; then
+    command -v python3 >/dev/null 2>&1 || fail "Python 3 is required"
+    command -v uv >/dev/null 2>&1 || fail "uv is required; install uv, then rerun this command"
+cli_metadata=$(python3 - "$release" "$release_prefix" "$channel" "$version" "$source_sha" <<'PY' || exit 1
+import json, re, sys
+from pathlib import PurePosixPath
+
+try:
+    release_path, prefix, expected_channel, expected_version, expected_source = sys.argv[1:]
+    with open(release_path, "rb") as source:
+        raw = source.read()
+    release = json.loads(raw)
+    if (
+        release.get("schema_version") != 2
+        or release.get("generation") != prefix.rsplit("/", 1)[-1]
+        or release.get("channel") != expected_channel
+        or release.get("version") != expected_version
+        or release.get("source_sha") != expected_source
+        or json.dumps(release, sort_keys=True, separators=(",", ":")).encode() + b"\n" != raw
+    ):
+        raise ValueError("release identity")
+    artifact = release.get("artifacts", {}).get("cli-wheel")
+    if not isinstance(artifact, dict):
+        raise ValueError("CLI wheel")
+    path, digest, size = artifact.get("path"), artifact.get("sha256"), artifact.get("size")
+    if not isinstance(path, str) or not path.startswith(prefix + "/cli/"):
+        raise ValueError("CLI wheel path")
+    name = PurePosixPath(path).name
+    if path != prefix + "/cli/" + name:
+        raise ValueError("CLI wheel path")
+    if not re.fullmatch(r"vonk_cluster_profiles-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any[.]whl", name):
+        raise ValueError("CLI wheel name")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("CLI wheel digest")
+    if type(size) is not int or not 0 < size <= 1024 * 1024 * 1024:
+        raise ValueError("CLI wheel size")
+    print("\t".join((path, digest, str(size), str(release["version"]), str(release["source_sha"]))))
+except (OSError, ValueError, TypeError, KeyError, AttributeError):
+    raise SystemExit(1)
+PY
+) || fail "the signed release has no valid CLI wheel"
+    old_ifs=$IFS
+    IFS="$(printf '\t')"
+    set -- $cli_metadata
+    IFS=$old_ifs
+    [ "$#" -eq 5 ] || fail "the signed CLI wheel descriptor is invalid"
+    cli_path=$1 cli_digest=$2 cli_size=$3 cli_version=$4 cli_source=$5
+    case "$cli_version" in ''|*[!A-Za-z0-9.+:~-]*) fail "the CLI version is invalid" ;; esac
+    case "$cli_source" in *[!0-9a-f]*|'') fail "the CLI source identity is invalid" ;; esac
+    [ "${#cli_source}" -eq 40 ] || fail "the CLI source identity is invalid"
+    wheel="$temporary/$(basename "$cli_path")"
+    curl -fsSL --proto '=https' --tlsv1.2 "$origin/$cli_path" -o "$wheel" ||
+        fail "cannot download the accepted CLI wheel"
+    [ "$(wc -c <"$wheel" | tr -d ' ')" = "$cli_size" ] || fail "the CLI wheel size is invalid"
+    [ "$(sha256 "$wheel")" = "$cli_digest" ] || fail "the CLI wheel digest is invalid"
+    python3 - "$wheel" "$cli_version" "$cli_source" <<'PY' || fail "the CLI wheel identity is invalid"
+import json, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    identity = json.loads(archive.read("cluster_profiles/build-identity.json"))
+if identity != {"schema_version": 1, "release_version": sys.argv[2], "source_sha": sys.argv[3]}:
+    raise SystemExit(1)
+PY
+    config_root=${XDG_CONFIG_HOME:-${HOME:-}/.config}
+    case "$config_root" in /*) ;; *) fail "the CLI signing key needs an absolute user config directory" ;; esac
+    key_directory="$config_root/vonkforge"
+    mkdir -p "$key_directory" || fail "cannot create the vonkforge user config directory"
+    [ -d "$key_directory" ] && [ ! -L "$key_directory" ] ||
+        fail "the vonkforge user config path is unsafe"
+    chmod 700 "$key_directory" || fail "cannot secure the vonkforge user config directory"
+    public_key_destination="$key_directory/installer-public.pem"
+    saved_key_tmp="$key_directory/.installer-public.pem.$$"
+    cp "$public_key" "$saved_key_tmp" || fail "cannot save the verified release public key"
+    chmod 600 "$saved_key_tmp" || fail "cannot secure the verified release public key"
+    mv -f -- "$saved_key_tmp" "$public_key_destination" || fail "cannot save the verified release public key"
+    saved_key_tmp=
+    uv tool install --force "$wheel" || fail "uv could not install the verified CLI wheel"
+    printf '%s\n' "vonkctl $cli_version is installed. Run 'vonkctl --version' to confirm."
+    printf '%s\n' "For signed updates, run: vonkctl update --apply --public-key '$public_key_destination'"
+    exit 0
+fi
 case "$kind" in
     nas) selected_path=$nas_path; selected_sha256=$nas_sha256 ;;
     spark) selected_path=$spark_path; selected_sha256=$spark_sha256 ;;

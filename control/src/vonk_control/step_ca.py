@@ -32,7 +32,7 @@ _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}\Z")
 _KID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
-_DEFAULT_CERTIFICATE_LIFETIME_SECONDS = 86400
+_DEFAULT_CERTIFICATE_LIFETIME_SECONDS = 30 * 24 * 60 * 60
 _MAX_CRL_WINDOW = timedelta(hours=1)
 
 
@@ -88,7 +88,7 @@ class StepCertificateAuthority(CertificateAuthority):
             <= _DEFAULT_CERTIFICATE_LIFETIME_SECONDS
         ):
             raise ValueError(
-                "certificate lifetime must be an integer between 90 and 86400 seconds"
+                "certificate lifetime must be an integer between 90 and 2592000 seconds"
             )
         if not 0 <= clock_skew_seconds <= 60:
             raise ValueError("CA clock skew must be between zero and 60 seconds")

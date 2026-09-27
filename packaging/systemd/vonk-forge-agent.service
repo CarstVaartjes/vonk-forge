@@ -8,7 +8,7 @@ After=network-online.target vonk-forge-package-helper.socket
 StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+Type=notify
 User=vonk-agent
 Group=vonk-agent
 SupplementaryGroups=
@@ -21,7 +21,8 @@ Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp
 Environment=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf
 Restart=on-failure
 RestartSec=30s
-TimeoutStartSec=30s
+TimeoutStartSec=0
+WatchdogSec=15min
 TimeoutStopSec=30s
 UMask=0077
 RuntimeDirectory=vonk-forge-agent

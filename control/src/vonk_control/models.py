@@ -222,7 +222,11 @@ class ControlProcessHeartbeat(Base):
 
     __tablename__ = "control_process_heartbeats"
     __table_args__ = (
-        UniqueConstraint("process_kind", name="uq_control_process_heartbeats_kind"),
+        UniqueConstraint(
+            "process_kind",
+            "process_instance_id",
+            name="uq_control_process_heartbeats_instance",
+        ),
         CheckConstraint(
             "process_kind = 'worker'",
             name="ck_control_process_heartbeats_process_kind",
@@ -2317,6 +2321,10 @@ class RecipeRun(Base):
             "route_attempts>=0",
             name="ck_recipe_runs_route_attempts",
         ),
+        CheckConstraint(
+            "recovery_attempts>=0",
+            name="ck_recipe_runs_recovery_attempts",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -2353,6 +2361,11 @@ class RecipeRun(Base):
     #: ``route_state='pending'`` and records when to try again instead of
     #: turning one supervisor hiccup into a terminal route failure.
     route_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    #: Recovery retries in the current bounded window. The coordinator resets
+    #: this after the visible cooldown so transient faults resume automatically.
+    recovery_attempts: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
     route_next_attempt_at: Mapped[datetime | None] = mapped_column(

@@ -1,6 +1,7 @@
 use std::{
     fs,
-    os::unix::fs::{MetadataExt, PermissionsExt},
+    io::Write,
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::Path,
     time::Duration,
 };
@@ -11,6 +12,130 @@ use vonk_agent_protocol::MemoryPool;
 
 use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
 
+/// Keep room on the state database filesystem for agent progress and recovery
+/// records when model or image storage approaches exhaustion.
+pub const STATE_DATABASE_DISK_RESERVE_BYTES: u64 = 64 * 1024 * 1024;
+
+pub fn disk_reserve_degraded(available_bytes: u64) -> bool {
+    available_bytes < STATE_DATABASE_DISK_RESERVE_BYTES
+}
+
+pub fn prepare_state_database_reserve(data_root: &Path) -> Result<bool, InventoryError> {
+    let available = available_disk_bytes(data_root)?;
+    maintain_state_database_reserve(data_root, available).map_err(InventoryError::Io)
+}
+
+fn maintain_state_database_reserve(
+    data_root: &Path,
+    available_bytes: u64,
+) -> Result<bool, std::io::Error> {
+    let reserve = data_root.join(".state-db-reserve");
+    let existing = match fs::symlink_metadata(&reserve) {
+        Ok(metadata)
+            if metadata.file_type().is_file()
+                && !metadata.file_type().is_symlink()
+                && metadata.nlink() == 1
+                && metadata.mode() & 0o777 == 0o600
+                && metadata.uid() == fs::metadata(data_root)?.uid() =>
+        {
+            if metadata.len() == STATE_DATABASE_DISK_RESERVE_BYTES {
+                true
+            } else {
+                // A process death during reserve allocation leaves only this
+                // exact agent-owned file shape. Remove it and rebuild below.
+                fs::remove_file(&reserve)?;
+                false
+            }
+        }
+        Ok(_) => return Err(std::io::Error::other("state database reserve is unsafe")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    if available_bytes < STATE_DATABASE_DISK_RESERVE_BYTES {
+        if existing {
+            fs::remove_file(&reserve)?;
+        }
+        return Ok(false);
+    }
+    if !existing && available_bytes >= STATE_DATABASE_DISK_RESERVE_BYTES.saturating_mul(2) {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&reserve)?;
+        let block = [0_u8; 1024 * 1024];
+        for _ in 0..(STATE_DATABASE_DISK_RESERVE_BYTES / block.len() as u64) {
+            if let Err(error) = file.write_all(&block) {
+                drop(file);
+                let _ = fs::remove_file(&reserve);
+                return Err(error);
+            }
+        }
+        if let Err(error) = file.sync_all() {
+            drop(file);
+            let _ = fs::remove_file(&reserve);
+            return Err(error);
+        }
+        drop(file);
+        fs::File::open(data_root)?.sync_all()?;
+        return Ok(true);
+    }
+    Ok(existing)
+}
+
+#[cfg(test)]
+mod disk_reserve_tests {
+    use super::{
+        STATE_DATABASE_DISK_RESERVE_BYTES, disk_reserve_degraded, maintain_state_database_reserve,
+    };
+    use std::{fs, os::unix::fs::PermissionsExt};
+    use tempfile::tempdir;
+
+    #[test]
+    fn low_disk_is_degraded_without_marking_the_agent_unavailable_at_the_reserve_boundary() {
+        assert!(disk_reserve_degraded(0));
+        assert!(disk_reserve_degraded(STATE_DATABASE_DISK_RESERVE_BYTES - 1));
+        assert!(!disk_reserve_degraded(STATE_DATABASE_DISK_RESERVE_BYTES));
+        assert!(!disk_reserve_degraded(
+            STATE_DATABASE_DISK_RESERVE_BYTES + 1
+        ));
+    }
+
+    #[test]
+    fn reserve_is_created_when_space_allows_and_released_for_state_recovery() {
+        let root = tempdir().unwrap();
+        let reserve = root.path().join(".state-db-reserve");
+        assert!(
+            maintain_state_database_reserve(root.path(), STATE_DATABASE_DISK_RESERVE_BYTES * 2)
+                .unwrap()
+        );
+        let metadata = fs::metadata(&reserve).unwrap();
+        assert_eq!(metadata.len(), STATE_DATABASE_DISK_RESERVE_BYTES);
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        assert!(
+            !maintain_state_database_reserve(root.path(), STATE_DATABASE_DISK_RESERVE_BYTES - 1)
+                .unwrap()
+        );
+        assert!(!reserve.exists());
+    }
+
+    #[test]
+    fn interrupted_reserve_allocation_is_repaired_on_the_next_inventory() {
+        let root = tempdir().unwrap();
+        let reserve = root.path().join(".state-db-reserve");
+        fs::write(&reserve, b"partial allocation").unwrap();
+        fs::set_permissions(&reserve, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(
+            maintain_state_database_reserve(root.path(), STATE_DATABASE_DISK_RESERVE_BYTES * 2)
+                .unwrap()
+        );
+        assert_eq!(
+            fs::metadata(reserve).unwrap().len(),
+            STATE_DATABASE_DISK_RESERVE_BYTES
+        );
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Inventory {
     #[serde(rename = "host_memory_total_bytes")]
@@ -20,6 +145,8 @@ pub struct Inventory {
     pub disk_total_bytes: u64,
     #[serde(rename = "disk_free_bytes")]
     pub disk_available_bytes: u64,
+    #[serde(skip)]
+    pub state_database_reserve_held: bool,
     pub gpu_count: u32,
     pub gpu_memory_total_bytes: u64,
     pub gpu_memory_free_bytes: u64,
@@ -65,9 +192,16 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             .f_blocks
             .checked_mul(fragment)
             .ok_or(InventoryError::Parse)?;
-        let disk_available_bytes = filesystem
+        let initial_disk_available_bytes = filesystem
             .f_bavail
             .checked_mul(fragment)
+            .ok_or(InventoryError::Parse)?;
+        let state_database_reserve_held =
+            maintain_state_database_reserve(self.store_path, initial_disk_available_bytes)?;
+        let filesystem = rustix::fs::statvfs(self.store_path)?;
+        let disk_available_bytes = filesystem
+            .f_bavail
+            .checked_mul(filesystem.f_frsize)
             .ok_or(InventoryError::Parse)?;
         let gpu = startup_probe(
             self.runner,
@@ -149,6 +283,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             memory_available_bytes,
             disk_total_bytes,
             disk_available_bytes,
+            state_database_reserve_held,
             gpu_count,
             gpu_memory_total_bytes,
             gpu_memory_free_bytes,

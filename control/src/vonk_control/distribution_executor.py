@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, timedelta
 from typing import Any
@@ -1266,11 +1268,28 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         *args: Any,
         model_cache: object,
         runtime_image_preparer: Callable[..., object] | None = None,
+        async_runtime_image_preparation: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._model_cache = model_cache
         self._runtime_image_preparer = runtime_image_preparer
+        self._async_runtime_image_preparation = async_runtime_image_preparation
+        self._runtime_image_pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="runtime-image-preparation"
+        )
+        self._runtime_image_futures: dict[
+            tuple[str, int, int], Future[Mapping[str, object] | None]
+        ] = {}
+        self._runtime_image_progress: dict[
+            tuple[str, int, int], tuple[str, int, int | None]
+        ] = {}
+        self._runtime_image_progress_lock = threading.Lock()
+
+    def close(self) -> None:
+        """Leave image preparation checkpoints resumable during shutdown."""
+
+        self._runtime_image_pool.shutdown(wait=False, cancel_futures=True)
 
     def execute(
         self,
@@ -1287,14 +1306,66 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             # durable high-level phase so install admission cannot compile a
             # schema-2 payload until the Controller archive and receipt are
             # present.  Target-copy only consumes the persisted evidence.
-            runtime_result = self._prepare_runtime_image(
-                plan,
-                phase,
-                item_index=item_index,
-                actor=actor,
-                request_key=request_key,
-                progress=progress,
-            )
+            if self._async_runtime_image_preparation:
+                key = (request_key, phase.index, item_index)
+                future = self._runtime_image_futures.get(key)
+                if future is None:
+
+                    def record_progress(
+                        stage: str, completed: int, total: int | None
+                    ) -> None:
+                        with self._runtime_image_progress_lock:
+                            self._runtime_image_progress[key] = (
+                                stage,
+                                completed,
+                                total,
+                            )
+
+                    self._runtime_image_futures[key] = self._runtime_image_pool.submit(
+                        self._prepare_runtime_image,
+                        plan,
+                        phase,
+                        item_index=item_index,
+                        actor=actor,
+                        request_key=request_key,
+                        progress=progress,
+                        transfer_progress=record_progress,
+                    )
+                    return PhaseExecution(
+                        waiting=True,
+                        status_reason=(
+                            "Runtime image preparation is running in the background; "
+                            "the durable checkpoint will be resumed after a restart."
+                        ),
+                    )
+                if not future.done():
+                    with self._runtime_image_progress_lock:
+                        transfer_progress = self._runtime_image_progress.get(key)
+                    detail = (
+                        "Runtime image preparation is still running in the background."
+                    )
+                    if transfer_progress is not None:
+                        stage, completed, total = transfer_progress
+                        detail = f"Runtime image {stage}: {completed} bytes transferred"
+                        if total is not None:
+                            detail += f" of {total} bytes"
+                    return PhaseExecution(
+                        waiting=True,
+                        status_reason=detail,
+                    )
+                del self._runtime_image_futures[key]
+                with self._runtime_image_progress_lock:
+                    self._runtime_image_progress.pop(key, None)
+                runtime_result = future.result()
+            else:
+                runtime_result = self._prepare_runtime_image(
+                    plan,
+                    phase,
+                    item_index=item_index,
+                    actor=actor,
+                    request_key=request_key,
+                    progress=progress,
+                )
             if runtime_result is None:
                 raise RuntimeError("runtime image preparation returned no evidence")
             return PhaseExecution(result=_phase_receipt(runtime_result, phase=phase))
@@ -1445,6 +1516,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         actor: str,
         request_key: str,
         progress: Mapping[str, object],
+        transfer_progress: Callable[[str, int, int | None], None] | None = None,
     ) -> Mapping[str, object] | None:
         """Prepare one Controller image and authorize every target execution.
 
@@ -1552,6 +1624,11 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 runtime_spec,
                 build,
                 before_publish=before_publish,
+                **(
+                    {"progress": transfer_progress}
+                    if transfer_progress is not None
+                    else {}
+                ),
             )
             to_mapping = getattr(receipt, "to_mapping", None)
             prepared = to_mapping() if callable(to_mapping) else receipt

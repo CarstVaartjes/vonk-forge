@@ -16,6 +16,7 @@ PACKAGED_UNITS = [
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
     "vonk-forge-package-upgrade-recover.service",
+    "vonk-forge-package-upgrade-alert@.service",
 ]
 
 
@@ -31,6 +32,22 @@ def test_monitor_unit_allows_clean_start_before_agent_state_exists() -> None:
     assert "-/var/lib/vonk-forge/incoming" in inaccessible
     assert "/var/lib/vonk-forge-agent/state.sqlite" not in inaccessible
     assert "/var/lib/vonk-forge/incoming" not in inaccessible
+
+
+def test_agent_unit_has_notify_watchdog_and_unsafe_recovery_alert_contract() -> None:
+    agent = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()
+    recovery = (
+        ROOT / "packaging/systemd/vonk-forge-package-upgrade-recover.service"
+    ).read_text()
+    alert = (
+        ROOT / "packaging/systemd/vonk-forge-package-upgrade-alert@.service"
+    ).read_text()
+
+    assert "Type=notify" in agent
+    assert "WatchdogSec=15min" in agent
+    assert "OnFailure=vonk-forge-package-upgrade-alert@%n.service" in recovery
+    assert "RestartPreventExitStatus=78" in recovery
+    assert "package-upgrade.status" in alert
 
 
 @pytest.mark.skipif(
@@ -56,9 +73,15 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
         "start_limit_interval": "0",
         "private_devices": "yes",
         "device_policy": "closed",
+        "type": "notify",
+        "watchdog": "15min",
+        "package_recovery_alert": "vonk-forge-package-upgrade-alert@%n.service",
     }
+    # Template units are assessed through the instance systemd starts.
     assert set(report["security_units"]) == {
-        unit for unit in PACKAGED_UNITS if unit.endswith(".service")
+        unit.replace("@.service", "@vonk-forge-package-upgrade-recover.service")
+        for unit in PACKAGED_UNITS
+        if unit.endswith(".service")
     }
     assert all(
         not unit["ambient_capabilities"] for unit in report["security_units"].values()

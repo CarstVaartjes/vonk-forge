@@ -1,5 +1,33 @@
 # `vonkctl` operator CLI
 
+## Install without a checkout
+
+On macOS or Linux, install the latest accepted stable CLI without cloning the
+repository. The workstation needs `curl`, `openssl`, Python 3, and `uv`; the CLI
+requires Python 3.14 or newer, which `uv` can manage for its tool environment:
+
+```sh
+curl -fsSL https://install.vonkforge.ai/vonkctl | sh
+```
+
+The channel endpoint embeds the trusted installer public key. It verifies the
+channel signature, immutable release signature and canonical encoding, and the
+exact wheel path, size, SHA-256 digest, and embedded source/version identity
+before passing the local wheel to `uv tool install`. A bad or unavailable
+artifact stops installation; no checkout is needed. For the accepted
+development channel, use
+`curl -fsSL https://install.vonkforge.ai/dev/vonkctl | sh`.
+
+`uv` resolves the CLI's declared Python dependencies during installation. This
+is a workstation install and does not change the Controller or Sparks. The
+verified release public key is saved as
+`${XDG_CONFIG_HOME:-$HOME/.config}/vonkforge/installer-public.pem`; use it for
+later signed updates:
+
+```sh
+vonkctl update --apply --public-key "${XDG_CONFIG_HOME:-$HOME/.config}/vonkforge/installer-public.pem"
+```
+
 `vonkctl` is the local, authenticated CLI for the Controller. It has four
 singular operator areas: Fleet, Model, Recipe, and Profile. The CLI uses the
 same current Controller routes as the operator API: `/api/fleet`,
@@ -12,12 +40,14 @@ The CLI accepts an HTTPS Controller origin and reads its bearer credential from
 a private regular file. It never accepts a token on the command line.
 
 ```bash
-uv tool install .
 export VONK_CONTROL_URL=https://forge.example.test
 export VONK_CONTROL_TOKEN_FILE="$PWD/.dev/admin-token"
 chmod 600 "$VONK_CONTROL_TOKEN_FILE"
 vonkctl --help
 ```
+
+For development from a source checkout, install that checkout with
+`uv tool install .` before setting these connection variables.
 
 Use `--json` for one parseable object on stdout. Use `--profile N` to select a
 stable numbered Profile for that invocation; the default is Profile 1.
@@ -560,7 +590,8 @@ model's route, report the missing member, and continue unrelated assignments.
 Do not count a removed Spark's old run as live capacity or report an unreachable
 Spark as stopped without confirmed cleanup. If the same node ID rejoins,
 reconcile its actual state against the accepted snapshot before scheduling work
-there. This ongoing reconciliation is under test and has not shipped.
+there. The worker also checks accepted running assignments for live-state drift
+and reconciles them through the existing run and route recovery paths.
 
 ```bash
 vonkctl profile
@@ -581,7 +612,33 @@ vonkctl --profile 2 profile progress --request-key REQUEST_UUID --follow
 vonkctl --profile 2 profile cancel APPLICATION_UUID --yes --request-key CANCEL_UUID
 vonkctl --profile 2 profile endpoint
 vonkctl --profile 2 profile endpoint coding
+vonkctl --profile 2 run "Qwen Code" --spark Atlas
+vonkctl --profile 2 run google/gemma-4-26B-A4B-it --yes
 ```
+
+`run` accepts one unambiguous recipe or model from the active library. It
+prepares the recipe and its model, adds the assignment to the selected saved
+profile (profile 1 by default), previews the complete profile change, asks for
+confirmation, follows the application, and prints the current endpoints. Use
+`--spark` more than once to choose the target group; without it, every enrolled
+Spark is included. The profile edit is saved before the preview so the
+Controller can review the exact whole-profile effects. If the review is
+blocked, the saved draft remains and the fleet is unchanged.
+
+For scripts, JSON, redirected input, or `--no-input`, pass `--yes`. The command
+still obtains a fresh Controller review and binds its exact plan before it
+starts. It waits for the application before looking up the endpoint.
+
+The CLI currently runs recipes from the active catalog. It does not turn an
+arbitrary Hugging Face repository into a runnable unqualified recipe. The
+existing recipe generator requires an immutable model definition, sizing data,
+and a pinned runtime image, while profile execution accepts only exact active
+catalog revisions. A BYO path needs a Controller-owned way to register and
+label an unqualified generated recipe while preserving the signed catalog
+path for qualified recipes.
+
+When a run or enrollment is refused, the CLI gives a short next step and keeps
+the Controller error code and original detail in JSON output for debugging.
 
 In an interactive terminal, load shows the current review and asks for one
 default-no confirmation. `--detach` returns the accepted application instead

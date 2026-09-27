@@ -37,6 +37,24 @@ test("sends sort and updated_since to both library routes", async () => {
   expect(recipe.searchParams.get("updated_since")).toBe(SINCE);
 });
 
+test("creates a Fleet enrollment grant through the current operator endpoint", async () => {
+  const requests: Request[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request);
+    return new Response(JSON.stringify({schema_version: 2, action: "enroll", state: "created", grant: {}}), {
+      status: 201,
+      headers: {"Content-Type": "application/json"},
+    });
+  });
+  const input = {name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101", ttl_seconds: 900};
+  await new ApiClient().enrollFleetNode(input);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]!.method).toBe("POST");
+  expect(new URL(requests[0]!.url).pathname).toBe("/api/fleet/enroll");
+  expect(await requests[0]!.json()).toEqual(input);
+});
+
 test("sends caller-owned request identities on artifact create, submit and cancel", async () => {
   const requests: Request[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {

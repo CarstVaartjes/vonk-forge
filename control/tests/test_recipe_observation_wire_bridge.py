@@ -1288,6 +1288,64 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
         assert run is not None and run.state == "failed"
         assert run.route_state == "withdrawn"
         assert claims and all(claim.state == "active" for claim in claims)
+
+
+def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
+    tmp_path: Path,
+    recipe_observation_wire_probe: Path,
+    host_helper_wire_probe: Path,
+    postgres_engine,
+) -> None:
+    (
+        now,
+        _app,
+        sessions,
+        run_id,
+        _original_start_id,
+        _node_id,
+        _grant_public_key,
+        _binding,
+        _service,
+        queue,
+        _mapping_id,
+        _node_ids,
+        bound_service,
+        routes,
+    ) = _signed_absent_singleton(
+        tmp_path,
+        recipe_observation_wire_probe=recipe_observation_wire_probe,
+        host_helper_wire_probe=host_helper_wire_probe,
+        engine=postgres_engine,
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id, with_for_update=True)
+        assert run is not None
+        run.recovery_attempts = 5
+        run.route_next_attempt_at = None
+    recovery = DistributedRecoveryCoordinator(
+        sessions,
+        routes=routes,
+        agent_jobs=queue,
+        clock=lambda: now[0],
+        recovery_run_stops=bound_service,
+        singleton_start_timeout_seconds=60,
+    )
+
+    assert recovery.tick() is True
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        assert run.recovery_attempts == 6
+        assert run.route_next_attempt_at == now[0] + timedelta(minutes=5)
+        assert "degraded" in (run.route_error or "")
+    now[0] += timedelta(minutes=5)
+
+    assert recovery.tick() is True
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.recovery_attempts == 0
+        assert run.route_next_attempt_at == now[0] + timedelta(seconds=5)
+        assert "fresh exact signed absence" in (run.route_error or "")
         assert not session.scalar(
             select(Job.id).where(
                 Job.kind == "recipe.start",

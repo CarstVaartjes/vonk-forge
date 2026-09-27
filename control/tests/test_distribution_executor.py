@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import uuid
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -1536,3 +1539,67 @@ def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
         oci_archive_sha256=archive_digest,
     )
     assert source.verify_runtime_image_assignment(assignment) is False
+
+
+def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
+
+    entered = threading.Event()
+    release = threading.Event()
+    executor = cast(Any, object.__new__(CompositeDistributionPhaseExecutor))
+    executor._async_runtime_image_preparation = True
+    executor._runtime_image_pool = ThreadPoolExecutor(max_workers=1)
+    executor._runtime_image_futures = {}
+    executor._runtime_image_progress = {}
+    executor._runtime_image_progress_lock = threading.Lock()
+
+    def prepare(
+        _plan,
+        _phase,
+        *,
+        item_index,
+        actor,
+        request_key,
+        progress,
+        transfer_progress=None,
+    ) -> None:
+        assert item_index == 0
+        assert actor == "operator"
+        assert request_key
+        assert not progress
+        assert transfer_progress is not None
+        transfer_progress("copy", 23, 100)
+        entered.set()
+        assert release.wait(5)
+
+    executor._prepare_runtime_image = prepare
+    phase = _phase(index=2, kind="prepare", subphase="runtime-image")
+    request_key = str(uuid4())
+    try:
+        result = executor.execute(
+            _plan(),
+            phase,
+            item_index=0,
+            actor="operator",
+            request_key=request_key,
+            progress={},
+        )
+        assert result.waiting
+        assert result.operation_id is None
+        assert "background" in (result.status_reason or "")
+        assert entered.wait(1)
+        observed = executor.execute(
+            _plan(),
+            phase,
+            item_index=0,
+            actor="operator",
+            request_key=request_key,
+            progress={},
+        )
+        assert observed.waiting
+        assert (
+            observed.status_reason
+            == "Runtime image copy: 23 bytes transferred of 100 bytes"
+        )
+    finally:
+        release.set()
+        executor.close()

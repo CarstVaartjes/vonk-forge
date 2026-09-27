@@ -5887,6 +5887,7 @@ class FleetProfileService:
             )
 
     def _reconcile_selected_roster(self, now: datetime) -> bool:
+        drift_signature: tuple[tuple[str, str], ...] = ()
         with self._sessions() as session:
             try:
                 selected = self._selected_profile_snapshot(session)
@@ -5903,7 +5904,19 @@ class FleetProfileService:
                     .order_by(AgentNode.node_id)
                 )
             )
-            if roster == selected.roster_node_ids:
+            roster_changed = roster != selected.roster_node_ids
+            application = session.get(FleetProfileApplication, selected.application_id)
+            if application is not None and application.state == "succeeded":
+                drift_signature = tuple(
+                    sorted(
+                        (assignment.id, state.current_state)
+                        for assignment in selected.intended.assignments
+                        if assignment.desired_state == "running"
+                        for state in (self._assignment_state(session, assignment),)
+                        if state.current_state != "running"
+                    )
+                )
+            if not roster_changed and not drift_signature:
                 return False
             if not self._user_has_profile_authority(
                 session.scalar(select(User).where(User.subject == selected.actor)),
@@ -5929,9 +5942,10 @@ class FleetProfileService:
         request_key = str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL,
-                "vonk-forge:fleet-profile-roster:"
+                "vonk-forge:fleet-profile-reconcile:"
                 f"{selected.application_id}:{selected.generation}:"
-                f"{_roster_digest(roster)}",
+                f"{_roster_digest(roster)}:"
+                f"{hashlib.sha256(repr(drift_signature).encode()).hexdigest()}",
             )
         )
         if not preview.allowed:

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
+import threading
+import time
+import traceback
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,7 +18,7 @@ from typing import Any
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from .jobs import JobService
-from .logging import log_event
+from .logging import log_event, redact_text
 
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -36,6 +40,32 @@ _SOURCE_FAILURES = (
 )
 
 _LOGGER = logging.getLogger("vonk-control-worker")
+_WORKER_WATCHDOG_TIMEOUT_SECONDS = 180
+
+
+class WorkerWatchdog:
+    """Track completed scheduler loops and detect a stalled main thread."""
+
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("worker watchdog timeout must be positive")
+        self._timeout_seconds = timeout_seconds
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._last_completed = clock()
+
+    def beat(self) -> None:
+        with self._lock:
+            self._last_completed = self._clock()
+
+    def stalled(self) -> bool:
+        with self._lock:
+            return self._clock() - self._last_completed > self._timeout_seconds
 
 
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
@@ -78,6 +108,10 @@ class WorkerHeartbeatRecorder:
             heartbeat = session.scalar(
                 select(ControlProcessHeartbeat)
                 .where(ControlProcessHeartbeat.process_kind == "worker")
+                .where(
+                    ControlProcessHeartbeat.process_instance_id
+                    == self._process_instance_id
+                )
                 .with_for_update()
             )
             if heartbeat is None:
@@ -110,6 +144,10 @@ class WorkerHeartbeatRecorder:
             heartbeat = session.scalar(
                 select(ControlProcessHeartbeat)
                 .where(ControlProcessHeartbeat.process_kind == "worker")
+                .where(
+                    ControlProcessHeartbeat.process_instance_id
+                    == self._process_instance_id
+                )
                 .with_for_update()
             )
             if (
@@ -222,6 +260,8 @@ class Worker:
                     service="control-worker",
                     source=name,
                     error=type(error).__name__,
+                    message=redact_text(error),
+                    traceback=redact_text(traceback.format_exc()),
                 )
                 continue
             if progressed:
@@ -245,6 +285,8 @@ class Worker:
                 service="control-worker",
                 task=name,
                 error=type(error).__name__,
+                message=redact_text(error),
+                traceback=redact_text(traceback.format_exc()),
             )
 
     def _run_model_cache(self) -> bool:
@@ -363,6 +405,7 @@ def assemble_production_worker(
             distribution,
             model_cache=model_cache,
             runtime_image_preparer=runtime_image_preparer,
+            async_runtime_image_preparation=True,
             clock=clock,
         )
     else:
@@ -455,10 +498,14 @@ def assemble_production_worker(
             recovery_run_stops=lifecycle,
             singleton_start_timeout_seconds=distributed_start_timeout_seconds,
         ),
+        manage_route_leases_in_background=True,
     )
     failure_evidence = FailureEvidenceService(sessions, clock=clock)
     worker_background_services = (*background_services, failure_evidence.tick)
-    worker_background_closers = tuple(background_closers)
+    worker_background_closers = (*background_closers, recipe_operations.close)
+    close_artifact_executor = getattr(artifact_phase_executor, "close", None)
+    if callable(close_artifact_executor):
+        worker_background_closers += (close_artifact_executor,)
     if recipe_image_artifact_root is not None:
         from .availability_production import build_recipe_image_availability
 
@@ -513,7 +560,6 @@ def assemble_production_worker(
 
 if __name__ == "__main__":
     import os
-    import time
     from datetime import UTC, datetime
     from pathlib import Path
 
@@ -689,11 +735,31 @@ if __name__ == "__main__":
             clock=clock,
         ).completed_loop,
     )
+    watchdog = WorkerWatchdog(timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS)
+    watchdog_stop = threading.Event()
+
+    def monitor_worker_loop() -> None:
+        while not watchdog_stop.wait(5):
+            if watchdog.stalled():
+                log_event(
+                    _LOGGER,
+                    "worker.watchdog_stalled",
+                    service="control-worker",
+                    timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS,
+                    action="exiting non-zero for container restart",
+                )
+                os._exit(70)
+
+    watchdog_thread = threading.Thread(
+        target=monitor_worker_loop, name="worker-watchdog", daemon=True
+    )
+    watchdog_thread.start()
     try:
         while True:
             try:
                 if not worker.run_once():
                     time.sleep(1)
+                watchdog.beat()
             except Exception as error:  # noqa: BLE001 - a tick must not kill the worker
                 # Retried on the next pass. A worker that exits here stops
                 # draining every coordinator, so the failure is reported and the
@@ -703,7 +769,12 @@ if __name__ == "__main__":
                     "worker.tick_failed",
                     service="control-worker",
                     error=type(error).__name__,
+                    message=redact_text(error),
+                    traceback=redact_text(traceback.format_exc()),
                 )
                 time.sleep(1)
+                watchdog.beat()
     finally:
+        watchdog_stop.set()
+        watchdog_thread.join(timeout=2)
         worker.close()

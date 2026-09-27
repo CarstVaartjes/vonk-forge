@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import timedelta
@@ -156,6 +157,38 @@ def test_postgres_claim_is_durable_before_image_commit(
         assert intent["archive_sha256"] == ARCHIVE_DIGEST
         reasons = runtime_image_reference_reasons(session, (ARCHIVE_DIGEST,))
     assert any("runtime image preparation" in item for item in reasons[ARCHIVE_DIGEST])
+
+
+def test_background_runtime_image_prep_is_a_durable_waiting_phase(
+    tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, sessions, revision_id, _digest, _mapping, executor, _events = (
+        _make_service(tmp_path, engine=postgres_engine)
+    )
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_preparation(*_args, **_kwargs):
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(executor, "_prepare_runtime_image", slow_preparation)
+    executor._async_runtime_image_preparation = True
+    operation = _apply(service, revision_id)
+    _advance_to_runtime_image(service, sessions, operation.operation_id)
+    try:
+        assert service._advance(operation.operation_id)
+        assert entered.wait(1)
+        with sessions() as session:
+            job = session.get(Job, operation.operation_id)
+            assert job is not None
+            assert job.state == "waiting", job.status_reason
+            assert "background" in (job.status_reason or "")
+            assert job.result is not None
+            assert isinstance(job.result.get("observation_due_at"), str)
+    finally:
+        release.set()
+        executor.close()
 
 
 def test_postgres_reference_survives_worker_death_and_restart(
