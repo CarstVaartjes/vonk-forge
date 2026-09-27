@@ -20,6 +20,7 @@ UNITS = (
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
     "vonk-forge-package-upgrade-recover.service",
+    "vonk-forge-package-upgrade-alert@.service",
 )
 SECURITY_UNITS = tuple(name for name in UNITS if name.endswith(".service"))
 SUMMARY = re.compile(
@@ -169,8 +170,10 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
         agent["Unit"].get("StartLimitIntervalSec") != "0"
         or agent["Service"].get("Restart") != "on-failure"
         or agent["Service"].get("RestartSec") != "30s"
+        or agent["Service"].get("Type") != "notify"
+        or agent["Service"].get("WatchdogSec") != "15min"
     ):
-        raise RuntimeError("agent boot dependency recovery policy is invalid")
+        raise RuntimeError("agent readiness, watchdog, or boot recovery policy is invalid")
     if (
         agent["Service"].get("PrivateDevices") != "yes"
         or agent["Service"].get("DevicePolicy") != "closed"
@@ -178,6 +181,19 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
         raise RuntimeError("agent boot recovery weakened device isolation")
     if agent["Unit"].get("PartOf"):
         raise RuntimeError("agent service has an indirect lifecycle owner")
+    recovery = ConfigParser(interpolation=None, strict=False)
+    alert = ConfigParser(interpolation=None, strict=False)
+    if not recovery.read(unit_root / "vonk-forge-package-upgrade-recover.service"):
+        raise RuntimeError("package recovery unit is unavailable")
+    if not alert.read(unit_root / "vonk-forge-package-upgrade-alert@.service"):
+        raise RuntimeError("package recovery alert unit is unavailable")
+    if (
+        recovery["Unit"].get("OnFailure")
+        != "vonk-forge-package-upgrade-alert@%n.service"
+        or recovery["Service"].get("RestartPreventExitStatus") != "78"
+        or "package-upgrade.status" not in alert["Service"].get("ExecStart", "")
+    ):
+        raise RuntimeError("unsafe package recovery failure is not alerted")
     if (
         monitor["Service"].get("ExecStart")
         != "/usr/lib/vonk-forge/vonk-monitor --config /etc/vonk-forge-agent/agent.toml"
@@ -204,6 +220,9 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
             "start_limit_interval": agent["Unit"].get("StartLimitIntervalSec"),
             "private_devices": agent["Service"].get("PrivateDevices"),
             "device_policy": agent["Service"].get("DevicePolicy"),
+            "type": agent["Service"].get("Type"),
+            "watchdog": agent["Service"].get("WatchdogSec"),
+            "package_recovery_alert": recovery["Unit"].get("OnFailure"),
         },
     )
 

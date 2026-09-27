@@ -1414,18 +1414,42 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         let mut run_ids = Vec::new();
-        for entry in fs::read_dir(&runs)? {
-            if run_ids.len() == MAX_RUN_DIRECTORY_ENTRIES {
-                return Err(OciError::Artifact);
+        for (index, entry) in fs::read_dir(&runs)?.enumerate() {
+            if index == MAX_RUN_DIRECTORY_ENTRIES {
+                eprintln!(
+                    "vonk-agent: run inspection skipped entries beyond the configured {} directory scan bound",
+                    MAX_RUN_DIRECTORY_ENTRIES
+                );
+                break;
             }
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            let run_id = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| OciError::Artifact)?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    eprintln!("vonk-agent: skipping unreadable run directory entry: {error}");
+                    continue;
+                }
+            };
+            let run_id = match entry.file_name().into_string() {
+                Ok(run_id) => run_id,
+                Err(_) => {
+                    eprintln!("vonk-agent: skipping run directory entry with a non-UTF-8 name");
+                    continue;
+                }
+            };
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(error) => {
+                    eprintln!(
+                        "vonk-agent: skipping run entry {run_id}: cannot inspect type: {error}"
+                    );
+                    continue;
+                }
+            };
             if !canonical_uuid(&run_id) || !file_type.is_dir() || file_type.is_symlink() {
-                return Err(OciError::Artifact);
+                eprintln!(
+                    "vonk-agent: skipping malformed run entry {run_id}: expected a canonical UUID directory"
+                );
+                continue;
             }
             run_ids.push(run_id);
         }

@@ -1,5 +1,6 @@
 [Unit]
 Description=Vonk Forge durable package upgrade recovery
+OnFailure=vonk-forge-package-upgrade-alert@%n.service
 After=local-fs.target vonk-forge-package-helper.socket
 ConditionPathExists=/var/lib/vonk-forge/package-upgrade/intent
 StartLimitIntervalSec=0

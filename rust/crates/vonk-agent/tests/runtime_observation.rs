@@ -111,6 +111,9 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
             &identity(&started),
         )
         .unwrap();
+    // One unrelated malformed directory must not prevent the valid managed
+    // run from reaching the Controller's observation sweep.
+    fs::create_dir_all(root.path().join("runs").join("not-a-run-id")).unwrap();
     let inspections = runtime.recipe_run_inspection_plans().unwrap();
     assert_eq!(inspections.len(), 1);
     assert_eq!(&inspections[0].arguments[4..], launched.main.as_slice());

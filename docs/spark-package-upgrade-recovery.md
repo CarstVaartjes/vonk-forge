@@ -45,6 +45,14 @@ metadata and are not required to match across Controller and Spark. The
 protocol version and the required upgrade capability remain safety checks so
 the receiving side can understand and execute the signed operation.
 
+If recovery exits with `unsafe_state` (status 78), systemd keeps the agent
+start gate closed and does not retry an operation against untrusted state. The
+recovery unit's `OnFailure` handler writes a critical journal entry naming the
+unit and the durable receipt path. The Controller sees the agent as offline;
+operators can inspect the bounded receipt and recovery journal to distinguish
+an unsafe-state stop from a transient package failure. The recovery unit still
+retries other failures with its configured restart delay.
+
 
 ## Bounded source restoration
 

@@ -52,6 +52,15 @@ Connected idle agents refresh their hardware inventory after two minutes, with
 at most one additional minute for an in-flight idle claim. This keeps builder
 and workload admission current without restarting the agent. A failed report
 does not advance the refresh deadline; normal bounded retries still apply.
+The systemd unit uses `Type=notify` and a watchdog. The agent reports readiness
+after local state recovery, then refreshes its watchdog only after a completed
+control-loop step or a handled retry. Startup inventory failures such as a late
+Podman/NVIDIA/CDI runtime stay in-process with bounded exponential backoff.
+Low free space on the state database filesystem is reported in systemd status
+and authenticated inventory. The agent holds a 64 MiB reserve file when at
+least 128 MiB is free, releases it below 64 MiB to leave room for state and
+recovery records, and recreates it after space recovers. Low space marks the
+agent degraded while it remains available for controller contact.
 
 The signed package also installs the static recipe-build egress proxy. After an
 upgrade, the agent advertises `recipe.build.egress-proxy.v1` only when that

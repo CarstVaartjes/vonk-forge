@@ -140,6 +140,7 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
     assert!(wire.get("memory_total_bytes").is_none());
     assert!(wire.get("memory_available_bytes").is_none());
     assert!(wire.get("disk_available_bytes").is_none());
+    assert!(wire.get("state_database_reserve_held").is_none());
 }
 
 #[test]
