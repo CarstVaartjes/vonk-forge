@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -293,9 +294,7 @@ def _service_stop_authority(
         or stop.recipe_revision_id != authority.revision.id
         or stop.recipe_content_sha256 != authority.revision.content_digest
         or parent.payload.get("owner_id") != run.id
-        or parent.payload.get("plan_digest") != run.plan_digest
-        or parent.authority_revision
-        != authority.revision.content_digest.removeprefix("sha256:")
+        or parent.authority_revision != run.plan_digest.removeprefix("sha256:")
     ):
         raise RuntimePlanAuthorityError("service Stop identity is stale")
     try:
@@ -343,13 +342,62 @@ def _validate_recovery_start_generation(
     now: datetime,
 ) -> None:
     try:
-        recovered = recovery_start_plan(parent.payload, now=now)
+        recovered = recovery_start_plan(
+            parent.payload, now=now, require_unexpired=False
+        )
         stored = parse_stored_run_plan(authority.run.plan)
     except (DistributedLifecycleError, RecipeExecutionContractError) as error:
         raise RuntimePlanAuthorityError("recovery Start plan is invalid") from error
     if recovered is None or stored.run_generation != current_generation:
         raise RuntimePlanAuthorityError("recovery Start generation is unavailable")
-    phases, _marker = recovered
+    phases, marker = recovered
+    expected_nodes = {node.node_id: node for node in authority.nodes}
+    if (
+        parent.payload.get("owner_kind") != "run"
+        or parent.payload.get("owner_id") != authority.run.id
+        or parent.targets != sorted(expected_nodes)
+    ):
+        raise RuntimePlanAuthorityError("recovery Stop owner is stale")
+
+    if parent.actor == "system:singleton-recovery":
+        expected_request_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                "vonk:singleton-recovery-stop:"
+                f"{authority.run.id}:{current_generation}:{marker['deadline']}",
+            )
+        )
+        if (
+            marker["failed_rank"] != 0
+            or parent.request_id != expected_request_id
+            or len(expected_nodes) != 1
+            or len(phases) != 1
+            or len(phases[0]) != 1
+        ):
+            raise RuntimePlanAuthorityError("singleton recovery Stop is invalid")
+        topology = "singleton"
+    elif parent.actor == "system:distributed-recovery":
+        failed_rank = marker["failed_rank"]
+        expected_request_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"vonk:distributed-recovery:{authority.run.id}:"
+                f"{failed_rank}:{marker['deadline']}",
+            )
+        )
+        if (
+            type(failed_rank) is not int
+            or failed_rank not in {node.rank for node in authority.nodes}
+            or parent.request_id != expected_request_id
+            or len(phases) != 2
+            or not phases[0]
+            or not phases[1]
+        ):
+            raise RuntimePlanAuthorityError("distributed recovery Stop is invalid")
+        topology = "distributed"
+    else:
+        raise RuntimePlanAuthorityError("recovery Stop actor is invalid")
+
     rank_launches: dict[str, RecipeStartPayload] = {}
     readiness: list[tuple[str, RecipeStartPayload]] = []
     try:
@@ -375,24 +423,49 @@ def _validate_recovery_start_generation(
                     )
                 ):
                     raise ValueError("recovery Start identity is inconsistent")
-                if phase_index == 0 and start.phase == "rank-launch":
+                if topology == "singleton" and phase_index == 0 and start.phase is None:
+                    if node_id in rank_launches:
+                        raise ValueError("singleton recovery target is duplicated")
+                    rank_launches[node_id] = start
+                elif (
+                    topology == "distributed"
+                    and phase_index == 0
+                    and start.phase == "rank-launch"
+                ):
                     if node_id in rank_launches:
                         raise ValueError("recovery Start target is duplicated")
                     rank_launches[node_id] = start
-                elif phase_index == 1 and start.phase == "collective-readiness":
+                elif (
+                    topology == "distributed"
+                    and phase_index == 1
+                    and start.phase == "collective-readiness"
+                ):
                     readiness.append((node_id, start))
                 else:
                     raise ValueError("recovery Start phase is invalid")
     except (TypeError, ValueError) as error:
         raise RuntimePlanAuthorityError("recovery Start plan is invalid") from error
-    expected_nodes = {node.node_id: node for node in authority.nodes}
+    if set(rank_launches) != set(expected_nodes):
+        raise RuntimePlanAuthorityError("recovery Start target set is invalid")
+    if topology == "singleton":
+        node = next(iter(expected_nodes.values()))
+        stored_node = next(
+            item for item in stored.nodes if item.node_id == node.node_id
+        )
+        start = rank_launches[node.node_id]
+        if (
+            node.rank != 0
+            or node.role != "entrypoint"
+            or not stored_node.endpoint_owner
+            or (start.rank, start.role, start.world_size) != (0, "entrypoint", 1)
+        ):
+            raise RuntimePlanAuthorityError(
+                "singleton recovery Start placement is invalid"
+            )
+        return
+
     owners = [node for node in stored.nodes if node.endpoint_owner]
-    if (
-        set(rank_launches) != set(expected_nodes)
-        or len(readiness) != 1
-        or len(owners) != 1
-        or readiness[0][0] != owners[0].node_id
-    ):
+    if len(readiness) != 1 or len(owners) != 1 or readiness[0][0] != owners[0].node_id:
         raise RuntimePlanAuthorityError("recovery Start target set is invalid")
     for node_id, start in rank_launches.items():
         node = expected_nodes[node_id]
@@ -402,6 +475,14 @@ def _validate_recovery_start_generation(
             len(expected_nodes),
         ):
             raise RuntimePlanAuthorityError("recovery Start placement is invalid")
+    readiness_node = expected_nodes[readiness[0][0]]
+    readiness_start = readiness[0][1]
+    if (readiness_start.rank, readiness_start.role, readiness_start.world_size) != (
+        readiness_node.rank,
+        readiness_node.role,
+        len(expected_nodes),
+    ):
+        raise RuntimePlanAuthorityError("recovery readiness placement is invalid")
 
 
 def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthority:

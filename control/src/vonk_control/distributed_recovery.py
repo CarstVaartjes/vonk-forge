@@ -327,7 +327,10 @@ class DistributedRecoveryCoordinator:
 
 
 def recovery_start_plan(
-    payload: Mapping[str, object], *, now: datetime
+    payload: Mapping[str, object],
+    *,
+    now: datetime,
+    require_unexpired: bool = True,
 ) -> (
     tuple[tuple[tuple[tuple[str, Mapping[str, object]], ...], ...], dict[str, object]]
     | None
@@ -344,7 +347,7 @@ def recovery_start_plan(
         "start_phases",
     }:
         raise DistributedLifecycleError("distributed recovery authority is invalid")
-    enforce_recovery_deadline(payload, now=now)
+    enforce_recovery_deadline(payload, now=now, require_unexpired=require_unexpired)
     failed_rank = value["failed_rank"]
     deadline_value = value["deadline"]
     phases = _decode_phases(value.get("start_phases"))
@@ -356,7 +359,12 @@ def recovery_start_plan(
     return phases, marker
 
 
-def enforce_recovery_deadline(payload: Mapping[str, object], *, now: datetime) -> bool:
+def enforce_recovery_deadline(
+    payload: Mapping[str, object],
+    *,
+    now: datetime,
+    require_unexpired: bool = True,
+) -> bool:
     """Validate and enforce a retained recovery marker at a trust boundary."""
 
     value = payload.get("recovery")
@@ -384,7 +392,7 @@ def enforce_recovery_deadline(payload: Mapping[str, object], *, now: datetime) -
         ) from error
     if deadline.tzinfo is None or deadline.utcoffset() is None:
         raise DistributedLifecycleError("distributed recovery authority is invalid")
-    if _aware(now) >= _aware(deadline):
+    if require_unexpired and _aware(now) >= _aware(deadline):
         raise DistributedLifecycleError("distributed recovery deadline elapsed")
     return True
 
@@ -1311,7 +1319,7 @@ def _enqueue_recovery_stop(
         kind="recipe.stop",
         state="running",
         actor="system:distributed-recovery",
-        authority_revision=recipe_digest.removeprefix("sha256:"),
+        authority_revision=run.plan_digest.removeprefix("sha256:"),
         targets=targets,
         payload_digest=hashlib.sha256(canonical_message(job_payload)).hexdigest(),
         payload=job_payload,
@@ -1326,7 +1334,7 @@ def _enqueue_recovery_stop(
             job.id,
             node_id,
             "recipe.stop",
-            recipe_digest.removeprefix("sha256:"),
+            run.plan_digest.removeprefix("sha256:"),
             payload,
             operation_id=operation_id,
         )

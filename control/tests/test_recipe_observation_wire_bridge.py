@@ -56,6 +56,7 @@ from .test_recipe_operations import (
     NOW,
     ConcurrentPublisher,
     RecordingQueue,
+    _issue_exact_stop_grant,
     bind_route_publications,
     installed_recipe,
     setup_services,
@@ -1065,7 +1066,82 @@ def test_signed_singleton_absence_reboots_through_new_controller_processes(
         assert run.run_generation == 3
         assert node.observed_run_generation is None
         assert node.observation_process_running is None
-        assert claims and all(claim.state == "active" for claim in claims)
+    assert claims and all(claim.state == "active" for claim in claims)
+
+
+def test_singleton_recovery_stop_grant_survives_start_deadline(
+    tmp_path: Path,
+    recipe_observation_wire_probe: Path,
+    host_helper_wire_probe: Path,
+    postgres_engine,
+) -> None:
+    """An elapsed future-Start deadline cannot refuse exact old-run cleanup."""
+
+    (
+        now,
+        _app,
+        sessions,
+        run_id,
+        _start_id,
+        node_id,
+        _grant_public_key,
+        _binding,
+        _service,
+        queue,
+        _mapping_id,
+        _node_ids,
+        bound_service,
+        routes,
+    ) = _signed_absent_singleton(
+        tmp_path,
+        recipe_observation_wire_probe=recipe_observation_wire_probe,
+        host_helper_wire_probe=host_helper_wire_probe,
+        engine=postgres_engine,
+    )
+    now[0] = NOW + timedelta(seconds=4)
+    recovery = DistributedRecoveryCoordinator(
+        sessions,
+        routes=routes,
+        agent_jobs=queue,
+        clock=lambda: now[0],
+        recovery_run_stops=bound_service,
+        singleton_start_timeout_seconds=60,
+    )
+    assert recovery.tick()
+
+    with sessions() as session:
+        stop = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.stop",
+                Job.payload["owner_id"].as_string() == run_id,
+                Job.payload["recovery"].is_not(None),
+            )
+        )
+        assert stop is not None
+        recovery_marker = stop.payload.get("recovery")
+        assert isinstance(recovery_marker, Mapping)
+        deadline_text = recovery_marker.get("deadline")
+        assert isinstance(deadline_text, str)
+        deadline = datetime.fromisoformat(deadline_text)
+    grant_now = deadline + timedelta(seconds=1)
+    now[0] = grant_now
+
+    claim, payload, _grant = _issue_exact_stop_grant(
+        sessions,
+        node_id=node_id,
+        certificate_serial="serial-0",
+        grant_now=grant_now,
+    )
+
+    with sessions() as session:
+        parent = session.get(Job, stop.id)
+        run = session.get(RecipeRun, run_id)
+        assert parent is not None and run is not None
+        assert claim.job_id == parent.id
+        assert payload.run_generation + 1 == run.run_generation
+        assert parent.actor == "system:singleton-recovery"
+        assert parent.payload["plan_digest"] != run.plan_digest
+        assert parent.authority_revision == run.plan_digest.removeprefix("sha256:")
 
 
 def test_newer_workload_intent_wins_over_signed_singleton_reboot_recovery(

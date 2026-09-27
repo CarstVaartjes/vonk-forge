@@ -119,9 +119,7 @@ def runtime_plan_binding(
     }
 
 
-def service_stop_runtime_service() -> tuple[
-    HostRuntimeAuthorityService, str, str, str
-]:
+def service_stop_runtime_service() -> tuple[HostRuntimeAuthorityService, str, str, str]:
     service = runtime_service()
     node_id = "spk_" + "1" * 32
     job_id = "a4000000-0000-4000-8000-00000000000a"
@@ -135,9 +133,7 @@ def service_stop_runtime_service() -> tuple[
         start = RecipeStartPayload.model_validate_json(
             canonical_message(start_operation.payload)
         )
-        stop = stop_payload_from_start(
-            start, node_id, cancel_pending_start=False
-        )
+        stop = stop_payload_from_start(start, node_id, cancel_pending_start=False)
         stop_payload = json.loads(canonical_message(stop))
         parent_payload: dict[str, object] = {
             "schema_version": 1,
@@ -155,7 +151,7 @@ def service_stop_runtime_service() -> tuple[
                 ]
             ],
         }
-        authority_revision = start.recipe_content_sha256.removeprefix("sha256:")
+        authority_revision = start.plan_digest.removeprefix("sha256:")
         session.add(
             Job(
                 id=job_id,
@@ -911,9 +907,7 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
 
 
 def test_job_run_stop_grant_preserves_logical_and_runtime_target_identity() -> None:
-    service = runtime_service(
-        operation_kind="recipe.job.run.v1", cancel_requested=True
-    )
+    service = runtime_service(operation_kind="recipe.job.run.v1", cancel_requested=True)
     binding = runtime_plan_binding(service, ContainerRuntimeAction.STOP)
     grant = service.issue_grant(
         node_id="spk_" + "1" * 32,
@@ -975,9 +969,7 @@ def test_service_stop_grant_signs_exact_durable_prior_start() -> None:
 
 
 def test_job_run_stop_rejects_wrong_runtime_target() -> None:
-    service = runtime_service(
-        operation_kind="recipe.job.run.v1", cancel_requested=True
-    )
+    service = runtime_service(operation_kind="recipe.job.run.v1", cancel_requested=True)
     binding = runtime_plan_binding(service, ContainerRuntimeAction.STOP)
     wrong_target_binding: _RuntimePlanBinding = {
         **binding,
@@ -1005,9 +997,7 @@ def test_hook_bearing_job_run_stop_fails_closed_before_signing() -> None:
         include_stop_hook=True,
     )
     with service._sessions() as session:
-        operation = session.get(
-            AgentOperation, "30000000-0000-4000-8000-000000000003"
-        )
+        operation = session.get(AgentOperation, "30000000-0000-4000-8000-000000000003")
         assert operation is not None
         job_plan = RecipeJobRunRequest.model_validate_json(
             canonical_message(operation.payload)

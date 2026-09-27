@@ -2361,7 +2361,11 @@ class RecipeOperationService:
         if type(workload_intent_ordinal) is not int or workload_intent_ordinal < 1:
             raise RecipeOperationConflict("recovery workload intent is invalid")
         try:
-            decoded = recovery_start_plan({"recovery": dict(recovery_context)}, now=now)
+            decoded = recovery_start_plan(
+                {"recovery": dict(recovery_context)},
+                now=now,
+                require_unexpired=False,
+            )
         except DistributedLifecycleError as error:
             raise RecipeOperationConflict("recovery continuation is invalid") from error
         if decoded is None:
@@ -4873,7 +4877,7 @@ class RecipeOperationService:
                                 _topology_order(revision.document, "stop_order"),
                                 stop_node_payloads,
                             ),
-                            authority_digest=revision.content_digest,
+                            authority_digest=run.plan_digest.removeprefix("sha256:"),
                             now=now,
                             workload_intent_ordinal=_bound_workload_intent(job),
                         )
