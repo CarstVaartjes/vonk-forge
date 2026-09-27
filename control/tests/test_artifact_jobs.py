@@ -256,14 +256,14 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
     }
 
 
-def running_artifact_service(tmp_path, *, recipe_transform=None):
+def running_artifact_service(tmp_path, *, recipe_transform=None, engine=None):
     def transform(document: dict[str, object]) -> None:
         _configure_artifact_recipe(document)
         if recipe_transform is not None:
             recipe_transform(document)
 
     sessions, recipe_operations, queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, recipe_transform=transform
+        tmp_path, recipe_transform=transform, engine=engine
     )
     installed = installed_recipe(
         recipe_operations,

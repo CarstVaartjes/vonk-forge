@@ -1509,7 +1509,17 @@ class RecipeLifecyclePhaseExecutor:
                         "run-switch.stop-still-unresolved-after-cancellation"
                     )
                 stop_digest = fresh.plan_digest
+            profile_application_id = _string_or_none(
+                progress.get("profile_application_id")
+            )
             child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{target.run_id}"))
+            if profile_application_id is not None:
+                child_key = str(
+                    uuid.uuid5(
+                        uuid.UUID(child_key),
+                        f"profile-stop:{profile_application_id}",
+                    )
+                )
             try:
                 value = self._lifecycle.stop(
                     target.run_id,
@@ -1518,6 +1528,7 @@ class RecipeLifecyclePhaseExecutor:
                     request_id=child_key,
                     workload_intent_ordinal=ordinal,
                     profile_target_node_ids=profile_target_node_ids,
+                    profile_application_id=profile_application_id,
                 )
             except RecipeArtifactJobCancellationPending as pending:
                 raise RunSwitchIssuedWorkloadPending(
@@ -3101,6 +3112,7 @@ class RunSwitchOperationService:
         *,
         actor: str,
         workload_intent_ordinal: int | None = None,
+        profile_application_id: str | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
         if request.request_key is not None:
@@ -3130,6 +3142,7 @@ class RunSwitchOperationService:
             actor=actor,
             kind="recipe.stop.v2",
             workload_intent_ordinal=workload_intent_ordinal,
+            profile_application_id=profile_application_id,
         )
 
     def apply_profile_stop(

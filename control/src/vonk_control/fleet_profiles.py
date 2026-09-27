@@ -814,6 +814,7 @@ class RunSwitchFleetProfileAdapter:
                 session,
                 ordered_assignments,
                 scope_node_ids,
+                application_id=application_id,
                 installation_policy=intended.installation_policy,
                 reviewed_effects=_persisted_profile_plan(application).effects,
                 expected_images={
@@ -1504,6 +1505,7 @@ class RunSwitchFleetProfileAdapter:
                 ),
                 actor=actor,
                 workload_intent_ordinal=workload_intent_ordinal,
+                profile_application_id=application_id,
             )
         assignment_id = item.get("id")
         assignment = next(
@@ -1727,6 +1729,7 @@ class RunSwitchFleetProfileAdapter:
         assignments: tuple[FleetProfileAssignment, ...],
         scope_node_ids: tuple[str, ...],
         *,
+        application_id: str,
         installation_policy: str,
         reviewed_effects: FleetProfileEffects,
         expected_images: Mapping[str, RuntimeImageIdentity],
@@ -1737,6 +1740,7 @@ class RunSwitchFleetProfileAdapter:
             set(scope_node_ids),
             installation_policy,
             expected_images=expected_images,
+            excluded_application_id=application_id,
         )
         if any(reason.severity == "error" for reason in control.reasons):
             raise FleetProfileConflict(
@@ -2420,8 +2424,8 @@ class FleetProfileService:
             plan=plan,
         )
 
+    @staticmethod
     def _application_is_current_selection(
-        self,
         session: Session,
         application: FleetProfileApplication,
         progress: FleetProfileApplicationProgress | None = None,
@@ -3567,6 +3571,7 @@ class FleetProfileService:
         installation_policy: str,
         *,
         expected_images: Mapping[str, RuntimeImageIdentity] | None = None,
+        excluded_application_id: str | None = None,
     ) -> _ProfileControlEffects:
         """Reconcile SQL-owned effects without cache, planner or external work."""
         states = {
@@ -3645,7 +3650,9 @@ class FleetProfileService:
             # that case; the adapter waits for issued cancellation receipts
             # before publishing its final no-workload receipt.
             for pending in session.scalars(
-                select(Job).where(Job.state.in_(("queued", "running")))
+                select(Job).where(
+                    Job.state.in_(("queued", "running", "waiting-for-operator"))
+                )
             ):
                 if type(pending.payload.get("workload_intent_ordinal")) is not int:
                     continue
@@ -3665,15 +3672,13 @@ class FleetProfileService:
                 changed_nodes.update(members)
             for pending in session.scalars(
                 select(FleetProfileApplication).where(
-                    FleetProfileApplication.state.in_(("queued", "running")),
-                    func.coalesce(
-                        FleetProfileApplication.progress[
-                            "admission_pending"
-                        ].as_boolean(),
-                        False,
-                    ).is_(False),
+                    FleetProfileApplication.state.in_(
+                        ("queued", "running", "waiting-for-operator")
+                    ),
                 )
             ):
+                if pending.id == excluded_application_id:
+                    continue
                 try:
                     _pending_plan = _persisted_profile_plan(pending)
                 except FleetProfileConflict:
@@ -3864,7 +3869,11 @@ class FleetProfileService:
                 installations=sorted(
                     installation_effects, key=lambda effect: effect.installation_id
                 ),
-                superseded=cls._pending_effects(session, changed_nodes),
+                superseded=cls._pending_effects(
+                    session,
+                    changed_nodes,
+                    excluded_application_id=excluded_application_id,
+                ),
             ),
             changed_nodes=changed_nodes,
             unavailable_assignment_ids=unavailable_assignment_ids,
@@ -3874,14 +3883,19 @@ class FleetProfileService:
 
     @staticmethod
     def _pending_effects(
-        session: Session, changed_nodes: set[str]
+        session: Session,
+        changed_nodes: set[str],
+        *,
+        excluded_application_id: str | None = None,
     ) -> list[FleetProfilePendingEffect]:
         """Identify older orders whose effects the new decision supersedes."""
         effects: list[FleetProfilePendingEffect] = []
         if not changed_nodes:
             return effects
         for pending in session.scalars(
-            select(Job).where(Job.state.in_(("queued", "running")))
+            select(Job).where(
+                Job.state.in_(("queued", "running", "waiting-for-operator"))
+            )
         ):
             if type(pending.payload.get("workload_intent_ordinal")) is not int:
                 continue
@@ -3894,13 +3908,13 @@ class FleetProfileService:
                 )
         for pending in session.scalars(
             select(FleetProfileApplication).where(
-                FleetProfileApplication.state.in_(("queued", "running")),
-                func.coalesce(
-                    FleetProfileApplication.progress["admission_pending"].as_boolean(),
-                    False,
-                ).is_(False),
+                FleetProfileApplication.state.in_(
+                    ("queued", "running", "waiting-for-operator")
+                ),
             )
         ):
+            if pending.id == excluded_application_id:
+                continue
             try:
                 plan = _persisted_profile_plan(pending)
                 members = {node_id for step in plan.steps for node_id in step.node_ids}
@@ -4787,6 +4801,7 @@ class FleetProfileService:
                 set(frozen_nodes),
                 installation_policy,
                 expected_images=accepted_images,
+                excluded_application_id=application_id,
             )
             if (
                 control.effects != preview.effects
@@ -6592,8 +6607,8 @@ class FleetProfileService:
                 return row.id, row.actor
         return None
 
+    @staticmethod
     def _superseding_intent(
-        self,
         session: Session,
         row: FleetProfileApplication,
         progress: FleetProfileApplicationProgress,
@@ -6604,7 +6619,9 @@ class FleetProfileService:
         if intended is None:
             return True
         if row.selection_generation is not None:
-            if not self._application_is_current_selection(session, row, progress):
+            if not FleetProfileService._application_is_current_selection(
+                session, row, progress
+            ):
                 return True
         else:
             profile = session.get(FleetProfile, row.profile_id)

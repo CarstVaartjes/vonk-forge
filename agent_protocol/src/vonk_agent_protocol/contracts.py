@@ -460,6 +460,7 @@ def _validate_safe_keys(
             typed_compiled_plan_key = operation in {
                 AgentOperation.RECIPE_INSTALL,
                 AgentOperation.RECIPE_START,
+                AgentOperation.RECIPE_STOP,
                 AgentOperation.RECIPE_JOB_RUN,
             } and path[:1] == ("compiled_execution_plan",)
             if _is_path_key(key) and not (
@@ -537,6 +538,7 @@ def _validate_safe_keys(
             in {
                 AgentOperation.RECIPE_INSTALL,
                 AgentOperation.RECIPE_START,
+                AgentOperation.RECIPE_STOP,
                 AgentOperation.RECIPE_JOB_RUN,
             }
             and path[:1] == ("compiled_execution_plan",)
@@ -1099,13 +1101,24 @@ class AgentClaim(_ProtocolEnvelopeModel):
             and self.payload.node_id != self.node_id
         ):
             raise AgentProtocolError("reconciliation node does not match claim")
+        if (
+            self.operation is AgentOperation.RECIPE_STOP
+            and self.payload.node_id != self.node_id
+        ):
+            raise AgentProtocolError("stop node does not match claim")
+        compiled_plan = getattr(self.payload, "compiled_execution_plan", None)
+        if compiled_plan is not None and len(canonical_message(compiled_plan)) > (
+            MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+        ):
+            raise AgentProtocolError("compiled execution plan is too large")
         payload_document = json.loads(canonical_message(self.payload))
         maximum_bytes = (
-            MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+            MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
             if self.operation
             in {
                 AgentOperation.RECIPE_INSTALL,
                 AgentOperation.RECIPE_START,
+                AgentOperation.RECIPE_STOP,
                 AgentOperation.RECIPE_JOB_RUN,
             }
             else MAX_DOCUMENT_BYTES
@@ -1139,11 +1152,12 @@ class AgentClaim(_ProtocolEnvelopeModel):
                     name="payload",
                     operation=operation_kind,
                     maximum_bytes=(
-                        MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+                        MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
                         if operation_kind
                         in {
                             AgentOperation.RECIPE_INSTALL,
                             AgentOperation.RECIPE_START,
+                            AgentOperation.RECIPE_STOP,
                             AgentOperation.RECIPE_JOB_RUN,
                         }
                         else MAX_DOCUMENT_BYTES

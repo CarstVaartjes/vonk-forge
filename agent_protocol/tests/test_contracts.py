@@ -12,6 +12,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 from vonk_agent_protocol import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     MAX_DOCUMENT_BYTES,
     AgentClaim,
@@ -29,10 +30,27 @@ from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
 
 def valid_claim() -> dict[str, object]:
+    compiled_plan = json.loads(
+        (
+            Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json"
+        ).read_text(encoding="utf-8")
+    )
     payload = RecipeStopPayload(
-        schema_version=1,
+        schema_version=2,
         run_id="00000000-0000-4000-8000-000000000004",
+        target_runtime_id="00000000-0000-4000-8000-000000000004",
+        run_generation=1,
+        node_id="spk_00000000000000000000000000000001",
+        installation_id="00000000-0000-4000-8000-000000000005",
+        recipe_revision_id="00000000-0000-4000-8000-000000000006",
+        recipe_content_sha256=compiled_plan["identity"]["recipe_revision_sha256"],
+        mapping_id="00000000-0000-4000-8000-000000000007",
+        mapping_generation=1,
         plan_digest="a" * 64,
+        rank=0,
+        role="entrypoint",
+        world_size=1,
+        compiled_execution_plan=compiled_plan,
     ).model_dump(mode="json")
     return {
         "schema_version": 1,
@@ -656,14 +674,22 @@ def test_reconciliation_claim_node_must_match_its_bound_identity() -> None:
     }
     valid = claim_for_operation("recipe.reconcile", payload)
     valid["node_id"] = payload["node_id"]
-    valid["payload_digest"] = hashlib.sha256(
-        canonical_message(payload)
-    ).hexdigest()
+    valid["payload_digest"] = hashlib.sha256(canonical_message(payload)).hexdigest()
     AgentClaim.parse(valid)
 
     mismatched = valid | {"node_id": "spk_" + "2" * 32}
     with pytest.raises(AgentProtocolError, match="reconciliation node"):
         AgentClaim.parse(mismatched)
+
+
+def test_recipe_stop_claim_node_must_match_the_typed_stop_plan() -> None:
+    raw = valid_claim()
+    payload = dict(raw["payload"])
+    payload["node_id"] = "spk_" + "2" * 32
+    raw = claim_for_operation("recipe.stop", payload)
+
+    with pytest.raises(AgentProtocolError, match="stop node"):
+        AgentClaim.parse(raw)
 
 
 def schema(name: str) -> Draft202012Validator:
@@ -760,7 +786,12 @@ def test_parse_and_shared_schema_validator_reject_bogus_utc_dates(
 def test_shared_schema_validator_and_parser_reject_oversized_canonical_documents(
     name: str,
 ) -> None:
-    document = {"x": "x" * (MAX_DOCUMENT_BYTES + 1)}
+    maximum = (
+        MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
+        if name == "agent-job.schema.json"
+        else MAX_DOCUMENT_BYTES
+    )
+    document = {"x": "x" * (maximum + 1)}
     if name == "agent-job.schema.json":
         raw = valid_claim() | {
             "payload": document,
@@ -843,12 +874,15 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
     )
     oversized = deepcopy(corpus_payload)
     oversized["compiled_execution_plan"] = oversized_plan
-    with pytest.raises(AgentProtocolError, match="large"):
+    with pytest.raises(AgentProtocolError, match="large|at most"):
         AgentClaim.parse(claim_for_operation(operation, oversized))
 
     with pytest.raises(AgentProtocolError, match="large"):
         AgentClaim.parse(
-            claim_for_operation("recipe.stop", {"value": "x" * MAX_DOCUMENT_BYTES})
+            claim_for_operation(
+                "recipe.stop",
+                {"value": "x" * MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES},
+            )
         )
 
 
