@@ -2991,6 +2991,85 @@
           "title": "Request Sha256",
           "type": "string"
         },
+        "run_generation": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Generation"
+        },
+        "runtime_installation_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Installation Id"
+        },
+        "runtime_run_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Run Id"
+        },
+        "runtime_target_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Target Id"
+        },
+        "start_plan_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Plan Sha256"
+        },
+        "stop_plan_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop Plan Sha256"
+        },
         "type": {
           "const": "execute-container-runtime-request",
           "title": "Type",
@@ -3576,6 +3655,17 @@
           "title": "Job Id",
           "type": "string"
         },
+        "job_plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeJobRunRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "observation": {
           "anyOf": [
             {
@@ -3603,10 +3693,46 @@
           ],
           "default": null
         },
+        "run_generation": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Generation"
+        },
         "schema_version": {
           "const": 1,
           "title": "Schema Version",
           "type": "integer"
+        },
+        "start_plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeStartPayload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stop_plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeStopPayload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -6809,6 +6935,17 @@
           "title": "Job Id",
           "type": "string"
         },
+        "mapping_generation": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Mapping Generation",
+          "type": "integer"
+        },
+        "mapping_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Mapping Id",
+          "type": "string"
+        },
         "memory_floor_bytes": {
           "maximum": 17592186044416,
           "minimum": 0,
@@ -6867,6 +7004,12 @@
           "title": "Role",
           "type": "string"
         },
+        "run_generation": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Run Generation",
+          "type": "integer"
+        },
         "run_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Run Id",
@@ -6889,6 +7032,9 @@
         "job_id",
         "run_id",
         "installation_id",
+        "mapping_id",
+        "mapping_generation",
+        "run_generation",
         "recipe_revision_id",
         "recipe_content_sha256",
         "image_digest",
@@ -8350,17 +8496,10 @@
           "type": "string"
         },
         "run_generation": {
-          "anyOf": [
-            {
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Run Generation"
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Run Generation",
+          "type": "integer"
         },
         "run_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -8414,7 +8553,8 @@
         "compiled_execution_plan",
         "local_address",
         "master_address",
-        "master_port"
+        "master_port",
+        "run_generation"
       ],
       "title": "RecipeStartPayload",
       "type": "object"
@@ -8746,10 +8886,59 @@
           "title": "Cancel Pending Start",
           "type": "boolean"
         },
+        "compiled_execution_plan": {
+          "$ref": "#/$defs/CompiledExecutionPlan"
+        },
+        "installation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "mapping_generation": {
+          "minimum": 1,
+          "title": "Mapping Generation",
+          "type": "integer"
+        },
+        "mapping_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Mapping Id",
+          "type": "string"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
         "plan_digest": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Plan Digest",
           "type": "string"
+        },
+        "rank": {
+          "minimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "recipe_content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Recipe Content Sha256",
+          "type": "string"
+        },
+        "recipe_revision_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Recipe Revision Id",
+          "type": "string"
+        },
+        "role": {
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Role",
+          "type": "string"
+        },
+        "run_generation": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Run Generation",
+          "type": "integer"
         },
         "run_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -8757,15 +8946,37 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 1,
+          "const": 2,
           "title": "Schema Version",
+          "type": "integer"
+        },
+        "target_runtime_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Target Runtime Id",
+          "type": "string"
+        },
+        "world_size": {
+          "minimum": 1,
+          "title": "World Size",
           "type": "integer"
         }
       },
       "required": [
         "schema_version",
         "run_id",
-        "plan_digest"
+        "target_runtime_id",
+        "run_generation",
+        "node_id",
+        "installation_id",
+        "recipe_revision_id",
+        "recipe_content_sha256",
+        "mapping_id",
+        "mapping_generation",
+        "plan_digest",
+        "rank",
+        "role",
+        "world_size",
+        "compiled_execution_plan"
       ],
       "title": "RecipeStopPayload",
       "type": "object"

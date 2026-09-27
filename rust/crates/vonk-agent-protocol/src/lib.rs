@@ -73,35 +73,20 @@ use uuid::Uuid;
 pub const MAX_HELPER_FRAME_BYTES: usize = 1024 * 1024;
 /// The authoritative ceiling on one canonical [`HostRuntimeRequest`], in bytes.
 ///
-/// This, not [`MAX_HELPER_FRAME_BYTES`], is the budget that actually constrains
-/// a runtime request. The request document is never framed and never sent to
-/// the Controller: the agent canonicalizes it, writes it to the owner-only
-/// request file, and sends only its digest, and the privileged helper reads and
-/// parses that file. Before this constant the helper bounded that read with a
-/// private `64 * 1024` round number and refused an over-long document with the
-/// opaque `helper.unsafe_path`, so a legitimate many-shard command line the
-/// plan admits failed after a successful install and blamed the path.
-///
-/// The ceiling shares the frame basis deliberately, because the frame and the
-/// request document are the two large allocations of one host-runtime exchange:
-/// bounding the document by one frame keeps that exchange's largest allocation
-/// at two frames. The basis is the largest legitimate command line, not taste.
-/// The compiled plan admits 4096 artifacts, and at one `--mount` pair per
-/// mounted file the container command line can reach roughly 0.6 MiB, so a
-/// 64 KiB document ceiling was one larger model away from refusing a valid
-/// start; 1 MiB carries the plan-admitted maximum with margin. There is
-/// deliberately no per-argument ceiling beyond this: an inline engine
-/// configuration is a legal, possibly large, single element, and an empty or
-/// newline-bearing element is legal too.
-pub const MAX_HOST_RUNTIME_REQUEST_BYTES: usize = MAX_HELPER_FRAME_BYTES;
+/// A request carries its exact typed Start, JobRun, or Stop plan plus projected
+/// argv. The nested compiled plan is separately limited to 16 MiB and its
+/// enclosing typed claim to 18 MiB; one helper frame of additional space bounds
+/// the remaining request envelope. The helper reads the canonical request from
+/// the agent's owner-only request file after verifying its signed digest.
+pub const MAX_HOST_RUNTIME_REQUEST_BYTES: usize =
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES + MAX_HELPER_FRAME_BYTES;
 /// The bytes a canonical [`HostRuntimeRequest`] spends on everything but its
-/// argument payload: field names, the seven identity and version fields, the
-/// `installation_id`, the largest legal inspection `observation` binding, and
-/// the argument array's brackets and separators.
+/// argument payload: field names, identity and version fields, the largest legal
+/// inspection `observation` binding, optional typed-plan keys, and array syntax.
 ///
-/// The compiled plan's `MAX_ARGV_BYTES` is derived by subtracting this from
-/// [`MAX_HOST_RUNTIME_REQUEST_BYTES`], so the plan's own argv budget sits
-/// strictly below the request budget instead of exactly on it. The value
+/// The projected argv's `MAX_ARGV_BYTES` remains separately bounded by one
+/// helper frame minus this envelope. The complete request can be larger because
+/// it also carries the exact typed plan and compiled execution claim. The value
 /// is a margin above a measured maximum, never merely equal to one:
 /// `the_declared_envelope_covers_the_largest_contract_permitted_request`
 /// re-measures the largest contract-permitted envelope and fails if it
@@ -232,8 +217,8 @@ pub fn host_helper_grant_signing_bytes(
 /// `validate()` used to answer every violation with one opaque `ProtocolError`,
 /// so the agent could only report `helper_request_document_invalid` no matter
 /// which rule refused. A live blocked Start could not say whether the request
-/// version, the attempt, the argument envelope, the argument count or one
-/// argument's value was wrong.
+/// version, attempt, typed plan, argument envelope, or one argument's value was
+/// wrong.
 ///
 /// A rule that measures a bound carries it, so a refusal can report the limit
 /// and the observed value without ever carrying the argument itself.
@@ -248,6 +233,10 @@ pub enum HostRuntimeRequestRule {
     /// Arguments are present or absent for the wrong action.
     #[error("host runtime request argument presence is invalid")]
     ArgumentsPresence,
+    /// A typed start/stop plan is absent, duplicated, or bound to another
+    /// generation.
+    #[error("host runtime request plan binding is invalid")]
+    PlanBinding,
     /// An installation identity is present or absent for the wrong action.
     #[error("host runtime request installation identity is invalid")]
     InstallationIdentity,
@@ -257,6 +246,9 @@ pub enum HostRuntimeRequestRule {
     /// bytes, so this rule always fires before any derived count could.
     #[error("host runtime request document exceeds the bounded exchange")]
     RequestBytes { limit: u64, observed: u64 },
+    /// A typed plan or its nested compiled plan exceeds its declared ceiling.
+    #[error("host runtime request plan exceeds its canonical byte ceiling")]
+    PlanBytes { limit: u64, observed: u64 },
     /// An argument carries a NUL byte, which an exec argv cannot frame.
     #[error("host runtime request argument carries a NUL byte")]
     ArgumentNulByte { observed: u64 },
@@ -278,7 +270,9 @@ impl HostRuntimeRequestRule {
     /// with no numeric ceiling (a refused byte, not a refused length).
     pub fn bound(self) -> Option<(Option<u64>, u64)> {
         match self {
-            Self::RequestBytes { limit, observed } => Some((Some(limit), observed)),
+            Self::RequestBytes { limit, observed } | Self::PlanBytes { limit, observed } => {
+                Some((Some(limit), observed))
+            }
             Self::ArgumentNulByte { observed } => Some((None, observed)),
             _ => None,
         }
@@ -296,7 +290,9 @@ impl HostRuntimeRequest {
         if self.arguments.is_empty()
             != matches!(
                 self.action,
-                HostRuntimeAction::RuntimePreflight | HostRuntimeAction::InstallationCleanup
+                HostRuntimeAction::RuntimePreflight
+                    | HostRuntimeAction::Stop
+                    | HostRuntimeAction::InstallationCleanup
             )
         {
             return Err(HostRuntimeRequestRule::ArgumentsPresence);
@@ -311,6 +307,46 @@ impl HostRuntimeRequest {
                 if valid_reconciliation_identity(identity)
                     && self.installation_id == Some(identity.installation_id) => {}
             _ => return Err(HostRuntimeRequestRule::InstallationIdentity),
+        }
+        match self.action {
+            HostRuntimeAction::Start => {
+                if (self.start_plan.is_none() == self.job_plan.is_none())
+                    || self.stop_plan.is_some()
+                {
+                    return Err(HostRuntimeRequestRule::PlanBinding);
+                }
+                if let Some(plan) = &self.start_plan {
+                    if self.run_generation != Some(plan.run_generation) {
+                        return Err(HostRuntimeRequestRule::PlanBinding);
+                    }
+                    validate_runtime_plan_size(plan, &plan.compiled_execution_plan)?;
+                } else if let Some(plan) = &self.job_plan {
+                    if self.run_generation != Some(plan.run_generation) {
+                        return Err(HostRuntimeRequestRule::PlanBinding);
+                    }
+                    validate_runtime_plan_size(plan, &plan.compiled_execution_plan)?;
+                }
+            }
+            HostRuntimeAction::Stop => {
+                let Some(plan) = &self.stop_plan else {
+                    return Err(HostRuntimeRequestRule::PlanBinding);
+                };
+                if self.start_plan.is_some()
+                    || self.job_plan.is_some()
+                    || self.run_generation != Some(plan.run_generation)
+                {
+                    return Err(HostRuntimeRequestRule::PlanBinding);
+                }
+                validate_runtime_plan_size(plan, &plan.compiled_execution_plan)?;
+            }
+            _ if self.start_plan.is_some()
+                || self.job_plan.is_some()
+                || self.stop_plan.is_some()
+                || self.run_generation.is_some() =>
+            {
+                return Err(HostRuntimeRequestRule::PlanBinding);
+            }
+            _ => {}
         }
         let encoded = canonical_json(self).map_err(|_| HostRuntimeRequestRule::Encoding)?;
         if encoded.len() > MAX_HOST_RUNTIME_REQUEST_BYTES {
@@ -349,6 +385,28 @@ impl HostRuntimeRequest {
     }
 }
 
+fn validate_runtime_plan_size<T: Serialize, C: Serialize>(
+    plan: &T,
+    compiled_execution_plan: &C,
+) -> Result<(), HostRuntimeRequestRule> {
+    let compiled_bytes =
+        canonical_json(compiled_execution_plan).map_err(|_| HostRuntimeRequestRule::Encoding)?;
+    if compiled_bytes.len() > MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES {
+        return Err(HostRuntimeRequestRule::PlanBytes {
+            limit: MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64,
+            observed: compiled_bytes.len() as u64,
+        });
+    }
+    let plan_bytes = canonical_json(plan).map_err(|_| HostRuntimeRequestRule::Encoding)?;
+    if plan_bytes.len() > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES {
+        return Err(HostRuntimeRequestRule::PlanBytes {
+            limit: MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as u64,
+            observed: plan_bytes.len() as u64,
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod installation_cleanup_contract_tests {
     use super::*;
@@ -362,9 +420,13 @@ mod installation_cleanup_contract_tests {
             attempt: 1,
             fence: Uuid::new_v4(),
             arguments: Vec::new(),
+            job_plan: None,
             observation: None,
             installation_id,
             reconciliation_identity: None,
+            run_generation: None,
+            start_plan: None,
+            stop_plan: None,
         }
     }
 
@@ -430,6 +492,7 @@ mod host_runtime_request_bound_tests {
     use uuid::Uuid;
 
     fn start(arguments: Vec<String>) -> HostRuntimeRequest {
+        let plan = super::recipe_start_tests::valid_start_plan();
         HostRuntimeRequest {
             schema_version: 1,
             action: HostRuntimeAction::Start,
@@ -438,9 +501,13 @@ mod host_runtime_request_bound_tests {
             attempt: 1,
             fence: Uuid::new_v4(),
             arguments,
+            job_plan: None,
             observation: None,
             installation_id: None,
             reconciliation_identity: None,
+            run_generation: Some(plan.run_generation),
+            start_plan: Some(plan),
+            stop_plan: None,
         }
     }
 
@@ -490,9 +557,13 @@ mod host_runtime_request_bound_tests {
             attempt: binding.run_generation,
             fence: Uuid::new_v4(),
             arguments: Vec::new(),
+            job_plan: None,
             observation: Some(binding),
             installation_id: None,
             reconciliation_identity: None,
+            run_generation: None,
+            start_plan: None,
+            stop_plan: None,
         };
         let measured = canonical_length(&request);
         assert!(
@@ -1345,6 +1416,11 @@ impl RecipeOperationRequest {
         {
             return Err(ProtocolError::Identity("reconciliation node"));
         }
+        if let Self::Stop(value) = &request
+            && value.node_id != claim.node_id
+        {
+            return Err(ProtocolError::Identity("stop node"));
+        }
         Ok(request)
     }
 
@@ -1372,28 +1448,19 @@ impl RecipeOperationRequest {
                     && value.compiled_execution_plan.schema_version == 2
             }
             Self::Start(value) => {
-                let valid_phase = match (&value.phase, &value.start_deadline, value.run_generation)
-                {
+                let valid_phase = match (&value.phase, &value.start_deadline) {
                     // Role-ordered distributed starts are deliberately
                     // unphased.  The collective readiness variant carries
                     // the complete phase envelope below.
-                    (None, None, None) => value.world_size > 1,
-                    // A singleton has no rendezvous phase, but still carries
-                    // its run generation so its exact observation binding is
-                    // persisted from the initial start.
-                    (None, None, Some(generation)) => generation > 0,
-                    (Some(RecipeStartPhase::RankLaunch), Some(deadline), Some(generation)) => {
-                        generation > 0
+                    (None, None) => value.run_generation > 0,
+                    (Some(RecipeStartPhase::RankLaunch), Some(deadline)) => {
+                        value.run_generation > 0
                             && value.world_size > 1
                             && chrono::DateTime::parse_from_rfc3339(deadline)
                                 .is_ok_and(|deadline| deadline.offset().local_minus_utc() == 0)
                     }
-                    (
-                        Some(RecipeStartPhase::CollectiveReadiness),
-                        Some(deadline),
-                        Some(generation),
-                    ) => {
-                        generation > 0
+                    (Some(RecipeStartPhase::CollectiveReadiness), Some(deadline)) => {
+                        value.run_generation > 0
                             && value.world_size > 1
                             && value.local_address.is_some()
                             && value.local_address == value.master_address
@@ -1403,6 +1470,11 @@ impl RecipeOperationRequest {
                     _ => false,
                 };
                 value.schema_version == 2
+                    && (1..=i32::MAX as u32).contains(&value.run_generation)
+                    && value.run_id.get_version() == Some(uuid::Version::Random)
+                    && value.installation_id.get_version() == Some(uuid::Version::Random)
+                    && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
+                    && value.mapping_id.get_version() == Some(uuid::Version::Random)
                     && lower_hex(&value.plan_digest, 64)
                     && lower_hex(&value.recipe_content_sha256, 64)
                     && valid_oci_digest(&value.image_digest)
@@ -1445,7 +1517,7 @@ impl RecipeOperationRequest {
                             .memory_kind
                             .to_string()
             }
-            Self::Stop(value) => valid_common(value.schema_version, &value.plan_digest),
+            Self::Stop(value) => validate_recipe_stop(value),
             Self::Uninstall(value) => {
                 valid_common(value.schema_version, &value.plan_digest)
                     && lower_hex(&value.recipe_content_sha256, 64)
@@ -1536,9 +1608,10 @@ mod recipe_start_tests {
             "plan_digest": "b".repeat(64),
             "port": 8000,
             "rank": rank,
-            "recipe_content_sha256": "c".repeat(64),
+            "recipe_content_sha256": "a".repeat(64),
             "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
             "reserved_memory_bytes": 1024,
+            "run_generation": 1,
             "memory_floor_bytes": 2 * 1024_u64.pow(3),
             "memory_kind": "unified",
             "role": if rank == 0 { "entrypoint" } else { "worker" },
@@ -1546,12 +1619,6 @@ mod recipe_start_tests {
             "schema_version": 2,
             "world_size": world_size,
         });
-        if world_size == 1 {
-            payload
-                .as_object_mut()
-                .unwrap()
-                .insert("run_generation".to_owned(), Value::from(1));
-        }
         if let Some(phase) = phase {
             let document = payload.as_object_mut().unwrap();
             document.insert("phase".to_owned(), Value::String(phase.to_owned()));
@@ -1565,6 +1632,10 @@ mod recipe_start_tests {
     }
 
     fn claim(payload: Value) -> Result<AgentClaim, ProtocolError> {
+        claim_for("recipe.start", payload)
+    }
+
+    fn claim_for(operation: &str, payload: Value) -> Result<AgentClaim, ProtocolError> {
         let payload: generated::AgentClaimPayload = serde_json::from_value(payload)?;
         Ok(AgentClaim {
             attempt: 1,
@@ -1573,7 +1644,7 @@ mod recipe_start_tests {
             fence: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
             job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            operation: "recipe.start".parse().unwrap(),
+            operation: operation.parse().unwrap(),
             operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000007").unwrap(),
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
@@ -1588,12 +1659,46 @@ mod recipe_start_tests {
         }
     }
 
+    pub(super) fn valid_start_plan() -> RecipeStartRequest {
+        parsed_start(start_payload(1, 0, None, None, None)).unwrap()
+    }
+
+    fn stop_payload() -> Value {
+        let start = start_payload(1, 0, None, None, None);
+        serde_json::json!({
+            "schema_version": 2,
+            "run_id": start["run_id"],
+            "target_runtime_id": start["run_id"],
+            "run_generation": 1,
+            "node_id": "spk_0123456789abcdef0123456789abcdef",
+            "installation_id": start["installation_id"],
+            "recipe_revision_id": start["recipe_revision_id"],
+            "recipe_content_sha256": start["recipe_content_sha256"],
+            "mapping_id": start["mapping_id"],
+            "mapping_generation": 1,
+            "plan_digest": start["plan_digest"],
+            "rank": start["rank"],
+            "role": start["role"],
+            "world_size": start["world_size"],
+            "compiled_execution_plan": start["compiled_execution_plan"],
+            "cancel_pending_start": false,
+        })
+    }
+
+    fn parsed_stop(payload: Value) -> Result<RecipeStopRequest, ProtocolError> {
+        let claim = claim_for("recipe.stop", payload)?;
+        match RecipeOperationRequest::parse(&claim)? {
+            RecipeOperationRequest::Stop(request) => Ok(request),
+            _ => unreachable!(),
+        }
+    }
+
     #[test]
     fn schema_two_start_payload_allows_unphased_distributed_role_ordering() {
         let single = parsed_start(start_payload(1, 0, None, None, None)).unwrap();
         assert_eq!(single.phase, None);
         assert_eq!(single.start_deadline, None);
-        assert_eq!(single.run_generation, Some(1));
+        assert_eq!(single.run_generation, 1);
         let unphased_wire = serde_json::to_value(single).unwrap();
         assert!(unphased_wire.get("phase").is_none());
         assert!(unphased_wire.get("start_deadline").is_none());
@@ -1617,7 +1722,82 @@ mod recipe_start_tests {
         .unwrap();
         assert_eq!(distributed.phase, None);
         assert_eq!(distributed.start_deadline, None);
-        assert_eq!(distributed.run_generation, None);
+        assert_eq!(distributed.run_generation, 1);
+    }
+
+    #[test]
+    fn typed_runtime_start_and_exact_stop_require_matching_plan_and_generation() {
+        let start = valid_start_plan();
+        let request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Start,
+            job_id: Uuid::new_v4(),
+            operation_id: Uuid::new_v4(),
+            attempt: 1,
+            fence: Uuid::new_v4(),
+            arguments: vec!["sha256:image".to_owned(), "run".to_owned()],
+            job_plan: None,
+            observation: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: Some(start.run_generation),
+            start_plan: Some(start.clone()),
+            stop_plan: None,
+        };
+        assert!(request.validate().is_ok());
+
+        let mut missing_start = request.clone();
+        missing_start.start_plan = None;
+        assert_eq!(
+            missing_start.validate(),
+            Err(HostRuntimeRequestRule::PlanBinding)
+        );
+
+        let stop = parsed_stop(stop_payload()).unwrap();
+        let stop_request = HostRuntimeRequest {
+            schema_version: 1,
+            action: HostRuntimeAction::Stop,
+            job_id: stop.target_runtime_id,
+            operation_id: Uuid::new_v4(),
+            attempt: 1,
+            fence: Uuid::new_v4(),
+            arguments: Vec::new(),
+            job_plan: None,
+            observation: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: Some(stop.run_generation),
+            start_plan: None,
+            stop_plan: Some(stop),
+        };
+        assert!(stop_request.validate().is_ok());
+        let mut wrong_generation = stop_request.clone();
+        wrong_generation.run_generation = Some(2);
+        assert_eq!(
+            wrong_generation.validate(),
+            Err(HostRuntimeRequestRule::PlanBinding)
+        );
+        let mut argv_stop = stop_request;
+        argv_stop.arguments.push("run-id".to_owned());
+        assert_eq!(
+            argv_stop.validate(),
+            Err(HostRuntimeRequestRule::ArgumentsPresence)
+        );
+    }
+
+    #[test]
+    fn typed_stop_must_match_claim_node_and_compiled_placement() {
+        let mut payload = stop_payload();
+        payload["node_id"] = Value::String("spk_abcdef0123456789abcdef0123456789".to_owned());
+        let claim = claim_for("recipe.stop", payload).unwrap();
+        assert!(matches!(
+            RecipeOperationRequest::parse(&claim),
+            Err(ProtocolError::Identity("stop node"))
+        ));
+
+        let mut payload = stop_payload();
+        payload["rank"] = Value::from(1);
+        assert!(parsed_stop(payload).is_err());
     }
 
     #[test]
@@ -1939,6 +2119,13 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
                 .map(|mapping| mapping.extensions.len())
                 .sum::<usize>();
     value.schema_version == 1
+        && value.job_id.get_version() == Some(uuid::Version::Random)
+        && value.run_id.get_version() == Some(uuid::Version::Random)
+        && value.installation_id.get_version() == Some(uuid::Version::Random)
+        && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
+        && value.mapping_id.get_version() == Some(uuid::Version::Random)
+        && value.mapping_generation >= 1
+        && (1..=i32::MAX as u32).contains(&value.run_generation)
         && lower_hex(&value.recipe_content_sha256, 64)
         && valid_oci_digest(&value.image_digest)
         && lower_hex(&value.plan_digest, 64)
@@ -1990,6 +2177,36 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
                 .placement
                 .memory_kind
                 .to_string()
+}
+
+fn validate_recipe_stop(value: &RecipeStopRequest) -> bool {
+    let placement = &value.compiled_execution_plan.runtime.placement;
+    value.schema_version == 2
+        && value.run_id.get_version() == Some(uuid::Version::Random)
+        && value.target_runtime_id.get_version() == Some(uuid::Version::Random)
+        && (1..=i32::MAX as u32).contains(&value.run_generation)
+        && valid_node_id(&value.node_id)
+        && value.installation_id.get_version() == Some(uuid::Version::Random)
+        && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
+        && value.mapping_id.get_version() == Some(uuid::Version::Random)
+        && value.mapping_generation >= 1
+        && lower_hex(&value.recipe_content_sha256, 64)
+        && lower_hex(&value.plan_digest, 64)
+        && value.world_size >= 1
+        && value.rank < value.world_size
+        && valid_role(&value.role)
+        && value.compiled_execution_plan.schema_version == 2
+        && value
+            .compiled_execution_plan
+            .identity
+            .recipe_revision_sha256
+            == value.recipe_content_sha256
+        && (value.rank, value.role.as_str(), value.world_size)
+            == (
+                placement.rank as u64,
+                placement.role.as_str(),
+                placement.world_size as u64,
+            )
 }
 
 fn valid_job_slot(value: &str) -> bool {
@@ -2452,6 +2669,9 @@ mod recipe_job_tests {
             run_id: Uuid::new_v4(),
             installation_id: Uuid::new_v4(),
             recipe_revision_id: Uuid::new_v4(),
+            mapping_id: Uuid::new_v4(),
+            mapping_generation: 1,
+            run_generation: 1,
             recipe_content_sha256: "b".repeat(64),
             image_digest: format!("sha256:{}", "c".repeat(64)),
             plan_digest: "d".repeat(64),
@@ -2679,6 +2899,12 @@ mod host_helper_reconciliation_identity_tests {
                     observation_identity_sha256: None,
                     installation_id: Some(identity.installation_id),
                     reconciliation_identity: Some(identity),
+                    run_generation: None,
+                    runtime_installation_id: None,
+                    runtime_run_id: None,
+                    runtime_target_id: None,
+                    start_plan_sha256: None,
+                    stop_plan_sha256: None,
                 },
             ),
         }
@@ -2759,9 +2985,13 @@ mod recipe_run_inspection_tests {
             attempt: binding.run_generation,
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
+            job_plan: None,
             observation: Some(binding.clone()),
             installation_id: None,
             reconciliation_identity: None,
+            run_generation: None,
+            start_plan: None,
+            stop_plan: None,
         };
         request.validate().unwrap();
 
@@ -2860,6 +3090,12 @@ mod recipe_run_inspection_tests {
                         observation_identity_sha256: Some(identity_sha256.clone()),
                         installation_id: None,
                         reconciliation_identity: None,
+                        run_generation: None,
+                        runtime_installation_id: None,
+                        runtime_run_id: None,
+                        runtime_target_id: None,
+                        start_plan_sha256: None,
+                        stop_plan_sha256: None,
                     },
                 ),
             },

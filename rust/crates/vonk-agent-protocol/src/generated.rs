@@ -1941,6 +1941,18 @@ pub struct ExecuteContainerRuntimeRequestOperation {
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub run_generation: ::std::option::Option<u32>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub runtime_run_id: ::std::option::Option<::uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub runtime_target_id: ::std::option::Option<::uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub start_plan_sha256: ::std::option::Option<::std::string::String>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub stop_plan_sha256: ::std::option::Option<::std::string::String>,
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
 }
@@ -2419,11 +2431,19 @@ pub struct HostRuntimeRequest {
     pub installation_id: ::std::option::Option<::uuid::Uuid>,
     pub job_id: ::uuid::Uuid,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub job_plan: ::std::option::Option<RecipeJobRunRequest>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
     pub operation_id: ::uuid::Uuid,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub run_generation: ::std::option::Option<u32>,
     pub schema_version: u8,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub start_plan: ::std::option::Option<RecipeStartPayload>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub stop_plan: ::std::option::Option<RecipeStopPayload>,
 }
 #[derive(
     ::serde::Deserialize,
@@ -4191,6 +4211,8 @@ pub struct RecipeJobRunRequest {
     pub installation_id: ::uuid::Uuid,
     pub interface: RecipeJobRunRequestInterface,
     pub job_id: ::uuid::Uuid,
+    pub mapping_generation: u64,
+    pub mapping_id: ::uuid::Uuid,
     pub memory_floor_bytes: u64,
     pub memory_kind: RecipeJobRunRequestMemoryKind,
     pub output_limits: RecipeJobOutputLimits,
@@ -4201,6 +4223,7 @@ pub struct RecipeJobRunRequest {
     pub recipe_revision_id: ::uuid::Uuid,
     pub reserved_memory_bytes: u64,
     pub role: ::std::string::String,
+    pub run_generation: u32,
     pub run_id: ::uuid::Uuid,
     pub schema_version: u8,
     pub timeout_seconds: u32,
@@ -4695,8 +4718,7 @@ pub struct RecipeStartPayload {
     pub recipe_revision_id: ::uuid::Uuid,
     pub reserved_memory_bytes: u64,
     pub role: ::std::string::String,
-    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_generation: ::std::option::Option<u64>,
+    pub run_generation: u32,
     pub run_id: ::uuid::Uuid,
     pub schema_version: u8,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -4913,9 +4935,21 @@ pub struct RecipeStartSingleEvidence {
 #[derive(Eq)]
 pub struct RecipeStopPayload {
     pub cancel_pending_start: bool,
+    pub compiled_execution_plan: CompiledExecutionPlan,
+    pub installation_id: ::uuid::Uuid,
+    pub mapping_generation: u64,
+    pub mapping_id: ::uuid::Uuid,
+    pub node_id: ::std::string::String,
     pub plan_digest: ::std::string::String,
+    pub rank: u64,
+    pub recipe_content_sha256: ::std::string::String,
+    pub recipe_revision_id: ::uuid::Uuid,
+    pub role: ::std::string::String,
+    pub run_generation: u32,
     pub run_id: ::uuid::Uuid,
     pub schema_version: u8,
+    pub target_runtime_id: ::uuid::Uuid,
+    pub world_size: u64,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -8443,6 +8477,18 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub run_generation: ::std::option::Option<u32>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub runtime_run_id: ::std::option::Option<::uuid::Uuid>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub runtime_target_id: ::std::option::Option<::uuid::Uuid>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub start_plan_sha256: ::std::option::Option<::std::string::String>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub stop_plan_sha256: ::std::option::Option<::std::string::String>,
             #[serde(rename = "type")]
             pub type_: ::std::string::String,
         }
@@ -8457,6 +8503,12 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             operation_id: raw.operation_id,
             reconciliation_identity: raw.reconciliation_identity,
             request_sha256: raw.request_sha256,
+            run_generation: raw.run_generation,
+            runtime_installation_id: raw.runtime_installation_id,
+            runtime_run_id: raw.runtime_run_id,
+            runtime_target_id: raw.runtime_target_id,
+            start_plan_sha256: raw.start_plan_sha256,
+            stop_plan_sha256: raw.stop_plan_sha256,
             type_: raw.type_,
         })
     }
@@ -8883,11 +8935,19 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             pub installation_id: ::std::option::Option<::uuid::Uuid>,
             pub job_id: ::uuid::Uuid,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub job_plan: ::std::option::Option<RecipeJobRunRequest>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
             pub operation_id: ::uuid::Uuid,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub run_generation: ::std::option::Option<u32>,
             pub schema_version: u8,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub start_plan: ::std::option::Option<RecipeStartPayload>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            pub stop_plan: ::std::option::Option<RecipeStopPayload>,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
@@ -8897,10 +8957,14 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             fence: raw.fence,
             installation_id: raw.installation_id,
             job_id: raw.job_id,
+            job_plan: raw.job_plan,
             observation: raw.observation,
             operation_id: raw.operation_id,
             reconciliation_identity: raw.reconciliation_identity,
+            run_generation: raw.run_generation,
             schema_version: raw.schema_version,
+            start_plan: raw.start_plan,
+            stop_plan: raw.stop_plan,
         })
     }
 }
@@ -11151,6 +11215,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
             pub installation_id: ::uuid::Uuid,
             pub interface: RecipeJobRunRequestInterface,
             pub job_id: ::uuid::Uuid,
+            pub mapping_generation: u64,
+            pub mapping_id: ::uuid::Uuid,
             pub memory_floor_bytes: u64,
             pub memory_kind: RecipeJobRunRequestMemoryKind,
             pub output_limits: RecipeJobOutputLimits,
@@ -11161,6 +11227,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
             pub recipe_revision_id: ::uuid::Uuid,
             pub reserved_memory_bytes: u64,
             pub role: ::std::string::String,
+            pub run_generation: u32,
             pub run_id: ::uuid::Uuid,
             pub schema_version: u8,
             pub timeout_seconds: u32,
@@ -11176,6 +11243,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
             installation_id: raw.installation_id,
             interface: raw.interface,
             job_id: raw.job_id,
+            mapping_generation: raw.mapping_generation,
+            mapping_id: raw.mapping_id,
             memory_floor_bytes: raw.memory_floor_bytes,
             memory_kind: raw.memory_kind,
             output_limits: raw.output_limits,
@@ -11186,6 +11255,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
             recipe_revision_id: raw.recipe_revision_id,
             reserved_memory_bytes: raw.reserved_memory_bytes,
             role: raw.role,
+            run_generation: raw.run_generation,
             run_id: raw.run_id,
             schema_version: raw.schema_version,
             timeout_seconds: raw.timeout_seconds,
@@ -11838,8 +11908,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
             pub recipe_revision_id: ::uuid::Uuid,
             pub reserved_memory_bytes: u64,
             pub role: ::std::string::String,
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_generation: ::std::option::Option<u64>,
+            pub run_generation: u32,
             pub run_id: ::uuid::Uuid,
             pub schema_version: u8,
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -12062,16 +12131,40 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopPayload {
         #[derive(Eq)]
         struct Raw {
             pub cancel_pending_start: bool,
+            pub compiled_execution_plan: CompiledExecutionPlan,
+            pub installation_id: ::uuid::Uuid,
+            pub mapping_generation: u64,
+            pub mapping_id: ::uuid::Uuid,
+            pub node_id: ::std::string::String,
             pub plan_digest: ::std::string::String,
+            pub rank: u64,
+            pub recipe_content_sha256: ::std::string::String,
+            pub recipe_revision_id: ::uuid::Uuid,
+            pub role: ::std::string::String,
+            pub run_generation: u32,
             pub run_id: ::uuid::Uuid,
             pub schema_version: u8,
+            pub target_runtime_id: ::uuid::Uuid,
+            pub world_size: u64,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             cancel_pending_start: raw.cancel_pending_start,
+            compiled_execution_plan: raw.compiled_execution_plan,
+            installation_id: raw.installation_id,
+            mapping_generation: raw.mapping_generation,
+            mapping_id: raw.mapping_id,
+            node_id: raw.node_id,
             plan_digest: raw.plan_digest,
+            rank: raw.rank,
+            recipe_content_sha256: raw.recipe_content_sha256,
+            recipe_revision_id: raw.recipe_revision_id,
+            role: raw.role,
+            run_generation: raw.run_generation,
             run_id: raw.run_id,
             schema_version: raw.schema_version,
+            target_runtime_id: raw.target_runtime_id,
+            world_size: raw.world_size,
         })
     }
 }
