@@ -105,6 +105,35 @@ def _setup(tmp_path, *, node_count=1):
     return sessions, queue, clock, nodes[0], service, arguments
 
 
+def test_failed_probe_is_reissued_after_backoff(tmp_path):
+    sessions, _queue, clock, _node, service, arguments = _setup(tmp_path)
+    checkpoint, blocked = service.ensure(previous=None, **arguments)
+    assert blocked is None
+    assert checkpoint.pending_job_id is not None
+    with sessions.begin() as session:
+        child = session.get(Job, checkpoint.pending_job_id)
+        operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == checkpoint.pending_job_id
+            )
+        )
+        assert child is not None and operation is not None
+        child.state = "failed"
+        child.status_reason = "runtime_preflight.execution_failed"
+        operation.state = "failed"
+
+    waiting, blocked = service.ensure(previous=checkpoint, **arguments)
+    assert blocked is None
+    assert waiting.pending_job_id is None
+    assert waiting.next_check_at is not None
+
+    clock.now = waiting.next_check_at
+    retried, blocked = service.ensure(previous=waiting, **arguments)
+    assert blocked is None
+    assert retried.pending_job_id is not None
+    assert retried.pending_job_id != checkpoint.pending_job_id
+
+
 def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path):
     from cryptography.hazmat.primitives.asymmetric import ed25519
     from vonk_agent_protocol import (
@@ -321,26 +350,22 @@ def test_disconnected_probe_keeps_exact_child_until_recovery_after_restart(
         assert len(list(session.scalars(select(AgentOperation)))) == 1
 
 
-@pytest.mark.parametrize(
-    ("state", "reason"),
-    [("failed", "permission_denied"), ("cancelled", "operator_cancelled")],
-)
-def test_terminal_probe_failure_remains_an_explicit_blocker(tmp_path, state, reason):
+def test_permission_denied_probe_failure_remains_an_explicit_blocker(tmp_path):
     sessions, _, clock, _, service, arguments = _setup(tmp_path)
     checkpoint, _ = service.ensure(**arguments, previous=None)
     with sessions.begin() as session:
         child = session.get(Job, checkpoint.pending_job_id)
         assert child is not None
-        child.state = state
-        child.status_reason = reason
+        child.state = "failed"
+        child.status_reason = "permission_denied"
     clock.now += timedelta(days=1)
     blocked, error = service.ensure(**arguments, previous=checkpoint)
-    assert error == reason
-    assert blocked.pending_job_id == checkpoint.pending_job_id
+    assert error == "permission_denied"
+    assert blocked.pending_job_id is None
     assert blocked.attempts == checkpoint.attempts
 
 
-def test_successful_probe_without_receipt_remains_an_explicit_blocker(tmp_path):
+def test_successful_probe_without_receipt_is_reissued(tmp_path):
     sessions, _, clock, _, service, arguments = _setup(tmp_path)
     checkpoint, _ = service.ensure(**arguments, previous=None)
     with sessions.begin() as session:
@@ -349,12 +374,13 @@ def test_successful_probe_without_receipt_remains_an_explicit_blocker(tmp_path):
         child.state = "succeeded"
     clock.now += timedelta(days=1)
     blocked, error = service.ensure(**arguments, previous=checkpoint)
-    assert error == "runtime_preflight.receipt_missing"
-    assert blocked.pending_job_id == checkpoint.pending_job_id
+    assert error is None
+    assert blocked.pending_job_id is None
+    assert blocked.next_check_at is not None
     assert blocked.attempts == checkpoint.attempts
 
 
-def test_pending_probe_without_recovery_owner_remains_an_explicit_blocker(tmp_path):
+def test_pending_probe_without_recovery_owner_is_reissued(tmp_path):
     sessions, _, clock, _, service, arguments = _setup(tmp_path)
     checkpoint, _ = service.ensure(**arguments, previous=None)
     with sessions.begin() as session:
@@ -365,8 +391,9 @@ def test_pending_probe_without_recovery_owner_remains_an_explicit_blocker(tmp_pa
         )
     clock.now += timedelta(days=1)
     blocked, error = service.ensure(**arguments, previous=checkpoint)
-    assert error == "runtime_preflight.operation_missing"
-    assert blocked.pending_job_id == checkpoint.pending_job_id
+    assert error is None
+    assert blocked.pending_job_id is None
+    assert blocked.next_check_at is not None
     assert blocked.attempts == checkpoint.attempts
 
 

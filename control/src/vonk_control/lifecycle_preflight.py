@@ -64,6 +64,22 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
         return self
 
 
+def _security_failure(reason: str) -> bool:
+    """Keep explicit authority and contract failures fail-closed."""
+    code = reason.split(":", 1)[0].strip().lower()
+    return code in {
+        "permission_denied",
+        "forbidden",
+        "unauthorized",
+        "identity_invalid",
+        "identity_revoked",
+        "node_revoked",
+        "signature_invalid",
+        "integrity_failed",
+        "contract_invalid",
+    }
+
+
 class LifecyclePreflight:
     def __init__(self, sessions, queue, clock, minimum_free_bytes: int) -> None:
         self._sessions = sessions
@@ -99,6 +115,23 @@ class LifecyclePreflight:
             checkpoint = LifecyclePreflightCheckpoint(
                 phase_index=phase_index, receipts=checkpoint.receipts
             )
+
+        def retry_probe(
+            node_id: str, reason: str
+        ) -> tuple[LifecyclePreflightCheckpoint, str | None]:
+            checkpoint.pending_job_id = None
+            checkpoint.pending_node_id = None
+            checkpoint.receipts.pop(node_id, None)
+            if _security_failure(reason):
+                return checkpoint, reason
+            checkpoint.next_check_at = self._recovery.next_attempt(
+                f"{request_key}:{phase_index}:{node_id}",
+                checkpoint.attempts.get(node_id, 1),
+                now,
+                ongoing_intent=True,
+            )
+            return checkpoint, None
+
         if checkpoint.pending_job_id is None:
             if checkpoint.next_check_at is not None and now < checkpoint.next_check_at:
                 return checkpoint, None
@@ -113,7 +146,9 @@ class LifecyclePreflight:
             for node_id, source_build in ordered_nodes:
                 node = session.get(AgentNode, node_id, with_for_update=True)
                 if node is None:
-                    return checkpoint, "runtime_preflight.node_missing"
+                    return retry_probe(node_id, "runtime_preflight.node_missing")
+                if node.revoked_at is not None:
+                    return checkpoint, "runtime_preflight.node_revoked"
                 request = recipe_requirements(
                     document,
                     source_build=source_build,
@@ -144,7 +179,7 @@ class LifecyclePreflight:
                         continue
                     child = session.get(Job, checkpoint.pending_job_id)
                     if child is None:
-                        return checkpoint, "runtime_preflight.child_missing"
+                        return retry_probe(node_id, "runtime_preflight.child_missing")
                     operation = session.scalar(
                         select(AgentOperation).where(
                             AgentOperation.parent_job_id == child.id,
@@ -152,7 +187,9 @@ class LifecyclePreflight:
                         )
                     )
                     if operation is None:
-                        return checkpoint, "runtime_preflight.operation_missing"
+                        return retry_probe(
+                            node_id, "runtime_preflight.operation_missing"
+                        )
                     if child.state in {"queued", "running"}:
                         created_at = child.created_at
                         if created_at.tzinfo is None:
@@ -169,8 +206,8 @@ class LifecyclePreflight:
                             checkpoint.next_check_at = now + interval
                         return checkpoint, None
                     if child.state != "succeeded":
-                        return (
-                            checkpoint,
+                        return retry_probe(
+                            node_id,
                             child.status_reason or "runtime_preflight.execution_failed",
                         )
                     raw = session.scalar(
@@ -180,8 +217,11 @@ class LifecyclePreflight:
                         )
                     )
                     if raw is None:
-                        return checkpoint, "runtime_preflight.receipt_missing"
-                    result = RuntimePreflightResult.model_validate(raw)
+                        return retry_probe(node_id, "runtime_preflight.receipt_missing")
+                    try:
+                        result = RuntimePreflightResult.model_validate(raw)
+                    except (TypeError, ValueError):
+                        return retry_probe(node_id, "runtime_preflight.receipt_invalid")
                     checkpoint.receipts[node_id] = result
                     checkpoint.pending_job_id = None
                     checkpoint.pending_node_id = None

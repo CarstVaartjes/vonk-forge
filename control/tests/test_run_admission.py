@@ -25,7 +25,11 @@ from vonk_control.models import (
     ResourceReservation,
     RunNode,
 )
-from vonk_control.run_admission import RunAdmissionService, RunPlanConflict
+from vonk_control.run_admission import (
+    RunAdmissionBusy,
+    RunAdmissionService,
+    RunPlanConflict,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
@@ -452,8 +456,51 @@ def test_queue_rejects_reservation_mutation_after_preview(tmp_path) -> None:
                 created_at=now,
             )
         )
-    with pytest.raises(RunPlanConflict, match="run.plan_stale_or_blocked"):
+    with pytest.raises(RunAdmissionBusy):
         service.accept_run(plan, actor="admin", now=now)
+
+
+def test_run_adopts_a_fresh_plan_after_nonblocking_reservation_change(tmp_path) -> None:
+    sessions, now, node, installation = setup(tmp_path, free_memory=400)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    preview = service.plan_run(installation, "qwen", now=now)
+    with sessions.begin() as session:
+        session.add(
+            ResourceReservation(
+                node_id=node,
+                kind="unified-memory",
+                resource_key="other-work",
+                amount_bytes=10,
+                owner_kind="run",
+                owner_id="3" * 36,
+                state="active",
+                plan_digest="b" * 64,
+                created_at=now,
+            )
+        )
+    current = service.plan_run(installation, "qwen", now=now)
+    assert current.allowed
+    current_free = current.nodes[0].free_after_bytes
+    preview_free = preview.nodes[0].free_after_bytes
+    assert current_free is not None and preview_free is not None
+    assert current_free < preview_free
+
+    run_id = service.accept_run(preview, actor="admin", now=now)
+
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        reservation = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.node_id == node,
+            )
+        )
+        assert reservation is not None
+        assert reservation.amount_bytes == current.nodes[0].required_memory_bytes
 
 
 def test_postgres_competing_admissions_have_one_capacity_winner(
