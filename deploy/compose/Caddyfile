@@ -168,9 +168,10 @@ http://:8084 {
 	respond 404
 }
 
-# Browser and operator traffic arrives only from the Tailscale gateway over the
-# private tailnet-web-edge network. Tailscale terminates HTTPS before this HTTP
-# listener; Docker does not publish port 8080.
+# Secure remote browser traffic arrives from Tailscale over the private
+# tailnet-web-edge network. Tailscale terminates HTTPS before this HTTP
+# listener; Lab mode also serves the control hostname on the local-CA HTTPS
+# listener below. Docker does not publish port 8080.
 :8080 {
 	@canonical_browser_host host {$VONK_CONTROL_HOSTNAME}
 	handle @canonical_browser_host {
@@ -213,6 +214,13 @@ http://:8084 {
 		}
 	}
 	respond 421
+}
+
+# Lab mode serves the same browser surface directly on the LAN. This certificate
+# is issued by the installer-created local CA; clients must trust that root.
+https://{$VONK_CONTROL_HOSTNAME}:{$VONK_BACKEND_PORT:8443} {
+	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
+	reverse_proxy 127.0.0.1:8080
 }
 
 # Internal inference clients use the same request-time lease authority without

@@ -23,6 +23,7 @@ HOSTNAMES = (
     "agents.test.example",
     "registry.test.example",
 )
+CONTROL_HOSTNAME = "control.test.example"
 
 
 def _docker_failure_or_skip(message: str) -> None:
@@ -105,7 +106,9 @@ def _write_pki(directory: Path) -> dict[str, Path | x509.Certificate]:
         .not_valid_before(now - timedelta(minutes=5))
         .not_valid_after(now + timedelta(days=1))
         .add_extension(
-            x509.SubjectAlternativeName([x509.DNSName(name) for name in HOSTNAMES]),
+            x509.SubjectAlternativeName(
+                [x509.DNSName(name) for name in (*HOSTNAMES, CONTROL_HOSTNAME)]
+            ),
             critical=False,
         )
         .add_extension(
@@ -231,7 +234,7 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
         "--tmpfs",
         "/tmp",
         "--env",
-        "VONK_CONTROL_HOSTNAME=control.test.example",
+        f"VONK_CONTROL_HOSTNAME={CONTROL_HOSTNAME}",
         "--env",
         f"VONK_AGENT_ENROLL_HOSTNAME={HOSTNAMES[0]}",
         "--env",
@@ -293,6 +296,15 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
         server = material["server"]
         assert isinstance(server, x509.Certificate)
         expected_der = server.public_bytes(serialization.Encoding.DER)
+
+        browser_peer, browser_response = _tls_request(
+            tls_port,
+            CONTROL_HOSTNAME,
+            material["root"],
+            "/",
+        )
+        assert browser_peer == expected_der
+        assert browser_response.startswith(b"HTTP/1.1 502")
 
         peer, enrollment = _tls_request(
             tls_port,

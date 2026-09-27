@@ -6,6 +6,7 @@ x-tailscale-logging: &tailscale-logging
 
 services:
   tailscale-gateway:
+    profiles: [secure-remote]
     image: ${TAILSCALE_IMAGE:-tailscale/tailscale:v1.102.3}
     hostname: ${VONK_TAILSCALE_GATEWAY_HOSTNAME:-vonk-forge-gateway}
     restart: unless-stopped
@@ -68,6 +69,7 @@ services:
       retries: 12
 
   tailscale-configurator:
+    profiles: [secure-remote]
     image: ${TAILSCALE_IMAGE:-tailscale/tailscale:v1.102.3}
     restart: unless-stopped
     logging: *tailscale-logging

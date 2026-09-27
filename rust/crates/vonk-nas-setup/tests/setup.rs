@@ -9,6 +9,8 @@ use vonk_nas_setup::{
 
 struct FixedSecretGenerator;
 
+struct LabSecretGenerator;
+
 struct FixedHiddenInput;
 
 impl<R: std::io::BufRead, W: std::io::Write> SecretInput<R, W> for FixedHiddenInput {
@@ -26,6 +28,12 @@ impl SecretGenerator for FixedSecretGenerator {
     fn generate(&self, bytes: usize) -> Result<String, SecretGenerationError> {
         assert_eq!(bytes, 16);
         Ok("generated-secret".to_owned())
+    }
+}
+
+impl SecretGenerator for LabSecretGenerator {
+    fn generate(&self, bytes: usize) -> Result<String, SecretGenerationError> {
+        Ok(format!("generated-{bytes}-byte-secret"))
     }
 }
 
@@ -146,7 +154,7 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
 }
 
 #[test]
-fn optional_secret_is_materialized_without_a_first_install_prompt() {
+fn optional_huggingface_secret_is_prompted_and_can_be_skipped() {
     let payload = CanonicalTemplatePayload::from_json(
         br#"{
           "schema_version": 2,
@@ -165,7 +173,7 @@ fn optional_secret_is_materialized_without_a_first_install_prompt() {
     .expect("valid optional-secret payload");
     let temporary = tempdir().expect("temporary directory");
     let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    let mut prompt = PromptIo::new(Cursor::new(b"\n".to_vec()), &mut output);
 
     let result = prepare(
         &payload,
@@ -175,10 +183,14 @@ fn optional_secret_is_materialized_without_a_first_install_prompt() {
     )
     .expect("bundle prepared without an HF token");
 
-    assert!(output.is_empty(), "optional credentials must not prompt");
+    assert!(
+        String::from_utf8(output)
+            .expect("prompt output")
+            .contains("Hugging Face access token (optional; leave blank for public models): ")
+    );
     assert_eq!(
         std::fs::read(result.root.join("secrets/hf-token")).expect("HF token file"),
-        b"\n"
+        b""
     );
     #[cfg(unix)]
     {
@@ -193,6 +205,112 @@ fn optional_secret_is_materialized_without_a_first_install_prompt() {
             0o600
         );
     }
+}
+
+#[test]
+fn lab_install_asks_only_for_lan_address_and_optional_hf_token() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "required_values": [
+            {"env": "TAILNET_HOST", "prompt": "Tailnet hostname"}
+          ],
+          "secrets": [
+            {"file": "admin-password", "prompt": "Admin password", "generate_bytes": 24, "generate_in_lab": true},
+            {"file": "tailscale-secret", "prompt": "Tailscale secret", "secure_remote_only": true},
+            {"file": "hf-token", "prompt": "Hugging Face token", "optional": true}
+          ],
+          "install_modes": {
+            "prompt": "Install mode",
+            "default": "lab",
+            "lab_value": "lab",
+            "secure_remote_value": "secure-remote",
+            "lab_required_values": [
+              {"env": "NAS_LAN_IP", "prompt": "NAS LAN IP", "validation": "ipv4"}
+            ],
+            "lab_values": [
+              {"env": "VONK_CONTROL_HOSTNAME", "value": "vonk-forge.local"}
+            ]
+          }
+        }"#,
+    )
+    .expect("valid lab fixture");
+    let temporary = tempdir().expect("temporary directory");
+    let input = Cursor::new(b"\n192.168.1.22\nhf_test_token\n".to_vec());
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(input, &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &LabSecretGenerator,
+    )
+    .expect("lab bundle prepared");
+
+    let transcript = String::from_utf8(output).expect("prompt transcript");
+    assert_eq!(transcript.matches(": ").count(), 3, "{transcript}");
+    assert!(!transcript.contains("Tailnet hostname"));
+    assert_eq!(
+        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
+        "COMPOSE_PROFILES=\nVONK_CONTROL_HOSTNAME=vonk-forge.local\nNAS_LAN_IP=192.168.1.22\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(result.root.join("secrets/admin-password"))
+            .expect("generated administrator password"),
+        "generated-24-byte-secret\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(result.root.join("secrets/tailscale-secret"))
+            .expect("inactive remote secret placeholder"),
+        ""
+    );
+    assert_eq!(
+        std::fs::read_to_string(result.root.join("secrets/hf-token")).expect("HF token"),
+        "hf_test_token\n"
+    );
+}
+
+#[test]
+fn secure_remote_selection_keeps_tailscale_profile_when_hermes_is_disabled() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "install_modes": {
+            "prompt": "Install mode",
+            "default": "lab",
+            "lab_value": "lab",
+            "secure_remote_value": "secure-remote",
+            "lab_required_values": [],
+            "lab_values": []
+          },
+          "hermes": {
+            "env": "COMPOSE_PROFILES",
+            "prompt": "Enable Hermes?",
+            "enabled_value": "hermes",
+            "disabled_value": ""
+          }
+        }"#,
+    )
+    .expect("valid secure-remote fixture");
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(b"secure-remote\nn\n".to_vec()), &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("secure remote bundle prepared");
+
+    assert_eq!(
+        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
+        "COMPOSE_PROFILES=secure-remote\n"
+    );
 }
 
 #[test]

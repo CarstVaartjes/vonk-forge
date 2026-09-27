@@ -261,7 +261,6 @@ def stage_compose_secrets(
         )
     for name in (
         "litellm-master-key",
-        "litellm-upstream-key",
         "litellm-database-url",
     ):
         stage_private_key(
@@ -271,6 +270,13 @@ def stage_compose_secrets(
             owner_gid=10001,
             mode=0o400,
         )
+    _stage_optional_private_key(
+        source_root / "litellm-upstream-key",
+        destination_root / "litellm-upstream-key",
+        owner_uid=10002,
+        owner_gid=10001,
+        mode=0o400,
+    )
     stage_private_key(
         source_root / "metrics-token",
         destination_root / "prometheus-metrics-token",

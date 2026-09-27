@@ -17,8 +17,6 @@ DEFAULT_SERVICES = {
     "prometheus",
     "registry",
     "step-ca",
-    "tailscale-configurator",
-    "tailscale-gateway",
 }
 
 
@@ -31,7 +29,7 @@ def _environment() -> dict[str, str]:
     return environment
 
 
-def _rendered(*, hermes: bool = False) -> dict[str, object]:
+def _rendered(*, hermes: bool = False, secure_remote: bool = True) -> dict[str, object]:
     command = [
         "docker",
         "compose",
@@ -43,12 +41,15 @@ def _rendered(*, hermes: bool = False) -> dict[str, object]:
     if hermes:
         command.extend(("--profile", "hermes"))
     command.extend(("config", "--format", "json"))
+    environment = _environment()
+    if not secure_remote:
+        environment["COMPOSE_PROFILES"] = ""
     result = subprocess.run(
         command,
         check=True,
         capture_output=True,
         text=True,
-        env=_environment(),
+        env=environment,
     )
     assert result.stderr == ""
     return json.loads(result.stdout)
@@ -72,6 +73,8 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         if isinstance(service, dict) and "profiles" not in service
     }
     assert set(defaults) == DEFAULT_SERVICES
+    assert services["tailscale-gateway"]["profiles"] == ["secure-remote"]
+    assert services["tailscale-configurator"]["profiles"] == ["secure-remote"]
 
     expected_evidence = {
         "postgres": ("pg_isready", "psql", "SELECT 1"),
@@ -137,9 +140,10 @@ def test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurat
 ):
     """Catches render warnings and disabled-profile dependencies in either graph."""
     for hermes in (False, True):
-        services = _rendered(hermes=hermes)["services"]
+        services = _rendered(hermes=hermes, secure_remote=False)["services"]
         assert set(services) == DEFAULT_SERVICES | (
             {"hermes-agent", "hermes-litellm-key-provisioner"} if hermes else set()
         )
-        configurator = services["tailscale-configurator"]
-        assert set(configurator["depends_on"]) == {"caddy", "tailscale-gateway"}
+    secure_remote = _rendered()["services"]
+    configurator = secure_remote["tailscale-configurator"]
+    assert set(configurator["depends_on"]) == {"caddy", "tailscale-gateway"}

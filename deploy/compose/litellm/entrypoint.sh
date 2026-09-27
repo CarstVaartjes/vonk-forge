@@ -17,6 +17,16 @@ read_secret() {
 }
 
 read_secret LITELLM_MASTER_KEY "${LITELLM_MASTER_KEY_FILE:-/run/secrets/litellm-master-key}"
-read_secret LITELLM_UPSTREAM_KEY "${LITELLM_UPSTREAM_KEY_FILE:-/run/secrets/litellm-upstream-key}"
+upstream_key_file=${LITELLM_UPSTREAM_KEY_FILE:-/run/secrets/litellm-upstream-key}
+if [ -e "$upstream_key_file" ]; then
+    if [ ! -r "$upstream_key_file" ]; then
+        printf 'LiteLLM optional upstream key file is unreadable\n' >&2
+        exit 2
+    fi
+    LITELLM_UPSTREAM_KEY=$(cat -- "$upstream_key_file")
+else
+    LITELLM_UPSTREAM_KEY=
+fi
+export LITELLM_UPSTREAM_KEY
 read_secret LITELLM_DATABASE_URL "${LITELLM_DATABASE_URL_FILE:-/run/secrets/litellm-database-url}"
 exec python /run/vonk-normalized-secrets/runtime-assets/litellm/config_supervisor.py

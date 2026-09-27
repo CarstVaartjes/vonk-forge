@@ -131,6 +131,19 @@ def test_optional_huggingface_secret_is_normalized_only_when_present(
     assert not projected.exists()
 
 
+def test_optional_litellm_upstream_key_is_not_projected_when_blank(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source" / "litellm-upstream-key"
+    source.parent.mkdir()
+    source.write_text("")
+    destination = tmp_path / "normalized" / "litellm-upstream-key"
+
+    runtime_init._stage_optional_private_key(source, destination)
+
+    assert not destination.exists()
+
+
 def test_optional_huggingface_secret_treats_dev_null_as_absent(tmp_path: Path) -> None:
     if not runtime_init._is_null_device(Path("/dev/null")):
         pytest.skip("host null-device identity is not the Linux /dev/null device")

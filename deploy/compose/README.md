@@ -2,10 +2,13 @@
 
 The supported controller installation starts on an ordinary Linux or macOS
 workstation. The eventual controller host can be this same laptop or any local
-NAS or server that runs Docker Compose. Before the first run, complete the
-[Tailscale fresh-install preflight](../../docs/runbooks/tailscale.md#fresh-install-preflight).
-It covers the canonical unsuffixed names, MagicDNS/HTTPS, exact grants and
-auto-approvals, gateway self-access, and the scoped OAuth client.
+NAS or server that runs Docker Compose. The installer offers Lab mode for
+LAN-only access and Secure remote for the existing Tailscale gateway. Complete
+the [Tailscale fresh-install preflight](../../docs/runbooks/tailscale.md#fresh-install-preflight)
+only when choosing Secure remote; it covers the canonical unsuffixed names,
+MagicDNS/HTTPS, exact grants and auto-approvals, gateway self-access, and the
+scoped OAuth client. The [Lab quickstart](../../docs/QUICKSTART.md) covers the
+local CA and LAN DNS requirements.
 
 Then run one command as your normal user:
 
@@ -13,9 +16,9 @@ Then run one command as your normal user:
 curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
-The command downloads a verified native setup program, asks for the site
-values and imported credentials through the terminal, generates everything
-else locally, and creates exactly:
+The command downloads a verified native setup program, asks for the selected
+mode and its inputs through the terminal, generates internal credentials and
+the local CA locally, and creates exactly:
 
 ```text
 vonk-forge/
@@ -35,18 +38,20 @@ so the four entries must remain together.
 The `/nas` segment in the public installer URL is historical; it is not a
 hardware restriction.
 
-The installer prompts for:
+Lab mode asks for the reserved LAN address and optional Hugging Face token.
+Secure remote asks for:
 
 - the controller host's LAN address, Spark management/fabric CIDRs, and
   operator jurisdiction;
 - the control, enrollment, agent, and registry hostnames;
 - Tailscale OAuth credentials;
 - the LiteLLM upstream provider key;
-- whether to enable optional Hermes, plus its values when selected.
+- whether to enable optional Hermes, plus its values when selected;
+- an optional Hugging Face token in either mode.
 
 Passwords, service tokens, signing keys, database URLs, and a coherent Step CA
-PKI are generated locally unless the prompt explicitly offers an import. Secret
-values are written only under `secrets/`; `.env` contains non-secret site
+PKI are generated locally in Lab mode. Secure remote also offers existing
+credential imports. Secret values are written only under `secrets/`; `.env` contains non-secret site
 configuration and relative secret paths.
 
 For gated or private Hugging Face model-cache downloads, see the
@@ -55,8 +60,9 @@ The background worker has a dedicated outbound `artifact-egress` network for
 model and OCI downloads. It publishes no ports. The API, PostgreSQL, and worker
 authority channel keep their internal networks.
 
-The default install leaves `HF_TOKEN_FILE` unset and all public downloads
-anonymous.
+The Hugging Face token is saved as an optional secret; leaving it blank keeps
+public model downloads anonymous. The LiteLLM upstream key is optional for
+local model routes.
 
 ## Start and verify
 
@@ -71,17 +77,19 @@ docker compose up -d --wait --remove-orphans
 docker compose ps
 ```
 
-Complete the runbook's
+For Secure remote, complete the runbook's
 [post-install verification](../../docs/runbooks/tailscale.md#verification),
 including `Self.PrimaryRoutes` and a browser test from an authorized
-Tailscale-connected client.
+Tailscale-connected client. For Lab mode, trust the generated local CA and
+verify the controller from a LAN client.
 
 Do not add host-path overrides. Persistent data belongs to the named Docker
-volumes declared by the generated project. Only Caddy publishes a host port;
-all browser-facing services remain private behind the generated Tailscale
-gateway. PostgreSQL is the control authority and Step CA is the agent identity
-authority. There is no runtime Git checkout, host updater, migration helper,
-one-shot initializer, or A/B agent supervisor.
+volumes declared by the generated project. Caddy binds to the configured LAN
+address and serves the browser UI with the generated local CA certificate;
+Secure remote additionally enables the Tailscale gateway. PostgreSQL is the
+control authority and Step CA is the agent identity authority. There is no
+runtime Git checkout, host updater, migration helper, one-shot initializer, or
+A/B agent supervisor.
 
 ## Upgrade
 
