@@ -4763,8 +4763,9 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
         assert exact_worker.state == "running"
 
 
+@pytest.mark.parametrize("node_index", [0, 1])
 def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
-    tmp_path: Path,
+    tmp_path: Path, node_index: int
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, distributed_lifecycle=True
@@ -4780,8 +4781,8 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
         request_id="8" * 36,
         alias="observed-exact",
     )
-    observation_node = nodes[1]
-    certificate_serial = "serial-1"
+    observation_node = nodes[node_index]
+    certificate_serial = f"serial-{node_index}"
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
         installed = _required(session.get(RecipeInstallation, run.installation_id))
@@ -4799,7 +4800,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
         launch = require_mapping(
             launch_evidence[observation_node], "node launch evidence"
         )
-        assert run_node.endpoint is None
+        assert (run_node.endpoint is not None) is (node_index == 0)
         identity = {
             "schema_version": 1,
             "node_id": observation_node,
@@ -5001,7 +5002,264 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
                 )
             )
         )
-        assert worker.endpoint is None
+        assert (worker.endpoint is not None) is (node_index == 0)
+
+
+@pytest.mark.parametrize(
+    "tamper", ["generation", "compiled-argv", "malformed-owner-endpoint"]
+)
+def test_exact_rank_inspection_rejects_self_consistent_child_tampering(
+    tmp_path: Path, tamper: str
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="6" * 36
+    )
+    start = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="5" * 36,
+        alias="tampered-observation",
+    )
+    node_index = 0 if tamper == "malformed-owner-endpoint" else 1
+    observation_node = nodes[node_index]
+    certificate_serial = f"serial-{node_index}"
+    with sessions() as session:
+        run = _required(session.get(RecipeRun, start.owner_id))
+        installed = _required(session.get(RecipeInstallation, run.installation_id))
+        run_node = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == run.id, RunNode.node_id == observation_node
+                )
+            )
+        )
+        start_job = _required(session.get(Job, start.id))
+        launch_evidence = require_mapping(
+            _required(start_job.result)["launch_evidence"], "launch evidence"
+        )
+        launch = require_mapping(
+            launch_evidence[observation_node], "node launch evidence"
+        )
+        identity = {
+            "schema_version": 1,
+            "node_id": observation_node,
+            "run_id": run.id,
+            "installation_id": run.installation_id,
+            "recipe_revision_id": installed.recipe_revision_id,
+            "recipe_content_sha256": launch["recipe_content_sha256"],
+            "mapping_id": run.mapping_id,
+            "mapping_generation": run.mapping_generation,
+            "run_generation": run.run_generation,
+            "image_digest": installed.image_digest.removeprefix("sha256:"),
+            "artifact_set_digest": launch["artifact_set_digest"],
+            "model_identity": launch["model_identity"],
+            "rank": run_node.rank,
+            "role": run_node.role,
+            "world_size": launch["world_size"],
+            "local_address": launch["local_address"],
+            "master_address": launch["master_address"],
+            "master_port": launch["master_port"],
+            "port": run_node.port,
+            "runtime_arguments_sha256": launch["runtime_arguments_sha256"],
+        }
+
+    with sessions.begin() as session:
+        parent = _required(session.get(Job, start.id))
+        child = _required(
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == parent.id,
+                    AgentOperation.node_id == observation_node,
+                    AgentOperation.payload["phase"].as_string() == "rank-launch",
+                )
+            )
+        )
+        if tamper == "malformed-owner-endpoint":
+            run_node = _required(
+                session.scalar(
+                    select(RunNode).where(
+                        RunNode.run_id == start.owner_id,
+                        RunNode.node_id == observation_node,
+                    )
+                )
+            )
+            run_node.endpoint = {"url": "not-an-endpoint"}
+        else:
+            child_payload = json.loads(canonical_message(child.payload))
+        if tamper == "generation":
+            child_payload["run_generation"] += 1
+        elif tamper == "compiled-argv":
+            child_payload["compiled_execution_plan"]["runtime"]["argv"][0] = (
+                "unreviewed-runtime-command"
+            )
+        if tamper != "malformed-owner-endpoint":
+            parent_payload = json.loads(canonical_message(parent.payload))
+            parent_item = next(
+                item
+                for phase in parent_payload["phases"]
+                for item in phase
+                if item["operation_id"] == child.id
+            )
+            parent_item["payload"] = child_payload
+            child.payload = child_payload
+            child.payload_digest = hashlib.sha256(
+                canonical_message(child_payload)
+            ).hexdigest()
+            parent.payload = parent_payload
+            parent.payload_digest = hashlib.sha256(
+                canonical_message(parent_payload)
+            ).hexdigest()
+
+    authority = HostRuntimeAuthorityService(
+        sessions,
+        HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=lambda: NOW),
+        clock=lambda: NOW,
+    )
+    with pytest.raises(HostHelperAuthorityError, match="launch evidence"):
+        authority.issue_recipe_run_observation_grant(
+            node_id=observation_node,
+            certificate_serial=certificate_serial,
+            identity=identity,
+            job_id=start.owner_id,
+            operation_id=str(uuid.uuid4()),
+            attempt=1,
+            fence=str(uuid.uuid4()),
+            request_sha256="a" * 64,
+            expires_in_seconds=10,
+        )
+
+
+@pytest.mark.parametrize("tamper", [None, "stop-actor", "start-actor"])
+def test_exact_rank_inspection_binds_distributed_recovery_provenance(
+    tmp_path: Path, tamper: str | None
+) -> None:
+    (
+        sessions,
+        service,
+        routes,
+        _publisher,
+        started,
+        restart,
+        worker_start,
+        nodes,
+    ) = _queued_distributed_recovery_restart(tmp_path)
+    service.record_node_result(
+        restart.id,
+        nodes[1],
+        succeeded=True,
+        evidence=start_evidence(worker_start.payload),
+    )
+    with sessions() as session:
+        owner_start = _required(
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == restart.id,
+                    AgentOperation.node_id == nodes[0],
+                    AgentOperation.payload["phase"].as_string() == "rank-launch",
+                )
+            )
+        )
+    service.record_node_result(
+        restart.id,
+        nodes[0],
+        succeeded=True,
+        evidence=start_evidence(owner_start.payload),
+    )
+    complete_collective_readiness(sessions, service, restart.id, nodes[0])
+    routes.publish_run(started.owner_id)
+
+    observation_node = nodes[1]
+    with sessions.begin() as session:
+        run = _required(session.get(RecipeRun, started.owner_id))
+        installed = _required(session.get(RecipeInstallation, run.installation_id))
+        run_node = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == run.id, RunNode.node_id == observation_node
+                )
+            )
+        )
+        restart_job = _required(session.get(Job, restart.id))
+        launch_evidence = require_mapping(
+            _required(restart_job.result)["launch_evidence"], "launch evidence"
+        )
+        launch = require_mapping(
+            launch_evidence[observation_node], "node launch evidence"
+        )
+        assert run.run_generation == 2
+        identity = {
+            "schema_version": 1,
+            "node_id": observation_node,
+            "run_id": run.id,
+            "installation_id": run.installation_id,
+            "recipe_revision_id": installed.recipe_revision_id,
+            "recipe_content_sha256": launch["recipe_content_sha256"],
+            "mapping_id": run.mapping_id,
+            "mapping_generation": run.mapping_generation,
+            "run_generation": run.run_generation,
+            "image_digest": installed.image_digest.removeprefix("sha256:"),
+            "artifact_set_digest": launch["artifact_set_digest"],
+            "model_identity": launch["model_identity"],
+            "rank": run_node.rank,
+            "role": run_node.role,
+            "world_size": launch["world_size"],
+            "local_address": launch["local_address"],
+            "master_address": launch["master_address"],
+            "master_port": launch["master_port"],
+            "port": run_node.port,
+            "runtime_arguments_sha256": launch["runtime_arguments_sha256"],
+        }
+        if tamper == "stop-actor":
+            stop = _required(
+                session.scalar(
+                    select(Job).where(
+                        Job.kind == "recipe.stop",
+                        Job.payload["owner_id"].as_string() == run.id,
+                    )
+                )
+            )
+            stop.actor = "admin"
+        elif tamper == "start-actor":
+            restart_job.actor = "admin"
+
+    authority = HostRuntimeAuthorityService(
+        sessions,
+        HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=lambda: NOW),
+        clock=lambda: NOW,
+    )
+    if tamper is not None:
+        with pytest.raises(HostHelperAuthorityError, match="launch evidence"):
+            authority.issue_recipe_run_observation_grant(
+                node_id=observation_node,
+                certificate_serial="serial-1",
+                identity=identity,
+                job_id=started.owner_id,
+                operation_id=str(uuid.uuid4()),
+                attempt=2,
+                fence=str(uuid.uuid4()),
+                request_sha256="b" * 64,
+                expires_in_seconds=10,
+            )
+    else:
+        _identity_digest, grant = authority.issue_recipe_run_observation_grant(
+            node_id=observation_node,
+            certificate_serial="serial-1",
+            identity=identity,
+            job_id=started.owner_id,
+            operation_id=str(uuid.uuid4()),
+            attempt=2,
+            fence=str(uuid.uuid4()),
+            request_sha256="c" * 64,
+            expires_in_seconds=10,
+        )
+        operation = grant.claims.operation
+        assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+        assert operation.attempt == 2
 
 
 def _recovery_deadline(job: Job) -> datetime:

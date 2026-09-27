@@ -49,7 +49,6 @@ from .agent_jobs import (
 )
 from .distributed_recovery import (
     _accepted_start_authority,
-    _accepted_start_authority_payload,
 )
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
@@ -596,11 +595,22 @@ class HostRuntimeAuthorityService:
             ) from error
         if content_sha256(recipe) != revision.content_digest:
             raise HostHelperAuthorityError("recipe run observation authority is stale")
+        run_node_ids = tuple(
+            session.scalars(
+                select(RunNode.node_id)
+                .where(RunNode.run_id == run.id)
+                .order_by(RunNode.node_id)
+            )
+        )
         try:
             start, workload_intent_ordinal = _accepted_start_authority(
-                session, run, revision.content_digest, node_id
+                session,
+                run,
+                revision.content_digest,
+                node_id,
+                allow_multi_target=len(run_node_ids) > 1,
+                now=now,
             )
-            _accepted_start_authority_payload(session, start, node_id)
         except RuntimeError as error:
             raise HostHelperAuthorityError(
                 "recipe run launch evidence is unavailable"
