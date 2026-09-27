@@ -200,7 +200,11 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
         isinstance(callback.__self__, FailureEvidenceService)
         for callback in worker._background_services
     )
-    image_production = worker._background_closers[0].__self__
+    image_production = next(
+        closer.__self__
+        for closer in worker._background_closers
+        if hasattr(getattr(closer, "__self__", None), "scheduler")
+    )
     assert image_production.scheduler is not None
     scheduler = image_production.scheduler
     assert scheduler.tick in worker._background_services
