@@ -1,6 +1,6 @@
 # Fault resilience and self-healing handover
 
-Reviewed 2026-09-21. The objective is automatic convergence to the latest
+Reviewed 2026-09-27. The objective is automatic convergence to the latest
 authorized workload request after a recoverable fault clears, preserving
 completed work and exposing the reason and next attempt while waiting.
 
@@ -17,7 +17,26 @@ and [storage implementation plan](../plans/resilient-artifact-storage.md)
 remain the owners of the architectural rules. This handover records status and
 acceptance work; it does not introduce a separate recovery path.
 
-## Observed baseline
+## Current observed baseline (2026-09-27 19:01:31 UTC)
+
+This is a timed snapshot. Refresh it through the
+[Controller client](../runbooks/vonkctl.md) before deciding on an operation;
+progress may have advanced since this observation.
+
+| Boundary | Evidence captured for this review | What remains unproved |
+| --- | --- | --- |
+| Repository | Remote `main` is `0ccd225620c1ed2c1e1660f355274010b9188fbe` (PR #914). It includes merged PR #916 at `575f1e42a978507641d182d5bf4b7d1d442f4a6d`. | A merged source revision alone does not prove accepted publication or deployment. |
+| CI and publication | The accepted signed development release for source `0ccd225620c1ed2c1e1660f355274010b9188fbe` is deployed to the NAS. That source includes PR #916; there is no separate PR #916 release claim. | Deployment does not prove post-reset physical serving, inference, or fault recovery. |
+| Controller deployment and reset scope | All NAS services were healthy at this observation. The logical `control` database was fully dropped and recreated. The intended cleanup was limited to troublesome tables, so the database reset was broader than intended. Other logical PostgreSQL databases and named volumes were preserved. | Health checks do not restore or recover the prior Controller records removed from `control`. |
+| Spark enrollment | Both Sparks were manually re-enrolled with their original IDs and reported online-ready. The exact orphan Vonk VLLM container on Spark2 was stopped during post-reset bootstrap. | Online-ready and stopping the orphan container do not prove a model is loaded or serving. |
+| Profile and cache | Prior Profile 1 application records are gone; Profile 1 revision 2 has been recreated. The GLM model cache is complete at 149/149. Spark1 build job `993a875b` produced exact runtime image `sha256:02a7342b3ac67f031dc93b7bc8e839aa857d9b45ec4498a5b45f54f78501f88f` successfully at 18:58:51 UTC, and the Controller cache reported that image ready by 19:00 UTC. | Cache readiness and an allowed preview do not prove a successful profile load. |
+| Post-reset Profile 1 application | At 19:00 UTC, the exact reviewed preview was allowed with zero blockers and was submitted under plan digest prefix `113a6635…`. Application `36d22487-a750-468c-944b-92d9a3e81419` (request key `07ad74ac-2cfe-43ce-bac1-d9fbe0412cec`) was still running in target-copy at 19:01:31 UTC, with 143,748,166,088 bytes copied of roughly 398,196,823,414 planned. | The application had not reached model-loaded or inference at this observation. Post-reset physical acceptance and recovery remain open. |
+
+The successful 2026-09-21 Profile 3 run below remains evidence for that earlier
+deployment. It does not establish success for the recreated Profile 1 revision
+or the application currently copying after the database reset.
+
+## Previous observed baseline (2026-09-21)
 
 The following is a snapshot, not a claim about the current state when this page
 is read. Refresh it through the [Controller client](../runbooks/vonkctl.md)
@@ -45,15 +64,16 @@ Keep progress in this list and the evidence record below; do not append another
 competing "remaining work" section. Close an item only against its named
 boundary, with the exact code and test/deployment evidence.
 
-| Action | Completion condition | Status at this review |
+| Action | Completion condition | Status for this 2026-09-27 review |
 | --- | --- | --- |
-| Recover accepted intent automatically | A temporary dependency failure resumes the same authorized intent after recovery, without retirement, Idle/reapply, or another recipe revision. Waiting exposes its cause, owner, dependency, next attempt, and deadline. Completed assets and effects are reused. | Merged in PR #874 and deployed for classified safe-effect retries and typed pre-effect profile cache loss. Exact identities and current workload priority are retained. Combined verification is recorded below; physical qualification remains open. |
+| Recover accepted intent automatically | A temporary dependency failure resumes the same authorized intent after recovery, without retirement, Idle/reapply, or another recipe revision. Waiting exposes its cause, owner, dependency, next attempt, and deadline. Completed assets and effects are reused. | The PR #874 recovery implementation and PR #916 whole-fleet convergence source are included in the signed dev deployment at `0ccd225620c1ed2c1e1660f355274010b9188fbe`. The post-reset Profile 1 application is still copying; this run has not yet established physical recovery. Combined local verification is recorded below. |
 | Make retirement and supersession safe | Observe or clean up the exact old runtime effects before releasing their reservations or admitting conflicting replacement work. Expired leases and terminal database labels alone cannot prove absence. Delayed results cannot revive retired intent. | Merged in PR #874 and deployed. Retirement retains capacity and schedules normal exact cleanup; temporary cleanup failure retries the same operation. PostgreSQL regressions cover release, late results, launch budgets, and newer intent. |
 | Align build reuse with installation admission | An editorial recipe successor with identical executable inputs can reuse an exact verified build under current revision authorization. Preparation, compilation, and install admission agree. Changed executable inputs or incompatible receipts cannot inherit the old result. | Connected preparation/admission corrections were merged in PR #874 and deployed. Current authorization and present verified bytes remain mandatory. |
-| Complete the physical GLM start | Installed bytes are charged once, a stopped workload can restart with its private temporary files present, and exact rank observations reach route publication. | PR #875 is merged, published, and deployed. Profile 3 succeeded on both upgraded Sparks; non-streaming and streaming inference passed, with fresh rank observations six minutes after readiness. The restart fault is covered by real Linux permission tests; physical fault injection remains separate. |
+| Complete the physical GLM start | Installed bytes are charged once, a stopped workload can restart with its private temporary files present, and exact rank observations reach route publication. | PR #875 was merged, published, and deployed; Profile 3 succeeded on both upgraded Sparks on 2026-09-21, with non-streaming and streaming inference and fresh rank observations. That remains historical physical evidence. The post-reset Profile 1 application is tracked separately below; physical fault injection remains open. |
+| Reestablish Profile 1 after the Controller reset | Load the exact reviewed Profile 1 plan on both re-enrolled Sparks, observe both ranks ready, and complete routed non-streaming and streaming inference. | In progress at 19:01:31 UTC. The exact image is cache-ready and preview had zero blockers. Application `36d22487-a750-468c-944b-92d9a3e81419` was copying targets (143,748,166,088 of roughly 398,196,823,414 bytes); no model-loaded state or inference had been observed yet. |
 | Apply the budget policy below | Estimated demand can produce a useful warning without removing real capacity, isolation, authorization, integrity, or exact-plan checks. Any automated smaller request or alternative runtime is explicitly permitted and bound in the accepted plan. | The historical blanket warning policy is superseded below. No allocator, kernel, integrity, or authorization check was weakened, and no automatic context/image substitution was introduced. |
-| Prove the recovery matrix below | Record failure injection, restart, response loss, cancellation/supersession, storage loss, and eventual recovery through the real owners. Run physical qualification separately after the corresponding deployment. | Local process-death and PostgreSQL fault/recovery tests are recorded below. Deployment and physical fault injection remain open. |
-| Maintain this handover | Retain one current action list, refresh dated observations, and keep repository, CI/publication, Controller, and physical results separate. | This document replaces the archive's conflicting current instructions. |
+| Prove the recovery matrix below | Record failure injection, restart, response loss, cancellation/supersession, storage loss, and eventual recovery through the real owners. Run physical qualification separately after the corresponding deployment. | Local process-death and PostgreSQL fault/recovery tests are recorded below. The current post-reset application is still copying; deployment-level recovery, inference, and physical fault injection remain open. |
+| Maintain this handover | Retain one current action list, refresh dated observations, and keep repository, CI/publication, Controller, and physical results separate. | Updated with the 2026-09-27 repository, deployment, reset-scope, and post-reset application snapshot. |
 
 Follow the existing [workload recovery path](workload-recovery.md) and expose a
 typed blocker where recovery lacks evidence or authority. Retirement is an
