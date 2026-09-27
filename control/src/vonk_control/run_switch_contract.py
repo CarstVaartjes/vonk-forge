@@ -100,7 +100,13 @@ RunSwitchSubphase = Literal[
 ]
 RunSwitchMemberState = Literal["pending", "running", "succeeded", "failed", "unknown"]
 RunSwitchProgressState = Literal[
-    "queued", "running", "succeeded", "failed", "cancelled", "unknown"
+    "queued",
+    "running",
+    "waiting-for-operator",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "unknown",
 ]
 RunSwitchOperationKind = Literal[
     "recipe.run-switch.v2",

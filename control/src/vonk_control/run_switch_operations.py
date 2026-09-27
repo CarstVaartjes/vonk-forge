@@ -55,7 +55,7 @@ from .disk_reservations import outstanding_disk_reservation_bytes
 from .install_admission import InstallAdmissionBusy
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
-from .logging import log_event
+from .logging import log_event, redact_text
 from .memory_reservations import (
     MEMORY_RESERVATION_KINDS,
     memory_reservations,
@@ -357,6 +357,7 @@ class PhaseExecution:
     operation_id: str | None = None
     result: Mapping[str, object] | None = None
     waiting: bool = False
+    status_reason: str | None = None
 
 
 class RunSwitchArtifactPhaseExecutor(Protocol):
@@ -1959,11 +1960,91 @@ class RecipeLifecyclePhaseExecutor:
                 waiting = status.state in _ACTIVE_RUN_STATES or status.route_state in {
                     "pending",
                 }
+                status_reason = (
+                    f"run-switch.stop-verification-pending: run {run_id} is "
+                    f"{status.state}, route is {status.route_state}"
+                )
             else:
                 verified = status.healthy and status.route_state == "published"
-                waiting = status.state in _ACTIVE_RUN_STATES or status.route_state in {
-                    "pending",
-                }
+                waiting = False
+                status_reason = None
+                route_error = (
+                    redact_text(status.route_error)
+                    if status.route_error is not None
+                    else None
+                )
+                if not verified:
+                    if status.state in {"failed", "lost", "stopped"}:
+                        detail = route_error or "run owner reached a terminal state"
+                        raise RunSwitchOperationConflict(
+                            f"run-switch.run-owner-terminal: {status.state}; {detail}"
+                        )
+                    if status.route_state == "failed":
+                        detail = route_error or "route owner reported terminal failure"
+                        raise RunSwitchOperationConflict(
+                            f"run-switch.route-owner-failed: {detail}"
+                        )
+                    waiting = True
+                    route_cause = f"route is {status.route_state}"
+                    if status.route_state == "pending":
+                        if status.route_next_attempt_at is not None:
+                            route_cause = (
+                                "route publication is pending; route owner next "
+                                f"attempt {status.route_next_attempt_at.isoformat()}"
+                            )
+                        elif status.observation_deadline_at is not None:
+                            route_cause = (
+                                "route publication is pending; route owner has no "
+                                "retry scheduled; initial observation deadline "
+                                f"{status.observation_deadline_at.isoformat()}"
+                            )
+                        else:
+                            route_cause = (
+                                "route publication is pending; route owner next "
+                                "attempt is not scheduled"
+                            )
+                    elif status.route_state == "withdrawn":
+                        route_cause = (
+                            f"route is withdrawn; cause {route_error or 'unknown'}"
+                        )
+                    if status.recovery_owners:
+                        owners = ", ".join(
+                            f"{owner.kind} {owner.operation_id} ({owner.state})"
+                            for owner in status.recovery_owners
+                        )
+                        status_reason = (
+                            f"run-switch.distributed-recovery-active: {owners}; run "
+                            f"{run_id} generation {status.run_generation}; {route_cause}"
+                        )
+                    elif status.route_recovery_pending:
+                        status_reason = (
+                            "run-switch.route-health-recovery-active: route owner is "
+                            f"reconciling run {run_id} generation {status.run_generation}; "
+                            f"{route_cause}"
+                        )
+                    elif status.state in {"starting", "stopping"}:
+                        status_reason = (
+                            f"run-switch.run-owner-active: run {run_id} generation "
+                            f"{status.run_generation} is {status.state}; {route_cause}"
+                        )
+                    elif status.route_state == "pending":
+                        status_reason = (
+                            f"run-switch.route-publication-pending: run {run_id} "
+                            f"generation {status.run_generation}; {route_cause}"
+                        )
+                    elif status.route_state == "withdrawn":
+                        cause = route_error or "no terminal route-owner cause recorded"
+                        status_reason = (
+                            f"run-switch.route-withdrawn-owner-unknown: run {run_id} "
+                            f"generation {status.run_generation} remains {status.state}; "
+                            f"route cause {cause}; waiting for exact reconciliation"
+                        )
+                    else:
+                        status_reason = (
+                            f"run-switch.final-owner-state-unknown: run {run_id} "
+                            f"generation {status.run_generation} is {status.state}; "
+                            f"route is {status.route_state}; waiting for exact reconciliation"
+                        )
             evidence = {
                 "run_id": run_id,
                 "state": status.state,
@@ -1986,6 +2067,7 @@ class RecipeLifecyclePhaseExecutor:
                 return PhaseExecution(
                     result={"final_verified": False, **evidence},
                     waiting=True,
+                    status_reason=status_reason,
                 )
             raise RunSwitchOperationConflict("run-switch.final-verification-failed")
         return PhaseExecution()
@@ -6689,11 +6771,20 @@ class RunSwitchOperationService:
             child_id = progress.get("child_operation_id")
             if job.state == "waiting-for-operator":
                 if not child_id:
-                    return False
-                # Only observe the already-issued child. No new effect is
-                # authorized by reopening this parent's observation checkpoint.
-                job.state = "running"
-                session.commit()
+                    # Final verification observes an existing run and route;
+                    # reopening this checkpoint cannot issue a new workload.
+                    # Newer intent was checked above, and the persisted start
+                    # deadline remains immutable.
+                    if progress.get("phase") != "final_verify":
+                        return False
+                    job.state = "running"
+                    job.updated_at = now
+                    session.commit()
+                else:
+                    # Only observe the already-issued child. No new effect is
+                    # authorized by reopening this parent's observation checkpoint.
+                    job.state = "running"
+                    session.commit()
             if progress.get("cancellation") and child_id is None:
                 _complete_cancellation(job, progress, now)
                 session.commit()
@@ -7068,6 +7159,7 @@ class RunSwitchOperationService:
                 if progress.get("cancellation"):
                     _complete_cancellation(job, progress, now)
             return True
+        expiry_event: dict[str, object] | None = None
         with self._sessions.begin() as session:
             job = checkpoint_job(session)
             if job is None or job.state not in {"queued", "running"}:
@@ -7236,6 +7328,7 @@ class RunSwitchOperationService:
             progress = _read_progress(job.result)
             if not _checkpoint_matches(job, progress, phase_index, item_index, None):
                 return False
+            previous_status_reason = job.status_reason
             if progress.get("observation_due_at") is not None:
                 progress["observation_due_at"] = None
                 progress["observation_deadline_at"] = None
@@ -7248,6 +7341,7 @@ class RunSwitchOperationService:
                 RunSwitchPostStopEvidencePending.code,
             ):
                 progress["retry_reason"] = None
+            deadline_expired = False
             _merge_progress_evidence(
                 progress,
                 plan,
@@ -7274,14 +7368,56 @@ class RunSwitchOperationService:
                             progress=progress,
                         )
                         return True
+                    raw_start_deadline = progress.get("start_deadline")
+                    start_deadline = (
+                        _aware(datetime.fromisoformat(raw_start_deadline))
+                        if isinstance(raw_start_deadline, str)
+                        else None
+                    )
+                    deadline_expired = (
+                        plan.action in {"run", "switch"}
+                        and start_deadline is not None
+                        and now >= start_deadline
+                    )
                     due = now + timedelta(
-                        seconds=60 if now.timestamp() - started >= 300 else 5
+                        seconds=(
+                            60
+                            if deadline_expired or now.timestamp() - started >= 300
+                            else 5
+                        )
                     )
                     progress["observation_due_at"] = due.isoformat()
-                    job.status_reason = (
-                        "Waiting for exact run and route verification; "
-                        f"next observation at {due.isoformat()}"
-                    )
+                    if deadline_expired and start_deadline is not None:
+                        owner_reason = execution.status_reason or (
+                            "run and route owners have not produced exact final evidence"
+                        )
+                        job.status_reason = (
+                            "run-switch.final-verification-expired: accepted start "
+                            f"deadline {start_deadline.isoformat()} passed; "
+                            f"{owner_reason[:220]}; exact reconciliation retains the "
+                            f"run and reservations; next observation at {due.isoformat()}"
+                        )[:512]
+                        job.state = "waiting-for-operator"
+                        if not (
+                            isinstance(previous_status_reason, str)
+                            and previous_status_reason.startswith(
+                                "run-switch.final-verification-expired:"
+                            )
+                        ):
+                            phase_evidence = execution.result or {}
+                            expiry_event = {
+                                "operation_id": job.id,
+                                "run_id": phase_evidence.get("run_id"),
+                                "run_state": phase_evidence.get("state"),
+                                "route_state": phase_evidence.get("route_state"),
+                                "accepted_start_deadline": start_deadline.isoformat(),
+                                "status_reason": job.status_reason,
+                            }
+                    else:
+                        job.status_reason = execution.status_reason or (
+                            "Waiting for exact run and route verification; "
+                            f"next observation at {due.isoformat()}"
+                        )
                     # Keep one current observation while awaiting route publication.
                     # Repeated polling must not grow durable phase receipts.
                     progress["final_observation"] = _phase_result(
@@ -7379,11 +7515,19 @@ class RunSwitchOperationService:
                     if next_index < len(plan.phases)
                     else None
                 )
-            job.state = "running"
+            if not deadline_expired:
+                job.state = "running"
             job.result = _persisted_result(progress)
             job.updated_at = now
             if progress.get("cancellation") and not progress.get("child_operation_id"):
                 _complete_cancellation(job, progress, now)
+        if expiry_event is not None:
+            log_event(
+                _LOGGER,
+                "run_switch.final_verification_expired",
+                service="control-worker",
+                **expiry_event,
+            )
         return True
 
     @staticmethod

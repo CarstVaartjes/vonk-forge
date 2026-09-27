@@ -58,6 +58,12 @@ _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 _SQLITE_ROUTE_PUBLICATION_LOCK = threading.RLock()
 
 
+def route_health_recovery_pending(route_error: str | None) -> bool:
+    """Return whether a run is waiting for its exact rank-health recovery owner."""
+
+    return route_error == _HEALTH_RECOVERY_ERROR
+
+
 class RecipeRouteError(RuntimeError):
     def __init__(self, message: str, *, run_id: str | None = None) -> None:
         super().__init__(message)
@@ -993,8 +999,7 @@ class RecipeRouteService:
             or expires_at != lease_expires_at
             or issued_at > now
             or expires_at <= issued_at
-            or expires_at - issued_at
-            > timedelta(seconds=ROUTE_MAXIMUM_LEASE_SECONDS)
+            or expires_at - issued_at > timedelta(seconds=ROUTE_MAXIMUM_LEASE_SECONDS)
         ):
             return None
         return marker, lease_expires_at

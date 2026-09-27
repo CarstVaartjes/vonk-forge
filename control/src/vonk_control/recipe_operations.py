@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn, Protocol
+from typing import Literal, NoReturn, Protocol
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
@@ -139,6 +139,7 @@ from .recipe_lifecycle_contract import (
 from .recipe_routes import (
     RecipeRouteError,
     RecipeRouteService,
+    route_health_recovery_pending,
     route_publication_transaction,
 )
 from .recipe_runtime_specs import recipe_topology
@@ -400,6 +401,13 @@ class RecipeRunRankStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class RecipeRunRecoveryOwner:
+    operation_id: str
+    kind: Literal["recipe.start", "recipe.stop"]
+    state: Literal["queued", "running", "waiting-for-operator"]
+
+
+@dataclass(frozen=True, slots=True)
 class RecipeRunStatus:
     id: str
     alias: str
@@ -407,6 +415,12 @@ class RecipeRunStatus:
     route_state: str
     healthy: bool
     ranks: tuple[RecipeRunRankStatus, ...]
+    run_generation: int
+    observation_deadline_at: datetime | None
+    route_error: str | None
+    route_next_attempt_at: datetime | None
+    route_recovery_pending: bool
+    recovery_owners: tuple[RecipeRunRecoveryOwner, ...]
 
 
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
@@ -1452,6 +1466,45 @@ class RecipeOperationService:
                 }
                 == {(node.node_id, node.rank, node.role) for node in nodes}
             )
+            recovery_jobs = tuple(
+                job
+                for job in session.scalars(
+                    select(Job)
+                    .where(
+                        Job.kind.in_({"recipe.start", "recipe.stop"}),
+                        Job.state.in_({"queued", "running", "waiting-for-operator"}),
+                        Job.payload["owner_kind"].as_string() == "run",
+                        Job.payload["owner_id"].as_string() == run.id,
+                    )
+                    .order_by(Job.created_at, Job.id)
+                )
+                if isinstance(job.payload.get("recovery"), Mapping)
+            )
+            recovery_owners: list[RecipeRunRecoveryOwner] = []
+            for job in recovery_jobs:
+                if job.kind == "recipe.start":
+                    kind: Literal["recipe.start", "recipe.stop"] = "recipe.start"
+                elif job.kind == "recipe.stop":
+                    kind = "recipe.stop"
+                else:
+                    continue
+                if job.state == "queued":
+                    state: Literal["queued", "running", "waiting-for-operator"] = (
+                        "queued"
+                    )
+                elif job.state == "running":
+                    state = "running"
+                elif job.state == "waiting-for-operator":
+                    state = "waiting-for-operator"
+                else:
+                    continue
+                recovery_owners.append(
+                    RecipeRunRecoveryOwner(
+                        operation_id=job.id,
+                        kind=kind,
+                        state=state,
+                    )
+                )
             ranks: list[RecipeRunRankStatus] = []
             for node in nodes:
                 observed_at = _aware(node.updated_at)
@@ -1476,6 +1529,20 @@ class RecipeOperationService:
                 healthy=bool(exact_ranks)
                 and all(rank.state == "running" and rank.fresh for rank in ranks),
                 ranks=tuple(ranks),
+                run_generation=run.run_generation,
+                observation_deadline_at=(
+                    _aware(run.observation_deadline_at)
+                    if run.observation_deadline_at is not None
+                    else None
+                ),
+                route_error=run.route_error,
+                route_next_attempt_at=(
+                    _aware(run.route_next_attempt_at)
+                    if run.route_next_attempt_at is not None
+                    else None
+                ),
+                route_recovery_pending=route_health_recovery_pending(run.route_error),
+                recovery_owners=tuple(recovery_owners),
             )
 
     def install(

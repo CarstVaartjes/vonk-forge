@@ -10,11 +10,19 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
-from vonk_control.models import AgentOperation, RecipeRun
+from vonk_control.logging import configure_controller_logging
+from vonk_control.models import (
+    AgentNode,
+    AgentOperation,
+    RecipeRun,
+    ResourceReservation,
+)
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchFinalVerifyResult,
+    SparkGroup,
+    SparkGroupNode,
 )
 
 from .test_recipe_operations import (
@@ -53,9 +61,13 @@ def migrated_engine(postgres_engine):
     return postgres_engine
 
 
-def _installed(tmp_path, engine, *, nodes=1):
+def _installed(tmp_path, engine, *, nodes=1, distributed_lifecycle=False):
     sessions, lifecycle, _, mapping, build, node_ids = setup_services(
-        tmp_path, engine=engine, create_schema=False, nodes=nodes
+        tmp_path,
+        engine=engine,
+        create_schema=False,
+        nodes=nodes,
+        distributed_lifecycle=distributed_lifecycle,
     )
     installation = installed_recipe(
         lifecycle, mapping, build, node_ids, request_id=str(uuid.uuid4())
@@ -120,12 +132,34 @@ def test_postgres_invalid_terminal_child_fails_without_nested_row_lock(
     assert failed.result.retryable is False
 
 
-def _awaiting_final_verification(tmp_path, engine):
-    sessions, lifecycle, nodes, _ = _installed(tmp_path, engine)
+def _awaiting_final_verification(tmp_path, engine, *, distributed=False):
+    nodes = 2 if distributed else 1
+    sessions, lifecycle, node_ids, _ = _installed(
+        tmp_path,
+        engine,
+        nodes=nodes,
+        distributed_lifecycle=distributed,
+    )
     publisher = ConcurrentPublisher()
     _, routes = bind_route_publications(sessions, lifecycle, publisher)
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
-    request = _request(sessions, nodes[0])
+    request = _request(sessions, node_ids[0])
+    if distributed:
+        request = request.model_copy(
+            update={
+                "spark_group": SparkGroup(
+                    nodes=[
+                        SparkGroupNode(
+                            node_id=node_ids[0],
+                            rank=0,
+                            role="entrypoint",
+                            endpoint_owner=True,
+                        ),
+                        SparkGroupNode(node_id=node_ids[1], rank=1, role="worker"),
+                    ]
+                )
+            }
+        )
     assert service.preview(request, actor="admin").allowed
     operation = service.apply(
         RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
@@ -225,6 +259,118 @@ def test_postgres_final_verification_backs_off_after_durable_deadline(
     assert waiting.result.final_verify_started_at == before.final_verify_started_at
     assert waiting.result.observation_due_at == NOW + timedelta(seconds=360)
     assert restarted.tick() is False
+
+
+def test_postgres_final_verification_waits_after_accepted_start_deadline(
+    tmp_path, migrated_engine, capsys
+):
+    configure_controller_logging()
+    sessions, lifecycle, routes, _, service, operation = _awaiting_final_verification(
+        tmp_path, migrated_engine, distributed=True
+    )
+    current = service.get(operation.operation_id)
+    assert current.result is not None
+    accepted_deadline = current.result.start_deadline
+    assert accepted_deadline is not None
+    initial_observation = current.result.final_observation
+    assert isinstance(initial_observation, RunSwitchFinalVerifyResult)
+    run_id = initial_observation.run_id
+
+    now = accepted_deadline + timedelta(seconds=1)
+    lifecycle._clock = lambda: now
+    service._clock = lambda: now
+    assert service.tick() is True
+    expiry_log = capsys.readouterr().err
+    assert '"event":"run_switch.final_verification_expired"' in expiry_log
+    assert run_id in expiry_log
+
+    expired = service.get(operation.operation_id)
+    assert expired.state == "waiting-for-operator"
+    assert expired.progress.state == "waiting-for-operator"
+    assert expired.status_reason is not None
+    assert "final-verification-expired" in expired.status_reason
+    assert "accepted start deadline" in expired.status_reason
+    assert run_id in expired.status_reason
+    assert "route-publication-pending" in expired.status_reason
+    assert "next observation at" in expired.status_reason
+    assert expired.result is not None
+    assert expired.result.start_deadline == accepted_deadline
+    next_observation_at = expired.result.observation_due_at
+    assert next_observation_at is not None
+    expired_observation = expired.result.final_observation
+    assert isinstance(expired_observation, RunSwitchFinalVerifyResult)
+    assert expired_observation.final_verified is False
+    assert expired_observation.state == "running"
+    assert expired_observation.route_state == "pending"
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "running"
+        reservations = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_kind == "run",
+                    ResourceReservation.owner_id == run_id,
+                    ResourceReservation.state == "active",
+                )
+            )
+        )
+        assert reservations
+    assert service.tick() is False
+
+    recovered_at = next_observation_at + timedelta(seconds=1)
+    mark_current_exact_observations(sessions, run_id, recovered_at)
+    lifecycle._clock = lambda: recovered_at
+    routes._clock = lambda: recovered_at
+    routes.publish_run(run_id)
+    service._clock = lambda: recovered_at
+    for _ in range(3):
+        service.tick()
+    recovered = service.get(operation.operation_id)
+    assert recovered.state == "succeeded", recovered.status_reason
+    assert recovered.result is not None
+    assert recovered.result.start_deadline == accepted_deadline
+    assert any(
+        isinstance(item, RunSwitchFinalVerifyResult)
+        and item.final_verified is True
+        and item.run_id == run_id
+        for item in recovered.result.phase_results
+    )
+
+
+def test_postgres_newer_intent_supersedes_parked_final_verification(
+    tmp_path, migrated_engine
+):
+    sessions, lifecycle, _, _, service, operation = _awaiting_final_verification(
+        tmp_path, migrated_engine, distributed=True
+    )
+    current = service.get(operation.operation_id)
+    assert current.result is not None
+    accepted_deadline = current.result.start_deadline
+    assert accepted_deadline is not None
+    now = accepted_deadline + timedelta(seconds=1)
+    lifecycle._clock = lambda: now
+    service._clock = lambda: now
+    assert service.tick() is True
+
+    expired = service.get(operation.operation_id)
+    assert expired.state == "waiting-for-operator"
+    assert expired.result is not None
+    next_observation_at = expired.result.observation_due_at
+    assert next_observation_at is not None
+
+    with sessions.begin() as session:
+        for node_id in expired.node_ids:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal += 1
+
+    lifecycle._clock = lambda: next_observation_at + timedelta(seconds=1)
+    service._clock = lambda: next_observation_at + timedelta(seconds=1)
+    assert service.tick() is True
+    superseded = service.get(operation.operation_id)
+    assert superseded.state == "cancelled"
+    assert superseded.status_reason is not None
+    assert "superseded" in superseded.status_reason
 
 
 def test_postgres_duplicate_apply_converges_under_target_lock(

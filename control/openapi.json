@@ -20922,6 +20922,7 @@
             "enum": [
               "queued",
               "running",
+              "waiting-for-operator",
               "succeeded",
               "failed",
               "cancelled",
