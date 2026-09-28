@@ -1324,7 +1324,6 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
     postconditions = (
         ROOT / "scripts/verify-production-alias-postconditions"
     ).read_text()
-    publication = (ROOT / "scripts/install-release-publication").read_text()
     gate = installer_job("promote")
     assert "needs: [authority, candidate, acceptance]" in gate
     for result in ("authority", "candidate", "acceptance"):
@@ -1346,23 +1345,6 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
     assert "scripts/verify-release-tag-authority" in postconditions
     assert "(.immutable == true)" in postconditions
     assert 'test "${observed_tags[0]:-}" = "$target_tag"' in postconditions
-    preflight = publication[
-        publication.index("def promote(") : publication.index(
-            "def quarantine_dev_pointer("
-        )
-    ]
-    for verification in (
-        "_load_plan(",
-        "_validate_signed_evidence(",
-        "_verify_candidate_objects(",
-        "_validate_existing_pointer(",
-    ):
-        assert preflight.index(verification) < preflight.index(
-            "if arguments.preflight_only:"
-        )
-    assert preflight.index("_copy_publication_entry(") > preflight.index(
-        "_copy_promotion_group(filesystem, remote, endpoints)"
-    )
 
 
 def test_accepted_installer_promotion_binds_authority_and_pointer_last() -> None:

@@ -6,7 +6,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -220,11 +219,25 @@ def test_rendered_postgres_configs_start_with_an_inert_initializer(
     config_names = {mount["source"] for mount in postgres["configs"]}
     backups = tmp_path / "backups"
     backups.mkdir()
+    # tmpfs data: initdb's fsyncs dominate the test on a Docker volume.
     postgres["volumes"] = [
-        "postgres-data:/var/lib/postgresql",
+        {"type": "tmpfs", "target": "/var/lib/postgresql"},
         {"type": "bind", "source": str(backups), "target": "/backups"},
     ]
     postgres.pop("networks")
+    postgres["healthcheck"] = {
+        "test": [
+            "CMD-SHELL",
+            (
+                "psql -U control -d control -tAc "
+                "\"SELECT count(*) FROM pg_database WHERE datname = 'litellm'\""
+                " | grep -qx 1"
+            ),
+        ],
+        "interval": "250ms",
+        "timeout": "5s",
+        "retries": 240,
+    }
     postgres_password = tmp_path / "postgres-password"
     postgres_password.write_text("postgres-password\n", encoding="ascii")
     litellm_password = tmp_path / "litellm-password"
@@ -240,58 +253,20 @@ def test_rendered_postgres_configs_start_with_an_inert_initializer(
             "postgres-password": {"file": str(postgres_password)},
             "litellm-database-password": {"file": str(litellm_password)},
         },
-        "volumes": {"postgres-data": {}},
     }
     rendered.write_text(yaml.safe_dump(compose, sort_keys=False), encoding="utf-8")
     project = f"vonk-rendered-postgres-{uuid.uuid4().hex}"
     command = ["docker", "compose", "-p", project, "-f", str(rendered)]
     try:
+        # Healthy only once the rendered initializer has created LiteLLM's
+        # database; a short interval keeps the wait close to initdb's time.
         subprocess.run(
-            [*command, "up", "-d", "postgres"],
+            [*command, "up", "-d", "--wait", "--wait-timeout", "60", "postgres"],
             check=True,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=90,
         )
-        for _ in range(120):
-            logs = subprocess.run(
-                [*command, "logs", "postgres"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            probe = subprocess.run(
-                [
-                    *command,
-                    "exec",
-                    "-T",
-                    "postgres",
-                    "psql",
-                    "-U",
-                    "control",
-                    "-d",
-                    "control",
-                    "-tAc",
-                    "SELECT count(*) FROM pg_database WHERE datname = 'litellm'",
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if (
-                "PostgreSQL init process complete; ready for start up."
-                in logs.stdout + logs.stderr
-                and probe.returncode == 0
-                and probe.stdout.strip() == "1"
-            ):
-                break
-            time.sleep(0.25)
-        else:
-            raise AssertionError(
-                f"rendered PostgreSQL did not initialize LiteLLM:\n{logs.stdout}{logs.stderr}"
-            )
         staged = subprocess.check_output(
             [
                 *command,
@@ -309,7 +284,7 @@ def test_rendered_postgres_configs_start_with_an_inert_initializer(
         assert staged == "regular file:0:0:444"
     finally:
         subprocess.run(
-            [*command, "down", "--volumes", "--remove-orphans"],
+            [*command, "down", "--volumes", "--remove-orphans", "--timeout", "0"],
             check=False,
             capture_output=True,
             text=True,

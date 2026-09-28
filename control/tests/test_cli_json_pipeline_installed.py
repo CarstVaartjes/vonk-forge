@@ -6,14 +6,22 @@ import json
 import subprocess
 import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import func, select
-from vonk_control.models import FleetProfileApplication, Job, RecipeRun
+from sqlalchemy.orm import sessionmaker
+from vonk_control.api import create_app
+from vonk_control.audit import MemoryAuditStore
+from vonk_control.auth import Actor, TokenCodec
+from vonk_control.fleet_projection import FleetProjection
+from vonk_control.jobs import JobService
+from vonk_control.models import AgentNode, Base, FleetProfileApplication, Job, RecipeRun
 
+from .test_cli_first_connection_endpoints_installed import _Authority
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
-from .test_profile_load_submission import _profile_api
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 pytestmark = pytest.mark.lane
@@ -55,10 +63,37 @@ def _effect_counts(sessions) -> tuple[int, int, int]:
 def test_installed_no_input_fleet_json_pipeline_is_read_only(
     installed_vonkctl: Path, postgres_engine, tmp_path: Path
 ) -> None:
-    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
+    now = datetime(2026, 9, 24, tzinfo=UTC)
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id="spk_" + "1" * 32,
+                state="active",
+                architecture="linux-arm64",
+                capabilities=[],
+                last_seen_at=now,
+            )
+        )
+    tokens = TokenCodec(b"installed-fleet-json-pipeline-key-32")
+    app = create_app(
+        jobs=JobService(sessions, clock=lambda: now),
+        tokens=tokens,
+        audits=MemoryAuditStore(),
+        fleet_projection=FleetProjection(_Authority(), sessions, clock=lambda: now),
+        now=lambda: 100,
+    )
+    headers = {
+        "Authorization": "Bearer "
+        + tokens.issue(Actor("operator", "viewer"), ttl_seconds=1_000, now=0)
+    }
     before_effects = _effect_counts(sessions)
 
-    with _https_api_peer(tmp_path, api, headers) as (url, certificate, peer):
+    with (
+        TestClient(app) as api,
+        _https_api_peer(tmp_path, api, headers) as (url, certificate, peer),
+    ):
         environment = _process_environment(tmp_path, url, certificate, headers)
         from tests.subprocess_environment import isolated_environment
 
@@ -111,7 +146,7 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
     assert consumer_stdout.count("\n") == 1
     summary = json.loads(consumer_stdout)
     assert isinstance(summary, dict)
-    assert summary["node_count"] == 2
+    assert summary["node_count"] == 1
     assert len(peer.calls) == 1
     method, path, _body = peer.calls[0]
     assert method == "GET"
