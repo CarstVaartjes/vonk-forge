@@ -1,0 +1,36 @@
+name: Scan a built image for fixable vulnerabilities
+description: >-
+  Run Trivy on a locally built image and fail on fixable HIGH or CRITICAL
+  findings. The vulnerability database is cached between runs, and the
+  findings are uploaded as SARIF to code scanning either way.
+inputs:
+  image:
+    description: Local image reference to scan
+    required: true
+  category:
+    description: Code-scanning category, one per scanned image
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Scan ${{ inputs.image }} with Trivy
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        scan-type: image
+        image-ref: ${{ inputs.image }}
+        severity: HIGH,CRITICAL
+        ignore-unfixed: true
+        exit-code: "1"
+        format: sarif
+        limit-severities-for-sarif: true
+        output: ${{ runner.temp }}/trivy-${{ inputs.category }}.sarif
+        cache: true
+    - name: Upload ${{ inputs.category }} findings to code scanning
+      if: always() && hashFiles(format('{0}/trivy-{1}.sarif', runner.temp, inputs.category)) != ''
+      # A fork pull request has no security-events permission; the scan
+      # result above still gates the job.
+      continue-on-error: true
+      uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      with:
+        sarif_file: ${{ runner.temp }}/trivy-${{ inputs.category }}.sarif
+        category: trivy-${{ inputs.category }}
