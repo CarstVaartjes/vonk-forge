@@ -38,7 +38,7 @@ export function FleetPage({api}: {api: ControlApi; onBusyChange?(busy: boolean):
     setSubmitting(true);
     setEnrollmentError(null);
     try {
-      const response = await api.enrollFleetNode({name, request_key: crypto.randomUUID(), ttl_seconds: 900});
+      const response = await api.enrollFleetNode({name, request_key: crypto.randomUUID()});
       if (response.action !== "enroll" || !response.grant) throw new Error("Controller did not return an enrollment grant");
       setGrant(response.grant);
     } catch (error) {

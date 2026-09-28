@@ -1421,7 +1421,6 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
         payload={
             "node_order": [NODE_ID],
             "package": package,
-            "strategy": "one-at-a-time",
         },
         current_attempt=1,
         status_reason="operator-facing explanation",

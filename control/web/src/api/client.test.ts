@@ -47,7 +47,7 @@ test("creates a Fleet enrollment grant through the current operator endpoint", a
       headers: {"Content-Type": "application/json"},
     });
   });
-  const input = {name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101", ttl_seconds: 900};
+  const input = {name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101"};
   await new ApiClient().enrollFleetNode(input);
   expect(requests).toHaveLength(1);
   expect(requests[0]!.method).toBe("POST");

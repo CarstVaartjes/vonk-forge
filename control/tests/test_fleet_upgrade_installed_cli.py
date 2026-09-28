@@ -125,8 +125,6 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
             "upgrade",
             "--all",
             "--yes",
-            "--strategy",
-            "one-at-a-time",
             "--request-key",
             key,
             "--detach",

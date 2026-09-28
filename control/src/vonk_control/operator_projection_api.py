@@ -97,9 +97,6 @@ class FleetEnrollRequest(StrictJSONModel):
 
     name: str = Field(min_length=1, max_length=80, pattern=r"^[^\x00-\x1f\x7f]+$")
     request_key: EnrollmentId
-    # The enrollment authority caps a one-time bootstrap grant; advertising a
-    # longer TTL turned its refusal into an unavailable projection.
-    ttl_seconds: int = Field(default=900, ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
 
 
 class FleetReenrollRequest(StrictJSONModel):
@@ -113,7 +110,6 @@ class FleetUpgradeRequest(StrictJSONModel):
     request_key: EnrollmentId
     selectors: list[str] | None = Field(default=None, min_length=1, max_length=64)
     all: bool = False
-    strategy: Literal["one-at-a-time"] = "one-at-a-time"
 
 
 class FleetActionResponse(StrictJSONModel):
@@ -177,11 +173,11 @@ class FleetProvenanceProvider(Protocol):
 
 class FleetEnrollmentProvider(Protocol):
     def create_named(
-        self, *, name: str, ttl_seconds: int, actor: str, request_id: str
+        self, *, name: str, actor: str, request_id: str
     ) -> Mapping[str, object]: ...
 
     def create_reenrollment(
-        self, node_id: str, actor: str, ttl_seconds: int, request_id: str
+        self, node_id: str, actor: str, request_id: str
     ) -> Mapping[str, object]: ...
 
     def revoke_node(self, node_id: str, actor: str) -> None: ...
@@ -207,7 +203,6 @@ class FleetUpgradeProvider(Protocol):
         node_ids: Sequence[str],
         package: Mapping[str, object],
         *,
-        strategy: Literal["one-at-a-time"],
         request_intent: Mapping[str, object],
     ) -> Any: ...
 
@@ -219,7 +214,6 @@ class FleetUpgradeProvider(Protocol):
         plan_digest: str,
         actor: str,
         request_id: str,
-        strategy: Literal["one-at-a-time"],
         request_intent: Mapping[str, object],
     ) -> Any: ...
 
@@ -276,12 +270,12 @@ class _AgentEnrollmentAdapter:
         )
 
     def create_named(
-        self, *, name: str, ttl_seconds: int, actor: str, request_id: str
+        self, *, name: str, actor: str, request_id: str
     ) -> Mapping[str, object]:
         services = self._required()
         assert services.enrollment is not None
         grant = services.enrollment.create_named(
-            name, actor, ttl_seconds, request_key=request_id
+            name, actor, MAX_ENROLLMENT_GRANT_TTL_SECONDS, request_key=request_id
         )
         return {
             "display_name": name,
@@ -290,12 +284,12 @@ class _AgentEnrollmentAdapter:
         }
 
     def create_reenrollment(
-        self, node_id: str, actor: str, ttl_seconds: int, request_id: str
+        self, node_id: str, actor: str, request_id: str
     ) -> Mapping[str, object]:
         services = self._required()
         assert services.enrollment is not None
         grant = services.enrollment.create_reenrollment(
-            node_id, actor, ttl_seconds, request_key=request_id
+            node_id, actor, MAX_ENROLLMENT_GRANT_TTL_SECONDS, request_key=request_id
         )
         return {
             "state": "pending",
@@ -1040,7 +1034,6 @@ def install_operator_projection_routes(
         try:
             value = fleet_services.enrollment.create_named(
                 name=body.name,
-                ttl_seconds=body.ttl_seconds,
                 actor=actor.subject,
                 request_id=body.request_key,
             )
@@ -1068,7 +1061,7 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
             value = fleet_services.enrollment.create_reenrollment(
-                node.id, actor.subject, 900, body.request_key
+                node.id, actor.subject, body.request_key
             )
             result = FleetActionResponse.model_validate(
                 {"action": "re-enroll", "node_id": node.id, **value}
@@ -1207,7 +1200,6 @@ def install_operator_projection_routes(
             plan = fleet_services.upgrades.preview(
                 node_ids,
                 package,
-                strategy=body.strategy,
                 request_intent=request_intent,
             )
             job = fleet_services.upgrades.apply(
@@ -1216,7 +1208,6 @@ def install_operator_projection_routes(
                 plan_digest=plan.plan_digest,
                 actor=actor.subject,
                 request_id=body.request_key,
-                strategy=body.strategy,
                 request_intent=request_intent,
             )
             result = FleetActionResponse(

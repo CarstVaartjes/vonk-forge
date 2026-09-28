@@ -318,21 +318,19 @@ class FakeClient:
             validate_control_document("RecipeCancellationRequest", payload)
         elif path == "/api/fleet/upgrade":
             assert (
-                {"all", "request_key", "strategy"}
+                {"all", "request_key"}
                 <= set(payload)
                 <= {
                     "selectors",
                     "all",
                     "request_key",
-                    "strategy",
                 }
             )
-            assert payload["strategy"] == "one-at-a-time"
             uuid.UUID(payload["request_key"])
             if "selectors" in payload:
                 assert isinstance(payload["selectors"], list) and payload["selectors"]
         elif path == "/api/fleet/enroll":
-            assert set(payload) == {"name", "ttl_seconds"}
+            assert set(payload) == {"name"}
         elif path.endswith("/rename"):
             assert set(payload) == {"display_name"}
         elif path.endswith(("/re-enroll", "/remove")):
@@ -3639,7 +3637,6 @@ def test_fleet_upgrade_resolves_friendly_scope_before_explicit_consent() -> None
     assert body == {
         "all": False,
         "request_key": request_key,
-        "strategy": "one-at-a-time",
         "selectors": [node_id],
     }
 
@@ -3997,26 +3994,11 @@ def test_fleet_upgrade_unknown_acceptance_recommends_exact_request_replay() -> N
     assert status == 2
     assert result["error"] == "Upgrade acceptance is unknown"
     assert result["reconcile"] == {
-        "operation": (
-            "vonkctl fleet upgrade --all --request-key "
-            f"{request_key} --strategy one-at-a-time --yes"
-        ),
+        "operation": (f"vonkctl fleet upgrade --all --request-key {request_key} --yes"),
         "request_key": request_key,
     }
     assert len(client.calls) == 2
     assert client.calls[0][2] == client.calls[1][2]
-
-
-def test_cli_rejects_retired_fleet_upgrade_strategy_before_request() -> None:
-    client = FakeClient({})
-
-    status, _result = run(
-        ("fleet", "upgrade", "--all", "--strategy", "all-at-once", "--json"),
-        client,
-    )
-
-    assert status == 2
-    assert not client.calls
 
 
 @pytest.mark.parametrize("since", ["yesterday", "15", "-1m", "2026-09-13T08:00:00"])

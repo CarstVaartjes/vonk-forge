@@ -179,7 +179,7 @@ export interface ControlApi extends LibraryApi {
   profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   profileEndpoints(number: number, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
-  enrollFleetNode(input: {name: string; request_key: string; ttl_seconds: number}, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
+  enrollFleetNode(input: {name: string; request_key: string}, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
   jobs(cursor?: string): Promise<JobsResponse>;
   operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse>;
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;

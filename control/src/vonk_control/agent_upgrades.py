@@ -9,7 +9,6 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
 
 import httpx2
 from sqlalchemy import select
@@ -118,7 +117,6 @@ class AgentUpgradePlan:
     plan_digest: str
     repair_manifest: dict[str, object] | None
     request_intent: dict[str, object]
-    strategy: Literal["one-at-a-time"]
     sources: dict[str, dict[str, object]]
     #: Selected Sparks this rollout will not touch, with the reason.  A Spark
     #: that already runs the target is a no-op, not a conflict; one that can
@@ -222,11 +220,8 @@ class AgentUpgradeService:
         package: Mapping[str, object],
         *,
         repair_manifest: Mapping[str, object] | None = None,
-        strategy: Literal["one-at-a-time"] = "one-at-a-time",
         request_intent: Mapping[str, object] | None = None,
     ) -> AgentUpgradePlan:
-        if strategy != "one-at-a-time":
-            raise AgentUpgradeConflict("agent upgrade rollout strategy is invalid")
         payload = self._package(package)
         intent = _request_intent(request_intent, node_ids)
         repair = (
@@ -235,12 +230,10 @@ class AgentUpgradeService:
             else self._repair_manifest(repair_manifest, payload)
         )
         if repair is not None and (
-            node_ids is None
-            or tuple(node_ids) != (repair["node_id"],)
-            or strategy != "one-at-a-time"
+            node_ids is None or tuple(node_ids) != (repair["node_id"],)
         ):
             raise AgentUpgradeConflict(
-                "agent repair requires exactly its explicit Spark and one-at-a-time rollout"
+                "agent repair requires exactly its explicit Spark"
             )
         authority_revision = self._current_revision()
         requested = None if node_ids is None else tuple(node_ids)
@@ -295,7 +288,6 @@ class AgentUpgradeService:
             "package": payload,
             "request_intent": intent,
             **({"repair_manifest": repair} if repair is not None else {}),
-            "strategy": strategy,
         }
         return AgentUpgradePlan(
             authority_revision=authority_revision,
@@ -304,7 +296,6 @@ class AgentUpgradeService:
             plan_digest=hashlib.sha256(canonical_message(document)).hexdigest(),
             repair_manifest=repair,
             request_intent=intent,
-            strategy=strategy,
             sources=sources,
             skipped=skipped,
         )
@@ -358,11 +349,8 @@ class AgentUpgradeService:
         actor: str,
         request_id: str,
         repair_manifest: Mapping[str, object] | None = None,
-        strategy: Literal["one-at-a-time"] = "one-at-a-time",
         request_intent: Mapping[str, object] | None = None,
     ) -> Job:
-        if strategy != "one-at-a-time":
-            raise AgentUpgradeConflict("agent upgrade rollout strategy is invalid")
         intent = _request_intent(request_intent, node_ids)
         existing = self.get_request(request_id, actor=actor, request_intent=intent)
         if existing is not None:
@@ -371,7 +359,6 @@ class AgentUpgradeService:
             node_ids,
             package,
             repair_manifest=repair_manifest,
-            strategy=strategy,
             request_intent=intent,
         )
         # The latest request leads: a preview digest that no longer matches is
@@ -398,7 +385,6 @@ class AgentUpgradeService:
                     if plan.repair_manifest is not None
                     else {}
                 ),
-                "strategy": plan.strategy,
             },
             current_attempt=0,
             created_at=now,
@@ -477,14 +463,12 @@ class AgentUpgradeService:
                     raise ValueError("agent upgrade worker dispatch is not stale")
             package = parent.payload.get("package")
             order = parent.payload.get("node_order")
-            strategy = parent.payload.get("strategy")
             repair = parent.payload.get("repair_manifest")
             request_intent = parent.payload.get("request_intent")
             expected_payload_keys = {
                 "node_order",
                 "package",
                 "request_intent",
-                "strategy",
                 "sources",
             }
             if repair is not None:
@@ -497,7 +481,6 @@ class AgentUpgradeService:
                 or not all(isinstance(node_id, str) for node_id in order)
                 or len(order) != len(set(order))
                 or order != parent.targets
-                or strategy != "one-at-a-time"
                 or (repair is not None and not isinstance(repair, Mapping))
             ):
                 raise ValueError("stored agent upgrade plan is invalid")
@@ -531,7 +514,6 @@ class AgentUpgradeService:
                             if normalized_repair is not None
                             else {}
                         ),
-                        "strategy": strategy,
                     }
                 )
             ).hexdigest()

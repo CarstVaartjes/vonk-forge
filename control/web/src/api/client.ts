@@ -207,7 +207,7 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/fleet", {signal}));
   }
 
-  async enrollFleetNode(input: {name: string; request_key: string; ttl_seconds: number}, signal?: AbortSignal) {
+  async enrollFleetNode(input: {name: string; request_key: string}, signal?: AbortSignal) {
     return resultData(await this.generated.POST("/api/fleet/enroll", {body: input, signal}));
   }
 

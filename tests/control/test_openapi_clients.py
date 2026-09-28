@@ -92,35 +92,6 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     assert "chain_pem" not in serialized
 
 
-def test_generated_fleet_upgrade_request_rejects_retired_strategy() -> None:
-    from cluster_profiles.generated_control.models.fleet_upgrade_request import (
-        FleetUpgradeRequest,
-    )
-
-    request_key = "11111111-1111-4111-8111-111111111111"
-    request = FleetUpgradeRequest.from_dict(
-        {
-            "all": True,
-            "request_key": request_key,
-            "strategy": "one-at-a-time",
-        }
-    )
-    assert request.to_dict() == {
-        "all": True,
-        "request_key": request_key,
-        "strategy": "one-at-a-time",
-    }
-
-    with pytest.raises(ValueError, match="strategy must match const"):
-        FleetUpgradeRequest.from_dict(
-            {
-                "all": True,
-                "request_key": request_key,
-                "strategy": "all-at-once",
-            }
-        )
-
-
 def test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait() -> (
     None
 ):

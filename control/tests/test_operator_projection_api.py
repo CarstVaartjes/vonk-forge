@@ -338,12 +338,11 @@ def test_agent_enrollment_adapter_binds_the_reviewed_display_name() -> None:
     adapter = _AgentEnrollmentAdapter(cast(AgentApiServices, services))
     result = adapter.create_named(
         name="Living Spark",
-        ttl_seconds=600,
         actor="admin",
         request_id="11111111-1111-4111-8111-111111111111",
     )
 
-    assert enrollment.created == ("Living Spark", "admin", 600)
+    assert enrollment.created == ("Living Spark", "admin", 900)
     assert result["display_name"] == "Living Spark"
 
 
@@ -493,26 +492,6 @@ def test_a_refused_upgrade_names_the_authority_reason(reason: str) -> None:
     assert response.json()["detail"] == reason
 
 
-def test_retired_upgrade_strategy_is_rejected_before_dispatch() -> None:
-    app = _action_app(
-        Actor("admin", "administrator"),
-        services=FleetOperatorServices(
-            upgrades=_RefusingUpgrade(AgentUpgradeConflict("must not dispatch"))
-        ),
-    )
-
-    response = TestClient(app).post(
-        "/api/fleet/upgrade",
-        json={
-            "all": True,
-            "request_key": "11111111-1111-4111-8111-111111111111",
-            "strategy": "all-at-once",
-        },
-    )
-
-    assert response.status_code == 422, response.text
-
-
 def test_upgrade_request_replay_returns_the_same_durable_job() -> None:
     class ReplayUpgrade:
         def __init__(self) -> None:
@@ -622,43 +601,3 @@ def test_a_refused_removal_names_the_enrollment_layer(
     assert response.status_code == status_code, response.text
     assert response.headers["x-vonk-error-code"] == code
     assert response.json()["detail"] == str(error)
-
-
-class _RecordingEnrollment(_Enrollment):
-    def __init__(self) -> None:
-        self.called = False
-
-    def create_named(self, **kwargs: object) -> dict[str, object]:
-        self.called = True
-        # EnrollmentService caps a bootstrap grant at 900 seconds and voices the
-        # refusal as this ValueError.
-        raise ValueError("enrollment grant TTL must be between one and 900 seconds")
-
-    def create_reenrollment(self, *args: object, **kwargs: object) -> dict[str, object]:
-        raise AssertionError("not used")
-
-    def revoke_node(self, node_id: str, actor: str) -> None:
-        raise AssertionError("not used")
-
-
-def test_enroll_rejects_a_ttl_the_bootstrap_authority_would_refuse() -> None:
-    """The request model advertised a TTL the authority always refuses.
-
-    ``ttl_seconds`` accepted up to 86400 while ``EnrollmentService`` caps a
-    bootstrap grant at 900, so an overlong value passed request validation and
-    the authority's ValueError arrived as "operator projection unavailable"
-    instead of a request rejection.
-    """
-
-    enrollment = _RecordingEnrollment()
-    app = _action_app(
-        Actor("admin", "administrator"),
-        services=FleetOperatorServices(enrollment=enrollment),
-    )
-    response = TestClient(app).post(
-        "/api/fleet/enroll",
-        json={"name": "Spark", "ttl_seconds": 901, "request_key": _GRANT["id"]},
-    )
-
-    assert response.status_code == 422, response.text
-    assert not enrollment.called

@@ -234,8 +234,8 @@ The Controller rechecks current authorization and the intent of every target
 before accepting it. Resume does not grant permission to replay superseded or
 revoked work. Already authorized retries retain their original retry budget.
 
-Fleet upgrades use `--strategy one-at-a-time`; this is the only accepted
-strategy. The receipt identifies the exact job to follow. A failure stops
+Fleet upgrades roll out one Spark at a time. The receipt identifies the exact
+job to follow. A failure stops
 consequential rollout to later Sparks. This command upgrades enrolled Sparks;
 Controller deployment and the signed local CLI `update` command have separate
 owners.

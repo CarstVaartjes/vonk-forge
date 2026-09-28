@@ -2,7 +2,6 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
 
 import httpx2
 import pytest
@@ -1030,22 +1029,6 @@ def test_waiting_upgrade_resume_expires_worker_fence_without_shortening_helper_f
         assert worker_attempt is not None and worker_attempt.state == "expired"
 
 
-def test_resume_rejects_retired_rollout_strategy_before_requeue(tmp_path) -> None:
-    sessions, _operations, upgrades, job = _rollout(tmp_path, "retired-strategy")
-    with sessions.begin() as session:
-        parent = session.get(Job, job.id)
-        assert parent is not None
-        parent.state = "waiting-for-operator"
-        parent.status_reason = "operator review"
-        parent.payload = {**parent.payload, "strategy": "all-at-once"}
-
-    with pytest.raises(ValueError, match="stored agent upgrade plan is invalid"):
-        upgrades.resume(job.id)
-    with sessions() as session:
-        parent = session.get(Job, job.id)
-        assert parent is not None and parent.state == "waiting-for-operator"
-
-
 def test_resume_restores_success_after_late_legacy_failure_of_completed_rollout(
     tmp_path,
 ) -> None:
@@ -1309,22 +1292,6 @@ def test_replay_returns_original_job_before_replanning_and_checks_actor_and_scop
             job.request_id,
             actor="admin",
             request_intent={"all": False, "selectors": [NODE_A, NODE_B]},
-        )
-
-
-def test_service_rejects_retired_rollout_strategy_even_on_replay(tmp_path) -> None:
-    _sessions, _operations, upgrades, job = _rollout(tmp_path, "retired-strategy-api")
-
-    with pytest.raises(AgentUpgradeConflict, match="rollout strategy is invalid"):
-        upgrades.preview(None, PACKAGE, strategy=cast(Any, "all-at-once"))
-    with pytest.raises(AgentUpgradeConflict, match="rollout strategy is invalid"):
-        upgrades.apply(
-            None,
-            PACKAGE,
-            plan_digest="0" * 64,
-            actor="admin",
-            request_id=job.request_id,
-            strategy=cast(Any, "all-at-once"),
         )
 
 
@@ -1718,14 +1685,13 @@ def test_latest_request_supersedes_an_older_paused_rollout(
         waiting = session.get(Job, old_job.id)
         assert waiting is not None
         waiting.state = "waiting-for-operator"
-    plan = upgrades.preview(None, PACKAGE, strategy="one-at-a-time")
+    plan = upgrades.preview(None, PACKAGE)
     current = upgrades.apply(
         None,
         PACKAGE,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
-        strategy="one-at-a-time",
     )
     claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     assert (
