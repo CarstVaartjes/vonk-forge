@@ -877,7 +877,7 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - name: Build recipe library index and packages
-        run: scripts/retry-dependency-fetch scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
 
       - name: Build and verify the Controller protocol wheel
         uses: ./.github/actions/prepare-control-wheel
