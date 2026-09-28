@@ -1183,7 +1183,7 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
         "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a",
     ):
         assert action in text
-    assert text.count("docker/build-push-action@") == 1
+    assert publisher.count("docker/build-push-action@") == 1
     metadata = (ROOT / "scripts/container-release-metadata").read_text()
     for package in (
         "vonk-forge-api",

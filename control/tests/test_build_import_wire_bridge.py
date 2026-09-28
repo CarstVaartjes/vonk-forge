@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import subprocess
 import uuid
 from pathlib import Path
@@ -39,37 +38,14 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.run_admission import RunAdmissionService
 
+from tests.wire_probes import prebuilt_probe
+
 from .test_recipe_builds import RecordingQueue, _authorize_distribution_fixture, setup
 
 
 @pytest.fixture(scope="session")
 def build_import_wire_probe() -> Path:
-    configured = os.environ.get("VONK_BUILD_IMPORT_WIRE_PROBE")
-    if configured:
-        path = Path(configured).expanduser().resolve()
-        if not path.is_file() or not os.access(path, os.X_OK):
-            raise AssertionError(f"configured wire probe is not executable: {path}")
-        return path
-    repository = Path(__file__).resolve().parents[2]
-    subprocess.run(
-        [
-            "cargo",
-            "build",
-            "--locked",
-            "--package",
-            "vonk-agent-protocol",
-            "--example",
-            "build_import_wire_probe",
-        ],
-        cwd=repository,
-        check=True,
-    )
-    target = repository / "target" / "debug" / "examples" / "build_import_wire_probe"
-    if not target.is_file() or not os.access(target, os.X_OK):
-        raise AssertionError(
-            f"cargo did not produce an executable wire probe: {target}"
-        )
-    return target
+    return prebuilt_probe("VONK_BUILD_IMPORT_WIRE_PROBE")
 
 
 def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(

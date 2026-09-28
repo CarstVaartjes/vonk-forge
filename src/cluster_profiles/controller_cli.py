@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import redirect_stdout
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from .cli_artifact_jobs import (
     ArtifactJobClient,
@@ -51,9 +51,11 @@ from .control_client import (
     validate_control_document,
 )
 from .error_reporting import ErrorContext, protocol_context, transport_context
-from .generated_control.models.fleet_profile_endpoints_view import (
-    FleetProfileEndpointsView,
-)
+
+if TYPE_CHECKING:
+    from .generated_control.models.fleet_profile_endpoints_view import (
+        FleetProfileEndpointsView,
+    )
 
 FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")

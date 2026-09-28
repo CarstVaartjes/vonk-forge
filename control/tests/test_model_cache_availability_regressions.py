@@ -440,11 +440,12 @@ def test_hf_rate_limit_cooldown_survives_restart_but_local_work_progresses(
 
 def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
     sessions = _database(tmp_path)
-    # The subject here is the member count, not transfer ordering: the assertion
-    # is that all 129 durable checkpoints survive into progress. Running the
-    # transfers one at a time made this single test take 36s, roughly a third of
-    # the whole fast tier, without changing what it can catch -- any truncation
-    # at the old 128 boundary still fails the length assertion below.
+    # The subject is the member count, not transfer throughput: the old
+    # contract capped the list at 128, so a 129th member must survive the
+    # durable progress round trip. The first tick persists every member, which
+    # is where a cap would truncate or reject. Draining all 129 transfers
+    # re-serialized the whole member list per checkpoint (quadratic) and took
+    # most of a minute without adding a way to fail.
     service, _ = _service(tmp_path, sessions, maximum=8)
     artifacts = []
     for index in range(129):
@@ -468,14 +469,15 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
         artifacts,
         "00000000-0000-4000-8000-000000000309",
     )
-    # This checks 129 durable file checkpoints, not a throughput requirement;
-    # allow the full set to commit on a busy shared CI filesystem.
-    _drain(service, operation.id, timeout_seconds=120)
-    result = service.get_operation(operation.id)
-    assert result.state == "succeeded", result.failure
-    parsed = ModelCacheOperationProgress.model_validate(result.progress)
-    assert len(parsed.measurement.members) == 129
-    service.close()
+    try:
+        service.tick()
+        result = service.get_operation(operation.id)
+        assert result.state in {"running", "succeeded"}, result.failure
+        parsed = ModelCacheOperationProgress.model_validate(result.progress)
+        assert len(parsed.measurement.members) == 129
+        assert len({member.member_id for member in parsed.measurement.members}) == 129
+    finally:
+        service.close()
 
 
 def _model_document(

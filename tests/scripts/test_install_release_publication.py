@@ -1150,9 +1150,54 @@ def test_acceptance_authority_rejects_missing_native_package_object(
     assert not (tmp_path / "acceptance/acceptance.json").exists()
 
 
-def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_proof(
-    tmp_path: Path,
-) -> None:
+def _proof(document: dict) -> dict:
+    return document["lifecycle"]["proof"]
+
+
+def _set(path: tuple[str, ...], value: object):
+    def tamper(document: dict) -> None:
+        target = _proof(document)
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+
+    return tamper
+
+
+# Each forged or incomplete ARM64 Spark lifecycle proof must be refused.
+_SPARK_PROOF_TAMPERING = {
+    "fabricated": lambda document: document.pop("lifecycle"),
+    "incomplete": lambda document: document["lifecycle"]["completed_phases"].remove(
+        "identity-renewed"
+    ),
+    "missing-proof": lambda document: _proof(document).pop("canary"),
+    "changed": _set(("installation", "identity", "package_sha256"), "f" * 64),
+    "reused-pairing": _set(("pairing_grant_use_count",), 2),
+    "unchanged-serial": _set(
+        ("renewal", "certificate_serial_after"), "0123456789abcdef"
+    ),
+    "accepted-old-serial": _set(
+        ("renewal", "old_certificate_rejection", "rejected"), False
+    ),
+    "changed-node": _set(
+        ("node_id_after_renewal",), "spk_fedcba9876543210fedcba9876543210"
+    ),
+    "unchanged-build": _set(("installation", "identity", "build_sha256"), "invalid"),
+    "indirect-agent": _set(("direct_agent_health", "transport"), "controller-proxy"),
+    "changed-graph": lambda document: _proof(document)["publication_graph"][
+        "packages"
+    ].pop("linux-arm64"),
+    "false-cdi": _set(("synthetic_device", "provenance"), "physical-gpu"),
+}
+
+
+@pytest.fixture(scope="module")
+def accepted_spark_proof(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, Path, dict]:
+    """One assembled publication with a valid NAS report and ARM64 proof."""
+
+    tmp_path = tmp_path_factory.mktemp("spark-proof")
     publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     report_root = tmp_path / "reports"
     report_root.mkdir()
@@ -1167,78 +1212,35 @@ def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_pro
         ARM64_SPARK_GATES,
         "linux-arm64",
     )
-    complete = json.loads(arm64.read_text())
+    return publication, nas, json.loads(arm64.read_text())
 
-    fabricated = copy.deepcopy(complete)
-    fabricated.pop("lifecycle")
-    incomplete = copy.deepcopy(complete)
-    incomplete["lifecycle"]["completed_phases"].remove("identity-renewed")
-    missing_proof = copy.deepcopy(complete)
-    missing_proof["lifecycle"]["proof"].pop("canary")
-    changed = copy.deepcopy(complete)
-    changed["lifecycle"]["proof"]["installation"]["identity"]["package_sha256"] = (
-        "f" * 64
-    )
-    reused_pairing = copy.deepcopy(complete)
-    reused_pairing["lifecycle"]["proof"]["pairing_grant_use_count"] = 2
-    unchanged_serial = copy.deepcopy(complete)
-    unchanged_serial["lifecycle"]["proof"]["renewal"]["certificate_serial_after"] = (
-        "0123456789abcdef"
-    )
-    accepted_old_serial = copy.deepcopy(complete)
-    accepted_old_serial["lifecycle"]["proof"]["renewal"]["old_certificate_rejection"][
-        "rejected"
-    ] = False
-    changed_node = copy.deepcopy(complete)
-    changed_node["lifecycle"]["proof"]["node_id_after_renewal"] = (
-        "spk_fedcba9876543210fedcba9876543210"
-    )
-    unchanged_build = copy.deepcopy(complete)
-    unchanged_build["lifecycle"]["proof"]["installation"]["identity"][
-        "build_sha256"
-    ] = "invalid"
-    indirect_agent = copy.deepcopy(complete)
-    indirect_agent["lifecycle"]["proof"]["direct_agent_health"]["transport"] = (
-        "controller-proxy"
-    )
-    changed_graph = copy.deepcopy(complete)
-    changed_graph["lifecycle"]["proof"]["publication_graph"]["packages"].pop(
-        "linux-arm64"
-    )
-    false_cdi = copy.deepcopy(complete)
-    false_cdi["lifecycle"]["proof"]["synthetic_device"]["provenance"] = "physical-gpu"
 
-    for name, document in {
-        "accepted-old-serial": accepted_old_serial,
-        "changed-graph": changed_graph,
-        "changed-node": changed_node,
-        "fabricated": fabricated,
-        "false-cdi": false_cdi,
-        "indirect-agent": indirect_agent,
-        "incomplete": incomplete,
-        "missing-proof": missing_proof,
-        "reused-pairing": reused_pairing,
-        "changed": changed,
-        "unchanged-build": unchanged_build,
-        "unchanged-serial": unchanged_serial,
-    }.items():
-        bad_report = report_root / f"{name}.json"
-        _canonical(bad_report, document)
-        output = tmp_path / f"acceptance-{name}"
-        result = subprocess.run(
-            _accept_command(publication, output, [nas, bad_report]),
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+@pytest.mark.parametrize("name", sorted(_SPARK_PROOF_TAMPERING))
+def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_proof(
+    accepted_spark_proof: tuple[Path, Path, dict],
+    tmp_path: Path,
+    name: str,
+) -> None:
+    publication, nas, complete = accepted_spark_proof
+    document = copy.deepcopy(complete)
+    _SPARK_PROOF_TAMPERING[name](document)
+    bad_report = tmp_path / f"{name}.json"
+    _canonical(bad_report, document)
+    output = tmp_path / "acceptance"
+    result = subprocess.run(
+        _accept_command(publication, output, [nas, bad_report]),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
-        assert result.returncode == 2, name
-        expected_error = (
-            "behavioral gate report" if name == "fabricated" else "Spark gate report"
-        )
-        assert expected_error in result.stderr, (name, result.stderr)
-        assert not (output / "acceptance.json").exists()
+    assert result.returncode == 2, name
+    expected_error = (
+        "behavioral gate report" if name == "fabricated" else "Spark gate report"
+    )
+    assert expected_error in result.stderr, (name, result.stderr)
+    assert not (output / "acceptance.json").exists()
 
 
 def test_acceptance_authority_rejects_incomplete_arm64_gate_ownership(

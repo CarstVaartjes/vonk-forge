@@ -115,10 +115,13 @@ def run_commands(job: str) -> list[str]:
 def lane_contract(workflow_text: str) -> dict[str, object]:
     """Extract the facts the local lane must agree with from the CI job."""
     job = workflow_job(workflow_text, CI_JOB)
+    # CI may start the probe build early with --build-only so it overlaps
+    # other checks; the tier command below builds anything still missing, so
+    # only the command that runs the contracts has to match this lane.
     tier_commands = [
         command
         for command in run_commands(job)
-        if "run_agent_wire_contracts.py" in command
+        if "run_agent_wire_contracts.py" in command and "--build-only" not in command
     ]
     rust = re.search(r"rustup toolchain install (\S+)", job)
     uv = re.search(r'^\s*version:\s*"([^"]+)"\s*$', job, re.MULTILINE)

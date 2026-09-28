@@ -23,7 +23,14 @@ vonkctl = "cluster_profiles.cli:main"
 vonk-fleet-qualify-campaign = "cluster_profiles.fleet_qualification_campaign_cli:main"
 
 [dependency-groups]
-dev = ["hatchling==1.31.0", "pytest==9.1.1", "pyyaml==6.0.3", "ruff==0.16.1"]
+dev = [
+    "hatchling==1.31.0",
+    "pytest==9.1.1",
+    "pytest-timeout==2.4.0",
+    "pytest-xdist==3.8.0",
+    "pyyaml==6.0.3",
+    "ruff==0.16.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cluster_profiles"]
@@ -72,6 +79,9 @@ exclude = [
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+# Hang guard only. The per-test time budget (10 s, or @pytest.mark.slow up to
+# 60 s) lives in tools/pytest_budget.py and is checked after each test.
+timeout = 120
 markers = [
     "lane: requires Docker, PostgreSQL, cargo or a Linux host tool; excluded from the fast tier",
     "linux_only: requires Linux host semantics or Linux system tools",

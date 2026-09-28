@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
 from vonk_agent_protocol import AgentDirective
+
+from tests.wire_probes import prebuilt_probe
 
 from .test_agent_api import NODE_A, STOP_PAYLOAD, agent_headers, parent
 from .test_agent_api import agent_system as _agent_system
@@ -16,41 +17,7 @@ agent_system = _agent_system
 
 @pytest.fixture(scope="session")
 def heartbeat_wire_probe() -> Path:
-    configured = os.environ.get("VONK_HEARTBEAT_WIRE_PROBE")
-    if configured:
-        path = Path(configured).expanduser()
-        if not path.is_absolute():
-            path = Path(__file__).resolve().parents[2] / path
-        path = path.resolve()
-        if not path.is_file() or not os.access(path, os.X_OK):
-            raise AssertionError(
-                f"configured heartbeat wire probe is not executable: {path}"
-            )
-        return path
-
-    repository = Path(__file__).resolve().parents[2]
-    target_root = Path(os.environ.get("CARGO_TARGET_DIR", repository / "target"))
-    if not target_root.is_absolute():
-        target_root = repository / target_root
-    subprocess.run(
-        [
-            "cargo",
-            "build",
-            "--locked",
-            "--package",
-            "vonk-agent",
-            "--example",
-            "heartbeat_wire_probe",
-        ],
-        cwd=repository,
-        check=True,
-    )
-    target = target_root / "debug" / "examples" / "heartbeat_wire_probe"
-    if not target.is_file() or not os.access(target, os.X_OK):
-        raise AssertionError(
-            f"cargo did not produce an executable wire probe: {target}"
-        )
-    return target
+    return prebuilt_probe("VONK_HEARTBEAT_WIRE_PROBE")
 
 
 def test_controller_heartbeat_response_crosses_rust_directive_parser(

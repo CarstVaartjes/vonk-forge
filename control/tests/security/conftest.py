@@ -1,55 +1,52 @@
-"""Acquire pinned image inputs separately from the container checks."""
+"""Prebuilt Controller images for the image-content checks.
+
+The ``built_image`` tests never build an image themselves. The "Controller
+image build tests" CI job builds the Controller (``api``) and ``worker``
+targets of ``control/Dockerfile`` once, with a build cache, and names them in
+``VONK_TEST_CONTROLLER_IMAGE`` and ``VONK_TEST_WORKER_IMAGE``; each test is then
+a quick check against that image. ``scripts/test-local --with-image-build``
+does the same locally. Without the variable the test skips locally and fails
+in CI, where only that job selects these tests.
+"""
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
-import sys
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]
 
-
-@pytest.fixture(scope="session")
-def control_image_build_args() -> list[str]:
-    if (
-        shutil.which("docker") is None
-        or subprocess.run(
-            ["docker", "info"], capture_output=True, check=False
+def _built_image(variable: str) -> str:
+    image = os.environ.get(variable, "")
+    reason = None
+    if not image:
+        reason = (
+            f"{variable} names no prebuilt image; run scripts/test-local "
+            "--with-image-build or build control/Dockerfile and set it"
+        )
+    elif shutil.which("docker") is None:
+        reason = "Docker is unavailable"
+    elif (
+        subprocess.run(
+            ["docker", "image", "inspect", image], capture_output=True, check=False
         ).returncode
         != 0
     ):
-        if os.getenv("CI"):
-            pytest.fail("Docker is required for Controller image checks", pytrace=False)
-        pytest.skip("Docker is unavailable")
+        reason = f"{variable}={image} is not a local Docker image"
+    if reason is None:
+        return image
+    if os.getenv("CI", "").lower() == "true":
+        pytest.fail(f"CI prerequisite missing: {reason}", pytrace=False)
+    pytest.skip(reason)
 
-    bases = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())[
-        "build_bases"
-    ]
-    arguments = []
-    for name in ("node", "python", "skopeo"):
-        image = bases[name]
-        # Local images are immutable inputs. Reuse them without contacting the
-        # registry; only missing inputs enter the bounded acquisition retry.
-        if (
-            subprocess.run(
-                ["docker", "image", "inspect", image], capture_output=True, check=False
-            ).returncode
-            != 0
-        ):
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(ROOT / "scripts/retry-dependency-fetch"),
-                    "docker",
-                    "pull",
-                    image,
-                ],
-                check=True,
-            )
-        arguments.extend(["--build-arg", f"{name.upper()}_IMAGE={image}"])
-    return arguments
+
+@pytest.fixture(scope="session")
+def controller_image() -> str:
+    return _built_image("VONK_TEST_CONTROLLER_IMAGE")
+
+
+@pytest.fixture(scope="session")
+def worker_image() -> str:
+    return _built_image("VONK_TEST_WORKER_IMAGE")

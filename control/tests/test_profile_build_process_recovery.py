@@ -358,6 +358,10 @@ def _worker_process(config: dict, crash: str) -> None:
         engine.dispose()
 
 
+# Slow by design: each case kills a real worker process mid-transaction and
+# restarts it, so it pays two to four Python process start-ups against
+# PostgreSQL. That process boundary is the behaviour under test.
+@pytest.mark.slow(30)
 @pytest.mark.parametrize(
     ("boundary", "complete_while_down", "initially_installed", "replacement"),
     [

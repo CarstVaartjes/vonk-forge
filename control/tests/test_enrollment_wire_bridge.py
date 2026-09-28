@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +13,8 @@ from vonk_agent_protocol.enrollment import (
     EnrollmentSubmitRequest,
     IssuedCertificateResponse,
 )
+
+from tests.wire_probes import prebuilt_probe
 
 from .test_agent_api import (
     NODE_A,
@@ -75,26 +76,12 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
 
 @pytest.fixture(scope="session")
 def bootstrap_wire_probe() -> Path:
-    configured = os.environ.get("VONK_BOOTSTRAP_WIRE_PROBE")
-    if not configured:
-        raise AssertionError(
-            "run scripts/tests/run_agent_wire_contracts.py to build wire probes"
-        )
-    probe = Path(configured).resolve()
-    assert probe.is_file() and os.access(probe, os.X_OK)
-    return probe
+    return prebuilt_probe("VONK_BOOTSTRAP_WIRE_PROBE")
 
 
 @pytest.fixture(scope="session")
 def enrollment_wire_probe() -> Path:
-    configured = os.environ.get("VONK_ENROLLMENT_WIRE_PROBE")
-    if not configured:
-        raise AssertionError(
-            "run scripts/tests/run_agent_wire_contracts.py to build wire probes"
-        )
-    probe = Path(configured).resolve()
-    assert probe.is_file() and os.access(probe, os.X_OK)
-    return probe
+    return prebuilt_probe("VONK_ENROLLMENT_WIRE_PROBE")
 
 
 def _roundtrip(probe: Path, content: bytes, *arguments: str) -> bytes:

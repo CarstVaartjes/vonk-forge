@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import ipaddress
 import json
 import os
@@ -228,7 +229,20 @@ def _https_api_peer(
 def installed_vonkctl(tmp_path_factory: pytest.TempPathFactory) -> Path:
     if shutil.which("uv") is None:
         pytest.skip("uv is required to build and install the CLI wheel")
-    return _build_installed_vonkctl(tmp_path_factory.mktemp("installed-profile-cli"))
+    # The installed CLI is identical for every xdist worker, so build it once
+    # per session in the shared base directory instead of once per worker.
+    root = tmp_path_factory.getbasetemp()
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        root = root.parent
+    workspace = root / "installed-profile-cli"
+    complete = workspace / "complete"
+    with open(root / "installed-profile-cli.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not complete.is_file():
+            shutil.rmtree(workspace, ignore_errors=True)
+            _build_installed_vonkctl(workspace)
+            complete.touch()
+    return workspace / "venv" / "bin" / "vonkctl"
 
 
 def _build_installed_vonkctl(workspace: Path) -> Path:
@@ -280,6 +294,7 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
             "pip",
             "install",
             "--offline",
+            "--compile-bytecode",
             "--python",
             str(python),
             str(wheels[0]),

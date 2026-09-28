@@ -346,6 +346,9 @@ def test_real_caddy_fails_closed_when_authority_stops(
     assert real_lease_edge.upstream.is_alive()
 
 
+# Slow by design: it waits out two real lease deadlines (5 s, then 10 s
+# later) against a running Caddy edge; the wall-clock expiry is under test.
+@pytest.mark.slow(30)
 @pytest.mark.needs_docker
 def test_real_caddy_honors_same_config_renewal_until_renewed_deadline(
     real_lease_edge: _RealLeaseEdge,
