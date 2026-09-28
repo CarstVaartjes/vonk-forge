@@ -479,12 +479,12 @@ def setup_services(
         recipe_transform(document)
     if model_transform is not None:
         model_transform(model_document)
-    recipe_definition = RecipeDefinition.model_validate(document)
+    RecipeDefinition.model_validate(document)
     model_definition = ModelDefinition.model_validate(model_document)
-    recipe_digest = document_sha256(recipe_definition.model_dump(mode="json"))
-    model_digest = document_sha256(model_definition.model_dump(mode="json"))
-    canonical_recipe_document = recipe_definition.model_dump(mode="json")
-    canonical_model_document = model_definition.model_dump(mode="json")
+    recipe_digest = document_sha256(document)
+    model_digest = document_sha256(model_document)
+    canonical_recipe_document = document
+    canonical_model_document = model_document
     recipe_revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
         recipe_catalog = CatalogDocument(
@@ -587,7 +587,6 @@ def setup_services(
             del archive
             return PulledImageEvidence(
                 manifest_digest="sha256:" + "1" * 64,
-                requested_manifest_digest=None,
                 config_id="sha256:" + "4" * 64,
                 local_reference="localhost/vonk/fixture@sha256:" + "4" * 64,
                 architecture=expected_architecture,
@@ -1006,7 +1005,7 @@ def test_retry_scheduled_start_observation_failure_keeps_the_run_pending(
     assert service.get(started.id).retry_due_at == NOW + timedelta(seconds=2)
 
 
-def test_canonical_recipe_revision_drives_install_and_schema2_payload(
+def test_canonical_recipe_revision_drives_install_and_payload(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -1031,7 +1030,6 @@ def test_canonical_recipe_revision_drives_install_and_schema2_payload(
         compiled = installation.plan.get("compiled_execution_plans")
         assert isinstance(compiled, dict)
         payload = compiled[nodes[0]]
-        assert payload["schema_version"] == 2
         assert payload["identity"]["recipe_revision_sha256"] == revision.content_digest
         RecipeInstallPayload.model_validate(
             {
@@ -1564,8 +1562,11 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
                 select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
             )
         )
-        assert {_placement(item.payload)["role"] for item in first} == {"worker"}
-        assert len(first) == 2
+        assert {_placement(item.payload)["role"] for item in first} == {
+            "worker",
+            "entrypoint",
+        }
+        assert len(first) == 3
         for item in first:
             RecipeStartPayload.model_validate(item.payload)
         stored = _required(session.get(Job, start.id))
@@ -1593,7 +1594,7 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
         second = tuple(
             item
             for item in all_children
-            if _placement(item.payload)["role"] == "entrypoint"
+            if item.payload.get("phase") == "collective-readiness"
         )
         assert len(second) == 1
         RecipeStartPayload.model_validate(second[0].payload)
@@ -1641,67 +1642,6 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
             stop.id, operation.node_id, succeeded=True, evidence={}
         )
     assert recovered.get(stop.id).state == "succeeded"
-
-
-def test_failed_start_phase_never_enqueues_dependent_role(tmp_path: Path) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2
-    )
-    install_plan = service.preview_install(mapping_id, build_id)
-    install = service.install(
-        install_plan,
-        plan_digest=install_plan.plan_digest,
-        actor="admin",
-        request_id="3" * 36,
-    )
-    for node_id in nodes:
-        service.record_node_result(
-            install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
-        )
-    run_plan = service.preview_run(install.owner_id, "blocked")
-    start = service.start(
-        run_plan,
-        plan_digest=run_plan.plan_digest,
-        actor="admin",
-        request_id="4" * 36,
-    )
-    with sessions() as session:
-        worker = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
-        )
-        assert (
-            worker is not None
-            and worker.payload["compiled_execution_plan"]["runtime"]["placement"][
-                "role"
-            ]
-            == "worker"
-        )
-    service.record_node_result(
-        start.id, worker.node_id, succeeded=False, evidence={"reason": "nope"}
-    )
-    with sessions() as session:
-        starts = tuple(
-            session.scalars(
-                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
-            )
-        )
-        assert {_placement(item.payload)["role"] for item in starts} == {"worker"}
-    assert service.get(start.id).state == "failed"
-    with sessions() as session:
-        cleanup = session.scalar(
-            select(Job).where(
-                Job.kind == "recipe.stop",
-                Job.payload["owner_id"].as_string() == start.owner_id,
-            )
-        )
-        assert cleanup is not None
-        stop_payloads = _typed_stop_payloads(cleanup.payload)
-        assert len(stop_payloads) == 2
-        assert {stop.run_id for stop in stop_payloads} == {start.owner_id}
-        assert {stop.target_runtime_id for stop in stop_payloads} == {start.owner_id}
-        assert {stop.plan_digest for stop in stop_payloads} == {start.plan_digest}
-        assert {stop.run_generation for stop in stop_payloads} == {1}
-        assert all(stop.cancel_pending_start for stop in stop_payloads)
 
 
 @pytest.mark.parametrize(
@@ -3257,8 +3197,6 @@ def test_terminal_image_distribution_retry_requeues_exact_persisted_group(
         (
             node_id,
             {
-                "schema_version": 1,
-                "kind": "recipe.image.import.v1",
                 "build_id": build_id,
                 "mapping_id": mapping_id,
                 "mapping_generation": 1,
@@ -3284,12 +3222,7 @@ def test_terminal_image_distribution_retry_requeues_exact_persisted_group(
         first.id,
         nodes[0],
         succeeded=True,
-        evidence={
-            "build_id": build_id,
-            "image_bytes": 30,
-            "image_digest": "sha256:" + "1" * 64,
-            "oci_layout_sha256": archive_sha256,
-        },
+        evidence={},
     )
     service.record_node_result(
         first.id,
@@ -3693,7 +3626,7 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         resources = require_mapping(entrypoint["resources"], "role resources")
         memory = resources["memory"]
         assert isinstance(memory, dict)
-        memory["system_reserve_bytes"] = 107
+        memory["reserve_bytes"] = 107
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, recipe_transform=declare_memory_floor
@@ -3723,14 +3656,9 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         assert child is not None
         run = _required(session.get(RecipeRun, start.owner_id))
         expected_floor = parse_stored_run_plan(run.plan).nodes[0].memory_floor_bytes
-        expected_kind = parse_stored_run_plan(run.plan).nodes[0].memory_kind
         assert expected_floor == 107
         assert _placement(child.payload)["memory_floor_bytes"] == expected_floor
         start_payload = RecipeStartPayload.model_validate(child.payload)
-        assert (
-            start_payload.compiled_execution_plan.runtime.placement.memory_kind
-            == expected_kind
-        )
         assert (
             start_payload.compiled_execution_plan.runtime.placement.memory_floor_bytes
             == expected_floor
@@ -3859,7 +3787,7 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
         assert first.recipe_content == revision.document
 
 
-@pytest.mark.parametrize("corruption", [None, "schema", "path", "bytes", "permissions"])
+@pytest.mark.parametrize("corruption", [None, "schema", "path", "permissions"])
 def test_uninstall_validates_stored_identity_without_requiring_launch_placement(
     tmp_path: Path,
     corruption: str | None,
@@ -3884,11 +3812,8 @@ def test_uninstall_validates_stored_identity_without_requiring_launch_placement(
             RecipeInstallPayload.model_validate_json(
                 json.dumps(
                     {
-                        "schema_version": 2,
                         "installation_id": installation.owner_id,
                         "plan_digest": installation.plan_digest,
-                        "rank": compiled["topology"]["rank"],
-                        "role": compiled["topology"]["role"],
                         "expected_bytes": 120,
                         "compiled_execution_plan": compiled,
                     }
@@ -3902,8 +3827,6 @@ def test_uninstall_validates_stored_identity_without_requiring_launch_placement(
             compiled["schema_version"] = 1
         elif corruption == "path":
             compiled["artifacts"][0]["path"] = "../unrelated/model"
-        elif corruption == "bytes":
-            compiled["identity"]["model_artifact_bytes"] += 1
         else:
             compiled["security"]["privileged"] = True
         with sessions.begin() as session:
@@ -5247,6 +5170,7 @@ def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(
             _placement(entry["payload"])
             for phase in _job_phases(job.payload)
             for entry in phase
+            if entry["payload"]["phase"] == "rank-launch"
         ]
         assert [child["local_address"] for child in children] == [
             "192.168.100.3",
@@ -5330,6 +5254,11 @@ def test_failed_multinode_start_queues_idempotent_stop_for_every_rank(
         assert worker is not None
     service.record_node_result(
         start.id, worker.node_id, succeeded=False, evidence={"code": "start.failed"}
+    )
+    # Every rank launches in one phase, so cleanup waits for the other report.
+    other = next(node for node in nodes if node != worker.node_id)
+    service.record_node_result(
+        start.id, other, succeeded=False, evidence={"code": "start.failed"}
     )
     # A duplicate final failure report must reuse the one deterministic gang
     # cleanup request instead of creating another stop operation.

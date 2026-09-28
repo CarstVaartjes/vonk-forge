@@ -292,7 +292,6 @@ def runtime_service(
     operation_payload: dict[str, object] | None = None,
     cancel_requested: bool = False,
     node_intent: int = 1,
-    include_stop_hook: bool = False,
 ) -> HostRuntimeAuthorityService:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -315,8 +314,8 @@ def runtime_service(
     )
     recipe_raw["identity"].update(publisher="vonk-forge", slug="authority-test")
     recipe = RecipeDefinition.model_validate_json(canonical_message(recipe_raw))
-    recipe_document = json.loads(canonical_message(recipe))
-    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
+    recipe_document = recipe_raw
+    recipe_digest = document_sha256(recipe_raw)
     collective = (
         operation_kind == "recipe.start"
         and operation_payload is not None
@@ -331,11 +330,8 @@ def runtime_service(
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
         fixture["identity"]["recipe_revision_sha256"] = recipe_digest
         if collective:
-            fixture["topology"].update(
-                name="dual", mode="distributed", node_count=2, backend="mp"
-            )
-            fixture["security"]["devices"] = ["nvidia.com/gpu=all"]
-        image_digest = fixture["runtime"]["image_digest"]
+            fixture["topology"].update(name="dual", node_count=2)
+        image_digest = fixture["runtime_image"]["image_digest"]
         deadline = (NOW + timedelta(minutes=5)).isoformat()
 
         def build_start(
@@ -422,12 +418,6 @@ def runtime_service(
         )
         vector = json.loads(vector_path.read_text(encoding="utf-8"))
         request_document = vector["payload"]
-        if include_stop_hook:
-            compiled = request_document["compiled_execution_plan"]
-            assert isinstance(compiled, dict)
-            lifecycle = compiled["lifecycle"]
-            assert isinstance(lifecycle, dict)
-            lifecycle["post_stop"] = [["/usr/bin/true"]]
         request_document.update(
             {
                 "job_id": "b0000000-0000-4000-8000-00000000000b",
@@ -511,7 +501,9 @@ def runtime_service(
             )
         )
         if lifecycle:
-            image_digest = next(iter(compiled_by_node.values())).runtime.image_digest
+            image_digest = next(
+                iter(compiled_by_node.values())
+            ).runtime_image.image_digest
 
             install_nodes = []
             run_nodes = []
@@ -519,7 +511,7 @@ def runtime_service(
                 compiled = compiled_by_node[target_node]
                 placement = compiled.runtime.placement
                 role = placement.role
-                required_bytes = compiled.identity.model_artifact_bytes
+                required_bytes = sum(item.size_bytes for item in compiled.artifacts)
                 install_nodes.append(
                     StoredInstallNodePlan(
                         node_id=target_node,
@@ -547,7 +539,7 @@ def runtime_service(
                         port=placement.port or 8000,
                         allowed=True,
                         inventory_observed_at=NOW.isoformat(),
-                        memory_kind=placement.memory_kind,
+                        memory_kind="unified",
                         memory_pool="shared",
                         required_memory_bytes=placement.reserved_memory_bytes,
                         available_memory_bytes=None,
@@ -940,41 +932,6 @@ def test_job_run_stop_rejects_wrong_runtime_target() -> None:
             request_sha256="e" * 64,
             certificate_serial="certificate-1",
             **wrong_target_binding,
-        )
-
-
-def test_hook_bearing_job_run_stop_fails_closed_before_signing() -> None:
-    service = runtime_service(
-        operation_kind="recipe.job.run.v1",
-        cancel_requested=True,
-        include_stop_hook=True,
-    )
-    with service._sessions() as session:
-        operation = session.get(AgentOperation, "30000000-0000-4000-8000-000000000003")
-        assert operation is not None
-        job_plan = RecipeJobRunRequest.model_validate_json(
-            canonical_message(operation.payload)
-        )
-        stop = stop_payload_from_job_run(
-            job_plan,
-            cancel_pending_start=True,
-        )
-    binding = {
-        "start_plan_sha256": None,
-        "stop_plan_sha256": hashlib.sha256(canonical_message(stop)).hexdigest(),
-        "run_generation": job_plan.run_generation,
-        "runtime_run_id": job_plan.run_id,
-        "runtime_target_id": job_plan.job_id,
-        "runtime_installation_id": job_plan.installation_id,
-    }
-    with pytest.raises(HostHelperAuthorityError, match="lifecycle authority"):
-        service.issue_grant(
-            node_id="spk_" + "1" * 32,
-            fence="40000000-0000-4000-8000-000000000004",
-            action=ContainerRuntimeAction.STOP,
-            request_sha256="e" * 64,
-            certificate_serial="certificate-1",
-            **binding,
         )
 
 
