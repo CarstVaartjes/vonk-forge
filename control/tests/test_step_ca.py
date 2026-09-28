@@ -870,6 +870,9 @@ def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation
     }
 
 
+# Slow by design: it runs the exact pinned step-ca image twice (fixture PKI,
+# then the CA itself) and waits for the server to become healthy.
+@pytest.mark.slow(30)
 @pytest.mark.lane  # Starts the pinned step-ca container.
 def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(
     tmp_path: Path, monkeypatch
@@ -894,94 +897,49 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(
     intermediate_password.write_text("fixture-intermediate-password-with-entropy\n")
     user = f"{os.getuid()}:{os.getgid()}"
 
-    def step(
-        *arguments: str, input_text: str | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "--user",
-                user,
-                "-i",
-                "-v",
-                f"{tmp_path}:/work",
-                "--entrypoint",
-                "step",
-                STEP_CA_IMAGE,
-                *arguments,
-            ],
-            input=input_text,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=True,
-        )
-
     root = tmp_path / "root_ca.crt"
-    root_key = tmp_path / "root_ca.key"  # noqa: F841 - created by step ca init
     intermediate = tmp_path / "intermediate_ca.crt"
     intermediate_key = tmp_path / "intermediate_ca_key"
     public_jwk = tmp_path / "agent-ca-public.jwk"
     private_jwk = tmp_path / "agent-ca-credential"
-    step(
-        "certificate",
-        "create",
-        "Vonk Forge Test Root",
-        "/work/root_ca.crt",
-        "/work/root_ca.key",
-        "--profile",
-        "root-ca",
-        "--kty",
-        "OKP",
-        "--curve",
-        "Ed25519",
-        "--not-after",
-        "87600h",
-        "--password-file",
-        "/work/root-password",
-    )
-    step(
-        "certificate",
-        "create",
-        "Vonk Forge Test Intermediate",
-        "/work/intermediate_ca.crt",
-        "/work/intermediate_ca_key",
-        "--profile",
-        "intermediate-ca",
-        "--kty",
-        "OKP",
-        "--curve",
-        "Ed25519",
-        "--not-after",
-        "8760h",
-        "--ca",
-        "/work/root_ca.crt",
-        "--ca-key",
-        "/work/root_ca.key",
-        "--ca-password-file",
-        "/work/root-password",
-        "--password-file",
-        "/work/intermediate-password",
-    )
-    step(
-        "crypto",
-        "jwk",
-        "create",
-        "/work/agent-ca-public.jwk",
-        "/work/agent-ca-credential",
-        "--kty",
-        "EC",
-        "--crv",
-        "P-256",
-        "--no-password",
-        "--insecure",
-    )
-    public = json.loads(public_jwk.read_text())
-    kid = step(
-        "crypto", "jwk", "thumbprint", input_text=public_jwk.read_text()
+    # Create the fixture PKI with the pinned image's own step CLI in one
+    # container: a start-up per command cost more than the rest of the test.
+    fixture_pki = """
+set -eu
+cd /work
+step certificate create "Vonk Forge Test Root" root_ca.crt root_ca.key \\
+  --profile root-ca --kty OKP --curve Ed25519 --not-after 87600h \\
+  --password-file root-password
+step certificate create "Vonk Forge Test Intermediate" \\
+  intermediate_ca.crt intermediate_ca_key \\
+  --profile intermediate-ca --kty OKP --curve Ed25519 --not-after 8760h \\
+  --ca root_ca.crt --ca-key root_ca.key --ca-password-file root-password \\
+  --password-file intermediate-password
+step crypto jwk create agent-ca-public.jwk agent-ca-credential \\
+  --kty EC --crv P-256 --no-password --insecure
+step crypto jwk thumbprint < agent-ca-public.jwk
+"""
+    kid = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            user,
+            "-v",
+            f"{tmp_path}:/work",
+            "--entrypoint",
+            "sh",
+            STEP_CA_IMAGE,
+            "-c",
+            fixture_pki,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
     ).stdout.strip()
+    public = json.loads(public_jwk.read_text())
     public.update({"kid": kid, "alg": "ES256", "use": "sig"})
     private = json.loads(private_jwk.read_text())
     private.update({"kid": kid, "alg": "ES256", "use": "sig"})

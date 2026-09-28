@@ -183,6 +183,9 @@ if __name__ == "__main__":
     _process(sys.argv[1], sys.argv[2])
 
 
+# Slow by design: a real worker process dies mid-cancellation and a fresh one
+# reconstructs the cleanup, so it pays Python process start-ups.
+@pytest.mark.slow(30)
 def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_death(
     tmp_path, postgres_engine
 ):

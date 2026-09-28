@@ -31,6 +31,9 @@ from .test_profile_build_memory import _accepted_build_profile
 from .test_profile_build_process_recovery import _worker_process
 
 
+# Slow by design: the replacement is executed by a freshly started worker
+# process against PostgreSQL, after an in-process review and build.
+@pytest.mark.slow(30)
 @pytest.mark.parametrize("distinct_build", [False, True])
 def test_running_image_replacement_executes_the_reviewed_build_receipt(
     tmp_path, postgres_engine, distinct_build

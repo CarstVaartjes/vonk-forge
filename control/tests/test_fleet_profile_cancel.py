@@ -635,6 +635,9 @@ def test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_ef
     assert second_node is not None and second_node.state == "stopped"
 
 
+# Slow by design: a spawned worker process is killed and a fresh one restarts
+# the pending child.
+@pytest.mark.slow(30)
 def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
     tmp_path, postgres_engine
 ) -> None:

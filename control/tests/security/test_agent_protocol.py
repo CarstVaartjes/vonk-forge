@@ -430,6 +430,8 @@ def test_control_environment_preserves_the_canonical_zero_byte_model_contract() 
     assert result.stdout.strip() == "True"
 
 
+# Slow by design: it builds the real Controller image from the root context.
+@pytest.mark.slow(60)
 @pytest.mark.lane  # Builds the root-context control image.
 @pytest.mark.linux_only
 @pytest.mark.needs_buildx

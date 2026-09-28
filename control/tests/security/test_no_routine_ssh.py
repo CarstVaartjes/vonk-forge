@@ -102,6 +102,9 @@ def test_production_worker_has_no_cluster_egress_network() -> None:
     assert "CONTROL_WORKER_IMAGE" in worker
 
 
+# Slow by design: it builds the real worker image, the only way to prove the
+# shipped filesystem lacks git and ssh.
+@pytest.mark.slow(60)
 @pytest.mark.lane  # Builds and runs the worker image.
 @pytest.mark.linux_only
 @pytest.mark.needs_buildx

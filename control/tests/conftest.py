@@ -477,6 +477,11 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             and "installed_vonkctl" in item.fixturenames
         ):
             item.add_marker(pytest.mark.needs_uv_cache)
+            # Installed-CLI tests are process-boundary tests by definition: each
+            # runs vonkctl several times as a separate process against a real
+            # HTTPS Controller peer. They get one shared, explicit allowance.
+            if item.get_closest_marker("slow") is None:
+                item.add_marker(pytest.mark.slow(20))
         if Path(str(item.fspath)).name.endswith("_wire_bridge.py"):
             item.add_marker(pytest.mark.needs_rust_probe)
         module_namespace = getattr(getattr(item, "module", None), "__dict__", {})
