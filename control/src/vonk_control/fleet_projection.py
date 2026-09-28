@@ -880,24 +880,6 @@ class FleetProjection:
             metrics=self._telemetry_metrics_in_session(session, node_id, value.metrics),
         )
 
-    def _registered_node_ids(self, node_id: str | None = None) -> tuple[str, ...]:
-        with self._sessions.begin() as session:
-            statement = (
-                select(AgentNode.node_id)
-                .where(
-                    AgentNode.state != "revoked",
-                    AgentNode.revoked_at.is_(None),
-                )
-                .order_by(AgentNode.node_id)
-                .limit(_MAX_FLEET_NODES + 1)
-            )
-            if node_id is not None:
-                statement = statement.where(AgentNode.node_id == node_id)
-            node_ids = tuple(session.scalars(statement))
-        if len(node_ids) > _MAX_FLEET_NODES:
-            raise ValueError("Fleet contains more than 500 registered nodes")
-        return node_ids
-
     @staticmethod
     def _registered_agents(session: Session) -> dict[str, AgentNode]:
         rows = tuple(
@@ -1559,13 +1541,3 @@ class FleetProjection:
             freshness=freshness,
             sample=telemetry_point(value),
         )
-
-    def _telemetry_freshness(
-        self, observed_at: datetime
-    ) -> Literal["live", "delayed", "stale"]:
-        age = max(0.0, (_utc(self._clock()) - _utc(observed_at)).total_seconds())
-        if age <= self._telemetry_live_seconds:
-            return "live"
-        if age <= self._telemetry_delayed_seconds:
-            return "delayed"
-        return "stale"
