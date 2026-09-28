@@ -411,6 +411,69 @@ def test_failed_install_retries_behind_fence_without_budget_while_rollout_contin
         assert parent is not None and parent.state == "succeeded"
 
 
+def test_fenced_retry_waits_while_another_spark_is_installing(tmp_path) -> None:
+    """Two Sparks never install at once, even when a fenced retry comes due.
+
+    Catches a claim guard that only looks at a sibling's ``running`` state in
+    the same rollout: once the next Spark has handed off to the helper it is
+    awaiting its new identity, and the failed Spark's retry must still wait.
+    """
+
+    clock = Clock()
+    sessions, operations, _upgrades, job = _rollout(
+        tmp_path, "retry-no-overlap", clock=clock
+    )
+    capabilities = ["agent.runtime.rust.v1", "agent.upgrade.v1"]
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    operations.fail(first, "agent upgrade request is invalid")
+    clock.advance(seconds=950)
+    second = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
+    clock.advance(seconds=10)
+    # Spark B is running its install: Spark A's due retry waits.
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=capabilities,
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
+    # Spark B handed off to its helper and awaits its new identity.
+    operations.succeed(second, _target_evidence())
+    assert (
+        operations.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            capabilities=capabilities,
+            runtime_identity=OLD_IDENTITY,
+        )
+        is None
+    )
+    # Spark B proves the exact target: Spark A's retry is dispatched.
+    assert (
+        operations.claim(
+            NODE_B,
+            "serial-b",
+            30,
+            capabilities=capabilities,
+            runtime_identity={
+                **NEW_IDENTITY,
+                "package_activation": {**ACTIVATION_RECEIPT, "node_id": NODE_B},
+            },
+        )
+        is None
+    )
+    retry = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    assert retry.operation_id == first.operation_id
+    assert retry.attempt == 2
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        assert parent is not None and parent.state == "queued"
+
+
 def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
     tmp_path,
 ) -> None:
