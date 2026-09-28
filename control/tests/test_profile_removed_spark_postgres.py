@@ -120,7 +120,11 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         with sessions.begin() as session:
             template = session.get(AgentNode, nodes[0])
             assert template is not None
-            capabilities = tuple(template.capabilities)
+            capabilities = (
+                "runtime.vonk.v1",
+                "recipe.operations.v1",
+                "fabric.connected.mbps.1000",
+            )
             session.add(
                 AgentNode(
                     node_id=unrelated_node,
@@ -130,7 +134,6 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     observation_receipt_public_key=RECEIPT_SIGNER.public_key()
                     .public_bytes_raw()
                     .hex(),
-                    capabilities=list(capabilities),
                     last_seen_at=now,
                 )
             )
@@ -260,9 +263,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         )
     assert [item.node_id for item in agent_operations] == [nodes[0]]
 
-    lifecycle.record_node_result(
-        stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
-    )
+    lifecycle.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
     for _ in range(40):
         planner.tick()
         profiles.tick()

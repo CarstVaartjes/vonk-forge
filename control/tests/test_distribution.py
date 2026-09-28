@@ -12,6 +12,7 @@ from vonk_control.distribution import (
     MemoryVerifiedObjectSource,
     ModelCacheVerifiedObjectSource,
 )
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers
 from .test_agent_api import agent_system as _agent_system
@@ -21,10 +22,9 @@ agent_system = _agent_system
 
 def _assignment(
     node_id: str, model_digest: str, config_digest: str, archive_digest: str
-) -> DistributionAssignment:
-    return DistributionAssignment.parse(
+) -> NodeDistributionAssignment:
+    return NodeDistributionAssignment.parse(
         {
-            "schema_version": 2,
             "assignment_id": str(uuid4()),
             "plan_digest": "a" * 64,
             "generation": 1,
@@ -72,7 +72,7 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
     source.register_runtime_image(assignment.oci_image_digest, archive_digest)
     service.register(assignment)
     service.register(
-        DistributionAssignment.parse(
+        NodeDistributionAssignment.parse(
             assignment.to_mapping() | {"assignment_id": str(uuid4()), "node_id": NODE_B}
         )
     )
@@ -83,7 +83,10 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert manifest.status_code == 200
-    assert DistributionAssignment.model_validate_json(manifest.content) == assignment
+    assert (
+        DistributionAssignment.model_validate_json(manifest.content)
+        == assignment.wire()
+    )
     assert manifest.headers["cache-control"] == "no-store"
     assert manifest.headers["etag"] == f'"plan:{assignment.plan_digest}"'
     response_schema = client.app.openapi()["paths"][

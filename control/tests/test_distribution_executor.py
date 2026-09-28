@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import DistributionAssignment, DistributionObject
+from vonk_agent_protocol import DistributionObject
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_control.agent_jobs import AgentJobService
@@ -28,6 +28,7 @@ from vonk_control.distribution import (
     MemoryVerifiedObjectSource,
     build_distribution_service_from_components,
 )
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import (
     CompositeDistributionPhaseExecutor,
     DurableDistributionPhaseExecutor,
@@ -306,19 +307,12 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         ExecuteContainerRuntimeRequestOperation(
             type="execute-container-runtime-request",
             action="image-import",
-            job_id=child.id,
-            operation_id=stored.id,
-            attempt=1,
             fence=str(uuid4()),
             request_sha256="a" * 64,
         )
         # ArtifactDistributionRequest is a plan reference. The agent fetches
         # the registered assignment through its authenticated distribution API.
-        assert stored.payload == {
-            "schema_version": 1,
-            "authority_revision": plan.plan_digest,
-            "plan_digest": plan.plan_digest,
-        }
+        assert stored.payload == {"plan_digest": plan.plan_digest}
         assert (
             distribution.authorize(
                 node_id=NODE_A, plan_digest=plan.plan_digest
@@ -345,11 +339,6 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
                 },
                 result={
                     "downloaded_bytes": 26,
-                    "verified": True,
-                    "verified_digests": ["a" * 64, "b" * 64],
-                    "verified_image_digest": "sha256:" + "e" * 64,
-                    "imported_image_digest": "sha256:" + "e" * 64,
-                    "verified_oci_layout_sha256": "c" * 64,
                 },
             )
         )
@@ -428,9 +417,8 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
     artifact_digest = "c" * 64
     image_digest = "sha256:" + "a" * 64
     layout_digest = "b" * 64
-    assignment = DistributionAssignment.parse(
+    assignment = NodeDistributionAssignment.parse(
         {
-            "schema_version": 2,
             "assignment_id": str(uuid4()),
             "plan_digest": "d" * 64,
             "generation": 1,
@@ -513,11 +501,6 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
             {
                 "node_id": node_id,
                 "downloaded_bytes": 18,
-                "verified": True,
-                "verified_digests": [artifact_digest],
-                "verified_image_digest": image_digest,
-                "imported_image_digest": image_digest,
-                "verified_oci_layout_sha256": layout_digest,
             },
         ]
     }
@@ -605,11 +588,7 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
             NODE_A,
             "artifact.distribution.v1",
             "f" * 64,
-            ArtifactDistributionPayload(
-                schema_version=1,
-                authority_revision="f" * 64,
-                plan_digest="f" * 64,
-            ).model_dump(mode="json"),
+            ArtifactDistributionPayload(plan_digest="f" * 64).model_dump(mode="json"),
             operation_id=str(uuid4()),
         )
         operation = (
@@ -1196,11 +1175,6 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                     },
                     result={
                         "downloaded_bytes": target_bytes,
-                        "verified": True,
-                        "verified_digests": [item["sha256"] for item in artifacts],
-                        "verified_image_digest": image_digest,
-                        "imported_image_digest": image_digest,
-                        "verified_oci_layout_sha256": archive_digest,
                     },
                 )
             )

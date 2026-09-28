@@ -164,8 +164,6 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
                 semantic_version="1.2.3",
                 build_digest="sha256:" + "a" * 64,
                 binary_digest="1" * 64,
-                self_test_passed=True,
-                capabilities=["recipe.build.v1"],
                 last_seen_at=now,
             )
         )

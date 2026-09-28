@@ -6,7 +6,7 @@ dependencies = [
   "alembic>=1.20.0",
   "argon2-cffi>=25.1.0",
   "cryptography>=50.0.1",
-  "vonk-agent-protocol==3.0.1",
+  "vonk-agent-protocol==4.0.0",
   "vonk-forge-public-contracts",
   "fastapi>=0.141.1",
   "httpx2>=2.13.1",
@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl" }
+vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl" }
 # Editable, so the repository and Compose suites that run in this environment
 # exercise the working tree rather than a snapshot built at sync time.
 vonk-cluster-profiles = { path = "..", editable = true }

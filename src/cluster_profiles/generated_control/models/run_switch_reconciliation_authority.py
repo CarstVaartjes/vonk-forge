@@ -25,12 +25,10 @@ T = TypeVar("T", bound="RunSwitchReconciliationAuthority")
 
 @_attrs_define
 class RunSwitchReconciliationAuthority:
-    """ Controller-owned identity and effect binding for installation repair.
+    """ Controller-owned identity of the installation a repair removes.
 
-    The accepted installation plan remains opaque.  This authority records its
-    canonical fingerprint and binds each target to the successful original
-    ``recipe.install`` operation that supplied the persisted compiled spec.
-    It never claims that malformed launch metadata is executable.
+    The accepted installation plan remains opaque; it never claims that
+    malformed launch metadata is executable.
 
         Attributes:
             image_digest (str):
@@ -42,7 +40,6 @@ class RunSwitchReconciliationAuthority:
             recipe_build_id (None | str):
             recipe_content_sha256 (str):
             recipe_revision_id (str):
-            stored_plan_canonical_sha256 (str):
             targets (list[RunSwitchReconciliationTarget]):
             schema_version (Literal[2] | Unset):  Default: 2.
      """
@@ -56,7 +53,6 @@ class RunSwitchReconciliationAuthority:
     recipe_build_id: None | str
     recipe_content_sha256: str
     recipe_revision_id: str
-    stored_plan_canonical_sha256: str
     targets: list[RunSwitchReconciliationTarget]
     schema_version: Literal[2] | Unset = 2
 
@@ -86,8 +82,6 @@ class RunSwitchReconciliationAuthority:
 
         recipe_revision_id = self.recipe_revision_id
 
-        stored_plan_canonical_sha256 = self.stored_plan_canonical_sha256
-
         targets = []
         for targets_item_data in self.targets:
             targets_item = targets_item_data.to_dict()
@@ -110,7 +104,6 @@ class RunSwitchReconciliationAuthority:
             "recipe_build_id": recipe_build_id,
             "recipe_content_sha256": recipe_content_sha256,
             "recipe_revision_id": recipe_revision_id,
-            "stored_plan_canonical_sha256": stored_plan_canonical_sha256,
             "targets": targets,
         })
         if schema_version is not UNSET:
@@ -154,8 +147,6 @@ class RunSwitchReconciliationAuthority:
 
         recipe_revision_id = d.pop("recipe_revision_id")
 
-        stored_plan_canonical_sha256 = d.pop("stored_plan_canonical_sha256")
-
         targets = []
         _targets = d.pop("targets")
         for targets_item_data in (_targets):
@@ -180,7 +171,6 @@ class RunSwitchReconciliationAuthority:
             recipe_build_id=recipe_build_id,
             recipe_content_sha256=recipe_content_sha256,
             recipe_revision_id=recipe_revision_id,
-            stored_plan_canonical_sha256=stored_plan_canonical_sha256,
             targets=targets,
             schema_version=schema_version,
         )

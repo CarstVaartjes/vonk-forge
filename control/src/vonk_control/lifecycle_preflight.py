@@ -23,7 +23,6 @@ from .recovery_policy import RecoveryPolicy
 from .runtime_preflight import (
     admission_blockers,
     latest_result,
-    node_fingerprint,
     recipe_requirements,
     request_digest,
 )
@@ -166,7 +165,7 @@ class LifecyclePreflight:
                     source_build=source_build,
                     minimum_free_bytes=self._minimum_free_bytes,
                 )
-                fingerprint = node_fingerprint(node.capabilities)
+                fingerprint = node.preflight_fingerprint
                 result = checkpoint.receipts.get(node_id) or latest_result(
                     session, node_id, requirements_sha256=request_digest(request)
                 )

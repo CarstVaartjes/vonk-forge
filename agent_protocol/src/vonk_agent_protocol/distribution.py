@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
-from uuid import UUID
 
 from pydantic import (
     Field,
@@ -60,33 +58,11 @@ class DistributionObject(WireModel):
 
 
 class DistributionAssignment(WireModel):
-    """Controller authorization for one node, generation and object set."""
+    """The object set one node downloads for a distribution plan."""
 
-    schema_version: Literal[2]
-    assignment_id: str = Field(json_schema_extra={"format": "uuid"})
-    plan_digest: Digest
-    generation: int = Field(ge=1)
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    expires_at: datetime
-    model_artifact_set_sha256: Digest
     objects: tuple[DistributionObject, ...] = Field(min_length=1, max_length=4096)
     oci_image_digest: ImageDigest
     oci_archive_sha256: Digest
-
-    @field_validator("assignment_id")
-    @classmethod
-    def random_assignment_id(cls, value: str) -> str:
-        parsed = UUID(value)
-        if str(parsed) != value or parsed.version != 4:
-            raise ValueError("assignment_id must be a canonical random UUID")
-        return value
-
-    @field_validator("expires_at")
-    @classmethod
-    def expiration_is_utc(cls, value: datetime) -> datetime:
-        if value.tzinfo is None or value.utcoffset() != UTC.utcoffset(value):
-            raise ValueError("distribution expiration must be UTC")
-        return value
 
     @model_validator(mode="after")
     def object_set_is_complete(self) -> DistributionAssignment:

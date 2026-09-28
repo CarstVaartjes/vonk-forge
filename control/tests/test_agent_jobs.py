@@ -21,10 +21,8 @@ from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
-    DistributionAssignment,
     RecipeOperationRequest,
     canonical_message,
-    format_model_identity,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs import (
@@ -38,6 +36,7 @@ from vonk_control.distribution import (
     DistributionService,
     MemoryVerifiedObjectSource,
 )
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
     AgentCertificate,
@@ -58,6 +57,7 @@ from vonk_control.recipe_start_payloads import (
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -72,15 +72,7 @@ NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
-STOP_RESULT = {"stopped": True}
-
-#: The capability set a Spark advertises when it can re-acquire one exact fenced
-#: lifecycle attempt after an operator-authorised retry.
-EXACT_LIFECYCLE_CAPABILITIES = [
-    "agent.runtime.rust.v1",
-    "recipe.start",
-    "agent.lifecycle.resume.exact.v1",
-]
+STOP_RESULT: dict[str, object] = {}
 
 
 def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
@@ -124,34 +116,14 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
         master_port=29500,
         world_size=2,
     )
-    # Binding rewrites the live rank placement and nothing else, so the identity
-    # and image digests are read from the document they came from.  The parse
-    # below re-checks both against the bound plan, so a binder that ever started
-    # rewriting them would fail loudly here instead of drifting.
     payload: dict[str, object] = {
-        "schema_version": 2,
         "run_id": "00000000-0000-4000-8000-0000000000aa",
         "installation_id": "00000000-0000-4000-8000-000000000001",
         "recipe_revision_id": "00000000-0000-4000-8000-0000000000bb",
-        "recipe_content_sha256": plan["identity"]["recipe_revision_sha256"],
         "mapping_id": "00000000-0000-4000-8000-0000000000cc",
-        "mapping_generation": 1,
         "run_generation": 1,
-        "image_digest": plan["runtime"]["image_digest"],
         "plan_digest": "b" * 64,
-        "alias": "rank-0",
-        "rank": 0,
-        "role": "entrypoint",
-        "port": 8000,
-        "reserved_memory_bytes": 4096,
-        "memory_floor_bytes": 2048,
-        "memory_kind": plan["runtime"]["placement"]["memory_kind"],
-        "endpoint_address": "192.168.100.10",
-        "world_size": 2,
         "compiled_execution_plan": compiled,
-        "local_address": "192.168.100.10",
-        "master_address": "192.168.100.10",
-        "master_port": 29500,
         "phase": "rank-launch",
         "start_deadline": start_deadline.isoformat(),
     }
@@ -160,30 +132,10 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
 
 
 def canonical_start_result(payload: Mapping[str, object]) -> dict[str, object]:
-    """One wire-valid rank-launch success receipt for a bound start payload."""
+    """A rank launch succeeds with an empty result."""
 
-    identity: dict[str, object] = {
-        "phase": "rank-launch",
-        "run_id": payload["run_id"],
-        "recipe_revision_id": payload["recipe_revision_id"],
-        "recipe_content_sha256": payload["recipe_content_sha256"],
-        "image_digest": str(payload["image_digest"]),
-        "artifact_set_digest": "b" * 64,
-        "model_identity": format_model_identity("vonk-forge", "tiny", "d" * 64),
-        "rank": payload["rank"],
-        "role": payload["role"],
-        "world_size": payload["world_size"],
-        "local_address": payload["local_address"],
-        "master_address": payload["master_address"],
-        "master_port": payload["master_port"],
-        "memory_reservation_bytes": payload["reserved_memory_bytes"],
-        "process_running": True,
-        "fabric_projection_bound": True,
-        "launched": True,
-        "run_generation": payload["run_generation"],
-        "runtime_arguments_sha256": "c" * 64,
-    }
-    return {"evidence": identity}
+    del payload
+    return {}
 
 
 def canonical_install_payload() -> dict[str, object]:
@@ -197,11 +149,8 @@ def canonical_install_payload() -> dict[str, object]:
         ).read_text(encoding="utf-8")
     )
     payload = {
-        "schema_version": 2,
         "installation_id": "00000000-0000-4000-8000-000000000001",
         "plan_digest": "b" * 64,
-        "rank": compiled_plan["runtime"]["placement"]["rank"],
-        "role": compiled_plan["runtime"]["placement"]["role"],
         "expected_bytes": compiled_plan["identity"]["model_artifact_bytes"],
         "compiled_execution_plan": compiled_plan,
     }
@@ -258,12 +207,10 @@ def service(tmp_path):
                     node_id=node_id,
                     state="active",
                     workload_intent_ordinal=1,
-                    capabilities=[],
                     architecture="linux-arm64",
                     semantic_version="1.0.0",
                     build_digest="sha256:" + "f" * 64,
                     binary_digest="f" * 64,
-                    self_test_passed=True,
                 )
             )
             session.add(
@@ -312,12 +259,11 @@ def test_agent_can_claim_only_its_node_operation(service) -> None:
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
 
-    assert claim_agent(jobs, NODE_B, "serial-b", 30) is None
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim_agent(jobs, NODE_B, "serial-b") is None
+    claim = claim_agent(jobs, NODE_A, "serial-a")
 
     assert claim is not None
-    assert claim.operation_id == operation.id
-    assert claim.node_id == NODE_A
+    assert fenced_operation(sessions, claim).id == operation.id
 
 
 def test_workload_enqueue_refuses_parent_without_an_admitted_intent(service) -> None:
@@ -342,7 +288,7 @@ def test_newer_workload_intent_fences_old_enqueues_renewals_and_results(
     with sessions.begin() as session:
         session.get(AgentNode, NODE_A).workload_intent_ordinal = 1
     jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     with sessions.begin() as session:
         session.get(AgentNode, NODE_A).workload_intent_ordinal = 2
@@ -363,7 +309,7 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
         COMMIT,
         recipe_stop_payload(NODE_B, plan_digest=COMMIT),
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     with sessions.begin() as session:
         for node_id in (NODE_A, NODE_B):
@@ -395,19 +341,16 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
         assert replacement_row is not None
         replacement_row.payload = {"workload_intent_ordinal": 2}
     fresh = jobs.enqueue(replacement.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    fresh_claim = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert fresh_claim is not None and fresh_claim.operation_id == fresh.id
+    fresh_claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert (
+        fresh_claim is not None
+        and fenced_operation(sessions, fresh_claim).id == fresh.id
+    )
     with pytest.raises(StaleAgentAttempt):
         jobs.succeed(claim, STOP_RESULT)
     cancelled = AgentResult.model_validate(
         {
-            "schema_version": 1,
-            "job_id": job.id,
-            "operation_id": running.id,
-            "attempt": claim.attempt,
             "fence": claim.fence,
-            "node_id": NODE_A,
-            "deadline": directive.deadline,
             "state": "cancelled",
             "result": {
                 "error_code": "operation_cancelled",
@@ -430,13 +373,7 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     assert jobs.known_superseded_cancellation(
         AgentProgress.model_validate(
             {
-                "schema_version": 1,
-                "job_id": job.id,
-                "operation_id": running.id,
-                "attempt": claim.attempt,
                 "fence": claim.fence,
-                "node_id": NODE_A,
-                "deadline": directive.deadline,
                 "progress": None,
             }
         )
@@ -555,93 +492,11 @@ def test_new_intent_retires_stopped_legacy_parent_with_unissued_child(service) -
         assert parent_row.status_reason == "superseded by newer workload intent"
 
 
-def test_lost_heartbeat_renewal_ack_is_only_benign_old_cancellation(service) -> None:
-    jobs, sessions, clock = service
-    job = parent(sessions, clock)
-    operation = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert claim is not None
-    renewed = jobs.heartbeat(claim, None, 60)
-    assert renewed.deadline > claim.deadline
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.workload_intent_ordinal = 2
-        jobs.request_superseded_workload_cancellation_in_session(
-            session, (NODE_A,), 2, clock.now
-        )
-    old_progress = AgentProgress.model_validate(
-        {
-            "schema_version": 1,
-            "job_id": job.id,
-            "operation_id": operation.id,
-            "attempt": claim.attempt,
-            "fence": claim.fence,
-            "node_id": NODE_A,
-            "deadline": claim.deadline,
-            "progress": None,
-        }
-    )
-    assert jobs.known_superseded_cancellation(old_progress)
-    assert not jobs.known_superseded_cancellation(
-        old_progress.model_copy(
-            update={"deadline": renewed.deadline + timedelta(seconds=1)}
-        )
-    )
-    assert not jobs.known_superseded_cancellation(
-        old_progress.model_copy(update={"fence": str(uuid.uuid4())})
-    )
-    assert not jobs.known_superseded_cancellation(
-        old_progress.model_copy(update={"attempt": claim.attempt + 1})
-    )
-    old_cancel = AgentResult.model_validate(
-        {
-            "schema_version": 1,
-            "job_id": job.id,
-            "operation_id": operation.id,
-            "attempt": claim.attempt,
-            "fence": claim.fence,
-            "node_id": NODE_A,
-            "deadline": claim.deadline,
-            "state": "cancelled",
-            "result": {
-                "error_code": "operation_cancelled",
-                "reason": "exact stop completed",
-            },
-        }
-    )
-    with pytest.raises(StaleAgentAttempt):
-        jobs.record_result(old_cancel)
-    with pytest.raises(StaleAgentAttempt):
-        jobs.record_late_result(
-            old_cancel.model_copy(
-                update={"deadline": renewed.deadline + timedelta(seconds=1)}
-            )
-        )
-    assert jobs.record_late_result(old_cancel) is False
-    with sessions() as session:
-        stored = session.get(AgentOperation, operation.id)
-        attempt = session.scalar(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.fence == claim.fence
-            )
-        )
-        assert stored is not None and stored.state == "running"
-        assert (
-            attempt is not None
-            and attempt.state == "running"
-            and attempt.result is None
-        )
-    current_cancel = old_cancel.model_copy(update={"deadline": renewed.deadline})
-    jobs.record_result(current_cancel)
-    assert jobs.record_late_result(old_cancel) is False
-
-
 def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
     jobs, sessions, clock = service
     job = parent(sessions, clock)
     operation = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
     second_fence = str(uuid.uuid4())
     with sessions.begin() as session:
@@ -671,13 +526,7 @@ def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
         )
     late = AgentResult.model_validate(
         {
-            "schema_version": 1,
-            "job_id": job.id,
-            "operation_id": operation.id,
-            "attempt": first.attempt,
             "fence": first.fence,
-            "node_id": NODE_A,
-            "deadline": first.deadline,
             "state": "cancelled",
             "result": {
                 "error_code": "operation_cancelled",
@@ -697,7 +546,7 @@ def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
         assert newer is not None and newer.state == "running" and newer.result is None
 
 
-@pytest.mark.parametrize("older_work", (None, "unadvertised", "exact-retry", "running"))
+@pytest.mark.parametrize("older_work", (None, "exact-retry", "running"))
 def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
     service,
     older_work,
@@ -728,26 +577,20 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
         "binary_digest": "f" * 64,
         "build_digest": "sha256:" + "f" * 64,
         "semantic_version": "0.1.0",
-        "self_test_passed": True,
         "observation_receipt_public_key": "d" * 64,
     }
-    capabilities = ["agent.runtime.rust.v1", "agent.upgrade.v1"]
     older = first = None
     if older_work is not None:
         older = jobs.enqueue(
             parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
         )
-        if older_work != "unadvertised":
-            capabilities.append("recipe.stop")
-            first = claim_agent(
-                jobs,
-                NODE_A,
-                "serial-a",
-                30,
-                capabilities=capabilities,
-                runtime_identity=old_identity,
-            )
-            assert first is not None and first.operation_id == older.id
+        first = claim_agent(
+            jobs,
+            NODE_A,
+            "serial-a",
+            runtime_identity=old_identity,
+        )
+        assert first is not None and fenced_operation(sessions, first).id == older.id
         clock.advance(seconds=1)
 
     job = parent(sessions, clock)
@@ -760,8 +603,6 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
                 jobs,
                 NODE_A,
                 "serial-a",
-                30,
-                capabilities=capabilities,
                 runtime_identity=old_identity,
             )
             is None
@@ -771,18 +612,7 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
             AgentResult.model_validate_json(
                 canonical_message(
                     {
-                        **{
-                            key: getattr(first, key)
-                            for key in (
-                                "schema_version",
-                                "job_id",
-                                "operation_id",
-                                "attempt",
-                                "fence",
-                                "node_id",
-                                "deadline",
-                            )
-                        },
+                        "fence": first.fence,
                         "state": "waiting-for-operator",
                         "result": {
                             "error_code": "agent_restart_interrupted",
@@ -795,31 +625,38 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
             )
         )
         with sessions() as session:
-            stored = session.get(AgentOperation, first.operation_id)
+            stored = session.get(AgentOperation, fenced_operation(sessions, first).id)
             assert stored is not None and stored.retry_due_at is not None
             clock.now = stored.retry_due_at.replace(tzinfo=UTC)
         # Retry and upgrade ordering must survive a Controller restart.
         jobs = AgentJobService(sessions, clock=clock)
+        # The older exact retry was queued first, so it resumes first.
+        resumed = claim_agent(
+            jobs,
+            NODE_A,
+            "serial-a",
+            runtime_identity=old_identity,
+        )
+        assert resumed is not None and fenced_operation(sessions, resumed).id == (
+            older.id
+        )
+        assert (
+            fenced_attempt(sessions, resumed).attempt
+            == fenced_attempt(sessions, first).attempt + 1
+        )
+        assert resumed.payload == first.payload
+        jobs.succeed(resumed, STOP_RESULT)
+        assert job_state(sessions, older.parent_job_id).state == "succeeded"
 
     claim = claim_agent(
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        capabilities=capabilities,
         runtime_identity=old_identity,
     )
     assert claim is not None
-    assert claim.operation_id == operation.id
+    assert fenced_operation(sessions, claim).id == operation.id
     assert job_state(sessions, job.id).state == "queued"
-    if older is not None:
-        with sessions() as session:
-            stored = session.get(AgentOperation, older.id)
-            assert stored is not None
-            assert stored.current_attempt == (0 if first is None else first.attempt)
-            assert stored.state == (
-                "queued" if first is None else "waiting-for-operator"
-            )
 
     new_identity = {
         **old_identity,
@@ -831,23 +668,15 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
             now=int(clock.now.timestamp()),
         ),
     }
-    resumed = claim_agent(
-        jobs,
-        NODE_A,
-        "serial-a",
-        30,
-        capabilities=[*capabilities, "recipe.stop", "agent.lifecycle.resume.exact.v1"],
-        runtime_identity=new_identity,
+    assert (
+        claim_agent(
+            jobs,
+            NODE_A,
+            "serial-a",
+            runtime_identity=new_identity,
+        )
+        is None
     )
-    if older is None:
-        assert resumed is None
-    else:
-        assert resumed is not None and resumed.operation_id == older.id
-        assert resumed.attempt == (1 if first is None else first.attempt + 1)
-        if first is not None:
-            assert resumed.payload == first.payload
-        jobs.succeed(resumed, STOP_RESULT)
-        assert job_state(sessions, older.parent_job_id).state == "succeeded"
 
     assert job_state(sessions, job.id).state == "succeeded"
     with sessions() as session:
@@ -865,64 +694,35 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
             "build_digest": "sha256:" + "b" * 64,
             "package_sha256": "d" * 64,
             "package_version": "0.1.0~dev.330+g0123456789ab",
-            "self_test_passed": True,
             "status": "upgraded",
             "activation_receipt": new_identity["package_activation"],
         }
 
 
-def test_rust_node_cannot_be_assigned_an_unadvertised_operation(service) -> None:
-    jobs, sessions, clock = service
-    job = parent(sessions, clock)
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.capabilities = ["recipe.install"]
-
-    with pytest.raises(ValueError, match="does not advertise"):
-        jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-
-    stored = jobs.enqueue(
-        job.id,
-        NODE_A,
-        "recipe.install",
-        COMMIT,
-        canonical_install_payload(),
-    )
-    assert stored.kind == "recipe.install"
-
-
-def test_artifact_distribution_is_negotiated_and_serialized_as_a_mutation(
+def test_artifact_distribution_is_serialized_as_a_mutation(
     service,
 ) -> None:
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     operation = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
-    payload = {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT}
+    payload = {"plan_digest": COMMIT}
     first = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, payload)
     clock.advance(seconds=1)
     second = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, payload)
-    capabilities = ["agent.runtime.rust.v1", operation]
 
     claim = claim_agent(
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=capabilities,
     )
 
     assert claim is not None
-    assert claim.operation_id == first.id
+    assert fenced_operation(sessions, claim).id == first.id
     assert (
         claim_agent(
             jobs,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=capabilities,
         )
         is None
     )
@@ -932,22 +732,25 @@ def test_artifact_distribution_is_negotiated_and_serialized_as_a_mutation(
 
 
 def test_rust_claim_updates_current_contact(service) -> None:
-    jobs, _sessions, _clock = service
+    jobs, sessions, _clock = service
     assert (
         claim_agent(
             jobs,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=["agent.runtime.rust.v1", "recipe.install"],
             runtime_identity=PACKAGED_RUNTIME_IDENTITY,
+            preflight_fingerprint="e" * 64,
         )
         is None
     )
+    with sessions() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        assert node.preflight_fingerprint == "e" * 64
+        assert node.protocol_version == 4
 
 
-def test_service_claim_requires_packaged_runtime_identity_with_rust_capability(
+def test_service_claim_requires_packaged_runtime_identity(
     service,
 ) -> None:
     jobs, _sessions, _clock = service
@@ -956,9 +759,6 @@ def test_service_claim_requires_packaged_runtime_identity_with_rust_capability(
         jobs.claim(
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=["agent.runtime.rust.v1", "recipe.install"],
         )
 
     with pytest.raises(ValueError, match="runtime identity"):
@@ -966,27 +766,7 @@ def test_service_claim_requires_packaged_runtime_identity_with_rust_capability(
             jobs,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=["agent.runtime.rust.v1", "recipe.install"],
             runtime_identity=None,
-        )
-
-
-def test_service_claim_requires_rust_capability_with_packaged_runtime_identity(
-    service,
-) -> None:
-    jobs, _sessions, _clock = service
-
-    with pytest.raises(ValueError, match="capability negotiation"):
-        claim_agent(
-            jobs,
-            NODE_A,
-            "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=["recipe.install"],
-            runtime_identity=PACKAGED_RUNTIME_IDENTITY,
         )
 
 
@@ -1003,11 +783,6 @@ def test_signed_observation_receipt_key_is_bound_on_upgrade_and_immutable(
         jobs.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=[
-                "agent.runtime.rust.v1",
-                "recipe.run.inspect.receipt.v1",
-            ],
             runtime_identity=receipt_identity,
         )
         is None
@@ -1019,11 +794,6 @@ def test_signed_observation_receipt_key_is_bound_on_upgrade_and_immutable(
         jobs.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=[
-                "agent.runtime.rust.v1",
-                "recipe.run.inspect.receipt.v1",
-            ],
             runtime_identity={
                 **receipt_identity,
                 "observation_receipt_public_key": "2" * 64,
@@ -1035,11 +805,6 @@ def test_signed_observation_receipt_key_is_bound_on_upgrade_and_immutable(
         jobs.claim(
             NODE_B,
             "serial-b",
-            30,
-            capabilities=[
-                "agent.runtime.rust.v1",
-                "recipe.run.inspect.receipt.v1",
-            ],
             runtime_identity=incomplete_identity,
         )
 
@@ -1060,58 +825,6 @@ def test_package_operation_is_not_a_control_plane_queue_operation(service) -> No
                 "deployment_digest": "b" * 64,
             },
         )
-
-
-def test_package_capabilities_are_not_control_plane_agent_capabilities(
-    service,
-) -> None:
-    jobs, _sessions, _clock = service
-
-    with pytest.raises(ValueError, match="capability negotiation is incomplete"):
-        claim_agent(
-            jobs,
-            NODE_A,
-            "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=[
-                "node.probe",
-                "release.install",
-                "workload.health",
-                "workload.prepare",
-                "workload.start",
-                "workload.stop",
-                "workload.verify",
-                "package.prepare",
-            ],
-        )
-
-
-def test_recipe_only_agent_is_not_forced_to_advertise_old_executors(service) -> None:
-    jobs, sessions, clock = service
-    install_payload = canonical_install_payload()
-    # The queue stores the exact canonical producer payload. Keep this test
-    # about capability selection while still rejecting retired flat launch
-    # documents at the protocol boundary.
-    queued = jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "recipe.install",
-        COMMIT,
-        install_payload,
-    )
-
-    claim = claim_agent(
-        jobs,
-        NODE_A,
-        "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=["agent.runtime.rust.v1", "recipe.install"],
-    )
-
-    assert claim is not None
-    assert claim.operation.value == queued.kind == "recipe.install"
 
 
 def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
@@ -1236,15 +949,11 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=["agent.runtime.rust.v1", "recipe.build.v1"],
         runtime_identity={
             "architecture": "linux-arm64",
             "build_digest": "sha256:" + "e" * 64,
             "binary_digest": "e" * 64,
             "semantic_version": "1.2.3",
-            "self_test_passed": True,
             "observation_receipt_public_key": "d" * 64,
         },
     )
@@ -1356,9 +1065,6 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=["agent.runtime.rust.v1", "recipe.build.v1"],
     )
 
     assert claim is None
@@ -1375,12 +1081,12 @@ def test_concurrent_agents_cannot_claim_the_same_operation(service) -> None:
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         claims = list(
-            pool.map(lambda _: claim_agent(jobs, NODE_A, "serial-a", 30), range(4))
+            pool.map(lambda _: claim_agent(jobs, NODE_A, "serial-a"), range(4))
         )
 
     claimed = [claim for claim in claims if claim is not None]
     assert len(claimed) == 1
-    assert claimed[0].operation_id == operation.id
+    assert fenced_operation(sessions, claimed[0]).id == operation.id
 
 
 def test_long_poll_wakes_on_enqueue_and_times_out_without_per_client_state(
@@ -1391,7 +1097,7 @@ def test_long_poll_wakes_on_enqueue_and_times_out_without_per_client_state(
 
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=1) as pool:
-        waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 30, 1.0)
+        waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 1.0)
         time.sleep(0.05)
         operation = jobs.enqueue(
             parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
@@ -1399,11 +1105,11 @@ def test_long_poll_wakes_on_enqueue_and_times_out_without_per_client_state(
         claim = waiting.result(timeout=1)
     elapsed = time.monotonic() - started
 
-    assert claim is not None and claim.operation_id == operation.id
+    assert claim is not None and fenced_operation(sessions, claim).id == operation.id
     assert elapsed < 0.8
 
     timeout_started = time.monotonic()
-    assert claim_agent(jobs, NODE_B, "serial-b", 30, 0.08) is None
+    assert claim_agent(jobs, NODE_B, "serial-b", 0.08) is None
     timeout_elapsed = time.monotonic() - timeout_started
     # The lower bound proves the requested long-poll timeout is honored. Keep
     # the upper bound generous enough for a CPU-starved parallel CI worker to
@@ -1428,7 +1134,7 @@ def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> Non
     jobs._claim_once = observed_claim_once  # type: ignore[method-assign]
     pool = ThreadPoolExecutor(max_workers=1)
     try:
-        waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 30, 2.0)
+        waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 2.0)
         assert first_poll.wait(timeout=_SCHEDULER_GUARD_SECONDS)
         operation = other_process.enqueue(
             parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
@@ -1442,18 +1148,18 @@ def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> Non
         jobs.notify_available()
         pool.shutdown(wait=True)
 
-    assert claim is not None and claim.operation_id == operation.id
+    assert claim is not None and fenced_operation(sessions, claim).id == operation.id
 
 
 def test_expired_attempt_cannot_publish_success(service) -> None:
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
 
     clock.advance(seconds=31)
-    second = claim_agent(jobs, NODE_A, "serial-a", 30)
+    second = claim_agent(jobs, NODE_A, "serial-a")
     assert second is None
 
     with pytest.raises(StaleAgentAttempt):
@@ -1475,14 +1181,14 @@ def test_lease_expiry_records_reason_and_last_contact_facts(service) -> None:
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
     with sessions() as session:
         running = session.get(AgentOperation, operation.id)
         assert running is not None and running.status_reason is None
 
     clock.advance(seconds=31)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
@@ -1521,7 +1227,7 @@ def test_replayed_result_stays_fenced_and_records_no_second_outcome(service) -> 
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
     jobs.succeed(first, STOP_RESULT)
 
@@ -1552,8 +1258,8 @@ def test_revoked_expired_or_node_mismatched_certificate_cannot_claim(service) ->
     with sessions.begin() as session:
         session.get(AgentCertificate, "serial-a").revoked_at = clock.now  # type: ignore[union-attr]
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
-    assert claim_agent(jobs, NODE_A, "serial-b", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+    assert claim_agent(jobs, NODE_A, "serial-b") is None
 
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
@@ -1561,7 +1267,7 @@ def test_revoked_expired_or_node_mismatched_certificate_cannot_claim(service) ->
         certificate.revoked_at = None
         certificate.not_after = clock.now
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
 
 def test_enqueue_rejects_noncanonical_protocol_payload(service) -> None:
@@ -1638,7 +1344,7 @@ def test_heartbeat_persists_canonical_progress_and_renews_lease(service) -> None
     jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
 
     progress = jobs.heartbeat(claim, {"phase": "checking"}, 60)
@@ -1663,7 +1369,7 @@ def test_heartbeat_never_shortens_a_longer_existing_lease(service) -> None:
     jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 120)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     clock.advance(seconds=10)
 
@@ -1685,7 +1391,7 @@ def test_a_lapsed_renewal_is_reacquired_inside_the_start_budget(service) -> None
         COMMIT,
         canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30)),
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
 
     # The Controller was unreachable for twice the accepted lease.
@@ -1726,7 +1432,7 @@ def test_a_lapsed_renewal_is_refused_once_the_start_budget_is_spent(service) -> 
         COMMIT,
         canonical_start_payload(start_deadline=clock.now + timedelta(seconds=40)),
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
 
     clock.advance(seconds=60)
@@ -1743,7 +1449,7 @@ def test_a_lapsed_renewal_without_a_start_budget_is_refused(service) -> None:
     jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
 
     clock.advance(seconds=60)
@@ -1766,7 +1472,7 @@ def test_a_silent_start_inside_its_launch_budget_is_not_parked_and_completes(
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
 
     # The agent is blocked inside the launch and sends no heartbeat for four
@@ -1774,7 +1480,7 @@ def test_a_silent_start_inside_its_launch_budget_is_not_parked_and_completes(
     clock.advance(seconds=120)
 
     # A poll for work by the same node must neither expire nor park it.
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
     with sessions() as session:
         running = session.get(AgentOperation, operation.id)
     assert running is not None and running.state == "running"
@@ -1806,11 +1512,11 @@ def test_a_start_that_stops_reporting_past_its_budget_is_parked_with_the_reason(
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
 
     clock.advance(seconds=60)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
@@ -1833,7 +1539,7 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
     accepted = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
     )
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
     clock.advance(seconds=60)
     jobs.succeed(first, canonical_start_result(payload))
@@ -1853,8 +1559,6 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
         jobs,
         NODE_B,
         "serial-b",
-        30,
-        capabilities=EXACT_LIFECYCLE_CAPABILITIES,
     )
     assert abandoned is not None
     clock.advance(seconds=60)
@@ -1863,8 +1567,6 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
             jobs,
             NODE_B,
             "serial-b",
-            30,
-            capabilities=EXACT_LIFECYCLE_CAPABILITIES,
         )
         is None
     )
@@ -1880,20 +1582,12 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
         jobs,
         NODE_B,
         "serial-b",
-        30,
-        capabilities=EXACT_LIFECYCLE_CAPABILITIES,
     )
-    assert current is not None and current.attempt == 2
+    assert current is not None and fenced_attempt(sessions, current).attempt == 2
     late = AgentResult.model_validate_json(
         canonical_message(
             {
-                "schema_version": 1,
-                "job_id": abandoned.job_id,
-                "operation_id": abandoned.operation_id,
-                "attempt": abandoned.attempt,
                 "fence": abandoned.fence,
-                "node_id": abandoned.node_id,
-                "deadline": abandoned.deadline,
                 "state": "succeeded",
                 "result": canonical_start_result(payload),
             }
@@ -1924,9 +1618,8 @@ def test_distribution_heartbeat_renews_only_live_authorized_transfer(
     source = MemoryVerifiedObjectSource()
     model_digest = source.put(b"weights")
     image_digest = source.put(b"image")
-    assignment = DistributionAssignment.parse(
+    assignment = NodeDistributionAssignment.parse(
         {
-            "schema_version": 2,
             "assignment_id": str(uuid.uuid4()),
             "plan_digest": COMMIT,
             "generation": 1,
@@ -1957,7 +1650,7 @@ def test_distribution_heartbeat_renews_only_live_authorized_transfer(
     source.register_runtime_image(assignment.oci_image_digest, image_digest)
     distribution = DistributionService(source, clock=clock, sessions=sessions)
     distribution.register(assignment)
-    other = DistributionAssignment.parse(
+    other = NodeDistributionAssignment.parse(
         assignment.to_mapping()
         | {
             "assignment_id": str(uuid.uuid4()),
@@ -1965,7 +1658,7 @@ def test_distribution_heartbeat_renews_only_live_authorized_transfer(
         }
     )
     distribution.register(other)
-    other_plan = DistributionAssignment.parse(
+    other_plan = NodeDistributionAssignment.parse(
         assignment.to_mapping()
         | {
             "assignment_id": str(uuid.uuid4()),
@@ -1980,7 +1673,7 @@ def test_distribution_heartbeat_renews_only_live_authorized_transfer(
         NODE_A,
         kind,
         COMMIT,
-        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+        {"plan_digest": COMMIT},
     )
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
@@ -1989,11 +1682,16 @@ def test_distribution_heartbeat_renews_only_live_authorized_transfer(
         jobs,
         NODE_A,
         "serial-a",
-        7200,
-        protocol_version=3,
-        capabilities=["agent.runtime.rust.v1", kind],
     )
     assert claim is not None
+    # Steady heartbeats keep the transfer's own lease alive for the whole copy.
+    with sessions.begin() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        attempt.lease_deadline = clock.now + timedelta(hours=2)
     clock.advance(seconds=3600 if restriction == "expired" else 3590)
     if restriction == "revoked":
         distribution.revoke(plan_digest=COMMIT, node_id=NODE_A)
@@ -2052,7 +1750,6 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
         binary_digest="c" * 64,
         build_digest="sha256:" + "c" * 64,
         semantic_version="1.2.3",
-        self_test_passed=True,
         observation_receipt_public_key="d" * 64,
     )
 
@@ -2061,8 +1758,6 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
             jobs,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
             runtime_identity=runtime_identity,
         )
         is not None
@@ -2076,7 +1771,6 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
             "binary_digest": node.binary_digest,
             "build_digest": node.build_digest,
             "semantic_version": node.semantic_version,
-            "self_test_passed": node.self_test_passed,
             "observation_receipt_public_key": node.observation_receipt_public_key,
         } == runtime_identity.model_dump(exclude={"package_activation"})
         assert node.contact_observation_digest is not None
@@ -2096,7 +1790,6 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
         "binary_digest": "c" * 64,
         "build_digest": "sha256:" + "c" * 64,
         "semantic_version": "1.2.3",
-        "self_test_passed": True,
         "observation_receipt_public_key": "d" * 64,
     }
 
@@ -2105,8 +1798,6 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
             jobs,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
             runtime_identity=runtime_identity,
         )
 
@@ -2117,7 +1808,6 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
         assert node.semantic_version == "1.0.0"
         assert node.build_digest == "sha256:" + "f" * 64
         assert node.binary_digest == "f" * 64
-        assert node.self_test_passed is True
 
 
 @pytest.mark.parametrize("agent_action", ("heartbeat", "result"))
@@ -2128,7 +1818,7 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30, protocol_version=3)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
@@ -2152,11 +1842,12 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == claim.attempt,
+                AgentOperationAttempt.attempt
+                == fenced_attempt(sessions, claim).attempt,
             )
         )
         assert node is not None and node.last_seen_at is None
-        assert node.protocol_version == 3
+        assert node.protocol_version == 4
         assert stored_operation is not None and stored_operation.state == "running"
         assert attempt is not None and attempt.state == "running"
         assert attempt.progress is None and attempt.result is None
@@ -2167,7 +1858,7 @@ def test_public_fence_string_interface_renews_and_completes(service) -> None:
     jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
 
     progress = jobs.heartbeat(claim.fence, {"phase": "checking"}, 60)
@@ -2177,40 +1868,17 @@ def test_public_fence_string_interface_renews_and_completes(service) -> None:
         jobs.fail(str(uuid.uuid4()), "unknown fence")
 
 
-def test_structured_fence_cannot_update_a_different_operation(service) -> None:
-    jobs, sessions, clock = service
-    first_operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
-    )
-    second_operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
-    )
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert first is not None
-    other_operation = (
-        second_operation
-        if first.operation_id == first_operation.id
-        else first_operation
-    )
-    forged = type(first)(**{**first.__dict__, "operation_id": other_operation.id})
-    with pytest.raises(StaleAgentAttempt):
-        jobs.heartbeat(forged, {"phase": "forged"}, 30)
-    with pytest.raises(StaleAgentAttempt):
-        jobs.succeed(forged, STOP_RESULT)
-    assert first.operation_id != other_operation.id
-
-
 def test_attempt_expiring_exactly_at_claim_time_requires_operator_retry(
     service,
 ) -> None:
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
 
     clock.advance(seconds=30)
-    second = claim_agent(jobs, NODE_A, "serial-a", 30)
+    second = claim_agent(jobs, NODE_A, "serial-a")
 
     assert second is None
     with sessions() as session:
@@ -2232,12 +1900,12 @@ def test_parent_job_becomes_succeeded_only_after_every_operation_succeeds(
         recipe_stop_payload(NODE_B, plan_digest=COMMIT),
     )
 
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
     jobs.succeed(first, STOP_RESULT)
     assert job_state(sessions, parent_job.id).state == "queued"
 
-    second = claim_agent(jobs, NODE_B, "serial-b", 30)
+    second = claim_agent(jobs, NODE_B, "serial-b")
     assert second is not None
     jobs.succeed(second, STOP_RESULT)
 
@@ -2258,12 +1926,12 @@ def test_parent_job_fails_when_all_operations_are_terminal_and_one_failed(
         recipe_stop_payload(NODE_B, plan_digest=COMMIT),
     )
 
-    failed = claim_agent(jobs, NODE_A, "serial-a", 30)
+    failed = claim_agent(jobs, NODE_A, "serial-a")
     assert failed is not None
     jobs.fail(failed, "token=sensitive " + "x" * 2_000)
     assert job_state(sessions, parent_job.id).state == "queued"
 
-    succeeded = claim_agent(jobs, NODE_B, "serial-b", 30)
+    succeeded = claim_agent(jobs, NODE_B, "serial-b")
     assert succeeded is not None
     jobs.succeed(succeeded, STOP_RESULT)
 
@@ -2288,11 +1956,11 @@ def test_parent_job_waits_when_all_operations_terminal_without_failures(
         recipe_stop_payload(NODE_B, plan_digest=COMMIT),
     )
 
-    waiting = claim_agent(jobs, NODE_A, "serial-a", 30)
+    waiting = claim_agent(jobs, NODE_A, "serial-a")
     assert waiting is not None
     jobs.wait_for_operator(waiting, "confirm displayed fingerprint")
 
-    succeeded = claim_agent(jobs, NODE_B, "serial-b", 30)
+    succeeded = claim_agent(jobs, NODE_B, "serial-b")
     assert succeeded is not None
     jobs.succeed(succeeded, STOP_RESULT)
 
@@ -2318,20 +1986,9 @@ def test_transient_start_failure_retries_automatically_without_operator(
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
-    body = {
-        key: claim.model_dump(mode="json")[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    }
+    body = {key: claim.model_dump(mode="json")[key] for key in ("fence",)}
     jobs.record_result(
         AgentResult.model_validate_json(
             json.dumps(
@@ -2357,9 +2014,11 @@ def test_transient_start_failure_retries_automatically_without_operator(
     assert job_state(sessions, operation.parent_job_id).state == "queued"
     clock.now = due + timedelta(seconds=1)
     retry = claim_agent(
-        jobs, NODE_A, "serial-a", 30, capabilities=EXACT_LIFECYCLE_CAPABILITIES
+        jobs,
+        NODE_A,
+        "serial-a",
     )
-    assert retry is not None and retry.attempt == 2
+    assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
 
 
 def test_uncertain_stop_is_reconciled_by_exact_resume_not_parked(service) -> None:
@@ -2369,7 +2028,7 @@ def test_uncertain_stop_is_reconciled_by_exact_resume_not_parked(service) -> Non
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     jobs.uncertain(claim, "runtime did not confirm the stop")
     with sessions() as session:
@@ -2386,7 +2045,7 @@ def test_progress_snapshots_and_phase_changes_have_bounded_write_frequency(
     jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 10}, 60)
     first_time = clock.now
@@ -2425,11 +2084,12 @@ def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay
         NODE_A,
         kind,
         COMMIT,
-        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+        {"plan_digest": COMMIT},
     )
-    capabilities = ["agent.runtime.rust.v1", kind]
     claim = claim_agent(
-        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        jobs,
+        NODE_A,
+        "serial-a",
     )
     assert claim is not None
     jobs.heartbeat(
@@ -2449,9 +2109,11 @@ def test_distribution_retry_preserves_durable_progress_and_accepts_object_replay
         prior.state = "failed"
     clock.advance(seconds=61)
     resumed = claim_agent(
-        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        jobs,
+        NODE_A,
+        "serial-a",
     )
-    assert resumed is not None and resumed.attempt == 2
+    assert resumed is not None and fenced_attempt(sessions, resumed).attempt == 2
     jobs.heartbeat(
         resumed, {"phase": "verifying", "completed_bytes": 50, "completed_items": 0}, 60
     )
@@ -2473,26 +2135,15 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     clock.advance(seconds=31)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
     from vonk_agent_protocol import AgentResult
 
     late = AgentResult.model_validate(
         {
-            **{
-                key: claim.model_dump(mode="json")[key]
-                for key in (
-                    "schema_version",
-                    "job_id",
-                    "operation_id",
-                    "attempt",
-                    "fence",
-                    "node_id",
-                    "deadline",
-                )
-            },
+            **{key: claim.model_dump(mode="json")[key] for key in ("fence",)},
             "state": "succeeded",
             "result": STOP_RESULT,
         }
@@ -2525,31 +2176,15 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
     from vonk_agent_protocol import AgentResult
 
     jobs, sessions, clock = service
-    capabilities = [
-        "agent.runtime.rust.v1",
-        "recipe.stop",
-        "agent.lifecycle.resume.exact.v1",
-    ]
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30, capabilities=capabilities)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     clock.advance(seconds=31)
     late = AgentResult.model_validate(
         {
-            **{
-                key: claim.model_dump(mode="json")[key]
-                for key in (
-                    "schema_version",
-                    "job_id",
-                    "operation_id",
-                    "attempt",
-                    "fence",
-                    "node_id",
-                    "deadline",
-                )
-            },
+            **{key: claim.model_dump(mode="json")[key] for key in ("fence",)},
             "state": "failed",
             "result": {
                 "status": "failed",
@@ -2564,7 +2199,7 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
         assert stored is not None and stored.state == "waiting-for-operator"
     resumed = None
     for _ in range(4):
-        resumed = claim_agent(jobs, NODE_A, "serial-a", 30, capabilities=capabilities)
+        resumed = claim_agent(jobs, NODE_A, "serial-a")
         if resumed is not None:
             break
         with sessions() as session:
@@ -2574,7 +2209,10 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
             assert stored.retry_due_at is not None
             clock.now = max(clock.now, stored.retry_due_at.replace(tzinfo=UTC))
     assert resumed is not None
-    assert resumed.operation_id == operation.id and resumed.attempt == 2
+    assert (
+        fenced_operation(sessions, resumed).id == operation.id
+        and fenced_attempt(sessions, resumed).attempt == 2
+    )
     with sessions() as session:
         previous = session.scalar(
             select(AgentOperationAttempt).where(
@@ -2599,26 +2237,19 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
         NODE_A,
         kind,
         COMMIT,
-        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+        {"plan_digest": COMMIT},
     )
-    capabilities = ["agent.runtime.rust.v1", kind]
     for attempt_number in range(1, 8):
         claim = claim_agent(
-            jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+            jobs,
+            NODE_A,
+            "serial-a",
         )
-        assert claim is not None and claim.attempt == attempt_number, attempt_number
-        body = {
-            key: claim.model_dump(mode="json")[key]
-            for key in (
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "deadline",
-            )
-        }
+        assert (
+            claim is not None
+            and fenced_attempt(sessions, claim).attempt == attempt_number
+        ), attempt_number
+        body = {key: claim.model_dump(mode="json")[key] for key in ("fence",)}
         jobs.record_result(
             AgentResult.model_validate_json(
                 json.dumps(
@@ -2651,9 +2282,6 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
                 jobs,
                 NODE_A,
                 "serial-a",
-                30,
-                protocol_version=3,
-                capabilities=capabilities,
             )
             is None
         )
@@ -2667,22 +2295,17 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
         clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
 
     recovered = claim_agent(
-        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        jobs,
+        NODE_A,
+        "serial-a",
     )
-    assert recovered is not None and recovered.operation_id == operation.id
+    assert (
+        recovered is not None
+        and fenced_operation(sessions, recovered).id == operation.id
+    )
     jobs.succeed(
         recovered,
-        {
-            "assignment_id": "33333333-3333-4333-8333-333333333333",
-            "model_artifact_set_sha256": COMMIT,
-            "verified": True,
-            "verified_digests": [COMMIT],
-            "verified_image_digest": "sha256:" + COMMIT,
-            "imported_image_digest": "sha256:" + COMMIT,
-            "verified_oci_layout_sha256": COMMIT,
-            "oci_image_digest": "sha256:" + COMMIT,
-            "downloaded_bytes": 0,
-        },
+        {"downloaded_bytes": 0},
     )
     with sessions() as session:
         assert session.get(AgentOperation, operation.id).state == "succeeded"
@@ -2698,15 +2321,12 @@ def test_successful_distribution_receipt_closes_coalesced_final_counters(
         NODE_A,
         kind,
         COMMIT,
-        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+        {"plan_digest": COMMIT},
     )
     claim = claim_agent(
         jobs,
         NODE_A,
         "serial-a",
-        30,
-        protocol_version=3,
-        capabilities=["agent.runtime.rust.v1", kind],
     )
     assert claim is not None
     jobs.heartbeat(
@@ -2723,17 +2343,7 @@ def test_successful_distribution_receipt_closes_coalesced_final_counters(
     )
     jobs.succeed(
         claim,
-        {
-            "assignment_id": "33333333-3333-4333-8333-333333333333",
-            "model_artifact_set_sha256": COMMIT,
-            "verified": True,
-            "verified_digests": [COMMIT],
-            "verified_image_digest": "sha256:" + COMMIT,
-            "imported_image_digest": "sha256:" + COMMIT,
-            "verified_oci_layout_sha256": COMMIT,
-            "oci_image_digest": "sha256:" + COMMIT,
-            "downloaded_bytes": 200,
-        },
+        {"downloaded_bytes": 200},
     )
     with sessions() as session:
         attempt = session.scalar(
@@ -2775,10 +2385,9 @@ def test_queue_stores_and_claims_the_canonical_payload_hash(
         assert stored.payload_digest == hashlib.sha256(expected).hexdigest()
         assert "slots" not in stored.payload["compiled_execution_plan"]["job"]["input"]
         assert stored.payload["compiled_execution_plan"]["endpoint"] is None
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     assert canonical_message(claim.payload) == expected
-    assert claim.payload_digest == hashlib.sha256(expected).hexdigest()
     executable = os.environ.get("VONK_CANONICAL_WIRE_PROBE")
     if executable:
         parsed = subprocess.run(
@@ -2800,7 +2409,7 @@ def test_lease_only_wire_heartbeat_retains_measured_progress(
     jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     jobs.heartbeat(
         claim,
@@ -2918,7 +2527,7 @@ def _enqueue_successor_mutation(jobs, sessions, clock):
         NODE_A,
         ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
         COMMIT,
-        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+        {"plan_digest": COMMIT},
     )
 
 
@@ -2952,10 +2561,10 @@ def test_superseded_waiting_mutation_is_reconciled_and_stops_blocking(
     )
     new = _enqueue_successor_mutation(jobs, sessions, clock)
 
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
 
     assert claim is not None
-    assert claim.operation_id == new.id
+    assert fenced_operation(sessions, claim).id == new.id
     with sessions() as session:
         reconciled = session.get(AgentOperation, old.id)
         assert reconciled is not None
@@ -2982,7 +2591,7 @@ def test_disarmed_cancellation_records_the_defect(service) -> None:
     )
     _enqueue_successor_mutation(jobs, sessions, clock)
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is not None
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
 
     assert (
         job_state(sessions, old_parent.id).status_reason
@@ -3006,7 +2615,7 @@ def test_live_cancellation_still_blocks_later_work(service) -> None:
     )
     new = _enqueue_successor_mutation(jobs, sessions, clock)
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         blocked = session.get(AgentOperation, new.id)
@@ -3019,13 +2628,13 @@ def test_live_prior_mutation_still_blocks_later_work(service) -> None:
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
     old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert first is not None and first.operation_id == old.id
+    first = claim_agent(jobs, NODE_A, "serial-a")
+    assert first is not None and fenced_operation(sessions, first).id == old.id
     clock.advance(seconds=1)
     new_parent = parent(sessions, clock)
     new = jobs.enqueue(new_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         blocked = session.get(AgentOperation, new.id)
@@ -3052,8 +2661,8 @@ def test_dead_running_mutation_is_reconciled_and_stops_blocking(
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
     old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert first is not None and first.operation_id == old.id
+    first = claim_agent(jobs, NODE_A, "serial-a")
+    assert first is not None and fenced_operation(sessions, first).id == old.id
 
     with sessions.begin() as session:
         attempt = session.scalar(
@@ -3072,10 +2681,10 @@ def test_dead_running_mutation_is_reconciled_and_stops_blocking(
 
     # The first claim reconciles the dead order and refuses itself so the park
     # commits; the next claim must then admit the successor.
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
-    claimed = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+    claimed = claim_agent(jobs, NODE_A, "serial-a")
 
-    assert claimed is not None and claimed.operation_id == new.id
+    assert claimed is not None and fenced_operation(sessions, claimed).id == new.id
     with sessions() as session:
         parked = session.get(AgentOperation, old.id)
         successor = session.get(AgentOperation, new.id)
@@ -3096,7 +2705,7 @@ def test_reconciled_dead_running_mutation_retains_its_pending_result(service) ->
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
     old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    first = claim_agent(jobs, NODE_A, "serial-a", 30)
+    first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
     with sessions.begin() as session:
         attempt = session.scalar(
@@ -3111,8 +2720,8 @@ def test_reconciled_dead_running_mutation_retains_its_pending_result(service) ->
     new_parent = parent(sessions, clock)
     jobs.enqueue(new_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is not None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
 
     with sessions() as session:
         retained = session.scalar(
@@ -3124,33 +2733,6 @@ def test_reconciled_dead_running_mutation_retains_its_pending_result(service) ->
         assert retained.result == {"reason": "unacknowledged stop receipt"}
 
 
-def test_claim_refusal_records_capability_reason(service) -> None:
-    jobs, sessions, clock = service
-    parent_job = parent(sessions, clock)
-    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-
-    assert (
-        claim_agent(
-            jobs, NODE_A, "serial-a", 30, capabilities=["agent.runtime.rust.v1"]
-        )
-        is None
-    )
-
-    with sessions() as session:
-        stored = session.get(AgentOperation, operation.id)
-        job = session.get(Job, parent_job.id)
-        assert stored is not None and stored.status_reason is not None
-        assert "capability-unadvertised" in stored.status_reason
-        assert "recipe.stop" in stored.status_reason
-        assert job is not None and job.status_reason == stored.status_reason
-
-    # Recording the refusal must not wedge the operation: a capable claim wins.
-    recovered = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert recovered is not None and recovered.operation_id == operation.id
-    with sessions() as session:
-        assert session.get(AgentOperation, operation.id).status_reason is None
-
-
 def test_claim_refusal_records_parent_state_reason(service) -> None:
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
@@ -3158,7 +2740,7 @@ def test_claim_refusal_records_parent_state_reason(service) -> None:
     with sessions.begin() as session:
         session.get(Job, parent_job.id).state = "succeeded"
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
@@ -3174,7 +2756,7 @@ def test_excluded_work_refusal_names_both_ordinals(service) -> None:
     with sessions.begin() as session:
         session.get(AgentNode, NODE_A).workload_intent_ordinal = 2
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
@@ -3191,7 +2773,7 @@ def test_excluded_work_refusal_records_a_cancelled_parent(service) -> None:
     with sessions.begin() as session:
         session.get(Job, parent_job.id).result = {"cancel_requested": True}
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
@@ -3212,7 +2794,7 @@ def test_excluded_work_refusal_records_an_unready_retry_attempt(service) -> None
     operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     _scenario_operator_retry_attempt_not_ready(sessions, clock, parent_job, operation)
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
@@ -3240,8 +2822,8 @@ def test_claim_admits_and_names_a_malformed_cancel_flag(service, malformed) -> N
         assert job is not None
         job.result = {"cancel_requested": malformed}
 
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
-    assert claim is not None and claim.operation_id == operation.id
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None and fenced_operation(sessions, claim).id == operation.id
 
     with sessions() as session:
         job = session.get(Job, parent_job.id)
@@ -3255,14 +2837,14 @@ def test_no_work_claim_records_no_refusal(service) -> None:
 
     # An empty node has nothing to explain, and a completed operation is not
     # "work this node may not execute", so neither case writes a reason.
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
     parent_job = parent(sessions, clock)
     operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     jobs.succeed(claim, STOP_RESULT)
 
-    assert claim_agent(jobs, NODE_A, "serial-a", 30) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     with sessions() as session:
         assert session.scalars(select(AgentOperation)).all() != []
@@ -3483,12 +3065,13 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
         NODE_A,
         kind,
         COMMIT,
-        {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+        {"plan_digest": COMMIT},
     )
-    capabilities = ["agent.runtime.rust.v1", kind]
     for _ in range(5):
         claim = claim_agent(
-            jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+            jobs,
+            NODE_A,
+            "serial-a",
         )
         assert claim is not None
         jobs.record_result(
@@ -3497,15 +3080,7 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
                     {
                         **{
                             key: claim.model_dump(mode="json")[key]
-                            for key in (
-                                "schema_version",
-                                "job_id",
-                                "operation_id",
-                                "attempt",
-                                "fence",
-                                "node_id",
-                                "deadline",
-                            )
+                            for key in ("fence",)
                         },
                         "state": "failed",
                         "result": {
@@ -3564,7 +3139,9 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
     jobs = AgentJobService(sessions, clock=clock)
     assert (
         claim_agent(
-            jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+            jobs,
+            NODE_A,
+            "serial-a",
         )
         is None
     )
@@ -3581,10 +3158,12 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
     clock.now = due.replace(tzinfo=UTC)
     jobs = AgentJobService(sessions, clock=clock)
     resumed = claim_agent(
-        jobs, NODE_A, "serial-a", 30, protocol_version=3, capabilities=capabilities
+        jobs,
+        NODE_A,
+        "serial-a",
     )
     assert (
         resumed is not None
-        and resumed.operation_id == operation.id
-        and resumed.attempt == 6
+        and fenced_operation(sessions, resumed).id == operation.id
+        and fenced_attempt(sessions, resumed).attempt == 6
     )

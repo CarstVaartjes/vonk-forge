@@ -221,20 +221,19 @@ the removed image or bypass cleanup. Model caches and unrelated builds remain
 intact.
 
 The work-claim request and runtime identity are defined in
-`agent_protocol/src/vonk_agent_protocol/claims.py`. Protocol 3, capabilities, node identity, lease,
-wait time, and the enrolled agent's observation key are required. The Rust
-HTTP transport and the connected test use the same request serializer and
-capability declaration. Enrollment keeps its bounded raw-body security
-handling, while OpenAPI exposes the exact `EnrollmentSubmitRequest` used to
-validate that body.
+`agent_protocol/src/vonk_agent_protocol/claims.py`. `protocol_version` is the
+single Controller-agent version gate: a Controller refuses any other version
+and names the fix (reinstall the Spark agent). mTLS identifies the node; the
+claim, heartbeat, directive, result and helper-grant messages carry only the
+attempt fence, from which the Controller resolves job, operation and attempt.
+The claim also reports the runtime identity, wait time and, when present, the
+host runtime's preflight fingerprint. The Rust HTTP transport and the connected
+test use the same request serializer. Enrollment keeps its bounded raw-body
+security handling, while OpenAPI exposes the exact `EnrollmentSubmitRequest`
+used to validate that body.
 
-Work claiming prefers due operations supported by the agent's advertised
-capabilities, preserving creation order within that group. A retry requiring
-exact lifecycle recovery must not starve the authorized agent upgrade that
-enables it. The original retry retains its identity and progress and resumes
-when the upgraded agent reconnects. Capability preference does not bypass
-authority, lease, or concurrent-mutation checks; unsupported work remains
-blocked with its recovery reason.
+Work claiming takes due operations in creation order; authority, lease and
+concurrent-mutation checks still apply.
 
 `scripts/generate-control-clients` derives the Controller OpenAPI document and
 Python/TypeScript clients from the actual API. Never fix drift by hand-editing

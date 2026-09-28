@@ -347,7 +347,6 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
                 node_id=later,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=list(capabilities),
             )
         )
         snapshot = session.scalar(select(NodeInventorySnapshot))

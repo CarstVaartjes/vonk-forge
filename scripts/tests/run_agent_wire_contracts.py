@@ -138,7 +138,6 @@ def main() -> int:
         ],
         [
             "tests/scripts/test_install_release_publication.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary",
-            "tests/acceptance/test_rust_agent_parity.py::test_rust_claim_capabilities_cover_current_controller_contract",
         ],
     ]
     for selection in selections:

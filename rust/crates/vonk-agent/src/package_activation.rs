@@ -56,7 +56,6 @@ pub async fn acknowledge(
     };
     if receipt.phase != PackageActivationPhase::Armed
         || receipt.candidate_binary_sha256 != identity.binary_digest
-        || !identity.self_test_passed
     {
         return Ok(Some(receipt));
     }

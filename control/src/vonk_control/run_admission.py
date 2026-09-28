@@ -61,10 +61,6 @@ from .resource_planning import (
 )
 from .topology import Placement, TopologyError, validate_topology
 
-_DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
-_EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
-_SIGNED_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.receipt.v1"
-
 _PORT_CONFLICTS = {
     "service": (
         "run.port_occupied",
@@ -382,9 +378,6 @@ class RunAdmissionService:
                 unreconciled_lost_ranks.setdefault(node_id, []).append(
                     (run_id, run_alias)
                 )
-            agent_capabilities = {
-                node.node_id: tuple(node.capabilities or ()) for node in agent_nodes
-            }
             receipt_keys = {
                 node.node_id: node.observation_receipt_public_key
                 for node in agent_nodes
@@ -474,32 +467,8 @@ class RunAdmissionService:
                         "run.stale_inventory", "GPU node memory inventory is stale."
                     )
                 )
-            if (
-                two_phase_start
-                and _DISTRIBUTED_START_CAPABILITY
-                not in agent_capabilities.get(placement.node_id, ())
-            ):
-                blockers.append(
-                    AdmissionReason(
-                        "run.distributed_start_capability_missing",
-                        "Spark agent does not support two-phase distributed start.",
-                    )
-                )
-            if (
-                two_phase_start
-                and _EXACT_RUN_INSPECTION_CAPABILITY
-                not in agent_capabilities.get(placement.node_id, ())
-            ):
-                blockers.append(
-                    AdmissionReason(
-                        "run.distributed_observation_capability_missing",
-                        "Spark agent does not support exact distributed rank inspection.",
-                    )
-                )
-            if two_phase_start and (
-                _SIGNED_RUN_INSPECTION_CAPABILITY
-                not in agent_capabilities.get(placement.node_id, ())
-                or not isinstance(receipt_keys.get(placement.node_id), str)
+            if two_phase_start and not isinstance(
+                receipt_keys.get(placement.node_id), str
             ):
                 blockers.append(
                     AdmissionReason(

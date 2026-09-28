@@ -129,9 +129,7 @@ impl HostHelperOperation {
             }
             Self::ConfirmPackageActivationOperation(_) => true,
             Self::ExecuteContainerRuntimeRequestOperation(operation) => {
-                operation.job_id.get_version() == Some(uuid::Version::Random)
-                    && operation.operation_id.get_version() == Some(uuid::Version::Random)
-                    && operation.fence.get_version() == Some(uuid::Version::Random)
+                operation.fence.get_version() == Some(uuid::Version::Random)
                     && (operation.installation_id.is_some()
                         == (operation.action
                             == HostHelperContainerRuntimeAction::InstallationCleanup))
@@ -172,17 +170,7 @@ impl HostHelperGrantClaims {
         {
             return Err(ProtocolError::Identity("host helper grant claims"));
         }
-        self.operation.validate()?;
-        if let HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) =
-            &self.operation
-            && operation
-                .reconciliation_identity
-                .as_ref()
-                .is_some_and(|identity| identity.node_id != self.node_id)
-        {
-            return Err(ProtocolError::Identity("host helper reconciliation node"));
-        }
-        Ok(())
+        self.operation.validate()
     }
 }
 
@@ -213,20 +201,13 @@ pub fn host_helper_grant_signing_bytes(
 ///
 /// `validate()` used to answer every violation with one opaque `ProtocolError`,
 /// so the agent could only report `helper_request_document_invalid` no matter
-/// which rule refused. A live blocked Start could not say whether the request
-/// version, attempt, typed plan, argument envelope, or one argument's value was
-/// wrong.
+/// which rule refused. A live blocked Start could not say whether the typed
+/// plan, argument envelope, or one argument's value was wrong.
 ///
 /// A rule that measures a bound carries it, so a refusal can report the limit
 /// and the observed value without ever carrying the argument itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum HostRuntimeRequestRule {
-    /// `schema_version` is not the current schema.
-    #[error("host runtime request schema version is invalid")]
-    SchemaVersion,
-    /// `attempt` is zero.
-    #[error("host runtime request attempt is invalid")]
-    Attempt,
     /// Arguments are present or absent for the wrong action.
     #[error("host runtime request argument presence is invalid")]
     ArgumentsPresence,
@@ -278,12 +259,6 @@ impl HostRuntimeRequestRule {
 
 impl HostRuntimeRequest {
     pub fn validate(&self) -> Result<(), HostRuntimeRequestRule> {
-        if self.schema_version != 1 {
-            return Err(HostRuntimeRequestRule::SchemaVersion);
-        }
-        if self.attempt == 0 {
-            return Err(HostRuntimeRequestRule::Attempt);
-        }
         if self.arguments.is_empty()
             != matches!(
                 self.action,
@@ -364,12 +339,10 @@ impl HostRuntimeRequest {
                 binding
                     .validate()
                     .map_err(|_| HostRuntimeRequestRule::ObservationBinding)?;
-                if self.job_id != binding.run_id
-                    || binding.run_generation != self.attempt
-                    || hex_sha256(
-                        &canonical_json(&self.arguments)
-                            .map_err(|_| HostRuntimeRequestRule::Encoding)?,
-                    ) != binding.runtime_arguments_sha256
+                if hex_sha256(
+                    &canonical_json(&self.arguments)
+                        .map_err(|_| HostRuntimeRequestRule::Encoding)?,
+                ) != binding.runtime_arguments_sha256
                 {
                     return Err(HostRuntimeRequestRule::ObservationBinding);
                 }
@@ -410,11 +383,7 @@ mod installation_cleanup_contract_tests {
 
     fn request(action: HostRuntimeAction, installation_id: Option<Uuid>) -> HostRuntimeRequest {
         HostRuntimeRequest {
-            schema_version: 1,
             action,
-            job_id: Uuid::new_v4(),
-            operation_id: Uuid::new_v4(),
-            attempt: 1,
             fence: Uuid::new_v4(),
             arguments: Vec::new(),
             job_plan: None,
@@ -449,20 +418,12 @@ mod installation_cleanup_contract_tests {
 
         for raw in [
             serde_json::json!({
-                "schema_version": 1,
                 "action": "installation-cleanup",
-                "job_id": Uuid::new_v4(),
-                "operation_id": Uuid::new_v4(),
-                "attempt": 1,
                 "fence": Uuid::new_v4(),
                 "arguments": [],
             }),
             serde_json::json!({
-                "schema_version": 1,
                 "action": "installation-cleanup",
-                "job_id": Uuid::new_v4(),
-                "operation_id": Uuid::new_v4(),
-                "attempt": 1,
                 "fence": Uuid::new_v4(),
                 "arguments": [],
                 "installation_id": null,
@@ -491,11 +452,7 @@ mod host_runtime_request_bound_tests {
     fn start(arguments: Vec<String>) -> HostRuntimeRequest {
         let plan = super::recipe_start_tests::valid_start_plan();
         HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::Start,
-            job_id: Uuid::new_v4(),
-            operation_id: Uuid::new_v4(),
-            attempt: 1,
             fence: Uuid::new_v4(),
             arguments,
             job_plan: None,
@@ -547,11 +504,7 @@ mod host_runtime_request_bound_tests {
         };
         assert!(binding.validate().is_ok());
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::RunInspect,
-            job_id: binding.run_id,
-            operation_id: Uuid::new_v4(),
-            attempt: binding.run_generation,
             fence: Uuid::new_v4(),
             arguments: Vec::new(),
             job_plan: None,
@@ -723,8 +676,6 @@ impl RecipeRunObservationWire {
             || match &self.grant.claims.operation {
                 HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
                     operation.action != HostHelperContainerRuntimeAction::RunInspect
-                        || operation.job_id != self.run_id
-                        || self.run_generation != operation.attempt
                         || operation.request_sha256 != self.helper_receipt.claims.request_sha256
                         || operation.observation_identity_sha256.as_deref()
                             != Some(self.observation_identity_sha256.as_str())
@@ -759,12 +710,6 @@ pub enum ProtocolError {
 
 impl AgentClaim {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema_version != 1 || self.attempt == 0 {
-            return Err(ProtocolError::Identity("claim version or attempt"));
-        }
-        if !valid_node_id(&self.node_id) || !lower_hex(&self.authority_revision, 64) {
-            return Err(ProtocolError::Identity("claim node or authority"));
-        }
         if !matches!(
             self.operation.as_str(),
             "agent.upgrade.v1"
@@ -791,8 +736,8 @@ impl AgentClaim {
         } else {
             MAX_DOCUMENT_BYTES
         };
-        if payload.len() > maximum_bytes || hex_sha256(&payload) != self.payload_digest {
-            return Err(ProtocolError::Identity("claim payload digest"));
+        if payload.len() > maximum_bytes {
+            return Err(ProtocolError::Identity("claim payload size"));
         }
         Ok(())
     }
@@ -854,10 +799,7 @@ fn valid_inventory_capability(value: &str) -> bool {
 
 impl ArtifactDistributionRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema_version != 1
-            || !lower_hex(&self.authority_revision, 64)
-            || !lower_hex(&self.plan_digest, 64)
-        {
+        if !lower_hex(&self.plan_digest, 64) {
             return Err(ProtocolError::Identity("artifact distribution request"));
         }
         Ok(())
@@ -926,7 +868,6 @@ impl AgentUpgradeRequest {
 
 impl AgentProgress {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)?;
         if let Some(progress) = &self.progress {
             if canonical_json(progress)?.len() > MAX_DOCUMENT_BYTES {
                 return Err(ProtocolError::Identity("progress document"));
@@ -934,12 +875,6 @@ impl AgentProgress {
             progress.validate()?;
         }
         Ok(())
-    }
-}
-
-impl AgentDirective {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)
     }
 }
 
@@ -969,19 +904,12 @@ impl DistributionObject {
     }
 }
 
-/// Controller-issued, node-scoped authorization for a complete model and
-/// executable image set.  The assignment is carried alongside every fetch;
-/// an enrolled agent cannot turn a digest into a general object browser.
+/// The complete model and executable image object set of one distribution
+/// plan. The plan digest scopes every object fetch, so an enrolled agent
+/// cannot turn a digest into a general object browser.
 impl DistributionAssignment {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema_version != 2
-            || self.assignment_id.get_version() != Some(uuid::Version::Random)
-            || self.generation == 0
-            || !valid_node_id(&self.node_id)
-            || self.expires_at.offset().local_minus_utc() != 0
-            || !lower_hex(&self.plan_digest, 64)
-            || !lower_hex(&self.model_artifact_set_sha256, 64)
-            || !valid_oci_digest(&self.oci_image_digest)
+        if !valid_oci_digest(&self.oci_image_digest)
             || !lower_hex(&self.oci_archive_sha256, 64)
             || self.objects.is_empty()
             || self.objects.len() > 4096
@@ -1010,14 +938,10 @@ impl DistributionAssignment {
 
 impl AgentResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema_version != 1
-            || self.attempt == 0
-            || !valid_node_id(&self.node_id)
-            || !matches!(
-                self.state.as_str(),
-                "succeeded" | "failed" | "cancelled" | "waiting-for-operator"
-            )
-        {
+        if !matches!(
+            self.state.as_str(),
+            "succeeded" | "failed" | "cancelled" | "waiting-for-operator"
+        ) {
             return Err(ProtocolError::Identity("result identity"));
         }
         Ok(())
@@ -1060,38 +984,21 @@ impl AgentResult {
                 AgentOperation::RecipeInstall => {
                     matches!(&self.result, AgentResultResult::AgentInstallResult(_))
                 }
-                AgentOperation::RecipeStart => {
-                    matches!(&self.result, AgentResultResult::RecipeStartResult(_))
+                // Stop, uninstall and reconcile succeed with `{}`, which an
+                // untagged parse reads as the first empty variant.
+                AgentOperation::RecipeStart
+                | AgentOperation::RecipeStop
+                | AgentOperation::RecipeUninstall
+                | AgentOperation::RecipeReconcile => {
+                    self.result.is_empty_success()
+                        || (*operation == AgentOperation::RecipeStart
+                            && matches!(&self.result, AgentResultResult::RecipeStartResult(_)))
                 }
                 AgentOperation::RecipeJobRunV1 => {
                     let AgentResultResult::RecipeJobRunResult(result) = &self.result else {
                         return Err(ProtocolError::Identity("result operation"));
                     };
                     result.validate()?;
-                    true
-                }
-                AgentOperation::RecipeStop => {
-                    let AgentResultResult::RecipeStopResult(result) = &self.result else {
-                        return Err(ProtocolError::Identity("result operation"));
-                    };
-                    result.validate()?;
-                    true
-                }
-                AgentOperation::RecipeUninstall => {
-                    let AgentResultResult::RecipeUninstallResult(result) = &self.result else {
-                        return Err(ProtocolError::Identity("result operation"));
-                    };
-                    result.validate()?;
-                    true
-                }
-                AgentOperation::RecipeReconcile => {
-                    let AgentResultResult::RecipeReconcileResult(result) = &self.result else {
-                        return Err(ProtocolError::Identity("result operation"));
-                    };
-                    result.validate()?;
-                    if result.node_id != self.node_id {
-                        return Err(ProtocolError::Identity("reconciliation result node"));
-                    }
                     true
                 }
             },
@@ -1129,6 +1036,20 @@ impl AgentResult {
     }
 }
 
+impl generated::AgentResultResult {
+    /// Whether this is the empty `{}` success body of a stop, uninstall,
+    /// reconcile or non-serving start.
+    pub fn is_empty_success(&self) -> bool {
+        match self {
+            Self::RecipeStartResult(result) => result.endpoint.is_none(),
+            Self::RecipeStopResult(_)
+            | Self::RecipeUninstallResult(_)
+            | Self::RecipeReconcileResult(_) => true,
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod agent_result_binding_tests {
     use super::*;
@@ -1136,24 +1057,15 @@ mod agent_result_binding_tests {
 
     fn result(state: AgentResultState, body: Value) -> AgentResult {
         AgentResult {
-            attempt: 1,
-            deadline: DateTime::parse_from_rfc3339("2026-09-08T12:00:00+00:00").unwrap(),
             fence: Uuid::new_v4(),
-            job_id: Uuid::new_v4(),
-            node_id: "spk_11111111111111111111111111111111".to_owned(),
-            operation_id: Uuid::new_v4(),
             result: serde_json::from_value(body).unwrap(),
-            schema_version: 1,
             state,
         }
     }
 
     #[test]
     fn succeeded_result_is_bound_to_its_current_operation() {
-        let stop = result(
-            AgentResultState::Succeeded,
-            serde_json::json!({"stopped": true}),
-        );
+        let stop = result(AgentResultState::Succeeded, serde_json::json!({}));
         stop.validate_for_operation(&AgentOperation::RecipeStop)
             .unwrap();
         assert!(
@@ -1265,11 +1177,10 @@ impl RecipeJobRunResult {
             "total_bytes": self.output_manifest.total_bytes,
             "files": self.output_manifest.files,
         });
-        let valid = self.schema_version == 1
-            && self
-                .diagnostics
-                .as_ref()
-                .is_none_or(|value| value.validate().is_ok())
+        let valid = self
+            .diagnostics
+            .as_ref()
+            .is_none_or(|value| value.validate().is_ok())
             && (0..=255).contains(&self.exit_code)
             && self.output_manifest.schema_version == 1
             && self.output_manifest.files.len() <= 32
@@ -1308,47 +1219,6 @@ impl RecipeJobRunResult {
             Ok(())
         } else {
             Err(ProtocolError::Identity("recipe job result"))
-        }
-    }
-}
-
-/// Typed receipt emitted after a recipe image has been built and the exported
-/// archive has been bound to its content identity.
-/// Typed receipt emitted after a node verifies and imports the exact build
-/// archive identified by the Controller operation.
-impl RecipeStopResult {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.stopped {
-            Ok(())
-        } else {
-            Err(ProtocolError::Identity("recipe stop result"))
-        }
-    }
-}
-
-impl RecipeUninstallResult {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.uninstalled && self.removed_model_bytes <= 16 * 1024_u64.pow(4) {
-            Ok(())
-        } else {
-            Err(ProtocolError::Identity("recipe uninstall result"))
-        }
-    }
-}
-
-impl RecipeReconcileResult {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.reconciled
-            && valid_node_id(&self.node_id)
-            && lower_hex(&self.install_operation_payload_sha256, 64)
-            && lower_hex(&self.plan_digest, 64)
-            && lower_hex(&self.recipe_content_sha256, 64)
-            && lower_hex(&self.compiled_spec_canonical_sha256, 64)
-            && lower_hex(&self.cleanup_receipt_sha256, 64)
-        {
-            Ok(())
-        } else {
-            Err(ProtocolError::Identity("recipe reconciliation result"))
         }
     }
 }
@@ -1403,21 +1273,10 @@ impl RecipeOperationRequest {
             _ => return Err(ProtocolError::Identity("recipe operation payload")),
         };
         request.validate()?;
-        if let Self::Reconcile(value) = &request
-            && value.node_id != claim.node_id
-        {
-            return Err(ProtocolError::Identity("reconciliation node"));
-        }
-        if let Self::Stop(value) = &request
-            && value.node_id != claim.node_id
-        {
-            return Err(ProtocolError::Identity("stop node"));
-        }
         Ok(request)
     }
 
     fn validate(&self) -> Result<(), ProtocolError> {
-        let valid_common = |version: u8, plan: &str| version == 1 && lower_hex(plan, 64);
         let valid = match self {
             Self::RuntimePreflight(_) => true,
             Self::Build(value) => validate_build(value),
@@ -1431,76 +1290,14 @@ impl RecipeOperationRequest {
             }
             Self::JobRun(value) => validate_recipe_job(value),
             Self::Install(value) => {
-                value.schema_version == 2
-                    && lower_hex(&value.plan_digest, 64)
+                lower_hex(&value.plan_digest, 64)
                     && value.expected_bytes <= 16 * 1024_u64.pow(4)
-                    && valid_role(&value.role)
+                    && valid_role(&value.compiled_execution_plan.runtime.placement.role)
             }
-            Self::Start(value) => {
-                let valid_phase = match (&value.phase, &value.start_deadline) {
-                    // Role-ordered distributed starts are deliberately
-                    // unphased.  The collective readiness variant carries
-                    // the complete phase envelope below.
-                    (None, None) => value.run_generation > 0,
-                    (Some(RecipeStartPhase::RankLaunch), Some(deadline)) => {
-                        value.run_generation > 0
-                            && value.world_size > 1
-                            && chrono::DateTime::parse_from_rfc3339(deadline)
-                                .is_ok_and(|deadline| deadline.offset().local_minus_utc() == 0)
-                    }
-                    (Some(RecipeStartPhase::CollectiveReadiness), Some(deadline)) => {
-                        value.run_generation > 0
-                            && value.world_size > 1
-                            && value.local_address.is_some()
-                            && value.local_address == value.master_address
-                            && chrono::DateTime::parse_from_rfc3339(deadline)
-                                .is_ok_and(|deadline| deadline.offset().local_minus_utc() == 0)
-                    }
-                    _ => false,
-                };
-                value.schema_version == 2
-                    && (1..=i32::MAX as u32).contains(&value.run_generation)
-                    && value.run_id.get_version() == Some(uuid::Version::Random)
-                    && value.installation_id.get_version() == Some(uuid::Version::Random)
-                    && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
-                    && value.mapping_id.get_version() == Some(uuid::Version::Random)
-                    && lower_hex(&value.plan_digest, 64)
-                    && lower_hex(&value.recipe_content_sha256, 64)
-                    && valid_oci_digest(&value.image_digest)
-                    && value.mapping_generation >= 1
-                    && value.world_size >= 1
-                    && value.rank < value.world_size
-                    && valid_role(&value.role)
-                    && value.port >= 1024
-                    && value.reserved_memory_bytes > 0
-                    && value.reserved_memory_bytes <= 16 * 1024_u64.pow(4)
-                    && !value.endpoint_address.is_loopback()
-                    && !value.endpoint_address.is_unspecified()
-                    && !value.endpoint_address.is_multicast()
-                    && !link_local(value.endpoint_address)
-                    && valid_phase
-                    && if value.world_size == 1 {
-                        value.rank == 0
-                            && value.local_address.is_none()
-                            && value.master_address.is_none()
-                            && value.master_port.is_none()
-                    } else {
-                        value.local_address.is_some_and(valid_fabric_address)
-                            && value.master_address.is_some_and(valid_fabric_address)
-                            && value.master_port.is_some_and(|port| port >= 1024)
-                    }
-                    && valid_alias(&value.alias)
-                    && value.memory_floor_bytes <= 16 * 1024_u64.pow(4)
-                    && value.memory_floor_bytes
-                        == value
-                            .compiled_execution_plan
-                            .runtime
-                            .placement
-                            .memory_floor_bytes
-            }
+            Self::Start(value) => validate_recipe_start(value),
             Self::Stop(value) => validate_recipe_stop(value),
             Self::Uninstall(value) => {
-                valid_common(value.schema_version, &value.plan_digest)
+                lower_hex(&value.plan_digest, 64)
                     && lower_hex(&value.recipe_content_sha256, 64)
                     && value
                         .cleanup_model_content_sha256
@@ -1575,30 +1372,31 @@ mod recipe_start_tests {
         master_address: Option<&str>,
         phase: Option<&str>,
     ) -> Value {
-        let mut payload = serde_json::json!({
-            "alias": "distributed-model",
-            "compiled_execution_plan": serde_json::from_str::<Value>(include_str!("../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json")).unwrap(),
-            "endpoint_address": "100.100.20.30",
-            "image_digest": format!("sha256:{}", "a".repeat(64)),
-            "installation_id": "00000000-0000-4000-8000-000000000001",
+        let mut plan: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
+        plan["runtime"]["placement"] = serde_json::json!({
+            "endpoint_address": if world_size == 1 { Some("100.100.20.30") } else { None },
             "local_address": local_address,
             "master_address": master_address,
             "master_port": if world_size > 1 { Some(29500) } else { None },
-            "mapping_generation": 1,
-            "mapping_id": "00000000-0000-4000-8000-000000000002",
-            "plan_digest": "b".repeat(64),
-            "port": 8000,
-            "rank": rank,
-            "recipe_content_sha256": "a".repeat(64),
-            "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
-            "reserved_memory_bytes": 1024,
-            "run_generation": 1,
             "memory_floor_bytes": 2 * 1024_u64.pow(3),
             "memory_kind": "unified",
+            "port": 8000,
+            "rank": rank,
+            "reserved_memory_bytes": 1024,
             "role": if rank == 0 { "entrypoint" } else { "worker" },
-            "run_id": "00000000-0000-4000-8000-000000000004",
-            "schema_version": 2,
             "world_size": world_size,
+        });
+        let mut payload = serde_json::json!({
+            "compiled_execution_plan": plan,
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "mapping_id": "00000000-0000-4000-8000-000000000002",
+            "plan_digest": "b".repeat(64),
+            "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
+            "run_generation": 1,
+            "run_id": "00000000-0000-4000-8000-000000000004",
         });
         if let Some(phase) = phase {
             let document = payload.as_object_mut().unwrap();
@@ -1619,17 +1417,10 @@ mod recipe_start_tests {
     fn claim_for(operation: &str, payload: Value) -> Result<AgentClaim, ProtocolError> {
         let payload: generated::AgentClaimPayload = serde_json::from_value(payload)?;
         Ok(AgentClaim {
-            attempt: 1,
-            authority_revision: "d".repeat(64),
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
-            job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             operation: operation.parse().unwrap(),
-            operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000007").unwrap(),
-            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
-            schema_version: 1,
         })
     }
 
@@ -1647,20 +1438,13 @@ mod recipe_start_tests {
     fn stop_payload() -> Value {
         let start = start_payload(1, 0, None, None, None);
         serde_json::json!({
-            "schema_version": 2,
             "run_id": start["run_id"],
             "target_runtime_id": start["run_id"],
             "run_generation": 1,
-            "node_id": "spk_0123456789abcdef0123456789abcdef",
             "installation_id": start["installation_id"],
             "recipe_revision_id": start["recipe_revision_id"],
-            "recipe_content_sha256": start["recipe_content_sha256"],
             "mapping_id": start["mapping_id"],
-            "mapping_generation": 1,
             "plan_digest": start["plan_digest"],
-            "rank": start["rank"],
-            "role": start["role"],
-            "world_size": start["world_size"],
             "compiled_execution_plan": start["compiled_execution_plan"],
             "cancel_pending_start": false,
         })
@@ -1684,14 +1468,10 @@ mod recipe_start_tests {
         assert!(unphased_wire.get("phase").is_none());
         assert!(unphased_wire.get("start_deadline").is_none());
 
-        for field in ["local_address", "master_address", "master_port"] {
-            let mut omitted = start_payload(1, 0, None, None, None);
-            omitted.as_object_mut().unwrap().remove(field);
-            assert!(
-                parsed_start(omitted).is_err(),
-                "omitted singleton field {field} must be rejected"
-            );
-        }
+        let mut with_rendezvous = start_payload(1, 0, None, None, None);
+        with_rendezvous["compiled_execution_plan"]["runtime"]["placement"]["master_port"] =
+            Value::from(29500);
+        assert!(parsed_start(with_rendezvous).is_err());
 
         let distributed = parsed_start(start_payload(
             2,
@@ -1710,11 +1490,7 @@ mod recipe_start_tests {
     fn typed_runtime_start_and_exact_stop_require_matching_plan_and_generation() {
         let start = valid_start_plan();
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::Start,
-            job_id: Uuid::new_v4(),
-            operation_id: Uuid::new_v4(),
-            attempt: 1,
             fence: Uuid::new_v4(),
             arguments: vec!["sha256:image".to_owned(), "run".to_owned()],
             job_plan: None,
@@ -1742,11 +1518,7 @@ mod recipe_start_tests {
 
         let stop = parsed_stop(stop_payload()).unwrap();
         let stop_request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::Stop,
-            job_id: stop.target_runtime_id,
-            operation_id: Uuid::new_v4(),
-            attempt: 1,
             fence: Uuid::new_v4(),
             arguments: Vec::new(),
             job_plan: None,
@@ -1782,11 +1554,7 @@ mod recipe_start_tests {
             panic!("expected canonical JobRun claim");
         };
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::Start,
-            job_id: claim.job_id,
-            operation_id: claim.operation_id,
-            attempt: claim.attempt,
             fence: claim.fence,
             arguments: vec!["sha256:image".to_owned(), "job".to_owned()],
             job_plan: Some(job.clone()),
@@ -1813,33 +1581,6 @@ mod recipe_start_tests {
             duplicate_plan.validate(),
             Err(HostRuntimeRequestRule::PlanBinding)
         );
-    }
-
-    #[test]
-    fn typed_stop_must_match_claim_node_and_compiled_placement() {
-        let mut payload = stop_payload();
-        payload["node_id"] = Value::String("spk_abcdef0123456789abcdef0123456789".to_owned());
-        let claim = claim_for("recipe.stop", payload).unwrap();
-        assert!(matches!(
-            RecipeOperationRequest::parse(&claim),
-            Err(ProtocolError::Identity("stop node"))
-        ));
-
-        let mut payload = stop_payload();
-        payload["rank"] = Value::from(1);
-        assert!(parsed_stop(payload).is_err());
-    }
-
-    #[test]
-    fn start_request_memory_floor_must_match_compiled_placement() {
-        let mut request = start_payload(1, 0, None, None, None);
-        request["memory_floor_bytes"] = Value::from(1);
-        assert!(parsed_start(request).is_err());
-
-        let mut request = start_payload(1, 0, None, None, None);
-        request["compiled_execution_plan"]["runtime"]["placement"]["memory_floor_bytes"] =
-            Value::from(1);
-        assert!(parsed_start(request).is_err());
     }
 
     #[test]
@@ -1877,7 +1618,7 @@ mod recipe_start_tests {
                 Some("192.168.100.2"),
                 Some("rank-launch"),
             );
-            omitted.as_object_mut().unwrap().remove(field);
+            omitted["compiled_execution_plan"]["runtime"]["placement"][field] = Value::Null;
             assert!(
                 parsed_start(omitted).is_err(),
                 "omitted distributed field {field} must be rejected"
@@ -2013,30 +1754,20 @@ mod recipe_install_tests {
             "expected_bytes": 1024,
             "installation_id": "00000000-0000-4000-8000-000000000001",
             "plan_digest": "a".repeat(64),
-            "rank": 0,
-            "role": "entrypoint",
-            "schema_version": 2,
         });
         let payload: generated::AgentClaimPayload = serde_json::from_value(payload).unwrap();
         let claim = AgentClaim {
-            attempt: 1,
-            authority_revision: "b".repeat(64),
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::new_v4(),
-            job_id: Uuid::new_v4(),
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             operation: "recipe.install".parse().unwrap(),
-            operation_id: Uuid::new_v4(),
-            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
-            schema_version: 1,
         };
         let RecipeOperationRequest::Install(request) =
             RecipeOperationRequest::parse(&claim).expect("schema 2 install wire should parse")
         else {
             panic!("expected install request");
         };
-        assert_eq!(request.schema_version, 2);
+        let _ = request;
     }
 }
 
@@ -2044,42 +1775,20 @@ mod recipe_install_tests {
 mod recipe_reconcile_tests {
     use super::*;
 
-    fn claim(claim_node: &str, payload_node: &str) -> AgentClaim {
+    #[test]
+    fn reconciliation_names_one_install_and_its_plan() {
         let payload = serde_json::json!({
-            "schema_version": 1,
-            "node_id": payload_node,
             "installation_id": "00000000-0000-4000-8000-000000000001",
-            "install_operation_id": "00000000-0000-4000-8000-000000000002",
-            "install_operation_payload_sha256": "a".repeat(64),
             "plan_digest": "b".repeat(64),
-            "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
-            "recipe_content_sha256": "c".repeat(64),
-            "compiled_spec_canonical_sha256": "d".repeat(64),
         });
-        let typed: generated::AgentClaimPayload = serde_json::from_value(payload).unwrap();
-        AgentClaim {
-            attempt: 1,
-            authority_revision: "e".repeat(64),
+        let claim = AgentClaim {
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::new_v4(),
-            job_id: Uuid::new_v4(),
-            node_id: claim_node.to_owned(),
             operation: "recipe.reconcile".parse().unwrap(),
-            operation_id: Uuid::new_v4(),
-            payload_digest: hex_sha256(&canonical_json(&typed).unwrap()),
-            payload: typed,
-            schema_version: 1,
-        }
-    }
-
-    #[test]
-    fn claim_and_bound_identity_must_name_the_same_node() {
-        let node = "spk_0123456789abcdef0123456789abcdef";
-        let parsed = RecipeOperationRequest::parse(&claim(node, node)).unwrap();
+            payload: serde_json::from_value(payload).unwrap(),
+        };
+        let parsed = RecipeOperationRequest::parse(&claim).unwrap();
         assert!(matches!(parsed, RecipeOperationRequest::Reconcile(_)));
-
-        let mismatch = claim(node, "spk_abcdef0123456789abcdef0123456789");
-        assert!(RecipeOperationRequest::parse(&mismatch).is_err());
     }
 }
 
@@ -2135,24 +1844,16 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
                 .iter()
                 .map(|mapping| mapping.extensions.len())
                 .sum::<usize>();
-    value.schema_version == 1
-        && value.job_id.get_version() == Some(uuid::Version::Random)
+    let plan = &value.compiled_execution_plan;
+    value.job_id.get_version() == Some(uuid::Version::Random)
         && value.run_id.get_version() == Some(uuid::Version::Random)
         && value.installation_id.get_version() == Some(uuid::Version::Random)
         && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
         && value.mapping_id.get_version() == Some(uuid::Version::Random)
-        && value.mapping_generation >= 1
         && (1..=i32::MAX as u32).contains(&value.run_generation)
-        && lower_hex(&value.recipe_content_sha256, 64)
-        && valid_oci_digest(&value.image_digest)
         && lower_hex(&value.plan_digest, 64)
-        && lower_hex(&value.contract_sha256, 64)
-        && matches!(
-            value.interface.as_str(),
-            "audio-job" | "video-job" | "image-job" | "mesh-job" | "artifact-job"
-        )
-        && value.rank == 0
-        && value.role == "entrypoint"
+        && plan.job.is_some()
+        && plan.runtime.placement.world_size == 1
         && inputs_valid
         && manifest_valid
         && mappings_valid
@@ -2177,44 +1878,119 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
                 .iter()
                 .any(|mapping| &mapping.media_type == allowed)
         })
-        && (1..=3600).contains(&value.timeout_seconds)
-        && (1..=16 * 1024_u64.pow(4)).contains(&value.reserved_memory_bytes)
-        && value.memory_floor_bytes <= 16 * 1024_u64.pow(4)
-        && value.memory_floor_bytes
-            == value
-                .compiled_execution_plan
-                .runtime
-                .placement
-                .memory_floor_bytes
 }
 
 fn validate_recipe_stop(value: &RecipeStopRequest) -> bool {
     let placement = &value.compiled_execution_plan.runtime.placement;
-    value.schema_version == 2
-        && value.run_id.get_version() == Some(uuid::Version::Random)
+    value.run_id.get_version() == Some(uuid::Version::Random)
         && value.target_runtime_id.get_version() == Some(uuid::Version::Random)
         && (1..=i32::MAX as u32).contains(&value.run_generation)
-        && valid_node_id(&value.node_id)
         && value.installation_id.get_version() == Some(uuid::Version::Random)
         && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
         && value.mapping_id.get_version() == Some(uuid::Version::Random)
-        && value.mapping_generation >= 1
-        && lower_hex(&value.recipe_content_sha256, 64)
         && lower_hex(&value.plan_digest, 64)
-        && value.world_size >= 1
-        && value.rank < value.world_size
-        && valid_role(&value.role)
-        && value
-            .compiled_execution_plan
-            .identity
-            .recipe_revision_sha256
-            == value.recipe_content_sha256
-        && (value.rank, value.role.as_str(), value.world_size)
-            == (
-                placement.rank,
-                placement.role.as_str(),
-                placement.world_size,
-            )
+        && placement.rank < placement.world_size
+        && valid_role(&placement.role)
+}
+
+/// A start's placement, addresses and image all come from its compiled plan;
+/// the payload adds only the run identity and the distributed phase.
+fn validate_recipe_start(value: &RecipeStartRequest) -> bool {
+    let placement = value.placement();
+    let distributed = placement.world_size > 1;
+    let utc_deadline = |deadline: &str| {
+        chrono::DateTime::parse_from_rfc3339(deadline)
+            .is_ok_and(|deadline| deadline.offset().local_minus_utc() == 0)
+    };
+    let valid_phase = match (&value.phase, &value.start_deadline) {
+        // Role-ordered distributed starts are deliberately unphased.
+        (None, None) => true,
+        (Some(RecipeStartPhase::RankLaunch), Some(deadline)) => {
+            distributed && utc_deadline(deadline)
+        }
+        (Some(RecipeStartPhase::CollectiveReadiness), Some(deadline)) => {
+            distributed && value.is_endpoint_owner() && utc_deadline(deadline)
+        }
+        _ => false,
+    };
+    let rendezvous_valid = if distributed {
+        placement.local_address.is_some_and(valid_fabric_address)
+            && placement.master_address.is_some_and(valid_fabric_address)
+            && placement.master_port.is_some_and(|port| port >= 1024)
+    } else {
+        placement.rank == 0
+            && placement.local_address.is_none()
+            && placement.master_address.is_none()
+            && placement.master_port.is_none()
+    };
+    (1..=i32::MAX as u32).contains(&value.run_generation)
+        && value.run_id.get_version() == Some(uuid::Version::Random)
+        && value.installation_id.get_version() == Some(uuid::Version::Random)
+        && value.recipe_revision_id.get_version() == Some(uuid::Version::Random)
+        && value.mapping_id.get_version() == Some(uuid::Version::Random)
+        && lower_hex(&value.plan_digest, 64)
+        && value.compiled_execution_plan.endpoint.is_some()
+        && placement.rank < placement.world_size
+        && valid_role(&placement.role)
+        && value.port().is_some_and(|port| port >= 1024)
+        && placement.reserved_memory_bytes > 0
+        && value.endpoint_address().is_some_and(|address| {
+            !address.is_loopback()
+                && !address.is_unspecified()
+                && !address.is_multicast()
+                && !link_local(address)
+        })
+        && rendezvous_valid
+        && valid_phase
+}
+
+impl RecipeJobRunRequest {
+    /// The job's single-rank placement as compiled into the plan.
+    pub fn placement(&self) -> &compiled_execution_plan::CompiledRuntimePlacement {
+        &self.compiled_execution_plan.runtime.placement
+    }
+}
+
+impl RecipeStartRequest {
+    /// The rank's placement as compiled into the plan.
+    pub fn placement(&self) -> &compiled_execution_plan::CompiledRuntimePlacement {
+        &self.compiled_execution_plan.runtime.placement
+    }
+
+    /// The serving port of this rank.
+    pub fn port(&self) -> Option<u16> {
+        self.placement().port
+    }
+
+    /// The address this rank serves on: the compiled endpoint address, or the
+    /// rank's fabric address for a distributed rank without one.
+    pub fn endpoint_address(&self) -> Option<std::net::IpAddr> {
+        let placement = self.placement();
+        placement.endpoint_address.or(if placement.world_size > 1 {
+            placement.local_address
+        } else {
+            None
+        })
+    }
+
+    /// Whether this rank owns the endpoint: every single-node rank, and the
+    /// distributed rank whose fabric address is the rendezvous address.
+    pub fn is_endpoint_owner(&self) -> bool {
+        let placement = self.placement();
+        placement.world_size == 1
+            || (placement.local_address.is_some()
+                && placement.local_address == placement.master_address)
+    }
+
+    /// The pinned runtime image digest (`sha256:<hex>`).
+    pub fn image_digest(&self) -> &str {
+        &self.compiled_execution_plan.runtime_image.image_digest
+    }
+
+    /// The immutable recipe revision content digest.
+    pub fn recipe_content_sha256(&self) -> &str {
+        &self.compiled_execution_plan.identity.recipe_revision_sha256
+    }
 }
 
 fn valid_job_slot(value: &str) -> bool {
@@ -2376,26 +2152,7 @@ fn valid_node_id(value: &str) -> bool {
 }
 
 fn valid_reconciliation_identity(value: &RecipeReconciliationIdentity) -> bool {
-    value.schema_version == 1
-        && valid_node_id(&value.node_id)
-        && !value.installation_id.is_nil()
-        && !value.install_operation_id.is_nil()
-        && !value.recipe_revision_id.is_nil()
-        && lower_hex(&value.install_operation_payload_sha256, 64)
-        && lower_hex(&value.plan_digest, 64)
-        && lower_hex(&value.recipe_content_sha256, 64)
-        && lower_hex(&value.compiled_spec_canonical_sha256, 64)
-}
-
-fn validate_attempt_identity(
-    schema_version: u8,
-    attempt: u32,
-    node_id: &str,
-) -> Result<(), ProtocolError> {
-    if schema_version != 1 || attempt == 0 || !valid_node_id(node_id) {
-        return Err(ProtocolError::Identity("attempt identity"));
-    }
-    Ok(())
+    !value.installation_id.is_nil() && lower_hex(&value.plan_digest, 64)
 }
 
 /// An empty success: an object without any non-null value.
@@ -2412,17 +2169,6 @@ fn lower_hex(value: &str, length: usize) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-}
-
-fn valid_alias(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 63
-        && value.bytes().enumerate().all(|(index, byte)| {
-            let edge = index == 0 || index + 1 == value.len();
-            byte.is_ascii_lowercase()
-                || byte.is_ascii_digit()
-                || !edge && matches!(byte, b'.' | b'_' | b'-')
-        })
 }
 
 fn valid_oci_digest(value: &str) -> bool {
@@ -2667,21 +2413,13 @@ mod recipe_job_tests {
             "files": inputs,
         });
         RecipeJobRunRequest {
-            schema_version: 1,
             job_id: Uuid::new_v4(),
             run_id: Uuid::new_v4(),
             installation_id: Uuid::new_v4(),
             recipe_revision_id: Uuid::new_v4(),
             mapping_id: Uuid::new_v4(),
-            mapping_generation: 1,
             run_generation: 1,
-            recipe_content_sha256: "b".repeat(64),
-            image_digest: format!("sha256:{}", "c".repeat(64)),
             plan_digest: "d".repeat(64),
-            interface: "video-job".parse().unwrap(),
-            rank: 0,
-            role: "entrypoint".to_owned(),
-            contract_sha256: "e".repeat(64),
             input_manifest_sha256: hex_sha256(&canonical_json(&manifest).unwrap()),
             input_total_bytes: 123,
             inputs,
@@ -2697,10 +2435,6 @@ mod recipe_job_tests {
                 max_total_bytes: 2 * 1024 * 1024,
                 allowed_media_types: vec!["video/mp4".to_owned()],
             },
-            timeout_seconds: 3600,
-            reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
-            memory_floor_bytes: 2 * 1024 * 1024 * 1024,
-            memory_kind: "unified".parse().unwrap(),
         }
     }
 
@@ -2720,10 +2454,6 @@ mod recipe_job_tests {
         let mut invalid_slot = valid.clone();
         invalid_slot.inputs[0].slot = "0input".to_owned();
         assert!(!validate_recipe_job(&invalid_slot));
-
-        let mut mismatched_floor = valid.clone();
-        mismatched_floor.memory_floor_bytes += 1;
-        assert!(!validate_recipe_job(&mismatched_floor));
 
         let mut reserved_manifest = valid.clone();
         reserved_manifest.inputs[0].name = "manifest.json".to_owned();
@@ -2828,17 +2558,11 @@ mod recipe_job_tests {
     #[test]
     fn cancelled_is_a_typed_terminal_agent_result_state() {
         let result = AgentResult {
-            attempt: 1,
-            deadline: DateTime::parse_from_rfc3339("2026-08-28T12:00:00+00:00").unwrap(),
             fence: Uuid::new_v4(),
-            job_id: Uuid::new_v4(),
-            node_id: "spk_11111111111111111111111111111111".to_owned(),
-            operation_id: Uuid::new_v4(),
             result: serde_json::from_value(
                 serde_json::json!({"reason": "controller cancellation requested"}),
             )
             .unwrap(),
-            schema_version: 1,
             state: "cancelled".parse().unwrap(),
         };
 
@@ -2850,17 +2574,10 @@ mod recipe_job_tests {
 mod host_helper_reconciliation_identity_tests {
     use super::*;
 
-    fn identity(node_id: &str) -> RecipeReconciliationIdentity {
+    fn identity() -> RecipeReconciliationIdentity {
         RecipeReconciliationIdentity {
-            schema_version: 1,
-            node_id: node_id.to_owned(),
             installation_id: Uuid::new_v4(),
-            install_operation_id: Uuid::new_v4(),
-            install_operation_payload_sha256: "a".repeat(64),
             plan_digest: "b".repeat(64),
-            recipe_revision_id: Uuid::new_v4(),
-            recipe_content_sha256: "c".repeat(64),
-            compiled_spec_canonical_sha256: "d".repeat(64),
         }
     }
 
@@ -2869,16 +2586,13 @@ mod host_helper_reconciliation_identity_tests {
             schema_version: 1,
             authority: HOST_HELPER_AUTHORITY.to_owned(),
             request_id: Uuid::new_v4(),
-            node_id: identity.node_id.clone(),
+            node_id: "spk_11111111111111111111111111111111".to_owned(),
             issued_at: 2_100_000_000,
             expires_at: 2_100_000_060,
             operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
                 generated::ExecuteContainerRuntimeRequestOperation {
                     type_: "execute-container-runtime-request".into(),
                     action: HostHelperContainerRuntimeAction::InstallationCleanup,
-                    job_id: Uuid::new_v4(),
-                    operation_id: Uuid::new_v4(),
-                    attempt: 1,
                     fence: Uuid::new_v4(),
                     request_sha256: "e".repeat(64),
                     observation_identity_sha256: None,
@@ -2896,14 +2610,9 @@ mod host_helper_reconciliation_identity_tests {
     }
 
     #[test]
-    fn signed_cleanup_grant_identity_is_strictly_bound_to_action_install_and_node() {
-        let node = "spk_11111111111111111111111111111111";
-        let exact = claims(identity(node));
+    fn signed_cleanup_grant_identity_is_strictly_bound_to_action_and_install() {
+        let exact = claims(identity());
         exact.validate().unwrap();
-
-        let mut wrong_node = exact.clone();
-        wrong_node.node_id = "spk_22222222222222222222222222222222".to_owned();
-        assert!(wrong_node.validate().is_err());
 
         let mut wrong_installation = exact.clone();
         let HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) =
@@ -2963,11 +2672,7 @@ mod recipe_run_inspection_tests {
     fn exact_inspection_binds_generation_and_is_run_inspect_only() {
         let binding = binding();
         let mut request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::RunInspect,
-            job_id: binding.run_id,
-            operation_id: Uuid::new_v4(),
-            attempt: binding.run_generation,
             fence: Uuid::new_v4(),
             arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
             job_plan: None,
@@ -3067,9 +2772,6 @@ mod recipe_run_inspection_tests {
                     generated::ExecuteContainerRuntimeRequestOperation {
                         type_: "execute-container-runtime-request".into(),
                         action: HostHelperContainerRuntimeAction::RunInspect,
-                        job_id: binding.run_id,
-                        operation_id: Uuid::new_v4(),
-                        attempt: binding.run_generation,
                         fence: Uuid::new_v4(),
                         request_sha256: "b".repeat(64),
                         observation_identity_sha256: Some(identity_sha256.clone()),
@@ -3147,13 +2849,6 @@ mod distribution_tests {
 
     fn assignment() -> DistributionAssignment {
         DistributionAssignment {
-            schema_version: 2,
-            assignment_id: Uuid::new_v4(),
-            plan_digest: "a".repeat(64),
-            generation: 3,
-            node_id: "spk_".to_owned() + &"b".repeat(32),
-            expires_at: DateTime::parse_from_rfc3339("2026-09-05T12:00:00+00:00").unwrap(),
-            model_artifact_set_sha256: "c".repeat(64),
             objects: vec![
                 DistributionObject {
                     name: "weights/model.bin".to_owned(),

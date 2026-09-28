@@ -15,7 +15,7 @@ if (($# != 0)); then
     exit 2
 fi
 
-wheel_name=vonk_agent_protocol-3.0.1-py3-none-any.whl
+wheel_name=vonk_agent_protocol-4.0.0-py3-none-any.whl
 wheel_path="$root/inventory/wheels/$wheel_name"
 lock_path="$root/control/uv.lock"
 

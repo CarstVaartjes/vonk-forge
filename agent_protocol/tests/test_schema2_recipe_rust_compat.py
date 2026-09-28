@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import os
 import subprocess
@@ -16,7 +15,6 @@ from vonk_agent_protocol import (
     RecipeInstallPayload,
     RecipeOperationRequest,
     RecipeStartPayload,
-    canonical_message,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledJob,
@@ -37,11 +35,8 @@ MAPPING_ID = "00000000-0000-4000-8000-000000000007"
 
 def _install(plan: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema_version": 2,
         "installation_id": INSTALLATION_ID,
         "plan_digest": "b" * 64,
-        "rank": 0,
-        "role": "entrypoint",
         "expected_bytes": 1,
         "compiled_execution_plan": copy.deepcopy(plan),
     }
@@ -53,28 +48,12 @@ def _start(plan: dict[str, Any] | None = None) -> dict[str, Any]:
         plan["runtime"]["placement"]["endpoint_address"] = "100.100.20.30"
         plan["security"]["network_mode"] = "bridge"
     return {
-        "schema_version": 2,
         "run_id": RUN_ID,
         "installation_id": INSTALLATION_ID,
         "recipe_revision_id": REVISION_ID,
-        "recipe_content_sha256": PLAN["identity"]["recipe_revision_sha256"],
         "mapping_id": MAPPING_ID,
-        "mapping_generation": 1,
-        "image_digest": PLAN["runtime"]["image_digest"],
         "plan_digest": "c" * 64,
-        "alias": "test-model",
-        "rank": 0,
-        "role": "entrypoint",
-        "port": 8000,
-        "reserved_memory_bytes": 67108864,
-        "memory_floor_bytes": plan["runtime"]["placement"]["memory_floor_bytes"],
-        "memory_kind": plan["runtime"]["placement"]["memory_kind"],
-        "endpoint_address": "100.100.20.30",
-        "world_size": 1,
         "compiled_execution_plan": plan,
-        "local_address": None,
-        "master_address": None,
-        "master_port": None,
         "run_generation": 1,
     }
 
@@ -97,15 +76,6 @@ def _distributed_start(
     )
     plan["security"].update(network_mode="host", host_network=True)
     payload = _start(plan)
-    payload.update(
-        rank=1,
-        role="worker",
-        world_size=2,
-        endpoint_address="100.100.20.31",
-        local_address="100.100.20.31",
-        master_address="100.100.20.31" if collective else "100.100.20.30",
-        master_port=29500,
-    )
     if phase is not None:
         payload.update(
             phase=phase,
@@ -187,16 +157,9 @@ def _ltx_plan() -> dict[str, Any]:
 
 def _claim(operation: AgentOperation, payload: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema_version": 1,
-        "attempt": 1,
         "deadline": "2026-09-07T12:05:00+00:00",
         "fence": "00000000-0000-4000-8000-000000000011",
-        "job_id": "00000000-0000-4000-8000-000000000012",
         "operation": operation.value,
-        "operation_id": "00000000-0000-4000-8000-000000000013",
-        "node_id": "spk_11111111111111111111111111111111",
-        "authority_revision": "a" * 64,
-        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
         "payload": payload,
     }
 
@@ -404,13 +367,9 @@ def _enum_variant(
     # The phase vocabulary has one cross-field ownership rule in the Rust
     # validator. Keep the mutation structurally positive before comparing it.
     if name == "phase" and candidate == "collective-readiness":
-        local = _at(result, ("local_address",))
-        _set(result, ("master_address",), local)
-        _set(
-            result,
-            ("compiled_execution_plan", "runtime", "placement", "master_address"),
-            local,
-        )
+        placement = ("compiled_execution_plan", "runtime", "placement")
+        local = _at(result, (*placement, "local_address"))
+        _set(result, (*placement, "master_address"), local)
     return result
 
 
@@ -699,19 +658,6 @@ def test_required_nullable_fields_cannot_be_omitted_on_either_wire(
     wire_probe: Path,
 ) -> None:
     for field in (
-        "local_address",
-        "master_address",
-        "master_port",
-        "memory_floor_bytes",
-        "memory_kind",
-    ):
-        payload = _start()
-        del payload[field]
-        with pytest.raises(ValueError):
-            RecipeStartPayload.model_validate(payload)
-        assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_START, payload)
-
-    for field in (
         "endpoint_address",
         "local_address",
         "master_address",
@@ -724,44 +670,6 @@ def test_required_nullable_fields_cannot_be_omitted_on_either_wire(
         with pytest.raises(ValueError):
             RecipeInstallPayload.model_validate(payload)
         assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_INSTALL, payload)
-
-
-@pytest.mark.parametrize(
-    "mutate",
-    [
-        lambda payload: payload.update(memory_floor_bytes=1),
-        lambda payload: payload["compiled_execution_plan"]["runtime"][
-            "placement"
-        ].update(memory_floor_bytes=1),
-    ],
-)
-def test_start_memory_floor_must_match_compiled_placement_on_both_wires(
-    wire_probe: Path, mutate
-) -> None:
-    payload = _start()
-    mutate(payload)
-    with pytest.raises(ValueError, match="compiled plan"):
-        RecipeStartPayload.model_validate(payload)
-    assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_START, payload)
-
-
-@pytest.mark.parametrize(
-    "mutate",
-    [
-        lambda payload: payload.update(memory_kind="host"),
-        lambda payload: payload["compiled_execution_plan"]["runtime"][
-            "placement"
-        ].update(memory_kind="host"),
-    ],
-)
-def test_start_memory_kind_must_match_compiled_placement_on_both_wires(
-    wire_probe: Path, mutate
-) -> None:
-    payload = _start()
-    mutate(payload)
-    with pytest.raises(ValueError, match="compiled plan"):
-        RecipeStartPayload.model_validate(payload)
-    assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_START, payload)
 
 
 @pytest.mark.parametrize(

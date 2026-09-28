@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/build-control-wheel"
-WHEEL_NAME = "vonk_agent_protocol-3.0.1-py3-none-any.whl"
+WHEEL_NAME = "vonk_agent_protocol-4.0.0-py3-none-any.whl"
 # A command that runs in the control environment: uv against the control
 # project, or scripts/test, which always does.
 CONTROL_UV_COMMAND = re.compile(
@@ -108,7 +108,7 @@ def test_build_script_verifies_the_frozen_wheel_digest(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert (root / "inventory/wheels" / WHEEL_NAME).read_bytes() == expected_bytes
     assert (
-        "Verified vonk_agent_protocol-3.0.1-py3-none-any.whl against control/uv.lock"
+        "Verified vonk_agent_protocol-4.0.0-py3-none-any.whl against control/uv.lock"
         in result.stdout
     )
 

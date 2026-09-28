@@ -110,7 +110,6 @@ impl PreparedRuntimeIdentity {
             build_digest: self.build_digest,
             binary_digest: self.binary_digest,
             architecture: self.architecture,
-            self_test_passed: true,
             package_activation: None,
             observation_receipt_public_key: hex::encode(observation_receipt_public_key),
         };
@@ -163,7 +162,6 @@ mod tests {
             .with_observation_receipt_public_key_bytes([9; 32])
             .mark_self_test_passed()
             .unwrap();
-        assert!(complete.self_test_passed);
         assert_eq!(complete.observation_receipt_public_key, "09".repeat(32));
         assert!(complete.package_activation.is_none());
     }

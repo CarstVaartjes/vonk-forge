@@ -27,6 +27,8 @@ from vonk_control.models import (
     JobAttempt,
 )
 
+from .agent_fences import fenced_attempt, fenced_operation
+
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 REVISION = "c" * 64
@@ -73,7 +75,6 @@ OLD_IDENTITY = {
     "binary_digest": "f" * 64,
     "build_digest": "sha256:" + "f" * 64,
     "semantic_version": "0.1.0",
-    "self_test_passed": True,
     "observation_receipt_public_key": "d" * 64,
 }
 NEW_IDENTITY = {
@@ -153,12 +154,10 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
                 architecture="linux-arm64",
                 semantic_version="0.1.0",
                 build_digest=OLD_IDENTITY["build_digest"],
                 binary_digest=OLD_IDENTITY["binary_digest"],
-                self_test_passed=True,
                 last_seen_at=now,
             )
         )
@@ -234,12 +233,10 @@ def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_lea
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                capabilities=["agent.upgrade.v1"],
                 architecture="linux-arm64",
                 semantic_version="0.1.0",
                 build_digest=OLD_IDENTITY["build_digest"],
                 binary_digest=OLD_IDENTITY["binary_digest"],
-                self_test_passed=True,
                 last_seen_at=now,
             )
         )
@@ -290,12 +287,10 @@ def test_rollout_queues_only_one_spark_until_new_identity_is_proven(tmp_path) ->
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
                     architecture="linux-arm64",
                     semantic_version="0.1.0",
                     build_digest=OLD_IDENTITY["build_digest"],
                     binary_digest=OLD_IDENTITY["binary_digest"],
-                    self_test_passed=True,
                     last_seen_at=now,
                 )
             )
@@ -362,13 +357,16 @@ def test_failed_install_retries_behind_fence_without_budget_while_rollout_contin
     )
     for attempt_number in (1, 2, 3):
         claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-        assert claim.attempt == attempt_number
+        assert fenced_attempt(sessions, claim).attempt == attempt_number
         operations.fail(claim, reason)
         with sessions() as session:
-            operation = session.get(AgentOperation, claim.operation_id)
+            operation = session.get(
+                AgentOperation, fenced_operation(sessions, claim).id
+            )
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == claim.operation_id,
+                    AgentOperationAttempt.operation_id
+                    == fenced_operation(sessions, claim).id,
                     AgentOperationAttempt.attempt == attempt_number,
                 )
             )
@@ -390,8 +388,6 @@ def test_failed_install_retries_behind_fence_without_budget_while_rollout_contin
             operations.claim(
                 NODE_A,
                 "serial-a",
-                30,
-                capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
                 runtime_identity=OLD_IDENTITY,
             )
             is None
@@ -417,7 +413,6 @@ def test_fenced_retry_waits_while_another_spark_is_installing(tmp_path) -> None:
     sessions, operations, _upgrades, job = _rollout(
         tmp_path, "retry-no-overlap", clock=clock
     )
-    capabilities = ["agent.runtime.rust.v1", "agent.upgrade.v1"]
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     operations.fail(first, "agent upgrade request is invalid")
     clock.advance(seconds=950)
@@ -428,8 +423,6 @@ def test_fenced_retry_waits_while_another_spark_is_installing(tmp_path) -> None:
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=capabilities,
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -440,8 +433,6 @@ def test_fenced_retry_waits_while_another_spark_is_installing(tmp_path) -> None:
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=capabilities,
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -451,8 +442,6 @@ def test_fenced_retry_waits_while_another_spark_is_installing(tmp_path) -> None:
         operations.claim(
             NODE_B,
             "serial-b",
-            30,
-            capabilities=capabilities,
             runtime_identity={
                 **NEW_IDENTITY,
                 "package_activation": {**ACTIVATION_RECEIPT, "node_id": NODE_B},
@@ -461,8 +450,8 @@ def test_fenced_retry_waits_while_another_spark_is_installing(tmp_path) -> None:
         is None
     )
     retry = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert retry.operation_id == first.operation_id
-    assert retry.attempt == 2
+    assert fenced_operation(sessions, retry).id == fenced_operation(sessions, first).id
+    assert fenced_attempt(sessions, retry).attempt == 2
     with sessions() as session:
         parent = session.get(Job, job.id)
         assert parent is not None and parent.state == "queued"
@@ -513,8 +502,6 @@ def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
         restarted_operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -524,21 +511,19 @@ def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
         restarted_operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
     )
     clock.advance(seconds=1)
     second = _claim_upgrade(restarted_operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert second.attempt == 2
+    assert fenced_attempt(sessions, second).attempt == 2
 
     restarted_operations.fail(second, "agent upgrade helper is unavailable")
     clock.advance(seconds=960)
     third = _claim_upgrade(restarted_operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert third.operation_id == second.operation_id
-    assert third.attempt == 3
+    assert fenced_operation(sessions, third).id == fenced_operation(sessions, second).id
+    assert fenced_attempt(sessions, third).attempt == 3
 
 
 def test_source_binary_drift_prevents_dispatch(tmp_path) -> None:
@@ -548,8 +533,6 @@ def test_source_binary_drift_prevents_dispatch(tmp_path) -> None:
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=changed,
         )
         is None
@@ -666,8 +649,6 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -677,16 +658,14 @@ def test_operator_resume_requeues_agent_operation_without_resetting_plan_or_audi
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
     )
     clock.advance(seconds=1)
     third = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert third.operation_id == second.operation_id
-    assert third.attempt == 3
+    assert fenced_operation(sessions, third).id == fenced_operation(sessions, second).id
+    assert fenced_attempt(sessions, third).attempt == 3
 
 
 @pytest.mark.parametrize(
@@ -709,11 +688,13 @@ def test_operator_resume_always_sets_fresh_install_safety_fence(
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     with sessions.begin() as session:
         parent = session.get(Job, job.id)
-        operation = session.get(AgentOperation, first.operation_id)
+        operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == first.operation_id,
-                AgentOperationAttempt.attempt == first.attempt,
+                AgentOperationAttempt.operation_id
+                == fenced_operation(sessions, first).id,
+                AgentOperationAttempt.attempt
+                == fenced_attempt(sessions, first).attempt,
             )
         )
         assert parent is not None and operation is not None and attempt is not None
@@ -729,8 +710,10 @@ def test_operator_resume_always_sets_fresh_install_safety_fence(
     with sessions() as session:
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == first.operation_id,
-                AgentOperationAttempt.attempt == first.attempt,
+                AgentOperationAttempt.operation_id
+                == fenced_operation(sessions, first).id,
+                AgentOperationAttempt.attempt
+                == fenced_attempt(sessions, first).attempt,
             )
         )
         assert attempt is not None
@@ -743,8 +726,6 @@ def test_operator_resume_always_sets_fresh_install_safety_fence(
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -754,15 +735,13 @@ def test_operator_resume_always_sets_fresh_install_safety_fence(
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
     )
     clock.advance(seconds=1)
     retry = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert retry.attempt == 2
+    assert fenced_attempt(sessions, retry).attempt == 2
 
 
 def test_resume_recovers_delayed_worker_failure_by_exact_identity_without_reinstall(
@@ -780,8 +759,6 @@ def test_resume_recovers_delayed_worker_failure_by_exact_identity_without_reinst
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=NEW_IDENTITY,
         )
         is None
@@ -830,8 +807,6 @@ def test_resume_quiesces_stale_old_identity_without_duplicate_mutation(
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -886,7 +861,7 @@ def test_resume_rejects_legacy_running_worker_dispatch_before_lease_deadline(
         assert operation is not None and operation.state == "running"
         assert operation.current_attempt == 1
         assert worker_attempt is not None and worker_attempt.state == "running"
-        assert child.attempt == 1
+        assert fenced_attempt(sessions, child).attempt == 1
 
 
 def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
@@ -931,8 +906,6 @@ def test_resume_recovers_expired_legacy_running_worker_without_duplicate(
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -996,8 +969,6 @@ def test_waiting_upgrade_resume_expires_worker_fence_without_shortening_helper_f
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -1007,15 +978,13 @@ def test_waiting_upgrade_resume_expires_worker_fence_without_shortening_helper_f
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
     )
     clock.advance(seconds=1)
     retry = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert retry.attempt == 2
+    assert fenced_attempt(sessions, retry).attempt == 2
     with sessions() as session:
         worker_attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.job_id == job.id)
@@ -1073,8 +1042,6 @@ def test_success_result_cannot_advance_without_exact_fresh_agent_identity(
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=reported_identity,
         )
         is None
@@ -1105,8 +1072,6 @@ def test_success_result_uses_signed_digests_over_version_metadata(tmp_path) -> N
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=runtime_identity,
         )
         is None
@@ -1133,20 +1098,18 @@ def test_exact_identity_reconciles_a_retrying_spark_while_the_next_one_upgrades(
     first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     operations.fail(first, "agent upgrade request is invalid")
     next_claim = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
-    assert next_claim.attempt == 1
+    assert fenced_attempt(sessions, next_claim).attempt == 1
 
     assert (
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=NEW_IDENTITY,
         )
         is None
     )
     with sessions() as session:
-        operation_a = session.get(AgentOperation, first.operation_id)
+        operation_a = session.get(AgentOperation, fenced_operation(sessions, first).id)
         assert operation_a is not None and operation_a.state == "succeeded"
         failed = session.scalar(
             select(AgentOperationAttempt).where(
@@ -1168,8 +1131,6 @@ def test_queued_exact_target_contact_settles_without_inventing_an_install_attemp
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=NEW_IDENTITY,
         )
         is None
@@ -1188,16 +1149,10 @@ def test_queued_exact_target_contact_settles_without_inventing_an_install_attemp
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 
 
-@pytest.mark.parametrize(
-    ("drift", "reason"),
-    [
-        ("revoked", "is not active"),
-        ("capability", "does not support controller upgrades"),
-    ],
-)
 def test_sequential_rollout_preserves_first_success_when_next_target_drifted(
-    tmp_path, drift: str, reason: str
+    tmp_path,
 ) -> None:
+    drift, reason = "revoked", "is not active"
     clock = Clock()
     sessions, operations, _upgrades, job = _rollout(
         tmp_path, f"next-target-{drift}", clock=clock
@@ -1206,17 +1161,12 @@ def test_sequential_rollout_preserves_first_success_when_next_target_drifted(
     with sessions.begin() as session:
         node_b = session.get(AgentNode, NODE_B)
         assert node_b is not None
-        if drift == "revoked":
-            node_b.revoked_at = clock()
-        else:
-            node_b.capabilities = ["agent.runtime.rust.v1"]
+        node_b.revoked_at = clock()
 
     assert (
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=NEW_IDENTITY,
         )
         is None
@@ -1237,7 +1187,7 @@ def test_sequential_rollout_preserves_first_success_when_next_target_drifted(
         assert stored is not None and stored.state == "succeeded"
         assert stored.result == {"skipped": {NODE_B: reason}}
         assert f"Spark {NODE_B} {reason}" in (stored.status_reason or "")
-    assert first.attempt == 1
+    assert fenced_attempt(sessions, first).attempt == 1
 
 
 def test_upgrade_failure_on_one_spark_does_not_block_the_next(tmp_path) -> None:
@@ -1248,11 +1198,11 @@ def test_upgrade_failure_on_one_spark_does_not_block_the_next(tmp_path) -> None:
 
     with sessions() as session:
         parent = session.get(Job, job.id)
-        failed = session.get(AgentOperation, first.operation_id)
+        failed = session.get(AgentOperation, fenced_operation(sessions, first).id)
         assert failed is not None and failed.retry_disposition == "retry"
         assert parent is not None and parent.state == "queued"
     second = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
-    assert second.operation_id != first.operation_id
+    assert fenced_operation(sessions, second).id != fenced_operation(sessions, first).id
 
 
 def test_replay_returns_original_job_before_replanning_and_checks_actor_and_scope(
@@ -1322,8 +1272,6 @@ def test_offline_spark_is_deferred_and_upgraded_when_it_reconnects(tmp_path) -> 
         operations.claim(
             NODE_B,
             "serial-b",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -1333,8 +1281,6 @@ def test_offline_spark_is_deferred_and_upgraded_when_it_reconnects(tmp_path) -> 
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is None
@@ -1505,12 +1451,10 @@ def _rollout(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
                     architecture="linux-arm64",
                     semantic_version="0.1.0",
                     build_digest=OLD_IDENTITY["build_digest"],
                     binary_digest=OLD_IDENTITY["binary_digest"],
-                    self_test_passed=True,
                     last_seen_at=now,
                 )
             )
@@ -1550,8 +1494,6 @@ def _claim_upgrade(
     claim = operations.claim(
         node_id,
         certificate_serial,
-        30,
-        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
         runtime_identity=runtime_identity,
     )
     assert claim is not None
@@ -1565,7 +1507,6 @@ def _target_evidence() -> dict[str, object]:
         "build_digest": PACKAGE["target_build_digest"],
         "package_sha256": PACKAGE["package_sha256"],
         "package_version": PACKAGE["package_version"],
-        "self_test_passed": True,
         "status": "upgraded",
         "activation_receipt": ACTIVATION_RECEIPT,
     }
@@ -1577,8 +1518,6 @@ def _upgrade_node(
     claim = operations.claim(
         node_id,
         certificate_serial,
-        30,
-        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
         runtime_identity=OLD_IDENTITY,
     )
     assert claim is not None
@@ -1586,8 +1525,6 @@ def _upgrade_node(
         operations.claim(
             node_id,
             certificate_serial,
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity={
                 **NEW_IDENTITY,
                 "package_activation": {**ACTIVATION_RECEIPT, "node_id": node_id},
@@ -1615,8 +1552,6 @@ def test_exact_candidate_contact_requires_acknowledged_matching_root_receipt(
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity={**NEW_IDENTITY, "package_activation": receipt},
         )
         is None
@@ -1639,8 +1574,6 @@ def test_root_rollback_receipt_retries_the_spark_and_preserves_typed_outcome(tmp
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity={**OLD_IDENTITY, "package_activation": receipt},
         )
         is None
@@ -1667,7 +1600,7 @@ def test_latest_request_supersedes_an_older_paused_rollout(
     sessions, operations, upgrades, old_job = _rollout(tmp_path, "older-paused")
     old_claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
     with sessions.begin() as session:
-        old = session.get(AgentOperation, old_claim.operation_id)
+        old = session.get(AgentOperation, fenced_operation(sessions, old_claim).id)
         assert old is not None
         old.state = "waiting-for-operator"
         old.created_at -= timedelta(minutes=1)
@@ -1690,15 +1623,17 @@ def test_latest_request_supersedes_an_older_paused_rollout(
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=NEW_IDENTITY,
         )
         is None
     )
     with sessions() as session:
-        claim_operation = session.get(AgentOperation, claim.operation_id)
-        old_operation = session.get(AgentOperation, old_claim.operation_id)
+        claim_operation = session.get(
+            AgentOperation, fenced_operation(sessions, claim).id
+        )
+        old_operation = session.get(
+            AgentOperation, fenced_operation(sessions, old_claim).id
+        )
         old_parent = session.get(Job, old_job.id)
         assert claim_operation is not None and claim_operation.state == "succeeded"
         assert old_operation is not None and old_operation.state == "cancelled"
@@ -1725,8 +1660,6 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
         return operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=identity,
         )
 
@@ -1736,7 +1669,9 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
     for _ in range(2):
         assert contact(source) is None
         with sessions() as session:
-            operation = session.get(AgentOperation, first.operation_id)
+            operation = session.get(
+                AgentOperation, fenced_operation(sessions, first).id
+            )
             assert operation is not None
             assert operation.retry_disposition == "retry"
             assert operation.current_attempt == 1
@@ -1752,8 +1687,6 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
         operations.claim(
             NODE_B,
             "serial-b",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity=OLD_IDENTITY,
         )
         is not None
@@ -1763,8 +1696,6 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
         operations.claim(
             NODE_B,
             "serial-b",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity={
                 **NEW_IDENTITY,
                 "package_activation": {
@@ -1780,7 +1711,7 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
     )
     second = contact(source)
     assert second is not None
-    assert second.attempt == 2
+    assert fenced_attempt(sessions, second).attempt == 2
     assert contact(source) is None
     acknowledged = {
         **ACTIVATION_RECEIPT,
@@ -1790,7 +1721,9 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
     }
     assert contact({**NEW_IDENTITY, "package_activation": acknowledged}) is None
     with sessions() as session:
-        final_operation = session.get(AgentOperation, first.operation_id)
+        final_operation = session.get(
+            AgentOperation, fenced_operation(sessions, first).id
+        )
         assert final_operation is not None and final_operation.state == "succeeded"
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 
@@ -1814,7 +1747,7 @@ def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
     operations.fail(first, AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON)
 
     with sessions() as session:
-        operation = session.get(AgentOperation, first.operation_id)
+        operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
         assert operation is not None
         assert operation.state == "waiting-for-operator"
         # The handoff is retried only behind the safety fence, and only while
@@ -1832,8 +1765,6 @@ def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
         operations.claim(
             NODE_A,
             "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
             runtime_identity={
                 **NEW_IDENTITY,
                 "package_activation": {**ACTIVATION_RECEIPT, "node_id": NODE_A},
@@ -1842,7 +1773,7 @@ def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
         is None
     )
     with sessions() as session:
-        operation = session.get(AgentOperation, first.operation_id)
+        operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
         assert operation is not None and operation.state == "succeeded"
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 

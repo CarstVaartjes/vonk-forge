@@ -15,7 +15,6 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
-    DistributionAssignment,
     DistributionObject,
     OperationMemberProgress,
     OperationProgress,
@@ -25,6 +24,7 @@ from vonk_agent_protocol import (
 from .agent_jobs import AgentJobService
 from .bounded_json import sequence
 from .distribution import DistributionError, DistributionService
+from .distribution_assignment import NodeDistributionAssignment
 from .model_cache import ModelCacheNotFound
 from .model_cache_contract import ModelCacheDownloadResult
 from .models import (
@@ -94,7 +94,7 @@ def _phase_receipt(
         assignments = normalized.get("assignments")
         if isinstance(assignments, Mapping):
             normalized["assignments"] = {
-                node_id: DistributionAssignment.parse(raw)
+                node_id: NodeDistributionAssignment.parse(raw)
                 if isinstance(raw, Mapping)
                 else raw
                 for node_id, raw in assignments.items()
@@ -139,13 +139,8 @@ def _evidence_projection(
             **{
                 key: value[key]
                 for key in (
-                    "verified",
-                    "verified_digests",
                     "downloaded_bytes",
                     "copied_bytes",
-                    "verified_image_digest",
-                    "imported_image_digest",
-                    "verified_oci_layout_sha256",
                     "error",
                     "reason",
                     "uncertain",
@@ -355,7 +350,7 @@ class DurableDistributionPhaseExecutor:
                 if not isinstance(assignment, Mapping):
                     return declared
                 try:
-                    parsed = DistributionAssignment.parse(assignment)
+                    parsed = NodeDistributionAssignment.parse(assignment)
                 except (TypeError, ValueError):
                     return None
                 if parsed.node_id != node_id:
@@ -622,7 +617,7 @@ class DurableDistributionPhaseExecutor:
                 or set(assignments).intersection(cached)
                 or set(assignments).union(cached) != set(phase.node_ids)
                 or any(
-                    DistributionAssignment.parse(raw).node_id != node_id
+                    NodeDistributionAssignment.parse(raw).node_id != node_id
                     for node_id, raw in assignments.items()
                 )
             ):
@@ -637,7 +632,7 @@ class DurableDistributionPhaseExecutor:
         actor: str,
         request_key: str,
         cached: tuple[str, ...],
-        assignments: Mapping[str, DistributionAssignment],
+        assignments: Mapping[str, NodeDistributionAssignment],
         target_order: tuple[str, ...],
         workload_intent_ordinal: int,
         target_bytes: int | None = None,
@@ -759,11 +754,7 @@ class DurableDistributionPhaseExecutor:
                     node_id,
                     "artifact.distribution.v1",
                     plan.plan_digest,
-                    {
-                        "schema_version": 1,
-                        "authority_revision": plan.plan_digest,
-                        "plan_digest": plan.plan_digest,
-                    },
+                    {"plan_digest": plan.plan_digest},
                     operation_id=str(uuid.uuid4()),
                 )
             return child.id
@@ -995,7 +986,7 @@ class DurableDistributionPhaseExecutor:
         *,
         image_digest: str,
         model_set_digest: str,
-    ) -> DistributionAssignment:
+    ) -> NodeDistributionAssignment:
         generation = getattr(getattr(plan, "mapping", None), "mapping_generation", None)
         if type(generation) is not int or generation < 1:
             generation = 1
@@ -1005,9 +996,8 @@ class DurableDistributionPhaseExecutor:
         assignment_bytes = bytearray(hashlib.sha256(seed.encode("utf-8")).digest()[:16])
         assignment_bytes[6] = (assignment_bytes[6] & 0x0F) | 0x40
         assignment_bytes[8] = (assignment_bytes[8] & 0x3F) | 0x80
-        return DistributionAssignment.parse(
+        return NodeDistributionAssignment.parse(
             {
-                "schema_version": 2,
                 "assignment_id": str(uuid.UUID(bytes=bytes(assignment_bytes))),
                 "plan_digest": plan.plan_digest,
                 "generation": generation,
@@ -1066,8 +1056,7 @@ class DurableDistributionPhaseExecutor:
         targets: tuple[str, ...],
         cached: tuple[str, ...],
     ) -> Mapping[str, object]:
-        """Validate terminal agent receipts for every non-cached target."""
-        expected_digests = set(plan.storage.artifact_digests)
+        """Require a terminal agent result from every non-cached target."""
         preparation = plan.preparation
         expected_image = plan.image_digest or (
             preparation.runtime_image.image_digest if preparation is not None else None
@@ -1109,7 +1098,7 @@ class DurableDistributionPhaseExecutor:
                 ):
                     continue
                 try:
-                    assignment = DistributionAssignment.parse(assignment_raw)
+                    assignment = NodeDistributionAssignment.parse(assignment_raw)
                 except (TypeError, ValueError):
                     continue
                 if (
@@ -1169,21 +1158,6 @@ class DurableDistributionPhaseExecutor:
             raise RuntimeError(
                 "verification requires terminal evidence from every target"
             )
-        for node_id in missing:
-            receipt = receipts[node_id]
-            if receipt.get("verified") is not True:
-                raise RuntimeError(f"target {node_id} did not verify its distribution")
-            digests = receipt.get("verified_digests")
-            if not isinstance(digests, list) or set(digests) != expected_digests:
-                raise RuntimeError(f"target {node_id} model evidence is incomplete")
-            if receipt.get("verified_image_digest") != expected_image:
-                raise RuntimeError(f"target {node_id} image evidence is not exact")
-            if receipt.get("imported_image_digest") != expected_image:
-                raise RuntimeError(f"target {node_id} image import evidence is missing")
-            if receipt.get("verified_oci_layout_sha256") != expected_layout:
-                raise RuntimeError(
-                    f"target {node_id} OCI archive evidence is not exact"
-                )
         return self._verification_result(
             plan,
             progress,

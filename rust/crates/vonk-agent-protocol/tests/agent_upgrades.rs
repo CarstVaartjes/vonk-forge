@@ -3,24 +3,14 @@
 use chrono::DateTime;
 use serde_json::{Value, json};
 use uuid::Uuid;
-use vonk_agent_protocol::{AgentClaim, AgentUpgradeRequest, canonical_json, hex_sha256};
-
-const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+use vonk_agent_protocol::{AgentClaim, AgentUpgradeRequest};
 
 fn claim(payload: Value) -> Result<AgentClaim, vonk_agent_protocol::ProtocolError> {
-    let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
     Ok(AgentClaim {
-        attempt: 1,
-        authority_revision: "a".repeat(64),
         deadline: DateTime::parse_from_rfc3339("2026-08-27T12:00:00+00:00").unwrap(),
         fence: Uuid::new_v4(),
-        job_id: Uuid::new_v4(),
-        node_id: NODE_ID.to_owned(),
         operation: "agent.upgrade.v1".parse().unwrap(),
-        operation_id: Uuid::new_v4(),
         payload: serde_json::from_value(payload)?,
-        payload_digest,
-        schema_version: 1,
     })
 }
 

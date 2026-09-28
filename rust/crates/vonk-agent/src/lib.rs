@@ -27,26 +27,3 @@ pub mod state;
 pub mod systemd_notify;
 pub mod telemetry;
 pub mod workloads;
-
-/// Capabilities advertised by the current Rust agent to the Controller.
-pub const CLAIM_CAPABILITIES: &[&str] = &[
-    "runtime.preflight.v1",
-    "agent.runtime.rust.v1",
-    "runtime.vonk.v1",
-    "agent.upgrade.v1",
-    "artifact.distribution.v1",
-    "recipe.build.v1",
-    "recipe.build.cleanup.v1",
-    "recipe.image.import.v1",
-    "recipe.job.run.v1",
-    "recipe.install",
-    "recipe.start",
-    "recipe.start.two-phase.v1",
-    "recipe.run.inspect.exact.v1",
-    "recipe.run.inspect.receipt.v1",
-    "recipe.stop",
-    "recipe.uninstall",
-    "recipe.reconcile",
-    "recipe.reconcile.v1",
-    "agent.lifecycle.resume.exact.v1",
-];

@@ -133,10 +133,6 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
 
     object.__setattr__(services, "host_runtime_authority", RecordingHostAuthority())
     request = {
-        "node_id": NODE_A,
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 1,
         "fence": "40000000-0000-4000-8000-000000000004",
         "action": "run-inspect",
         "request_sha256": "a" * 64,
@@ -178,15 +174,8 @@ def test_python_reconciliation_grant_is_verified_unchanged_by_rust(
     host_helper_wire_probe: Path,
 ) -> None:
     identity = RecipeReconciliationIdentity(
-        schema_version=1,
-        node_id=NODE_A,
         installation_id="70000000-0000-4000-8000-000000000007",
-        install_operation_id="80000000-0000-4000-8000-000000000008",
-        install_operation_payload_sha256="a" * 64,
         plan_digest="b" * 64,
-        recipe_revision_id="90000000-0000-4000-8000-000000000009",
-        recipe_content_sha256="c" * 64,
-        compiled_spec_canonical_sha256="d" * 64,
     )
     issuer = HostHelperGrantIssuer(
         ed25519.Ed25519PrivateKey.from_private_bytes(PRIVATE_SEED),
@@ -198,9 +187,6 @@ def test_python_reconciliation_grant_is_verified_unchanged_by_rust(
         operation=ExecuteContainerRuntimeRequestOperation(
             type="execute-container-runtime-request",
             action="installation-cleanup",
-            job_id="20000000-0000-4000-8000-000000000002",
-            operation_id="30000000-0000-4000-8000-000000000003",
-            attempt=2,
             fence="40000000-0000-4000-8000-000000000004",
             request_sha256="e" * 64,
             installation_id=identity.installation_id,
@@ -215,9 +201,7 @@ def test_python_reconciliation_grant_is_verified_unchanged_by_rust(
     assert verified.returncode == 0, verified.stderr.decode()
     assert verified.stdout.rstrip(b"\n") == raw
     tampered = json.loads(raw)
-    tampered["claims"]["operation"]["reconciliation_identity"][
-        "compiled_spec_canonical_sha256"
-    ] = "f" * 64
+    tampered["claims"]["operation"]["reconciliation_identity"]["plan_digest"] = "f" * 64
     refused = subprocess.run(
         [str(host_helper_wire_probe)],
         input=canonical_message(tampered),

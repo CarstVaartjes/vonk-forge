@@ -1319,7 +1319,6 @@ def _persist_issued_enrollment(
         node = AgentNode(
             node_id=enrollment.node_id,
             state="active",
-            capabilities=[],
             observation_receipt_public_key=(enrollment.observation_receipt_public_key),
         )
         session.add(node)

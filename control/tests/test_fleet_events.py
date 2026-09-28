@@ -613,7 +613,7 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
     node_id = "spk_" + "a" * 32
     FleetEventRecorder.install(sessions, clock=lambda: NOW)
     with sessions.begin() as session:
-        session.add(models.AgentNode(node_id=node_id, state="active", capabilities=[]))
+        session.add(models.AgentNode(node_id=node_id, state="active"))
         session.flush()
         session.add(
             models.AgentNodeProfile(
@@ -749,7 +749,7 @@ def test_recorder_emits_nothing_for_irrelevant_writes_or_exact_telemetry_replay(
 def test_telemetry_repository_emits_only_when_latest_pointer_advances(sessions) -> None:
     node_id = "spk_" + "a" * 32
     with sessions.begin() as session:
-        session.add(models.AgentNode(node_id=node_id, state="active", capabilities=[]))
+        session.add(models.AgentNode(node_id=node_id, state="active"))
     FleetEventRecorder.install(sessions, clock=lambda: NOW)
     telemetry = TelemetryRepository(sessions, clock=lambda: NOW)
     latest = _telemetry_sample(
@@ -921,22 +921,14 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
             )
         )
         run_id = "00000000-0000-4000-8000-000000000001"
-        placement = compiled_plan["runtime"]["placement"]
         operation.payload = RecipeStopPayload(
-            schema_version=2,
             run_id=run_id,
             target_runtime_id=run_id,
             run_generation=1,
-            node_id=job.targets[0],
             installation_id="00000000-0000-4000-8000-000000000002",
             recipe_revision_id="00000000-0000-4000-8000-000000000003",
-            recipe_content_sha256=compiled_plan["identity"]["recipe_revision_sha256"],
             mapping_id="00000000-0000-4000-8000-000000000004",
-            mapping_generation=1,
             plan_digest="a" * 64,
-            rank=placement["rank"],
-            role=placement["role"],
-            world_size=placement["world_size"],
             compiled_execution_plan=compiled_plan,
             cancel_pending_start=False,
         ).model_dump(mode="json")

@@ -45,7 +45,6 @@ window. Neither an expired lease nor an overdue observation proves that an
 effect stopped. Current authority, cancellation, and newer intent are checked
 before further work.
 
-Lifecycle recovery requires an agent advertising exact lifecycle resumption.
 Installation, Start, Stop and uninstall reconcile the exact stored receipt or
 runtime/filesystem effect before performing unfinished work. A running exact
 runtime is observed instead of started again. A completed installation is checked

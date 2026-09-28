@@ -57,7 +57,6 @@ from .runtime_image_preparation import require_runtime_image_authorization
 from .runtime_preflight import (
     admission_blockers,
     latest_result,
-    node_fingerprint,
     recipe_requirements,
     request_digest,
 )
@@ -282,7 +281,7 @@ class InstallAdmissionService:
                         node.node_id,
                         requirements_sha256=request_digest(preflight_request),
                     ),
-                    current_fingerprint=node_fingerprint(node.capabilities),
+                    current_fingerprint=node.preflight_fingerprint,
                     now=int(now.timestamp()),
                 )
                 for node in nodes
@@ -378,12 +377,7 @@ class InstallAdmissionService:
             capabilities_by_node = {
                 node.node_id: tuple(
                     sorted(
-                        {
-                            capability
-                            for capability in node.capabilities
-                            if not capability.startswith("fabric.")
-                        }
-                        | set(
+                        set(
                             known_inventory[node.node_id].capabilities
                             if node.node_id in known_inventory
                             else ()

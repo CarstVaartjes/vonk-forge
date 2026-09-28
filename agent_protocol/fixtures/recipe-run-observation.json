@@ -34,9 +34,6 @@
       "operation": {
         "type": "execute-container-runtime-request",
         "action": "run-inspect",
-        "job_id": "10000000-0000-4000-8000-000000000001",
-        "operation_id": "60000000-0000-4000-8000-000000000006",
-        "attempt": 3,
         "fence": "70000000-0000-4000-8000-000000000007",
         "request_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "observation_identity_sha256": "595f3b3887386b64ee2900d919fc19cd560806f8200f8dc96f99f66b0bdb5462"

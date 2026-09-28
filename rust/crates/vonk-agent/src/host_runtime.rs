@@ -82,10 +82,6 @@ pub enum HelperProtocolCause {
     /// The agent-built runtime request or inspection binding failed canonical
     /// validation before any helper was called.
     RequestDocument,
-    /// The agent-built request targets another schema version.
-    RequestSchemaVersion,
-    /// The agent-built request carries a zero attempt.
-    RequestAttempt,
     /// The agent-built request carries arguments for the wrong action.
     RequestArgumentsPresence,
     /// The typed lifecycle plan is missing, duplicated, or bound to another
@@ -127,8 +123,6 @@ impl HelperProtocolCause {
             Self::RejectionMalformed => "rejection_malformed",
             Self::OutcomeMalformed => "outcome_malformed",
             Self::RequestDocument => "request_document_invalid",
-            Self::RequestSchemaVersion => "request_schema_version_invalid",
-            Self::RequestAttempt => "request_attempt_invalid",
             Self::RequestArgumentsPresence => "request_arguments_presence_invalid",
             Self::RequestPlanBinding => "request_plan_binding_invalid",
             Self::RequestInstallationIdentity => "request_installation_identity_invalid",
@@ -149,8 +143,6 @@ impl HelperProtocolCause {
     /// opaque label.
     pub fn from_request_rule(rule: HostRuntimeRequestRule) -> Self {
         match rule {
-            HostRuntimeRequestRule::SchemaVersion => Self::RequestSchemaVersion,
-            HostRuntimeRequestRule::Attempt => Self::RequestAttempt,
             HostRuntimeRequestRule::ArgumentsPresence => Self::RequestArgumentsPresence,
             HostRuntimeRequestRule::PlanBinding => Self::RequestPlanBinding,
             HostRuntimeRequestRule::InstallationIdentity => Self::RequestInstallationIdentity,
@@ -300,13 +292,8 @@ impl HostRuntimeBoundary<'_> {
         binding
             .validate()
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestDocument))?;
-        let attempt = binding.run_generation;
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::RunInspect,
-            job_id: binding.run_id,
-            operation_id: uuid::Uuid::new_v4(),
-            attempt,
             fence: uuid::Uuid::new_v4(),
             arguments,
             job_plan: None,
@@ -435,7 +422,11 @@ impl HostRuntimeBoundary<'_> {
             HostRuntimeAction::Start => lifecycle_plan
                 .as_ref()
                 .and_then(|plan| match plan {
-                    HostRuntimePlan::JobRun(job) => Some(u64::from(job.timeout_seconds)),
+                    HostRuntimePlan::JobRun(job) => job
+                        .compiled_execution_plan
+                        .job
+                        .as_ref()
+                        .map(|job| u64::from(job.timeout_seconds)),
                     _ => None,
                 })
                 .filter(|value| (1..=3600).contains(value))
@@ -471,11 +462,7 @@ impl HostRuntimeBoundary<'_> {
             None => (None, None, None, None),
         };
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action,
-            job_id: claim.job_id,
-            operation_id: claim.operation_id,
-            attempt: claim.attempt,
             fence: claim.fence,
             arguments,
             job_plan,
@@ -1445,32 +1432,13 @@ mod tests {
         .unwrap();
         compiled["runtime"]["placement"]["endpoint_address"] = serde_json::json!("100.100.20.30");
         compiled["security"]["network_mode"] = serde_json::json!("bridge");
-        let placement = compiled["runtime"]["placement"].clone();
-        let recipe_digest = compiled["identity"]["recipe_revision_sha256"].clone();
-        let image_digest = compiled["runtime_image"]["image_digest"].clone();
         serde_json::from_value(serde_json::json!({
-            "schema_version": 2,
             "run_id": "00000000-0000-4000-8000-000000000003",
             "installation_id": "00000000-0000-4000-8000-000000000001",
             "recipe_revision_id": "00000000-0000-4000-8000-000000000002",
-            "recipe_content_sha256": recipe_digest,
             "mapping_id": "00000000-0000-4000-8000-000000000007",
-            "mapping_generation": 1,
-            "image_digest": image_digest,
             "plan_digest": "c".repeat(64),
-            "alias": "test-model",
-            "rank": placement["rank"],
-            "role": placement["role"],
-            "port": placement["port"],
-            "reserved_memory_bytes": placement["reserved_memory_bytes"],
-            "memory_floor_bytes": placement["memory_floor_bytes"],
-            "memory_kind": "unified",
-            "endpoint_address": "100.100.20.30",
-            "world_size": placement["world_size"],
             "compiled_execution_plan": compiled,
-            "local_address": null,
-            "master_address": null,
-            "master_port": null,
             "run_generation": 1
         }))
         .unwrap()
@@ -1479,11 +1447,7 @@ mod tests {
     fn start_request() -> super::HostRuntimeRequest {
         let plan = start_plan();
         super::HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::Start,
-            job_id: Uuid::new_v4(),
-            operation_id: Uuid::new_v4(),
-            attempt: 1,
             fence: Uuid::new_v4(),
             arguments: vec!["sha256:image".to_owned(), "run".to_owned()],
             job_plan: None,
@@ -1503,31 +1467,6 @@ mod tests {
         let error = HostRuntimeError::request_refusal(rule);
         assert!(error.diagnostic().is_none());
         error.preflight_code()
-    }
-
-    #[test]
-    fn request_schema_version_refusal_names_the_schema_rule() {
-        // Wrong implementation: a request whose schema version was not current
-        // collapsed into `helper_request_document_invalid`, so a live Start
-        // could not say which envelope rule refused it.
-        let mut request = start_request();
-        request.schema_version = 2;
-        assert_eq!(
-            request_rule_code(&request),
-            "helper_request_schema_version_invalid"
-        );
-    }
-
-    #[test]
-    fn request_attempt_refusal_names_the_attempt_rule() {
-        // Wrong implementation: a zero attempt collapsed into
-        // `helper_request_document_invalid`.
-        let mut request = start_request();
-        request.attempt = 0;
-        assert_eq!(
-            request_rule_code(&request),
-            "helper_request_attempt_invalid"
-        );
     }
 
     #[test]
@@ -1816,8 +1755,6 @@ mod tests {
             HelperProtocolCause::RejectionMalformed,
             HelperProtocolCause::OutcomeMalformed,
             HelperProtocolCause::RequestDocument,
-            HelperProtocolCause::RequestSchemaVersion,
-            HelperProtocolCause::RequestAttempt,
             HelperProtocolCause::RequestArgumentsPresence,
             HelperProtocolCause::RequestPlanBinding,
             HelperProtocolCause::RequestInstallationIdentity,

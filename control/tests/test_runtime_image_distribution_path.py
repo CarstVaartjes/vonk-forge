@@ -11,10 +11,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import DistributionObject
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.distribution import (
-    DistributionAssignment,
     DistributionService,
     MemoryVerifiedObjectSource,
 )
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
 from vonk_control.models import Base, RuntimeImageAuthorization
 from vonk_control.run_switch_contract import RunSwitchPhase, RunSwitchPlan
@@ -104,7 +104,7 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
         "model_artifact_set_sha256": model_set_digest,
         "model_artifact_set_bytes": model.bytes,
     }
-    captured: dict[str, DistributionAssignment] = {}
+    captured: dict[str, NodeDistributionAssignment] = {}
 
     def ensure_child(*_args: object, **kwargs: object) -> str:
         assignments = kwargs.get("assignments")
@@ -154,16 +154,7 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
                 runtime_plan_result,
                 {"assignments": {nodes[0]: assignment}},
             ],
-            "evidence": [
-                {
-                    "node_id": nodes[0],
-                    "verified": True,
-                    "verified_digests": [model.sha256],
-                    "verified_image_digest": BUILT_IMAGE_DIGEST,
-                    "imported_image_digest": BUILT_IMAGE_DIGEST,
-                    "verified_oci_layout_sha256": ARCHIVE_DIGEST,
-                }
-            ],
+            "evidence": [{"node_id": nodes[0], "downloaded_bytes": model.bytes}],
         },
     )
     assert verify.result is not None

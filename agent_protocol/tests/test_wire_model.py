@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 
 import pytest
@@ -16,31 +15,13 @@ from vonk_agent_protocol import (
 
 
 def _claim(**overrides: object) -> dict[str, object]:
-    payload = {
-        "schema_version": 1,
-        "authority_revision": "a" * 64,
-        "plan_digest": "a" * 64,
-    }
     return {
-        "schema_version": 1,
-        "job_id": "00000000-0000-4000-8000-000000000001",
-        "operation_id": "00000000-0000-4000-8000-000000000002",
-        "attempt": 1,
         "fence": "00000000-0000-4000-8000-000000000003",
-        "node_id": "spk_00000000000000000000000000000001",
         "operation": "artifact.distribution.v1",
-        "authority_revision": "a" * 64,
-        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
-        "payload": payload,
+        "payload": {"plan_digest": "a" * 64},
         "deadline": "2026-08-03T12:00:00+00:00",
         **overrides,
     }
-
-
-@pytest.mark.parametrize("value", [True, 1.0])
-def test_schema_version_rejects_boolean_and_float_tags(value: object) -> None:
-    with pytest.raises(AgentProtocolError):
-        AgentClaim.parse(_claim(schema_version=value))
 
 
 def test_claim_rejects_unknown_top_level_fields_and_roundtrips_json() -> None:
@@ -54,13 +35,9 @@ def test_claim_rejects_unknown_top_level_fields_and_roundtrips_json() -> None:
 
 
 def test_distribution_payload_is_typed_and_plan_bound() -> None:
-    payload = {
-        "schema_version": 1,
-        "authority_revision": "a" * 64,
-        "plan_digest": "a" * 64,
-    }
+    payload = {"plan_digest": "a" * 64}
     parsed = ArtifactDistributionPayload.model_validate(payload)
-    assert parsed.plan_digest == parsed.authority_revision
+    assert parsed.plan_digest == "a" * 64
     with pytest.raises(ValidationError):
         ArtifactDistributionPayload.model_validate(payload | {"extra": True})
 

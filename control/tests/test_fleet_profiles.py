@@ -601,7 +601,6 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -738,7 +737,6 @@ def _seed_dual_solo_without_runtime_state(
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -1021,7 +1019,6 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -1652,7 +1649,6 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -1943,7 +1939,6 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -2158,12 +2153,12 @@ def _transfer_result(nodes: tuple[str, ...]) -> dict[str, object]:
 
     import datetime as _datetime
 
-    from vonk_agent_protocol import DistributionAssignment, DistributionObject
+    from vonk_agent_protocol import DistributionObject
+    from vonk_control.distribution_assignment import NodeDistributionAssignment
 
     node_id = nodes[0]
     archive_sha256 = "1" * 64
-    assignment = DistributionAssignment(
-        schema_version=2,
+    assignment = NodeDistributionAssignment(
         assignment_id=_uuid(648),
         plan_digest="c" * 64,
         generation=1,
@@ -2718,7 +2713,6 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -2928,7 +2922,6 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -3047,7 +3040,6 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -3761,13 +3753,9 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
             operation = session.get(Job, operation_id)
             assert operation is not None
             kind = operation.kind
-        evidence = (
-            {"stopped": True}
-            if kind == "recipe.stop"
-            else {"uninstalled": True, "removed_model_bytes": 1}
-        )
+        assert kind in {"recipe.stop", "recipe.uninstall"}
         lifecycle.record_node_result(
-            operation_id, nodes[0], succeeded=True, evidence=evidence
+            operation_id, nodes[0], succeeded=True, evidence={}
         )
         completed_agent_operations.add(operation_id)
     else:

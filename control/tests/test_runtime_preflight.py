@@ -10,7 +10,6 @@ from vonk_agent_protocol.runtime_preflight import (
 from vonk_control.runtime_preflight import (
     admission_blockers,
     mandatory_capabilities,
-    node_fingerprint,
     request_digest,
 )
 
@@ -142,9 +141,6 @@ def test_missing_current_fingerprint_and_missing_result_fail_clearly():
         blockers(req, result(req), current_fingerprint=None)[0].code
         == "runtime_preflight.host_changed"
     )
-    assert node_fingerprint(["runtime.preflight.fingerprint." + "a" * 64]) == "a" * 64
-    assert node_fingerprint(["runtime.preflight.fingerprint.invalid"]) is None
-    assert node_fingerprint(["runtime.preflight.fingerprint." + "a" * 64] * 2) is None
 
 
 def test_wire_rejects_unknown_fields_duplicate_findings_and_fake_numeric_types():

@@ -36,7 +36,6 @@ class RecipeStopAuthorityError(ValueError):
 
 def stop_payload_from_start(
     value: RecipeStartPayload | Mapping[str, object],
-    node_id: str,
     *,
     cancel_pending_start: bool,
 ) -> RecipeStopPayload:
@@ -47,19 +46,12 @@ def stop_payload_from_start(
         if type(start.run_generation) is not int or start.run_generation < 1:
             raise ValueError("start generation is missing")
         payload = RecipeStopPayload(
-            schema_version=2,
             run_id=start.run_id,
-            node_id=node_id,
             target_runtime_id=start.run_id,
             installation_id=start.installation_id,
             recipe_revision_id=start.recipe_revision_id,
-            recipe_content_sha256=start.recipe_content_sha256,
             mapping_id=start.mapping_id,
-            mapping_generation=start.mapping_generation,
             plan_digest=start.plan_digest,
-            rank=start.rank,
-            role=start.role,
-            world_size=start.world_size,
             compiled_execution_plan=start.compiled_execution_plan,
             cancel_pending_start=cancel_pending_start,
             run_generation=start.run_generation,
@@ -71,7 +63,6 @@ def stop_payload_from_start(
 
 def stop_payload_from_job_run(
     value: RecipeJobRunRequest | Mapping[str, object],
-    node_id: str,
     *,
     cancel_pending_start: bool,
 ) -> RecipeStopPayload:
@@ -79,30 +70,15 @@ def stop_payload_from_job_run(
 
     try:
         job = RecipeJobRunRequest.model_validate_json(canonical_message(value))
-        if (
-            type(job.run_generation) is not int
-            or job.run_generation < 1
-            or type(job.mapping_generation) is not int
-            or job.mapping_generation < 1
-        ):
-            raise ValueError("job run generation or mapping is missing")
-        placement = job.compiled_execution_plan.runtime.placement
-        if placement.world_size != 1:
-            raise ValueError("artifact job is not single-node")
+        if type(job.run_generation) is not int or job.run_generation < 1:
+            raise ValueError("job run generation is missing")
         payload = RecipeStopPayload(
-            schema_version=2,
             run_id=job.run_id,
-            node_id=node_id,
             target_runtime_id=job.job_id,
             installation_id=job.installation_id,
             recipe_revision_id=job.recipe_revision_id,
-            recipe_content_sha256=job.recipe_content_sha256,
             mapping_id=job.mapping_id,
-            mapping_generation=job.mapping_generation,
             plan_digest=job.plan_digest,
-            rank=job.rank,
-            role=job.role,
-            world_size=placement.world_size,
             compiled_execution_plan=job.compiled_execution_plan,
             cancel_pending_start=cancel_pending_start,
             run_generation=job.run_generation,
@@ -255,13 +231,14 @@ def durable_run_stop_payloads(
                     node is None
                     or start.installation_id != run.installation_id
                     or start.recipe_revision_id != installation.recipe_revision_id
-                    or start.recipe_content_sha256 != revision.content_digest
+                    or start.compiled_execution_plan.identity.recipe_revision_sha256
+                    != revision.content_digest
                     or start.mapping_id != run.mapping_id
-                    or start.mapping_generation != run.mapping_generation
                     or start.plan_digest != run.plan_digest
-                    or start.rank != node.rank
-                    or start.role != node.role
-                    or start.world_size != len(requested)
+                    or start.compiled_execution_plan.runtime.placement.rank != node.rank
+                    or start.compiled_execution_plan.runtime.placement.role != node.role
+                    or start.compiled_execution_plan.runtime.placement.world_size
+                    != len(requested)
                 ):
                     raise RecipeStopAuthorityError(
                         "recipe Start target identity differs"
@@ -322,7 +299,6 @@ def durable_run_stop_payloads(
                     candidates[node_id].append(
                         stop_payload_from_start(
                             start,
-                            node.node_id,
                             cancel_pending_start=cancel_pending_start,
                         )
                     )
@@ -344,7 +320,6 @@ def durable_run_stop_payloads(
                 candidates[node_id].append(
                     stop_payload_from_start(
                         start,
-                        node.node_id,
                         cancel_pending_start=cancel_pending_start,
                     )
                 )

@@ -65,9 +65,7 @@ def test_slow_distributed_restart_retains_accepted_startup_budget(
         payload.node_id: payload.run_generation for payload in stop_payloads
     } == source_generations
     for node_id in nodes:
-        service.record_node_result(
-            stop.id, node_id, succeeded=True, evidence={"stopped": True}
-        )
+        service.record_node_result(stop.id, node_id, succeeded=True, evidence={})
     with sessions() as session:
         restart = session.scalar(
             select(Job).where(

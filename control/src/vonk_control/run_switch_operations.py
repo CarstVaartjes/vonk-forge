@@ -28,7 +28,6 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
-    DistributionAssignment,
     OperationProgress,
     canonical_message,
 )
@@ -53,6 +52,7 @@ from .cluster_mappings import (
     validate_mapping_parameters,
 )
 from .disk_reservations import outstanding_disk_reservation_bytes
+from .distribution_assignment import NodeDistributionAssignment
 from .failure_classification import error_code, is_redownload, is_security_failure
 from .install_admission import InstallAdmissionBusy, InstallPreflightExpired
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
@@ -2065,26 +2065,20 @@ class RecipeLifecyclePhaseExecutor:
         installation_id = plan.installation_id
         if installation_id is None:
             raise RunSwitchOperationConflict("run-switch.uninstall_target_unavailable")
-        exact_reconciliation_receipts = True
+        reconciliation_complete = True
         reconcile_request_id: str | None = None
-        reconciliation_receipts: list[dict[str, object]] = []
         if plan.cleanup_mode == "reconcile":
             if self._lifecycle is None or plan.reconciliation_authority is None:
                 raise RunSwitchOperationConflict(
                     "run-switch.reconciliation-authority-unavailable"
                 )
             reconcile_request_id = str(uuid.uuid5(uuid.UUID(request_key), "reconcile"))
-            verified_receipts = self._lifecycle.reconciliation_operation_receipts(
+            reconciliation_complete = self._lifecycle.reconciliation_complete(
                 reconcile_request_id,
                 expected_authority=plan.reconciliation_authority.model_dump(
                     mode="json"
                 ),
             )
-            exact_reconciliation_receipts = verified_receipts is not None
-            if verified_receipts is not None:
-                reconciliation_receipts = [
-                    receipt.model_dump(mode="json") for receipt in verified_receipts
-                ]
         with self._sessions() as session:
             installation = session.get(RecipeInstallation, installation_id)
             members = tuple(
@@ -2116,11 +2110,11 @@ class RecipeLifecyclePhaseExecutor:
                 and installation.state == "uninstalled"
                 and exact_members
                 and all(node.state == "uninstalled" for node in members)
-                and exact_reconciliation_receipts
+                and reconciliation_complete
             )
-            if not exact_reconciliation_receipts:
+            if not reconciliation_complete:
                 raise RunSwitchOperationConflict(
-                    "run-switch.reconciliation-receipt-verification-failed"
+                    "run-switch.reconciliation-verification-failed"
                 )
             if (
                 installation is None
@@ -2142,11 +2136,7 @@ class RecipeLifecyclePhaseExecutor:
             "active_runs": active_runs,
             "cleanup_mode": plan.cleanup_mode,
             **(
-                {
-                    "reconciliation_request_id": reconcile_request_id,
-                    "exact_reconciliation_receipts": exact_reconciliation_receipts,
-                    "reconciliation_receipts": reconciliation_receipts,
-                }
+                {"reconciliation_request_id": reconcile_request_id}
                 if plan.cleanup_mode == "reconcile"
                 else {}
             ),
@@ -4411,7 +4401,6 @@ class RunSwitchOperationService:
             or node.revoked_at is not None
             or node.architecture != "linux-arm64"
             or not _is_hex_digest(node.binary_digest)
-            or "recipe.build.v1" not in node.capabilities
             or freshness.state != "fresh"
         ):
             return freshness, False
@@ -8470,7 +8459,7 @@ def _phase_result(
         assignments = normalized.get("assignments")
         if isinstance(assignments, Mapping):
             normalized["assignments"] = {
-                node_id: DistributionAssignment.parse(raw)
+                node_id: NodeDistributionAssignment.parse(raw)
                 if isinstance(raw, Mapping)
                 else raw
                 for node_id, raw in assignments.items()
@@ -9309,30 +9298,6 @@ def _validate_artifact_execution(
             raise RunSwitchOperationConflict(
                 "run-switch.artifact-digest-verification-failed"
             )
-        expected = set(plan.storage.artifact_digests)
-        if expected:
-            raw_digests = result.get("verified_digests")
-            if (
-                not isinstance(raw_digests, list)
-                or not all(isinstance(value, str) for value in raw_digests)
-                or set(raw_digests) != expected
-            ):
-                raise RunSwitchOperationConflict(
-                    "run-switch.artifact-digest-verification-mismatch"
-                )
-        if plan.image_digest is not None:
-            if result.get("verified_image_digest") != plan.image_digest:
-                raise RunSwitchOperationConflict(
-                    "run-switch.runtime-image-verification-mismatch"
-                )
-            expected_layout = plan.build.oci_layout_sha256
-            if (
-                expected_layout is not None
-                and result.get("verified_oci_layout_sha256") != expected_layout
-            ):
-                raise RunSwitchOperationConflict(
-                    "run-switch.runtime-layout-verification-mismatch"
-                )
         if verification.verified_build_id != plan.recipe_build_id:
             # A build performed by the same high-level operation has no OCI
             # output digest at preview time.  The distribution adapter must

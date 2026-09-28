@@ -19,6 +19,7 @@ from vonk_control.models import (
     Job,
 )
 
+from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
@@ -46,7 +47,6 @@ def queue(tmp_path):
             AgentNode(
                 node_id=NODE_ID,
                 state="active",
-                capabilities=[],
                 workload_intent_ordinal=1,
             )
         )
@@ -87,7 +87,7 @@ def _parent_id(sessions: sessionmaker[Session]) -> str:
 
 
 def _claim(service: AgentJobService):
-    claim = claim_agent(service, NODE_ID, "serial-a", 30)
+    claim = claim_agent(service, NODE_ID, "serial-a")
     assert claim is not None
     return claim
 
@@ -95,13 +95,7 @@ def _claim(service: AgentJobService):
 def _result(claim, state: str, result: dict[str, object]) -> AgentResult:
     return AgentResult.model_validate(
         {
-            "schema_version": 1,
-            "job_id": claim.job_id,
-            "operation_id": claim.operation_id,
-            "attempt": claim.attempt,
             "fence": claim.fence,
-            "node_id": claim.node_id,
-            "deadline": claim.deadline,
             "state": state,
             "result": result,
         }
@@ -197,7 +191,7 @@ def test_result_consumer_cannot_be_bound_after_queue_activity(
             STOP_PAYLOAD,
         )
     elif activity == "claim":
-        assert claim_agent(service, NODE_ID, "serial-a", 30) is None
+        assert claim_agent(service, NODE_ID, "serial-a") is None
     else:
         bootstrap = AgentJobService(sessions, clock=clock)
         bootstrap.enqueue(
@@ -225,7 +219,7 @@ def test_result_consumer_cannot_be_bound_after_queue_activity(
     (
         (
             "succeeded",
-            {"stopped": True},
+            {},
         ),
         ("failed", {"status": "failed", "error_code": "service_failed"}),
         (
@@ -273,10 +267,11 @@ def test_result_consumer_receives_exact_canonical_message_in_finish_transaction(
     with sessions() as session:
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == claim.operation_id
+                AgentOperationAttempt.operation_id
+                == fenced_operation(sessions, claim).id
             )
         )
-        parent = session.get(Job, claim.job_id)
+        parent = session.get(Job, fenced_operation(sessions, claim).parent_job_id)
         assert attempt is not None and attempt.result == result
         assert parent is not None
         assert parent.result == {"consumed_fence": claim.fence}
@@ -314,18 +309,19 @@ def test_consumer_rejection_rolls_back_agent_result_and_parent_projection(
             _result(
                 claim,
                 "succeeded",
-                {"stopped": True},
+                {},
             )
         )
 
     with sessions() as session:
-        operation = session.get(AgentOperation, claim.operation_id)
+        operation = session.get(AgentOperation, fenced_operation(sessions, claim).id)
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == claim.operation_id
+                AgentOperationAttempt.operation_id
+                == fenced_operation(sessions, claim).id
             )
         )
-        parent = session.get(Job, claim.job_id)
+        parent = session.get(Job, fenced_operation(sessions, claim).parent_job_id)
         assert operation is not None and operation.state == "running"
         assert attempt is not None and attempt.state == "running"
         assert attempt.result is None
@@ -396,10 +392,11 @@ def test_invalid_result_is_no_write_and_never_reaches_consumer(
 
     assert consumed == []
     with sessions() as session:
-        operation = session.get(AgentOperation, claim.operation_id)
+        operation = session.get(AgentOperation, fenced_operation(sessions, claim).id)
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == claim.operation_id
+                AgentOperationAttempt.operation_id
+                == fenced_operation(sessions, claim).id
             )
         )
         assert operation is not None and operation.state == "running"

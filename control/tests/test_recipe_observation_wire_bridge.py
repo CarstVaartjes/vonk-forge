@@ -311,11 +311,6 @@ def _production_controller_app(
     with sessions.begin() as session:
         node = session.get(AgentNode, node_ids[0])
         assert node is not None
-        node.capabilities = list(node.capabilities or ()) + [
-            "recipe.run.inspect.exact.v1",
-            "recipe.run.inspect.receipt.v1",
-            "recipe.stop",
-        ]
         node.observation_receipt_public_key = (
             receipt_seed.public_key().public_bytes_raw().hex()
         )

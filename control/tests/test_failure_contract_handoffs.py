@@ -73,12 +73,10 @@ def test_persisted_agent_failure_survives_activity(sessions, tmp_path, failure):
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                capabilities=[],
                 architecture="linux-arm64",
                 semantic_version="1.0.0",
                 build_digest="sha256:" + "f" * 64,
                 binary_digest="f" * 64,
-                self_test_passed=True,
                 workload_intent_ordinal=1,
             )
         )
@@ -97,20 +95,9 @@ def test_persisted_agent_failure_survives_activity(sessions, tmp_path, failure):
     with sessions.begin() as session:
         session.get(Job, job.id).targets = [NODE_A]
     operation = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
-    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
     message = AgentResult(
-        **{
-            key: getattr(claim, key)
-            for key in (
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "deadline",
-            )
-        },
+        **{key: getattr(claim, key) for key in ("fence",)},
         state="failed",
         result=AgentFailureResult.model_validate(failure),
     )

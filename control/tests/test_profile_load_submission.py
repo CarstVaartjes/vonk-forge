@@ -253,7 +253,6 @@ def test_change_between_fresh_review_and_admission_refuses_load(
                         state="active",
                         protocol_version=2,
                         architecture="linux-arm64",
-                        capabilities=[],
                         last_seen_at=NOW,
                     )
                 )
@@ -357,7 +356,6 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                     state="active",
                     protocol_version=2,
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW,
                 )
             )

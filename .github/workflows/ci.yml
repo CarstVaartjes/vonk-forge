@@ -151,7 +151,7 @@ jobs:
       - name: Include protocol wheel with generated release evidence
         run: |
           mkdir -p "$RUNNER_TEMP/supply-chain"
-          cp inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl "$RUNNER_TEMP/supply-chain/"
+          cp inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl "$RUNNER_TEMP/supply-chain/"
       - name: Verify supply-chain evidence
         run: scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json
       - name: Preserve verified SBOMs and manifest
@@ -330,14 +330,6 @@ jobs:
             run: >-
               uv run --project control --frozen
               pytest -q tests/scripts/test_agent_apt_compaction_integration.py
-          - name: Verify Rust agent advertises Controller capabilities
-            env:
-              VONK_AGENT_BINARY: target/debug/vonk-agent
-              VONK_CI_PREREQUISITES: needs_agent_binary
-            run: >-
-              cargo build --locked -p vonk-agent --bin vonk-agent &&
-              uv run --project control --frozen
-              pytest -q tests/acceptance/test_rust_agent_parity.py
           - name: Test Spark rootless Podman OCI import
             run: >-
               cargo test --locked -p vonk-agent --test recipe_builder
@@ -938,7 +930,7 @@ jobs:
           name: supply-chain-evidence-${{ github.run_id }}
           path: release-output/supply-chain
       - name: Restore verified protocol wheel for image build context
-        run: install -D -m 0644 release-output/supply-chain/vonk_agent_protocol-3.0.1-py3-none-any.whl inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl
+        run: install -D -m 0644 release-output/supply-chain/vonk_agent_protocol-4.0.0-py3-none-any.whl inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl
       - name: Verify public image inputs
         run: scripts/verify-public-image-inputs
       - name: Rebuild and compare release supply-chain evidence
@@ -946,7 +938,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/supply-chain"
-          cp inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl "$RUNNER_TEMP/supply-chain/"
+          cp inventory/wheels/vonk_agent_protocol-4.0.0-py3-none-any.whl "$RUNNER_TEMP/supply-chain/"
           scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json
           diff -ru "$RUNNER_TEMP/supply-chain" release-output/supply-chain
       - name: Require the preinstalled Docker Buildx plugin
@@ -1460,7 +1452,7 @@ jobs:
             "release-output/supply-chain/agent-rust.spdx.json"
             "release-output/supply-chain/control-python.spdx.json"
             "release-output/supply-chain/control-web.spdx.json"
-            "release-output/supply-chain/vonk_agent_protocol-3.0.1-py3-none-any.whl"
+            "release-output/supply-chain/vonk_agent_protocol-4.0.0-py3-none-any.whl"
             "release-output/agent-package/$ARM64_PACKAGE"
             "release-output/agent-package/vonk-forge-systemd-security.json"
           )

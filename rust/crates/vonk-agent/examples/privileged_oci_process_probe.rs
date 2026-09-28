@@ -84,23 +84,13 @@ fn main() {
             Some(plan),
         )
     };
-    let job_id = Uuid::parse_str(PROBE_RUN_ID).unwrap();
-    let operation_id = if action == HostRuntimeAction::ImageImport {
-        Uuid::parse_str("50000000-0000-4000-8000-000000000005").unwrap()
-    } else {
-        Uuid::parse_str("50000000-0000-4000-8000-000000000006").unwrap()
-    };
     let fence = if action == HostRuntimeAction::ImageImport {
         Uuid::parse_str("60000000-0000-4000-8000-000000000005").unwrap()
     } else {
         Uuid::parse_str("60000000-0000-4000-8000-000000000006").unwrap()
     };
     let request = HostRuntimeRequest {
-        schema_version: 1,
         action,
-        job_id,
-        operation_id,
-        attempt: 1,
         fence,
         arguments: arguments.clone(),
         job_plan: None,
@@ -136,9 +126,6 @@ fn main() {
                 }
                 _ => unreachable!(),
             },
-            job_id,
-            operation_id,
-            attempt: 1,
             fence,
             request_sha256: request_sha.clone(),
             observation_identity_sha256: None,
@@ -295,30 +282,13 @@ fn production_start_arguments() -> (Vec<String>, RecipeStartRequest) {
 }
 
 fn typed_start_plan(plan: &CompiledExecutionPlan) -> RecipeStartRequest {
-    let placement = &plan.runtime.placement;
     serde_json::from_value(json!({
-        "schema_version": 2,
         "run_id": PROBE_RUN_ID,
         "installation_id": PROBE_INSTALLATION_ID,
         "recipe_revision_id": "40000000-0000-4000-8000-000000000002",
-        "recipe_content_sha256": plan.identity.recipe_revision_sha256,
         "mapping_id": "40000000-0000-4000-8000-000000000007",
-        "mapping_generation": 1,
-        "image_digest": plan.runtime_image.image_digest,
         "plan_digest": plan.identity.model_artifact_set_sha256,
-        "alias": "helper-process-proof",
-        "rank": placement.rank,
-        "role": placement.role,
-        "port": placement.port,
-        "reserved_memory_bytes": placement.reserved_memory_bytes,
-        "memory_floor_bytes": placement.memory_floor_bytes,
-        "memory_kind": "unified",
-        "endpoint_address": placement.endpoint_address,
-        "world_size": placement.world_size,
         "compiled_execution_plan": plan,
-        "local_address": null,
-        "master_address": null,
-        "master_port": null,
         "run_generation": 1
     }))
     .unwrap()

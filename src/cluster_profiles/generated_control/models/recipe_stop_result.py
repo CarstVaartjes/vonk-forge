@@ -20,26 +20,19 @@ T = TypeVar("T", bound="RecipeStopResult")
 
 @_attrs_define
 class RecipeStopResult:
-    """
-        Attributes:
-            stopped (bool):
+    """ A stop succeeds with an empty result.
+
      """
 
-    stopped: bool
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        stopped = self.stopped
-
 
         field_dict: dict[str, Any] = {}
 
-        field_dict.update({
-            "stopped": stopped,
-        })
 
         return field_dict
 
@@ -47,11 +40,7 @@ class RecipeStopResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        d = dict(src_dict)
-        stopped = d.pop("stopped")
-
         recipe_stop_result = cls(
-            stopped=stopped,
         )
 
         return recipe_stop_result

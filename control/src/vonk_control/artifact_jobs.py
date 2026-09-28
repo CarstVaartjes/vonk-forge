@@ -1190,23 +1190,12 @@ class ArtifactJobService:
             )
             raw_files = _input_manifest(artifact_job).model_dump(mode="json")["files"]
             payload = {
-                "schema_version": 1,
                 "job_id": artifact_job.id,
                 "run_id": run.id,
                 "installation_id": installation.id,
                 "recipe_revision_id": revision.id,
-                "recipe_content_sha256": revision.content_digest,
-                "image_digest": installation.image_digest,
                 "plan_digest": run.plan_digest,
                 "mapping_id": run.mapping_id,
-                "mapping_generation": run.mapping_generation,
-                "interface": artifact_job.interface,
-                "rank": node.rank,
-                "role": node.role,
-                "reserved_memory_bytes": node.reserved_memory_bytes,
-                "memory_floor_bytes": planned_node.memory_floor_bytes,
-                "memory_kind": planned_node.memory_kind,
-                "contract_sha256": artifact_job.contract_sha256,
                 "input_manifest_sha256": artifact_job.input_manifest_sha256,
                 "input_total_bytes": artifact_job.input_total_bytes,
                 "inputs": raw_files,
@@ -1214,7 +1203,6 @@ class ArtifactJobService:
                 "run_generation": run.run_generation,
                 "output_mappings": _output_mappings(artifact_job.compiled_contract),
                 "output_limits": artifact_job.output_limits,
-                "timeout_seconds": artifact_job.timeout_seconds,
             }
             RecipeJobRunRequest.parse(payload)
             operation = self._recipe_operations.enqueue_one_shot_job_in_session(

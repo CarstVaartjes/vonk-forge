@@ -48,14 +48,14 @@ const ADAPTER_RECIPE_IMAGE_ARGUMENT: &str = "VONK_RECIPE_IMAGE";
 /// Recipe images are always built for DGX Spark.
 const BUILD_PLATFORM: &str = "linux/arm64";
 
-/// A Controller-authorized cleanup names an operation, never a host path or
+/// A Controller-authorized cleanup names a build, never a host path or
 /// arbitrary service. Systemd stops the entire build cgroup before capacity is
 /// released; a failed query or stop is not evidence that the service is absent.
 pub fn cleanup_build<R: ProcessRunner>(
     runner: &R,
     request: &RecipeBuildCleanupRequest,
 ) -> Result<RecipeBuildCleanupEvidence, RecipeBuildError> {
-    let unit = format!("vonk-recipe-build-{}.service", request.operation_id);
+    let unit = format!("vonk-recipe-build-{}.service", request.build_id);
     let query = vec![
         "--user".to_owned(),
         "show".to_owned(),

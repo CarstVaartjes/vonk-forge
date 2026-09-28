@@ -30,7 +30,7 @@ def _repository(engine: Engine) -> tuple[TelemetryRepository, sessionmaker]:
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_A, state="active"))
     return TelemetryRepository(sessions, clock=lambda: NOW), sessions
 
 

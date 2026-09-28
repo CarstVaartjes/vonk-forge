@@ -36,7 +36,7 @@ def sessions(tmp_path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
     with factory.begin() as session:
-        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_A, state="active"))
     return factory
 
 

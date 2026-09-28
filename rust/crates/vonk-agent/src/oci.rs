@@ -130,7 +130,6 @@ type LoadedRunLifecycle = (
 
 #[derive(Debug, Clone)]
 pub struct RecipeRunStartIdentity {
-    pub mapping_generation: u64,
     pub mapping_id: uuid::Uuid,
     pub recipe_content_sha256: String,
     pub recipe_revision_id: uuid::Uuid,
@@ -153,14 +152,11 @@ struct InstallationReconciliationCheckpoint {
     identity: RecipeReconciliationIdentity,
     installation_device: u64,
     installation_inode: u64,
-    removed_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallationReconciliationProgress {
     pub complete: bool,
-    pub removed_bytes: u64,
-    pub cleanup_receipt_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -175,7 +171,7 @@ pub struct JobOutputState {
 const INSTALLATION_METADATA_SCHEMA_VERSION: u8 = 2;
 const INSTALLATION_METADATA_FILE: &str = "model-metadata.json";
 const INSTALLATION_RECONCILIATION_ROOT: &str = "installation-reconciliation";
-const INSTALLATION_RECONCILIATION_SCHEMA_VERSION: u8 = 2;
+const INSTALLATION_RECONCILIATION_SCHEMA_VERSION: u8 = 3;
 const MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES: u64 = 64 * 1024;
 const MAX_COMPILED_DOCUMENT_BYTES: u64 = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64;
 const TRUSTED_RUNTIME_UID: u32 = 10_001;
@@ -548,13 +544,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                         {
                             return Err(OciError::Artifact);
                         }
-                        return Ok(InstallationReconciliationProgress {
-                            complete: true,
-                            removed_bytes: checkpoint.removed_bytes,
-                            cleanup_receipt_sha256: Some(reconciliation_receipt_sha256(
-                                &checkpoint,
-                            )?),
-                        });
+                        return Ok(InstallationReconciliationProgress { complete: true });
                     }
                     InstallationReconciliationState::Prepared => {
                         let location = match (
@@ -572,11 +562,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                         {
                             return Err(OciError::Artifact);
                         }
-                        return Ok(InstallationReconciliationProgress {
-                            complete: false,
-                            removed_bytes: checkpoint.removed_bytes,
-                            cleanup_receipt_sha256: None,
-                        });
+                        return Ok(InstallationReconciliationProgress { complete: false });
                     }
                     InstallationReconciliationState::Removing => {
                         match (
@@ -592,11 +578,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                                     ) => {}
                             _ => return Err(OciError::Artifact),
                         }
-                        return Ok(InstallationReconciliationProgress {
-                            complete: false,
-                            removed_bytes: checkpoint.removed_bytes,
-                            cleanup_receipt_sha256: None,
-                        });
+                        return Ok(InstallationReconciliationProgress { complete: false });
                     }
                 }
             }
@@ -608,52 +590,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             if !trusted_installation_directory(&directory_metadata) {
                 return Err(OciError::Artifact);
             }
-            let spec_path = installation.join("spec.json");
-            let spec_metadata = fs::symlink_metadata(&spec_path)?;
-            if !trusted_receipt_metadata(&spec_metadata)
-                || spec_metadata.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64
-            {
-                return Err(OciError::Artifact);
-            }
-            let spec_bytes =
-                read_regular_file(&spec_path, MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64)?;
-            let spec_value: serde_json::Value = serde_json::from_slice(&spec_bytes)?;
-            let canonical_spec =
-                canonical_protocol_json(&spec_value).map_err(|_| OciError::Artifact)?;
-            if protocol_sha256(&canonical_spec) != identity.compiled_spec_canonical_sha256 {
-                return Err(OciError::Artifact);
-            }
-            let recipe_path = installation.join("recipe-content.sha256");
-            let recipe_metadata = fs::symlink_metadata(&recipe_path)?;
-            if !trusted_receipt_metadata(&recipe_metadata) {
-                return Err(OciError::Artifact);
-            }
-            let recipe_digest = String::from_utf8(read_regular_file(&recipe_path, 64)?)
-                .map_err(|_| OciError::Artifact)?;
-            let embedded_recipe_digest = spec_value
-                .get("identity")
-                .and_then(|value| value.get("recipe_revision_sha256"))
-                .and_then(serde_json::Value::as_str);
-            if recipe_digest != identity.recipe_content_sha256
-                || embedded_recipe_digest != Some(identity.recipe_content_sha256.as_str())
-            {
-                return Err(OciError::Artifact);
-            }
-            let removed_bytes = reconciliation_directory_bytes(&installation)?;
             let checkpoint = InstallationReconciliationCheckpoint {
                 schema_version: INSTALLATION_RECONCILIATION_SCHEMA_VERSION,
                 state: InstallationReconciliationState::Prepared,
                 identity: identity.clone(),
                 installation_device: directory_metadata.dev(),
                 installation_inode: directory_metadata.ino(),
-                removed_bytes,
             };
             write_reconciliation_checkpoint(&root, &checkpoint_path, &checkpoint)?;
-            Ok(InstallationReconciliationProgress {
-                complete: false,
-                removed_bytes,
-                cleanup_receipt_sha256: None,
-            })
+            Ok(InstallationReconciliationProgress { complete: false })
         })();
         drop(lock);
         result
@@ -687,11 +632,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 {
                     return Err(OciError::Artifact);
                 }
-                return Ok(InstallationReconciliationProgress {
-                    complete: true,
-                    removed_bytes: checkpoint.removed_bytes,
-                    cleanup_receipt_sha256: Some(reconciliation_receipt_sha256(&checkpoint)?),
-                });
+                return Ok(InstallationReconciliationProgress { complete: true });
             }
 
             match checkpoint.state {
@@ -755,11 +696,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             checkpoint.state = InstallationReconciliationState::Complete;
             write_reconciliation_checkpoint(&root, &checkpoint_path, &checkpoint)?;
-            Ok(InstallationReconciliationProgress {
-                complete: true,
-                removed_bytes: checkpoint.removed_bytes,
-                cleanup_receipt_sha256: Some(reconciliation_receipt_sha256(&checkpoint)?),
-            })
+            Ok(InstallationReconciliationProgress { complete: true })
         })();
         drop(lock);
         result
@@ -1054,8 +991,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                         Some(placement.master_port.ok_or(OciError::Artifact)?),
                     )
                 };
-                if identity.mapping_generation == 0
-                    || identity.run_generation == 0
+                if identity.run_generation == 0
                     || identity.recipe_content_sha256 != self.recipe_digest(installation_id)?
                 {
                     return Err(OciError::Artifact);
@@ -1077,7 +1013,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     local_address,
                     master_address,
                     master_port,
-                    mapping_generation: identity.mapping_generation,
+                    // The observation binding still names the mapping
+                    // generation, which is always 1.
+                    mapping_generation: 1,
                     mapping_id: identity.mapping_id,
                     model_identity: spec
                         .artifacts
@@ -1211,7 +1149,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Runtime);
         };
         if binding.mapping_id != identity.mapping_id
-            || binding.mapping_generation != identity.mapping_generation
             || binding.recipe_revision_id != identity.recipe_revision_id
             || binding.recipe_content_sha256 != identity.recipe_content_sha256
             || u64::from(binding.run_generation) != identity.run_generation
@@ -2508,50 +2445,6 @@ fn write_reconciliation_checkpoint(
     Ok(())
 }
 
-fn reconciliation_receipt_sha256(
-    checkpoint: &InstallationReconciliationCheckpoint,
-) -> Result<String, OciError> {
-    if checkpoint.state != InstallationReconciliationState::Complete {
-        return Err(OciError::Artifact);
-    }
-    let bytes = canonical_protocol_json(checkpoint).map_err(|_| OciError::Artifact)?;
-    Ok(protocol_sha256(&bytes))
-}
-
-fn reconciliation_directory_bytes(path: &Path) -> Result<u64, OciError> {
-    fn visit(path: &Path, root: &Path, total: &mut u64) -> Result<(), OciError> {
-        let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
-        entries.sort_by_key(fs::DirEntry::file_name);
-        for entry in entries {
-            let file_type = entry.file_type()?;
-            if path == root && entry.file_name() == "runtime-cache" {
-                // This exact top-level subtree is helper-owned and may be
-                // root-only. Its removal is separately proven by the signed
-                // helper tombstone; do not traverse it as the agent user.
-                if !file_type.is_dir() || file_type.is_symlink() {
-                    return Err(OciError::Artifact);
-                }
-                continue;
-            }
-            if file_type.is_symlink() {
-                return Err(OciError::Artifact);
-            }
-            if file_type.is_dir() {
-                visit(&entry.path(), root, total)?;
-            } else if file_type.is_file() {
-                let size = entry.metadata()?.len();
-                *total = total.checked_add(size).ok_or(OciError::Artifact)?;
-            } else {
-                return Err(OciError::Artifact);
-            }
-        }
-        Ok(())
-    }
-    let mut total = 0_u64;
-    visit(path, path, &mut total)?;
-    Ok(total)
-}
-
 fn materialized_model_bytes(
     data_root: &Path,
     installation_id: &str,
@@ -2691,9 +2584,8 @@ fn canonical_uuid(value: &str) -> bool {
 mod tests {
     use super::{
         InstallationReconciliationState, OciError, OciRuntime, SHA256_OPEN_FILE_CALLS,
-        canonical_protocol_json, ensure_runtime_tmp, materialize_compiled_models, protocol_sha256,
-        read_installation_metadata, read_reconciliation_directory_identity,
-        reconciliation_checkpoint_path, reconciliation_directory_bytes,
+        ensure_runtime_tmp, materialize_compiled_models, read_installation_metadata,
+        read_reconciliation_directory_identity, reconciliation_checkpoint_path,
         reconciliation_quarantine_path, release_page_cache, unique_plan_artifacts,
         write_installation_metadata, write_reconciliation_checkpoint,
     };
@@ -2711,31 +2603,17 @@ mod tests {
 
     fn reconciliation_identity(
         installation_id: Uuid,
-        spec_bytes: &[u8],
     ) -> vonk_agent_protocol::RecipeReconciliationIdentity {
-        let value: Value = serde_json::from_slice(spec_bytes).unwrap();
-        let canonical = canonical_protocol_json(&value).unwrap();
         vonk_agent_protocol::RecipeReconciliationIdentity {
-            compiled_spec_canonical_sha256: protocol_sha256(&canonical),
-            install_operation_id: Uuid::new_v4(),
-            install_operation_payload_sha256: "a".repeat(64),
             installation_id,
-            node_id: format!("spk_{}", "b".repeat(32)),
             plan_digest: "c".repeat(64),
-            recipe_content_sha256: "d".repeat(64),
-            recipe_revision_id: Uuid::new_v4(),
-            schema_version: 1,
         }
     }
 
     fn reconciliation_installation(
         data_root: &Path,
         installation_id: Uuid,
-    ) -> (
-        PathBuf,
-        vonk_agent_protocol::RecipeReconciliationIdentity,
-        u64,
-    ) {
+    ) -> (PathBuf, vonk_agent_protocol::RecipeReconciliationIdentity) {
         let installation = data_root
             .join("installations")
             .join(installation_id.to_string());
@@ -2764,9 +2642,7 @@ mod tests {
         )
         .unwrap();
         fs::write(installation.join("opaque-agent-file"), b"agent-owned").unwrap();
-        let identity = reconciliation_identity(installation_id, &spec);
-        let measured = spec.len() as u64 + recipe_digest.len() as u64 + b"agent-owned".len() as u64;
-        (installation, identity, measured)
+        (installation, reconciliation_identity(installation_id))
     }
 
     #[test]
@@ -2803,70 +2679,13 @@ mod tests {
     }
 
     #[test]
-    fn reconciliation_measures_agent_tree_but_skips_only_helper_owned_runtime_cache() {
-        let directory = tempdir().unwrap();
-        let data_root = directory.path().join("data");
-        fs::create_dir_all(&data_root).unwrap();
-        let installation_id = Uuid::new_v4();
-        let (installation, identity, expected_bytes) =
-            reconciliation_installation(&data_root, installation_id);
-        let runtime_cache = installation.join("runtime-cache");
-        fs::create_dir(&runtime_cache).unwrap();
-        fs::write(runtime_cache.join("private-cache.bin"), vec![3_u8; 8192]).unwrap();
-        fs::set_permissions(&runtime_cache, fs::Permissions::from_mode(0o0))
-            .expect("test owns the cache directory metadata");
-
-        assert_eq!(
-            reconciliation_directory_bytes(&installation).unwrap(),
-            expected_bytes
-        );
-        let runtime = OciRuntime {
-            runner: &NoProcess,
-            data_root: &data_root,
-        };
-        let progress = runtime.prepare_reconciliation(&identity).unwrap();
-        assert_eq!(progress.removed_bytes, expected_bytes);
-        assert!(!progress.complete);
-    }
-
-    #[test]
-    fn reconciliation_refuses_symlinked_agent_owned_paths_outside_the_cache() {
-        let directory = tempdir().unwrap();
-        let data_root = directory.path().join("data");
-        fs::create_dir_all(&data_root).unwrap();
-        let outside = directory.path().join("outside");
-        fs::create_dir(&outside).unwrap();
-        fs::write(outside.join("sentinel"), b"preserve").unwrap();
-        let installation_id = Uuid::new_v4();
-        let (installation, identity, _) = reconciliation_installation(&data_root, installation_id);
-        symlink(&outside, installation.join("opaque-link")).unwrap();
-
-        let runtime = OciRuntime {
-            runner: &NoProcess,
-            data_root: &data_root,
-        };
-        assert!(matches!(
-            runtime.prepare_reconciliation(&identity),
-            Err(OciError::Artifact)
-        ));
-        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"preserve");
-        assert!(
-            !data_root
-                .join("installation-reconciliation")
-                .join(format!("{installation_id}.json"))
-                .exists()
-        );
-    }
-
-    #[test]
     fn reconciliation_removing_checkpoint_recovers_after_partial_or_complete_quarantine_deletion() {
         for delete_quarantine_before_retry in [false, true] {
             let directory = tempdir().unwrap();
             let data_root = directory.path().join("data");
             fs::create_dir_all(&data_root).unwrap();
             let installation_id = Uuid::new_v4();
-            let (installation, identity, expected_bytes) =
-                reconciliation_installation(&data_root, installation_id);
+            let (installation, identity) = reconciliation_installation(&data_root, installation_id);
             let runtime = OciRuntime {
                 runner: &NoProcess,
                 data_root: &data_root,
@@ -2905,11 +2724,8 @@ mod tests {
 
             let resumed = runtime.prepare_reconciliation(&identity).unwrap();
             assert!(!resumed.complete);
-            assert_eq!(resumed.removed_bytes, expected_bytes);
             let completed = runtime.finalize_reconciliation(&identity).unwrap();
             assert!(completed.complete);
-            assert_eq!(completed.removed_bytes, expected_bytes);
-            assert!(completed.cleanup_receipt_sha256.is_some());
             assert!(!installation.exists());
             assert!(!quarantine.exists());
             // A current reviewed retry of the same exact installation identity
@@ -2926,11 +2742,7 @@ mod tests {
         let data_root = directory.path().join("data");
         fs::create_dir_all(data_root.join("installations")).unwrap();
         let missing_id = Uuid::new_v4();
-        let spec = json!({
-            "identity": {"recipe_revision_sha256": "d".repeat(64)},
-            "corrupt": true,
-        });
-        let identity = reconciliation_identity(missing_id, &serde_json::to_vec(&spec).unwrap());
+        let identity = reconciliation_identity(missing_id);
         let runtime = OciRuntime {
             runner: &NoProcess,
             data_root: &data_root,
@@ -3269,7 +3081,6 @@ mod tests {
         let run_id = Uuid::new_v4().to_string();
         let placement = plan.runtime.placement.clone();
         let identity = super::RecipeRunStartIdentity {
-            mapping_generation: 12,
             mapping_id: Uuid::new_v4(),
             recipe_content_sha256: recipe_digest,
             recipe_revision_id: Uuid::new_v4(),
@@ -3303,7 +3114,7 @@ mod tests {
         assert!(observation["master_address"].is_null());
         assert!(observation["master_port"].is_null());
         assert_eq!(observation["run_generation"], 7);
-        assert_eq!(observation["mapping_generation"], 12);
+        assert_eq!(observation["mapping_generation"], 1);
         let binding: vonk_agent_protocol::RecipeRunInspectionBinding =
             serde_json::from_value(observation).unwrap();
         binding.validate().unwrap();

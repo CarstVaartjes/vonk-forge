@@ -62,7 +62,6 @@ fn placement(plan: &CompiledExecutionPlan) -> CompiledRuntimePlacement {
 
 fn identity(plan: &CompiledExecutionPlan) -> RecipeRunStartIdentity {
     RecipeRunStartIdentity {
-        mapping_generation: 3,
         mapping_id: "11111111-1111-4111-8111-111111111111".parse().unwrap(),
         recipe_content_sha256: plan.identity.recipe_revision_sha256.clone(),
         recipe_revision_id: "22222222-2222-4222-8222-222222222222".parse().unwrap(),

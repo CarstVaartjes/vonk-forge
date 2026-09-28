@@ -45,7 +45,6 @@ fn strict_rust_types_parse_shared_messages() {
     let enrollment: EnrollmentRequest =
         parse_strict(&fs::read(root.join("enrollment-request.json")).unwrap()).unwrap();
     enrollment.evidence.validate().unwrap();
-    assert_eq!(enrollment.evidence.node_id, claim.node_id);
 }
 
 #[test]

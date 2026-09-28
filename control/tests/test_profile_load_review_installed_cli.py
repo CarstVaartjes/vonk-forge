@@ -63,7 +63,6 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
                 state="active",
                 protocol_version=2,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=lifecycle._clock(),
             )
         )

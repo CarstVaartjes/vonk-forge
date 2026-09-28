@@ -34,31 +34,14 @@ def start_plan(*, large_environment: bool = False) -> RecipeStartPayload:
             {"name": f"PROFILE_STOP_TEST_{index:03}", "value": "x" * 60000}
             for index in range(40)
         )
-    placement = plan["runtime"]["placement"]
     return RecipeStartPayload.model_validate(
         {
-            "schema_version": 2,
             "run_id": "00000000-0000-4000-8000-000000000003",
             "installation_id": "00000000-0000-4000-8000-000000000001",
             "recipe_revision_id": "00000000-0000-4000-8000-000000000002",
-            "recipe_content_sha256": plan["identity"]["recipe_revision_sha256"],
             "mapping_id": "00000000-0000-4000-8000-000000000007",
-            "mapping_generation": 1,
-            "image_digest": plan["runtime_image"]["image_digest"],
             "plan_digest": "c" * 64,
-            "alias": "test-model",
-            "rank": placement["rank"],
-            "role": placement["role"],
-            "port": 8000,
-            "reserved_memory_bytes": placement["reserved_memory_bytes"],
-            "memory_floor_bytes": placement["memory_floor_bytes"],
-            "memory_kind": "unified",
-            "endpoint_address": "100.100.20.30",
-            "world_size": placement["world_size"],
             "compiled_execution_plan": plan,
-            "local_address": None,
-            "master_address": None,
-            "master_port": None,
             "run_generation": 1,
         }
     )
@@ -68,20 +51,13 @@ def stop_plan() -> RecipeStopPayload:
     start = start_plan()
     return RecipeStopPayload.model_validate(
         {
-            "schema_version": 2,
             "run_id": start.run_id,
             "target_runtime_id": start.run_id,
             "run_generation": start.run_generation,
-            "node_id": "spk_" + "a" * 32,
             "installation_id": start.installation_id,
             "recipe_revision_id": start.recipe_revision_id,
-            "recipe_content_sha256": start.recipe_content_sha256,
             "mapping_id": start.mapping_id,
-            "mapping_generation": start.mapping_generation,
             "plan_digest": start.plan_digest,
-            "rank": start.rank,
-            "role": start.role,
-            "world_size": start.world_size,
             "compiled_execution_plan": start.compiled_execution_plan,
             "cancel_pending_start": False,
         }
@@ -190,11 +166,7 @@ def test_runtime_request_arguments_are_bounded_by_bytes_not_a_count() -> None:
     )
     assert MAX_ARGV_BYTES == MAX_HOST_RUNTIME_ARGUMENT_BYTES
     document = {
-        "schema_version": 1,
         "action": "start",
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 1,
         "fence": "40000000-0000-4000-8000-000000000004",
         "run_generation": 1,
         "start_plan": start_plan().model_dump(mode="json"),
@@ -213,11 +185,7 @@ def test_runtime_stop_request_binds_exact_stop_plan_and_has_no_argv() -> None:
     stop = stop_plan()
     request = HostRuntimeRequest.model_validate(
         {
-            "schema_version": 1,
             "action": "stop",
-            "job_id": "20000000-0000-4000-8000-000000000002",
-            "operation_id": "30000000-0000-4000-8000-000000000003",
-            "attempt": 1,
             "fence": "40000000-0000-4000-8000-000000000004",
             "arguments": [],
             "run_generation": stop.run_generation,
@@ -229,11 +197,7 @@ def test_runtime_stop_request_binds_exact_stop_plan_and_has_no_argv() -> None:
     with pytest.raises(ValidationError, match="runtime arguments"):
         HostRuntimeRequest.model_validate(
             {
-                "schema_version": 1,
                 "action": "stop",
-                "job_id": "20000000-0000-4000-8000-000000000002",
-                "operation_id": "30000000-0000-4000-8000-000000000003",
-                "attempt": 1,
                 "fence": "40000000-0000-4000-8000-000000000004",
                 "arguments": ["docker", "stop"],
                 "run_generation": stop.run_generation,
@@ -245,11 +209,7 @@ def test_runtime_stop_request_binds_exact_stop_plan_and_has_no_argv() -> None:
 def test_exact_runtime_request_round_trips_a_plan_over_two_megabytes() -> None:
     start = start_plan(large_environment=True)
     document = {
-        "schema_version": 1,
         "action": "start",
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 1,
         "fence": "40000000-0000-4000-8000-000000000004",
         "arguments": ["runtime"],
         "run_generation": start.run_generation,
@@ -283,11 +243,7 @@ def test_runtime_request_rejects_a_typed_plan_above_its_document_ceiling() -> No
     oversized = start.model_dump(mode="json")
     oversized["compiled_execution_plan"] = plan
     document = {
-        "schema_version": 1,
         "action": "start",
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 1,
         "fence": "40000000-0000-4000-8000-000000000004",
         "arguments": ["runtime"],
         "run_generation": start.run_generation,
@@ -313,9 +269,6 @@ def test_runtime_authority_grant_binds_plan_generation_and_both_run_ids(
     valid = {
         "type": "execute-container-runtime-request",
         "action": action,
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 1,
         "fence": "40000000-0000-4000-8000-000000000004",
         "request_sha256": "c" * 64,
         **plan_fields,
@@ -333,13 +286,10 @@ def test_runtime_authority_grant_binds_plan_generation_and_both_run_ids(
 def test_runtime_cleanup_identity_is_required_only_for_cleanup(model) -> None:
     document = {
         "action": "installation-cleanup",
-        "job_id": "20000000-0000-4000-8000-000000000002",
-        "operation_id": "30000000-0000-4000-8000-000000000003",
-        "attempt": 2,
         "fence": "40000000-0000-4000-8000-000000000004",
     }
     if model is HostRuntimeRequest:
-        document.update(schema_version=1, arguments=[])
+        document.update(arguments=[])
     else:
         document.update(
             type="execute-container-runtime-request", request_sha256="a" * 64
@@ -370,24 +320,13 @@ def test_runtime_reconciliation_identity_is_bound_to_cleanup_request_and_grant()
     from vonk_agent_protocol import RecipeReconciliationIdentity
 
     identity = {
-        "schema_version": 1,
-        "node_id": "spk_" + "a" * 32,
         "installation_id": "70000000-0000-4000-8000-000000000007",
-        "install_operation_id": "80000000-0000-4000-8000-000000000008",
-        "install_operation_payload_sha256": "b" * 64,
         "plan_digest": "c" * 64,
-        "recipe_revision_id": "90000000-0000-4000-8000-000000000009",
-        "recipe_content_sha256": "d" * 64,
-        "compiled_spec_canonical_sha256": "e" * 64,
     }
     typed = RecipeReconciliationIdentity.model_validate(identity)
     request = HostRuntimeRequest.model_validate(
         {
-            "schema_version": 1,
             "action": "installation-cleanup",
-            "job_id": "20000000-0000-4000-8000-000000000002",
-            "operation_id": "30000000-0000-4000-8000-000000000003",
-            "attempt": 2,
             "fence": "40000000-0000-4000-8000-000000000004",
             "arguments": [],
             "installation_id": identity["installation_id"],
@@ -398,9 +337,6 @@ def test_runtime_reconciliation_identity_is_bound_to_cleanup_request_and_grant()
         {
             "type": "execute-container-runtime-request",
             "action": "installation-cleanup",
-            "job_id": "20000000-0000-4000-8000-000000000002",
-            "operation_id": "30000000-0000-4000-8000-000000000003",
-            "attempt": 2,
             "fence": "40000000-0000-4000-8000-000000000004",
             "request_sha256": "f" * 64,
             "installation_id": identity["installation_id"],
@@ -412,11 +348,7 @@ def test_runtime_reconciliation_identity_is_bound_to_cleanup_request_and_grant()
     with pytest.raises(ValidationError, match="reconciliation identity"):
         HostRuntimeRequest.model_validate(
             {
-                "schema_version": 1,
                 "action": "installation-cleanup",
-                "job_id": "20000000-0000-4000-8000-000000000002",
-                "operation_id": "30000000-0000-4000-8000-000000000003",
-                "attempt": 2,
                 "fence": "40000000-0000-4000-8000-000000000004",
                 "arguments": [],
                 "installation_id": identity["installation_id"],

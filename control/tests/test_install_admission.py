@@ -446,7 +446,6 @@ def setup(
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["runtime.vonk.v1"],
             )
         )
         session.flush()
@@ -855,7 +854,6 @@ def test_install_topology_uses_authenticated_inventory_capabilities(tmp_path) ->
     with sessions.begin() as session:
         registered = session.get(AgentNode, node)
         assert registered is not None
-        registered.capabilities = []
 
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
@@ -869,7 +867,6 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
     with sessions.begin() as session:
         registered = session.get(AgentNode, node)
         assert registered is not None
-        registered.capabilities = []
     InventoryRepository(sessions, clock=lambda: now).record(
         InventorySnapshotInput(
             node,
@@ -1003,11 +1000,7 @@ def test_refreshable_preflight_and_capacity_changes_wait_for_fresh_state(
         with sessions.begin() as session:
             host = session.get(AgentNode, node)
             assert host is not None
-            host.capabilities = [
-                value
-                for value in host.capabilities
-                if not value.startswith("runtime.preflight.fingerprint.")
-            ] + ["runtime.preflight.fingerprint." + "b" * 64]
+            host.preflight_fingerprint = "b" * 64
 
     with pytest.raises(InstallAdmissionBusy):
         service.accept_install(plan, actor="admin", now=later)
@@ -1037,11 +1030,7 @@ def test_moved_host_fingerprint_refreshes_instead_of_failing_the_identical_plan(
     with sessions.begin() as session:
         host = session.get(AgentNode, node)
         assert host is not None
-        host.capabilities = [
-            value
-            for value in host.capabilities
-            if not value.startswith("runtime.preflight.fingerprint.")
-        ] + ["runtime.preflight.fingerprint." + "b" * 64]
+        host.preflight_fingerprint = "b" * 64
 
     with pytest.raises(InstallPreflightExpired) as moved:
         service.accept_install(plan, actor="admin", now=later)
@@ -1074,10 +1063,7 @@ def test_runtime_preflight_is_required_and_host_changes_invalidate_install(tmp_p
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.capabilities = [
-            "runtime.vonk.v1",
-            "runtime.preflight.fingerprint." + "b" * 64,
-        ]
+        node.preflight_fingerprint = "b" * 64
     blocked = service.plan_install(mapping, None, now=now)
     assert "runtime_preflight.host_changed" in {
         reason.code for reason in blocked.nodes[0].blockers

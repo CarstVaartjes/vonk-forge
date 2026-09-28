@@ -359,7 +359,6 @@ def test_review_binds_idle_roster_and_definition_but_not_observation_time():
                 state="active",
                 protocol_version=2,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=now,
             )
         )

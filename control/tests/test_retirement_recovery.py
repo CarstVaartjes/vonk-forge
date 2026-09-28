@@ -27,6 +27,7 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recovery_policy import RecoveryPolicy
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
     NOW,
@@ -34,14 +35,6 @@ from .test_recipe_operations import (
     installed_recipe,
     setup_services,
     start_evidence,
-)
-
-CAPABILITIES = (
-    "agent.runtime.rust.v1",
-    "runtime.vonk.v1",
-    "recipe.start",
-    "recipe.stop",
-    "agent.lifecycle.resume.exact.v1",
 )
 
 
@@ -57,13 +50,7 @@ def _result(claim, evidence, *, state="succeeded"):
     return AgentResult.model_validate_json(
         canonical_message(
             {
-                "schema_version": 1,
-                "job_id": claim.job_id,
-                "operation_id": claim.operation_id,
-                "attempt": claim.attempt,
                 "fence": claim.fence,
-                "node_id": claim.node_id,
-                "deadline": claim.deadline.isoformat(),
                 "state": state,
                 "result": evidence,
             }
@@ -78,10 +65,6 @@ def _parked_start(tmp_path: Path, engine):
     installed = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id="retirement-install"
     )
-    with sessions.begin() as session:
-        node = session.get(AgentNode, nodes[0])
-        assert node is not None
-        node.capabilities = [*node.capabilities, "recipe.start", "recipe.stop"]
     jobs = AgentJobService(sessions, clock=lambda: NOW)
     jobs.set_result_consumer(lifecycle.consume_agent_result)
     lifecycle._agent_jobs = jobs
@@ -93,16 +76,15 @@ def _parked_start(tmp_path: Path, engine):
         jobs,
         nodes[0],
         "serial-0",
-        30,
-        capabilities=CAPABILITIES,
     )
     assert claim is not None
     with sessions.begin() as session:
-        operation = session.get(AgentOperation, claim.operation_id)
+        operation = session.get(AgentOperation, fenced_operation(sessions, claim).id)
         parent = session.get(Job, started.id)
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == claim.operation_id
+                AgentOperationAttempt.operation_id
+                == fenced_operation(sessions, claim).id
             )
         )
         assert operation is not None and parent is not None and attempt is not None
@@ -146,7 +128,9 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
         assert run.state == "lost"
         assert reservation.state == "active"
         assert reservation.released_at is None
-        old_operation = session.get(AgentOperation, claim.operation_id)
+        old_operation = session.get(
+            AgentOperation, fenced_operation(sessions, claim).id
+        )
         assert old_operation is not None
         evidence = start_evidence(old_operation.payload)
         ordinal = old_operation.workload_intent_ordinal
@@ -206,7 +190,7 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
         assert cleanup is not None
         assert cleanup.payload["workload_intent_ordinal"] == ordinal
         assert cleanup.payload["owner_id"] == started.owner_id
-        original = session.get(AgentOperation, claim.operation_id)
+        original = session.get(AgentOperation, fenced_operation(sessions, claim).id)
         assert original is not None and original.state == "failed"
         assert _required(session.get(RecipeRun, started.owner_id)).state == "stopping"
         assert (
@@ -229,12 +213,13 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
         )
     stop = claim_agent(
         restarted_jobs,
-        claim.node_id,
+        fenced_operation(sessions, claim).node_id,
         "serial-0",
-        30,
-        capabilities=CAPABILITIES,
     )
-    assert stop is not None and stop.job_id == cleanup.id
+    assert (
+        stop is not None
+        and fenced_operation(sessions, stop).parent_job_id == cleanup.id
+    )
     restarted_jobs.record_result(
         _result(
             stop,
@@ -248,16 +233,23 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
         )
     )
     with sessions() as session:
-        child = _required(session.get(AgentOperation, stop.operation_id))
+        child = _required(
+            session.get(AgentOperation, fenced_operation(sessions, stop).id)
+        )
         assert _required(session.get(Job, cleanup.id)).state == "queued"
         assert child.retry_due_at is not None
         now[0] = child.retry_due_at + timedelta(seconds=1)
     retry = claim_agent(
-        restarted_jobs, claim.node_id, "serial-0", 30, capabilities=CAPABILITIES
+        restarted_jobs,
+        fenced_operation(sessions, claim).node_id,
+        "serial-0",
     )
-    assert retry is not None and retry.operation_id == stop.operation_id
-    assert retry.attempt == stop.attempt + 1 and retry.fence != stop.fence
-    restarted_jobs.record_result(_result(retry, {"stopped": True}))
+    assert retry is not None
+    assert fenced_operation(sessions, retry).id == fenced_operation(sessions, stop).id
+    assert fenced_attempt(sessions, retry).attempt == (
+        fenced_attempt(sessions, stop).attempt + 1
+    )
+    restarted_jobs.record_result(_result(retry, {}))
     now[0] += timedelta(seconds=6)
     worker.tick()
     with sessions() as session:
@@ -285,7 +277,7 @@ def test_retirement_refuses_expired_lease_inside_issued_launch_budget(
         tmp_path, postgres_engine
     )
     with sessions.begin() as session:
-        operation = session.get(AgentOperation, claim.operation_id)
+        operation = session.get(AgentOperation, fenced_operation(sessions, claim).id)
         assert operation is not None
         operation.payload = {
             **operation.payload,
@@ -308,7 +300,7 @@ def test_retirement_cleanup_never_takes_newer_workload_authority(
     assert projection.retire_job is not None
     projection.retire_job(started.id)
     with sessions.begin() as session:
-        node = session.get(AgentNode, claim.node_id)
+        node = session.get(AgentNode, fenced_operation(sessions, claim).node_id)
         assert node is not None
         node.workload_intent_ordinal += 1
         newer = node.workload_intent_ordinal
@@ -317,7 +309,9 @@ def test_retirement_cleanup_never_takes_newer_workload_authority(
     with sessions() as session:
         assert session.scalar(select(Job.id).where(Job.kind == "recipe.stop")) is None
         assert (
-            _required(session.get(AgentNode, claim.node_id)).workload_intent_ordinal
+            _required(
+                session.get(AgentNode, fenced_operation(sessions, claim).node_id)
+            ).workload_intent_ordinal
             == newer
         )
         assert "newer workload intent owns cleanup" in (
@@ -341,10 +335,6 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
         tmp_path, engine=postgres_engine
     )
     now = [NOW]
-    capabilities = (*CAPABILITIES, "recipe.install", "recipe.uninstall")
-    with sessions.begin() as session:
-        node = _required(session.get(AgentNode, nodes[0]))
-        node.capabilities = sorted(set(node.capabilities) | set(capabilities))
     jobs = AgentJobService(sessions, clock=lambda: now[0])
     lifecycle._clock = lambda: now[0]
     lifecycle._agent_jobs = jobs
@@ -353,10 +343,12 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
     install = lifecycle.install(
         plan, plan_digest=plan.plan_digest, actor="admin", request_id="retired-install"
     )
-    claim = claim_agent(jobs, nodes[0], "serial-0", 30, capabilities=capabilities)
+    claim = claim_agent(jobs, nodes[0], "serial-0")
     assert claim is not None
     with sessions.begin() as session:
-        child = _required(session.get(AgentOperation, claim.operation_id))
+        child = _required(
+            session.get(AgentOperation, fenced_operation(sessions, claim).id)
+        )
         child.state = "waiting-for-operator"
         child.current_attempt = RecoveryPolicy().max_failures
         attempt = _required(
@@ -379,7 +371,7 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
     projection.retire_job(install.id)
     now[0] += timedelta(seconds=6)
     assert lifecycle.reconcile_retired_operations()
-    cleanup = claim_agent(jobs, nodes[0], "serial-0", 30, capabilities=capabilities)
+    cleanup = claim_agent(jobs, nodes[0], "serial-0")
     assert cleanup is not None and cleanup.operation == "recipe.uninstall"
     jobs.record_result(
         _result(
