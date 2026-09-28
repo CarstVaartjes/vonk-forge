@@ -700,11 +700,16 @@ class RecipeOperationService:
         force: bool = False,
         admission_guard: Callable[[Session], None] | None = None,
     ) -> RecipeOperationView:
-        # An independent build request may refresh mutable builder inputs when
-        # accepted. A parent Run/Switch request already binds the exact build
-        # identity in its accepted plan, so its admission guard keeps that
-        # identity fixed while reserve_in_session rechecks current capacity.
-        if self._builds is not None and admission_guard is None:
+        # A stale independent build request is re-planned with the current
+        # builder inputs instead of being refused. A request that matches its
+        # plan keeps that exact identity, and a parent Run/Switch request binds
+        # the build identity in its accepted plan, so its admission guard keeps
+        # it fixed. reserve_in_session rechecks current capacity either way.
+        if (
+            self._builds is not None
+            and admission_guard is None
+            and build_input_sha256 != plan.build_input_sha256
+        ):
             builder_node_id = plan.builder_node_id
             with self._sessions() as session:
                 previous_build = session.get(RecipeBuild, plan.build_id)
