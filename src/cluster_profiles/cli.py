@@ -13,11 +13,18 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
-from typing import cast, overload
+from typing import Any, NoReturn, cast, overload
 
 from .build_identity import current_build
 from .cli_artifact_jobs import _may_have_completed
 from .cli_completion import completion_script
+from .cli_help import (
+    GROUP_VIEWS,
+    command_help,
+    group_help,
+    subcommands,
+    usage_error,
+)
 from .cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
@@ -52,53 +59,106 @@ _SENSITIVE_OPTION = re.compile(
 )
 
 
+_UPDATE_ORIGIN = "https://install.vonkforge.ai"
+
+
 class _UsageError(ValueError):
-    pass
+    def __init__(self, message: str, *, usage: str | None, next_step: str) -> None:
+        super().__init__(message)
+        self.usage = usage
+        self.next_step = next_step
+
+
+class _Subcommands(argparse._SubParsersAction):  # type: ignore[type-arg]
+    """Subcommands whose own help opens with the summary their group lists."""
+
+    def add_parser(self, name: str, **kwargs: Any) -> argparse.ArgumentParser:
+        if "help" in kwargs:
+            kwargs.setdefault("description", kwargs["help"])
+        return super().add_parser(name, **kwargs)
 
 
 class _CliParser(argparse.ArgumentParser):
-    def error(self, message: str) -> None:
-        raise _UsageError(message)
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.register("action", "parsers", _Subcommands)
+        for action in self._actions:
+            if isinstance(action, argparse._HelpAction):
+                action.help = "Show help"
+
+    def error(self, message: str) -> NoReturn:
+        text, usage, next_step = usage_error(self, message)
+        raise _UsageError(text, usage=usage, next_step=next_step)
+
+    def format_help(self) -> str:
+        if subcommands(self) is not None:
+            return group_help(self)
+        return command_help(self)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = _CliParser(
         prog="vonkctl",
-        description="Inspect Sparks, prepare assets, and run whole-fleet profiles.",
-        epilog="Start with vonkctl fleet or vonkctl model library. "
-        "Use vonkctl COMMAND --help for details. Connection: VONK_CONTROL_URL "
-        "and VONK_CONTROL_TOKEN_FILE (a private file).",
+        description="Run models on your Spark fleet: see what runs where, "
+        "prepare recipes, and load whole-fleet profiles.",
+        epilog="Connection: set VONK_CONTROL_URL and VONK_CONTROL_TOKEN_FILE "
+        "(a private file), then check it with vonkctl --check-connection.",
     )
-    parser.add_argument("--json", dest="global_json", action="store_true")
     parser.add_argument(
-        "--version", action="store_true", help="Show the installed CLI build identity"
+        "--json",
+        dest="global_json",
+        action="store_true",
+        help="Print one JSON document instead of text",
     )
-    parser.add_argument("--profile", dest="profile_number", type=int, default=None)
-    parser.add_argument("--no-input", action="store_true", help="Never prompt")
+    parser.add_argument(
+        "--profile",
+        dest="profile_number",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Profile number for profile commands (default: 1)",
+    )
+    parser.add_argument(
+        "--no-input",
+        action="store_true",
+        help="Never prompt; changes then need --yes",
+    )
     parser.add_argument(
         "--check-connection",
         action="store_true",
-        help="Validate credentials, TLS, and an authorized Controller read",
+        help="Check the Controller URL, token file, and access",
+    )
+    parser.add_argument(
+        "--version", action="store_true", help="Show the installed version"
     )
     commands = parser.add_subparsers(
         dest="command", required=False, parser_class=_CliParser
     )
     add_controller_commands(commands)
     completion = commands.add_parser(
-        "completion", help="Generate offline shell completion"
+        "completion", help="Print shell completion for bash or zsh"
     )
-    completion.add_argument("shell", choices=("bash", "zsh"))
-    update = commands.add_parser(
-        "update", help="Check or install the accepted CLI release"
+    completion.add_argument(
+        "shell", nargs="?", choices=("bash", "zsh"), metavar="SHELL", help="bash or zsh"
     )
+    update = commands.add_parser("update", help="Check for or install a newer vonkctl")
     update.add_argument(
         "--apply",
         action="store_true",
-        help="Install the signed wheel in this Python environment",
+        help="Install the newer signed release in this Python environment",
     )
-    update.add_argument("--channel", choices=("dev", "stable"), default=None)
-    update.add_argument("--origin", default="https://install.vonkforge.ai")
-    update.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    update.add_argument(
+        "--channel",
+        choices=("dev", "stable"),
+        default=None,
+        help="Release channel (default: the one this install came from)",
+    )
+    update.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Print one JSON document instead of text",
+    )
     return parser
 
 
@@ -470,7 +530,7 @@ def _emit(
         else _sanitize(payload)
     )
     if args.global_json or getattr(args, "json", False):
-        print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
+        print(_json_text(safe))
         return
     if error:
         code = safe.get("code")
@@ -517,6 +577,30 @@ def _emit(
                 else None
             ),
         )
+
+
+def _json_text(document: object) -> str:
+    """One JSON document: indented for a person, compact for a pipe."""
+
+    if sys.stdout.isatty():
+        return json.dumps(document, sort_keys=True, indent=2)
+    return json.dumps(document, sort_keys=True, separators=(",", ":"))
+
+
+def _bare_group(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> argparse.ArgumentParser | None:
+    """Return the group invoked without a command when it has no view of its own."""
+
+    current = parser
+    while (commands := subcommands(current)) is not None:
+        chosen = getattr(args, commands.dest, None)
+        if chosen is None:
+            return None if current.prog in GROUP_VIEWS - {"vonkctl"} else current
+        current = commands.choices[chosen]
+    if current.prog == "vonkctl completion" and args.shell is None:
+        return current
+    return None
 
 
 def main(
@@ -573,51 +657,52 @@ def _main(
         error_args = argparse.Namespace(
             global_json="--json" in raw_argv, json=False, command="profile"
         )
-        _emit(
-            {
-                "error": (
-                    "invalid command arguments"
-                    if _arguments_may_contain_secrets(raw_argv)
-                    else str(error)
-                ),
-                "error_type": "arguments",
-            },
-            error_args,
-            error=True,
-        )
+        document: dict[str, object] = {
+            "error": (
+                "invalid command arguments"
+                if _arguments_may_contain_secrets(raw_argv)
+                else str(error)
+            ),
+            "error_type": "arguments",
+            "recovery_actions": [error.next_step],
+        }
+        if error.usage is not None:
+            document["usage"] = error.usage
+        _emit(document, error_args, error=True)
         return 2
 
     if args.version:
         identity = current_build()
         if args.global_json:
-            print(json.dumps(identity, sort_keys=True, separators=(",", ":")))
+            print(_json_text(identity))
         else:
             source = identity["source_sha"] or "unstamped"
             print(f"vonkctl {identity['version']} ({source})")
         return 0
-    if args.command == "completion":
+    if args.command == "completion" and args.shell is not None:
         print(completion_script(parser, args.shell), end="")
         return 0
-    if args.command is None and not args.check_connection:
+    bare = _bare_group(parser, args)
+    if bare is not None and not args.check_connection:
         if args.global_json:
-            print(json.dumps({"help": parser.format_help()}))
+            print(_json_text({"help": bare.format_help()}))
         else:
-            parser.print_help()
+            bare.print_help()
         return 0
     if args.command == "update":
         try:
             result: dict[str, object] = run_update(
                 channel=args.channel or configured_update_channel(),
-                origin=args.origin,
+                origin=_UPDATE_ORIGIN,
                 apply=args.apply,
             )
-            cache_update_notice(result, origin=args.origin)
+            cache_update_notice(result)
             status = 0
         except (CliUpdateError, OSError) as error:
             result = {"error": _sanitize_text(error), "error_type": "update"}
             status = 2
         if args.global_json or getattr(args, "json", False):
-            print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+            print(_json_text(result))
         else:
             for name, value in result.items():
                 print(
