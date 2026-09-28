@@ -49,7 +49,7 @@ export function FleetPage({api}: {api: ControlApi; onBusyChange?(busy: boolean):
   }
 
   const enrollmentCommand = grant
-    ? `curl -fsSL ${grant.installer_url} | ${grant.controller_address ? `VONK_CONTROLLER_ADDRESS=${shellQuote(grant.controller_address)} ` : ""}sh -s -- --enroll`
+    ? `curl -fsSL ${grant.installer_url} | ${grant.controller_address ? `VONK_CONTROLLER_ADDRESS=${shellQuote(grant.controller_address)} ` : ""}VONK_ENROLLMENT_URL=${shellQuote(grant.enrollment_endpoint)} VONK_CONTROLLER_CA_SHA256=${shellQuote(grant.ca_fingerprint)} sh -s -- --enroll`
     : "";
 
   return <div className="fleet-page">

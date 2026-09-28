@@ -71,7 +71,7 @@ PLATFORMS = ("linux-arm64",)
 
 # How long a synthetic-canary operation may take before the lane calls it
 # stuck. The product bounds a single distributed step at
-# VONK_DISTRIBUTED_START_TIMEOUT_SECONDS, so a canary that never converges could
+# its fixed distributed start timeout, so a canary that never converges could
 # otherwise sit inside that budget; the canary moves a tiny synthetic asset set,
 # so a well-behaved operation converges in seconds and these diagnostic bounds
 # stay far below the product's. Waiting out the product budget only delays the
@@ -102,11 +102,8 @@ PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-arm64\Z")
 # of a certificate lifetime and its independent rotation lane polls on a bounded
 # interval, so 90 seconds leaves real scheduling margin in every ARM64 gate.
 CERTIFICATE_LIFETIME_SECONDS = 90
-CANARY_PACKAGE_PORT = 8086
-ENROLLMENT_HOST = "enroll.spark.localhost"
-AGENT_HOST = "agents.spark.localhost"
-REGISTRY_HOST = "registry.spark.localhost"
 CONTROLLER_ADDRESS = "127.0.0.1"
+CANARY_CATALOG_IMPORT = Path(__file__).with_name("spark_canary_catalog_import.py")
 SPARK_CONFIG = Path("/etc/vonk-forge-agent/agent.toml")
 AGENT_BINARY = Path("/usr/lib/vonk-forge/vonk-agent")
 AGENT_DATA = Path("/var/lib/vonk-forge-agent")
@@ -141,6 +138,13 @@ LOCAL_CONTROL_SERVICE = "svc:vonk-forge-spark-local"
 LOCAL_HERMES_API_SERVICE = "svc:hermes-api-spark-local"
 LOCAL_HERMES_DASHBOARD_SERVICE = "svc:hermes-dashboard-spark-local"
 LOCAL_DNS_SUFFIX = "spark.acceptance.invalid"
+# The installer derives every controller SNI name from the control hostname.
+LOCAL_CONTROL_HOSTNAME = (
+    f"{LOCAL_CONTROL_SERVICE.removeprefix('svc:')}.{LOCAL_DNS_SUFFIX}"
+)
+ENROLLMENT_HOST = f"enroll.{LOCAL_CONTROL_HOSTNAME}"
+AGENT_HOST = f"agents.{LOCAL_CONTROL_HOSTNAME}"
+REGISTRY_HOST = f"registry.{LOCAL_CONTROL_HOSTNAME}"
 DISABLED_TAILSCALE_CREDENTIAL = "tailscale-disabled-for-spark-acceptance"
 FORBIDDEN_SPARK_TAILNET_INPUTS = (
     "VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX",
@@ -500,6 +504,17 @@ def _run_spark_bootstrap(
     )
 
 
+def _set_bundle_environment(bundle: Path, values: dict[str, str]) -> None:
+    environment = bundle / ".env"
+    lines = [
+        line
+        for line in environment.read_text(encoding="utf-8").splitlines()
+        if line.partition("=")[0] not in values
+    ]
+    lines.extend(f"{name}={json.dumps(value)}" for name, value in values.items())
+    environment.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _configure_acceptance_renewal(
     bundle: Path, *, lifetime_seconds: int, agent_source_address: str
 ) -> None:
@@ -534,6 +549,7 @@ def _configure_acceptance_renewal(
         or claims.get("disableSmallstepExtensions") is not True
     ):
         raise LifecycleError("Step CA provisioner claims are invalid")
+    # The Controller derives the agent certificate lifetime from this claim.
     duration = f"{lifetime_seconds}s"
     claims.update(
         defaultTLSCertDuration=duration,
@@ -546,15 +562,8 @@ def _configure_acceptance_renewal(
     compose_path = bundle / "docker-compose.yaml"
     try:
         compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
-        control = compose["services"]["control-api"]
-        environment = control["environment"]
-    except (OSError, TypeError, KeyError, yaml.YAMLError) as error:
+    except (OSError, yaml.YAMLError) as error:
         raise LifecycleError("Compose controller configuration is invalid") from error
-    if not isinstance(environment, dict) or (
-        "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS" in environment
-    ):
-        raise LifecycleError("Compose controller environment is invalid")
-    environment["VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS"] = str(lifetime_seconds)
     try:
         caddy_service = compose["services"]["caddy"]
         caddy_ports = caddy_service["ports"]
@@ -607,98 +616,6 @@ def _configure_acceptance_renewal(
     ):
         raise LifecycleError("Compose acceptance network topology is invalid")
     caddy_networks.append("cluster-egress")
-    compose_path.write_text(
-        yaml.safe_dump(compose, sort_keys=False, default_flow_style=False),
-        encoding="utf-8",
-    )
-    os.chmod(compose_path, 0o644)
-
-
-def _configure_canonical_canary_library(
-    bundle: Path, fixture: CanonicalCanaryFixture
-) -> None:
-    """Serve one exact producer package to the isolated Controller sync client."""
-
-    compose_path = bundle / "docker-compose.yaml"
-    try:
-        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
-        control_environment = compose["services"]["control-api"]["environment"]
-        caddy_service = compose["services"]["caddy"]
-        caddy_configs = caddy_service["configs"]
-        caddy_source = next(
-            value["source"]
-            for value in caddy_configs
-            if value.get("target") == "/etc/caddy/Caddyfile"
-        )
-        caddy_path = bundle / "secrets/runtime-configs" / caddy_source
-        caddy = caddy_path.read_text(encoding="utf-8")
-    except (
-        OSError,
-        UnicodeDecodeError,
-        TypeError,
-        KeyError,
-        StopIteration,
-        yaml.YAMLError,
-    ) as error:
-        raise LifecycleError(
-            "canonical canary Controller package boundary is invalid"
-        ) from error
-    if (
-        not isinstance(control_environment, dict)
-        or not isinstance(caddy_service, dict)
-        or f"http://:{CANARY_PACKAGE_PORT}" in caddy
-    ):
-        raise LifecycleError("canonical canary Controller package boundary is invalid")
-    serving_root = bundle / "secrets/synthetic-recipe-library"
-    index_target = serving_root / "v1/recipe-library/index.json"
-    package_target = serving_root / Path(*fixture.package_path.parts)
-    try:
-        index_target.parent.mkdir(mode=0o755, parents=True)
-        package_target.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-        index_target.write_bytes(fixture.index_bytes)
-        package_target.write_bytes(fixture.package_bytes)
-    except OSError as error:
-        raise LifecycleError("canonical canary package staging failed") from error
-    # The producer's package path is repository-relative and may contain
-    # several directories (the canonical canary lives under
-    # ``tests/fixtures/...``).  ``Path.mkdir(parents=True)`` applies its mode
-    # only to the leaf, so make every bind-mounted ancestor traversable by
-    # Caddy explicitly even under a private umask.
-    package_directories = [
-        path for path in package_target.parents if path.is_relative_to(serving_root)
-    ]
-    for directory in (
-        serving_root,
-        serving_root / "v1",
-        serving_root / "v1/recipe-library",
-        *reversed(package_directories),
-    ):
-        os.chmod(directory, 0o755)
-    os.chmod(index_target, 0o644)
-    os.chmod(package_target, 0o644)
-    if (
-        index_target.read_bytes() != fixture.index_bytes
-        or package_target.read_bytes() != fixture.package_bytes
-    ):
-        raise LifecycleError("canonical canary staged package bytes differ")
-    control_environment["VONK_RECIPE_LIBRARY_PACKAGE_URL"] = (
-        f"http://caddy:{CANARY_PACKAGE_PORT}"
-    )
-    volumes = caddy_service.setdefault("volumes", [])
-    if not isinstance(volumes, list):
-        raise LifecycleError("canonical canary Caddy volumes are invalid")
-    volumes.append("./secrets/synthetic-recipe-library:/srv/vonk-recipe-library:ro")
-    caddy_path.write_text(
-        caddy.rstrip()
-        + f"\n\nhttp://:{CANARY_PACKAGE_PORT} {{\n"
-        + "\troot * /srv/vonk-recipe-library\n"
-        + f"\t@canary_package path /{fixture.package_path.as_posix()}\n"
-        + "\theader @canary_package Content-Type application/octet-stream\n"
-        + "\tfile_server\n"
-        + "}\n",
-        encoding="utf-8",
-    )
-    os.chmod(caddy_path, 0o644)
     compose_path.write_text(
         yaml.safe_dump(compose, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
@@ -1089,13 +1006,15 @@ class SparkLifecycle:
         timeout: int = 300,
         report_failure_output: bool = False,
         allowed_returncodes: tuple[int, ...] = (0,),
+        input_text: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         try:
             result = subprocess.run(
                 command,
                 cwd=cwd,
                 env=host_command_environment(),
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL if input_text is None else None,
+                input=input_text,
                 text=True,
                 capture_output=True,
                 timeout=timeout,
@@ -1335,12 +1254,11 @@ class SparkLifecycle:
         ):
             raise LifecycleError("Spark lifecycle target is not fresh")
 
-    def _controller_response_replacements(self) -> dict[str, str]:
+    def _controller_site_values(self) -> dict[str, str]:
+        """Synthetic Spark networks, set in .env where an operator would."""
         return {
-            "Trusted Spark management CIDRs: ": "172.16.0.0/12",
-            "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ": (
-                f"198.19.{self.synthetic_fabric_octet}.0/24"
-            ),
+            "VONK_MANAGEMENT_CIDRS": "172.16.0.0/12",
+            "VONK_DIRECT_FABRIC_CIDRS": f"198.19.{self.synthetic_fabric_octet}.0/24",
         }
 
     def _start_controller(self) -> None:
@@ -1359,14 +1277,7 @@ class SparkLifecycle:
             hermes=False,
             control_service=self.tailnet_services["control"],
             hermes_dashboard_service=self.tailnet_services["hermes_dashboard"],
-            enrollment_hostname=ENROLLMENT_HOST,
-            agent_hostname=AGENT_HOST,
-            registry_hostname=REGISTRY_HOST,
         )
-        replacements = self._controller_response_replacements()
-        responses = [
-            (prompt, replacements.get(prompt, answer)) for prompt, answer in responses
-        ]
         release_url = (
             f"{self.origin}/artifacts/{self.arguments.channel}/releases/"
             f"{self.arguments.generation}"
@@ -1377,6 +1288,7 @@ class SparkLifecycle:
             child_environment=child_environment,
             responses=responses,
         )
+        _set_bundle_environment(self.bundle, self._controller_site_values())
         _configure_acceptance_renewal(
             self.bundle,
             lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS,
@@ -1384,7 +1296,6 @@ class SparkLifecycle:
         )
         library_root = self._required_environment("VONK_RECIPE_LIBRARY_ROOT")
         self.synthetic_canary_fixture = _canonical_canary_fixture(Path(library_root))
-        _configure_canonical_canary_library(self.bundle, self.synthetic_canary_fixture)
         self._assert_project_is_empty()
         self._assert_compose_image_graph()
         try:
@@ -1852,10 +1763,6 @@ class SparkLifecycle:
             "VONK_NODE_MANAGEMENT_IP": node_management_ip,
             "VONK_NODE_FABRIC_IP": node_fabric_ip,
             "VONK_PEER_FABRIC_IP": peer_fabric_ip,
-            "VONK_ENDPOINT_HOST_PORTS": "8000,8101",
-            "VONK_HOST_ENDPOINT_PORTS": "8888",
-            "VONK_RENDEZVOUS_PORT": "29500",
-            "VONK_FABRIC_BANDWIDTH_MBPS": "200000",
         }
 
     def _installer_environment(self, *, baseline: bool) -> dict[str, str]:
@@ -2102,6 +2009,47 @@ class SparkLifecycle:
             "transport": "direct",
         }
 
+    def _import_canary_catalog(
+        self, fixture: CanonicalCanaryFixture, request_key: str
+    ) -> dict[str, object]:
+        """Apply the producer fixture through the Controller's catalog sync.
+
+        Production Controllers only read signed recipe releases, so the
+        fixture's exact index and package bytes are handed to the running
+        control-api container, which imports them with its own sync service.
+        """
+        assert self.bundle is not None
+        result = self._run_command(
+            self._compose(
+                "exec",
+                "-T",
+                "--user",
+                "10001:10001",
+                "control-api",
+                "python",
+                "-c",
+                CANARY_CATALOG_IMPORT.read_text(encoding="utf-8"),
+            ),
+            cwd=self.bundle,
+            timeout=660,
+            report_failure_output=True,
+            input_text=json.dumps(
+                {
+                    "request_key": request_key,
+                    "index": fixture.index_bytes.decode("utf-8"),
+                    "package": base64.b64encode(fixture.package_bytes).decode("ascii"),
+                }
+            ),
+        )
+        lines = result.stdout.strip().splitlines()
+        try:
+            sync = json.loads(lines[-1])
+        except (IndexError, json.JSONDecodeError) as error:
+            raise LifecycleError(
+                "synthetic canary catalog import returned no sync view"
+            ) from error
+        return require_object(sync, "synthetic canary catalog sync")
+
     def _run_synthetic_canary(self, node_id: str) -> dict[str, object]:
         assert (
             self.control is not None
@@ -2114,17 +2062,9 @@ class SparkLifecycle:
         completed = ["inventory-ready"]
         response_digest: str | None = None
         try:
-            _, sync_payload = self.control.request(
-                "POST",
-                "/api/catalog/managed-recipes/sync",
-                {
-                    "request_key": self._canary_request_key(
-                        fixture, node_id, "catalog-sync"
-                    ),
-                    "expected_commit": fixture.source_commit,
-                },
+            sync = self._import_canary_catalog(
+                fixture, self._canary_request_key(fixture, node_id, "catalog-sync")
             )
-            sync = require_object(sync_payload, "synthetic canary catalog sync")
             # The sync counts every catalog document it applies: the one canary
             # Recipe plus the model documents its catalog index carries.
             total = sync.get("total_count")

@@ -1,9 +1,8 @@
 #!/bin/sh
 set -eu
 
-test_root=${HERMES_ENTRYPOINT_TEST_ROOT:-}
-secret_path="${test_root}/run/secrets/hermes-api-key"
-litellm_key_path="${test_root}/run/secrets/hermes-litellm-key"
+secret_path=/run/secrets/hermes-api-key
+litellm_key_path=/run/secrets/hermes-litellm-key
 
 fail() {
     printf '%s\n' "ERROR: Hermes API key file is invalid" >&2
@@ -53,8 +52,15 @@ case "${OPENAI_API_KEY}" in
 esac
 export OPENAI_API_KEY
 
-if [ "${HERMES_ENTRYPOINT_TEST_ONLY:-0}" = "1" ]; then
-    exit 0
-fi
+# The dashboard is the svc:hermes-dashboard Tailscale Service, a sibling of
+# the control hostname's svc:vonk-forge (vonk-forge.<tailnet> ->
+# hermes-dashboard.<tailnet>).
+control_hostname=${VONK_CONTROL_HOSTNAME:-vonk-forge.local}
+case "${control_hostname}" in
+    *.*) tailnet_domain=${control_hostname#*.} ;;
+    *) tailnet_domain=${control_hostname} ;;
+esac
+: "${API_SERVER_CORS_ORIGINS:=https://hermes-dashboard.${tailnet_domain}}"
+export API_SERVER_CORS_ORIGINS
 
 exec /init /opt/hermes/docker/main-wrapper.sh "$@"

@@ -77,7 +77,6 @@ fn persist_binding(
     let runtime = OciRuntime {
         runner: &runner,
         data_root: &input.data_root,
-        huggingface_curl_config: None,
     };
     let start_plan = if matches!(
         input.request.phase,

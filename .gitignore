@@ -10,7 +10,6 @@
 /inventory/sbom/manifest.json
 .env
 .env.*
-!.env.example
 tailscale-oauth-client-id
 tailscale-oauth-client-secret
 *.key

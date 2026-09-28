@@ -1,10 +1,11 @@
 #!/bin/sh
 set -eu
 
-: "${COMPOSE_PROJECT_NAME:?set Compose project name}"
+: "${COMPOSE_PROJECT_NAME:=vonk-forge-control}"
 : "${ORAS_PUBLISHER_IMAGE:?set digest-pinned ORAS publisher image}"
 : "${RELEASE_TAG:?set operator release tag}"
-: "${REGISTRY_REPOSITORY:?set registry repository}"
+# Agents pull operator releases from this one fixed repository.
+registry_repository=vonk/releases
 
 case "$COMPOSE_PROJECT_NAME" in
   [a-z0-9]* ) ;;
@@ -16,10 +17,6 @@ esac
 if [ "${#RELEASE_TAG}" -gt 128 ] \
   || ! printf '%s\n' "$RELEASE_TAG" | LC_ALL=C /usr/bin/grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]*$'; then
   echo "release tag is invalid" >&2
-  exit 64
-fi
-if ! printf '%s\n' "$REGISTRY_REPOSITORY" | LC_ALL=C /usr/bin/grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$'; then
-  echo "registry repository is invalid" >&2
   exit 64
 fi
 case "$ORAS_PUBLISHER_IMAGE" in
@@ -49,4 +46,4 @@ exec docker run --rm \
   -v "$release_directory:/release:ro" \
   -w /release \
   "$ORAS_PUBLISHER_IMAGE" \
-  push --plain-http "registry:5000/$REGISTRY_REPOSITORY:$RELEASE_TAG" .
+  push --plain-http "registry:5000/$registry_repository:$RELEASE_TAG" .

@@ -74,9 +74,8 @@ against the release's exact commit. The local controller resolves every recipe
 dependency by `kind`, `publisher`, `slug`, and content digest; it never turns
 a branch, display name, or `latest` tag directly into execution authority.
 
-The Controller refreshes the managed catalog automatically every 15 minutes by
-default. Set `VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS` between 60 and 86400
-seconds only when a different cadence is required. Opening Library also offers
+The Controller refreshes the managed catalog automatically every 15 minutes.
+Opening Library also offers
 **Update from Vonk Forge remote** for an immediate administrator-triggered
 refresh. Both paths use the same durable, idempotent operation and exact commit
 gate. The import receipt records the exact library commit and recipe path;
@@ -202,18 +201,12 @@ implementation or weaken the runtime security and evidence contract.
 
 ### Distributed cold-start budget
 
-Set `VONK_DISTRIBUTED_START_TIMEOUT_SECONDS` on both the Controller API and
-worker to change the budget a distributed model gets to load weights or compile
-kernels. Values must be between 60 and 3600 seconds, and the default is 3600 —
-a bounded 60-minute cold start. The shipped Compose default is the same 3600, so
-a deployment that sets nothing still admits a long cold start; a test asserts
-those two defaults agree rather than repeating the number. This sets one
-immutable deadline when the run is admitted, covering rank launch and
-collective readiness.
-Changing the setting affects newly admitted runs only. It does not extend active
+A distributed model gets a fixed 60-minute (3600 s) budget to load weights or
+compile kernels. It is one immutable deadline set when the run is admitted,
+covering rank launch and collective readiness. It does not extend active
 deadlines, publish an unready endpoint, or change rank-loss recovery and stop
 timeouts. Native agents continue enforcing the signed operation's deadline.
-The default is deliberately the largest value the contract allows: 60 minutes is
+The budget is deliberately the largest value the contract allows: 60 minutes is
 headroom for a frontier model that must load weights and compile kernels across
 two Sparks, and the lease-lapse evidence now makes a start that stalls visible
 long before the budget ends. It is not a promise that every model needs that

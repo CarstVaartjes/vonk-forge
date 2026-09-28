@@ -19,7 +19,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import httpx2
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -42,23 +41,20 @@ from vonk_control.library_contract import (
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem
-from vonk_control.recipe_packages import (
-    PACKAGE_MEDIA_TYPE,
-    RecipePackageClient,
-)
 from vonk_control.source_bundles import SourceBundleStore
 
 from .recipe_library_source import recipe_library_root
+from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 SHA1 = re.compile(r"^[0-9a-f]{40}$")
+pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
 
 @dataclass(frozen=True)
 class FrozenCorpus:
     index: dict[str, Any]
     package_root: Path
-    publication_commit: str | None
 
 
 def _require_sha1(value: object, *, label: str) -> str:
@@ -101,14 +97,10 @@ def _load_frozen_corpus() -> FrozenCorpus:
         index.get("recipes"), list
     ):
         pytest.fail("canonical catalog index does not contain Models and Recipes")
-    publication = index.get("publication_commit")
-    if publication is not None:
-        _require_sha1(publication, label="catalog publication identity")
     _require_sha1(index.get("source_commit"), label="catalog source commit")
     return FrozenCorpus(
         index=index,
         package_root=package_root,
-        publication_commit=publication,
     )
 
 
@@ -142,51 +134,12 @@ def _selected_model_keys(index: dict[str, Any]) -> set[tuple[str, str, str]]:
     }
 
 
-def _package_path(corpus: FrozenCorpus, row: dict[str, Any]) -> Path:
-    package = row["package"]
-    location = Path(str(package["path"]))
+def _package_path(corpus: FrozenCorpus, package_path: str) -> Path:
+    location = Path(package_path)
     direct = corpus.package_root / location
     if direct.is_file():
         return direct
     pytest.fail(f"frozen package archive is unavailable: {location}")
-
-
-def _transport(corpus: FrozenCorpus, calls: list[str]) -> httpx2.MockTransport:
-    index_bytes = json.dumps(
-        corpus.index, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    by_name = {
-        Path(str(row["package"]["path"])).name: row for row in corpus.index["recipes"]
-    }
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        calls.append(request.url.path)
-        if request.url.path.endswith("index.json"):
-            # Raw GitHub serves generated catalog JSON as text/plain on some
-            # publication paths.  The production reader accepts both MIME
-            # types, so keep this acceptance transport representative.
-            headers = {"content-type": "text/plain"}
-            if corpus.publication_commit:
-                headers["x-vonk-publication-commit"] = corpus.publication_commit
-            return httpx2.Response(200, headers=headers, content=index_bytes)
-        row = by_name.get(Path(request.url.path).name)
-        if row is None:
-            return httpx2.Response(404)
-        archive = _package_path(corpus, row).read_bytes()
-        return httpx2.Response(
-            200,
-            headers={
-                "content-type": PACKAGE_MEDIA_TYPE,
-                **(
-                    {"x-vonk-publication-commit": corpus.publication_commit}
-                    if corpus.publication_commit
-                    else {}
-                ),
-            },
-            content=archive,
-        )
-
-    return httpx2.MockTransport(handler)
 
 
 def _upgrade_fresh_database(engine: Engine) -> None:
@@ -317,7 +270,7 @@ def test_frozen_corpus_closure_is_dynamic() -> None:
     for row in recipes:
         package = row["package"]
         digest = str(package["sha256"])
-        archive = _package_path(corpus, row)
+        archive = _package_path(corpus, str(package["path"]))
         assert archive.stat().st_size == package["expected_bytes"]
         assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
 
@@ -338,13 +291,11 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         cursors=TokenCodec(b"f" * 32).cursor_codec(),
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
     )
-    calls: list[str] = []
-    reader = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=_transport(corpus, calls),
-        publication_commit=corpus.publication_commit,
+    release = SignedRecipeRelease(
+        corpus.index,
+        lambda location: _package_path(corpus, location).read_bytes(),
     )
+    reader = release.client(tmp_path / "packages")
     snapshot = reader.list()
     reader.prepare(snapshot)
     model_keys = {_model_key(row) for row in corpus.index["catalog_entities"]}
@@ -352,8 +303,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     for item in fetched_items:
         assert item.package_handle is not None
         assert item.package_handle.source_commit == snapshot.commit
-        if corpus.publication_commit is not None:
-            assert item.package_handle.publication_commit == corpus.publication_commit
+        assert item.package_handle.publication_commit == snapshot.commit
     package_model_keys = {
         identity
         for item in fetched_items
@@ -376,9 +326,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         f"updated={result.updated_count} skipped={result.skipped_count}"
     )
     assert result.imported_count == len(corpus.index["recipes"])
-    assert len([path for path in calls if path.endswith(".tar.gz")]) == len(
-        corpus.index["recipes"]
-    )
+    assert len(release.package_downloads) == len(corpus.index["recipes"])
 
     forbidden_tables = {
         "local_recipes",
@@ -541,25 +489,16 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     api.close()
     reader.close()
 
-    # A new reader can continue from the durable snapshot and package objects
-    # with the publication endpoint unavailable.  The failed index request is
-    # visible in calls; no package request is hidden behind synthetic success.
-    offline_calls: list[str] = []
-
-    def offline(request: httpx2.Request) -> httpx2.Response:
-        offline_calls.append(request.url.path)
-        raise httpx2.ConnectError("publication offline", request=request)
-
-    restarted = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(offline),
-        publication_commit=corpus.publication_commit,
-    )
+    # A new reader can continue from the durable, re-verified snapshot and
+    # package objects with the release unavailable.  The failed release request
+    # is visible; no package request is hidden behind synthetic success.
+    release.requests.clear()
+    release.offline = True
+    restarted = release.client(tmp_path / "packages")
     offline_snapshot = restarted.list()
     restarted.prepare(offline_snapshot)
     assert offline_snapshot.commit == snapshot.commit
     assert len(offline_snapshot.items) == len(corpus.index["recipes"])
-    assert offline_calls == ["/v1/recipe-library/index.json"]
+    assert release.requests == [f"/repos/{REPOSITORY}/releases/latest"]
     assert not (tmp_path / "packages" / "snapshot.candidate.json").exists()
     restarted.close()

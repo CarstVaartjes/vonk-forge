@@ -99,8 +99,8 @@ def test_compose_secret_staging_gives_step_ca_its_config(
         source / "step-ca-config",
         destination / "step-ca" / "ca.json",
         1000,
-        1000,
-        0o400,
+        10001,
+        0o440,
     ) in staged
 
 

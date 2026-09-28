@@ -132,8 +132,10 @@ signed CRL whose update window is current and bounded to that configured hour.
 
 ## Start and verify the production provider
 
-Set `STEP_CA_CONFIG_FILE`, `AGENT_CA_PROVISIONER_KID`, and all file variables
-before starting the Compose graph. Verify the provider directly:
+Set `STEP_CA_CONFIG_FILE` and all file variables before starting the Compose
+graph. The Controller reads the provisioner key ID from the public JWK and the
+certificate lifetime from the provisioner's `defaultTLSCertDuration`. Verify the
+provider directly:
 
 ```sh
 docker compose ps
@@ -143,8 +145,7 @@ docker compose exec step-ca step ca health \
 ```
 
 Only Caddy publishes a port. step-ca and control-api share the internal `ca`
-network. The worker has `VONK_AGENT_RUNTIME=disabled` and loads no CA, proxy, or
-agent credential. Inspect the rendered mounts and confirm no root private key.
+network. The worker never reads CA, proxy, or agent credentials. Inspect the rendered mounts and confirm no root private key.
 
 ## Revocation and uncertain remote results
 

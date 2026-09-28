@@ -42,10 +42,7 @@ def test_fresh_postgres_initializes_the_litellm_database() -> None:
         "/run/vonk-source-assets/postgres/init-databases.sh:ro" in postgres["volumes"]
     )
     assert canonical["secrets"]["litellm-database-password"] == {
-        "file": (
-            "${LITELLM_DATABASE_PASSWORD_FILE:?"
-            "set LiteLLM database password secret file}"
-        )
+        "file": "./secrets/litellm-database-password"
     }
 
 

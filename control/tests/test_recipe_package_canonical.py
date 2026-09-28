@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -33,17 +32,15 @@ from vonk_control.recipe_builds import (
     _canonical_build,
     _source_policy_document,
 )
-from vonk_control.recipe_packages import (
-    PACKAGE_MEDIA_TYPE,
-    RecipePackageClient,
-    RecipePackageError,
-)
+from vonk_control.recipe_packages import RecipePackageError
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_control.source_policy import inspect_build_source_policy
 
 from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 ROOT = recipe_library_root()
+pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
 
 def _fixture() -> tuple[dict[str, object], dict[str, object], bytes]:
@@ -74,33 +71,14 @@ def _repack(files: dict[str, bytes]) -> bytes:
     return gzip.compress(output.getvalue(), compresslevel=9, mtime=0)
 
 
-def test_candidate_package_decodes_and_restart_only_reads_index(tmp_path: Path) -> None:
+def test_candidate_package_decodes_and_restart_reuses_the_cached_package(
+    tmp_path: Path,
+) -> None:
     index, row, package = _fixture()
     index["recipes"] = [row]
-    package_path = require_mapping(row["package"], "fixture recipe package metadata")[
-        "path"
-    ]
-    assert isinstance(package_path, str)
-    calls: list[str] = []
+    release = SignedRecipeRelease(index, lambda _location: package)
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        calls.append(request.url.path)
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=json.dumps(index).encode(),
-            )
-        assert request.url.path.endswith(Path(package_path).name)
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
-    )
+    client = release.client(tmp_path / "packages")
     snapshot = client.list()
     assert len(snapshot.catalog_entities) == len(
         require_sequence(index["catalog_entities"], "fixture model catalog")
@@ -110,14 +88,10 @@ def test_candidate_package_decodes_and_restart_only_reads_index(tmp_path: Path) 
     assert item.dependencies and item.dependencies[0]["kind"] == "model"
     client.close()
 
-    calls.clear()
-    restarted = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
-    )
+    release.requests.clear()
+    restarted = release.client(tmp_path / "packages")
     restarted.prepare(restarted.list())
-    assert calls == ["/v1/recipe-library/index.json"]
+    assert release.package_downloads == []
     restarted.close()
 
 
@@ -131,21 +105,8 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     assert row["source_path"] == (
         "tests/fixtures/canonical-synthetic-canary/recipe.json"
     )
-    index_bytes = json.dumps(index).encode()
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200, headers={"content-type": "application/json"}, content=index_bytes
-            )
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
+    client = SignedRecipeRelease(index, lambda _location: package).client(
+        tmp_path / "packages"
     )
     snapshot = client.list()
     item = client.fetch(snapshot.items[0].uri)
@@ -275,23 +236,12 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
 def test_candidate_package_rejects_unsafe_source_path(
     tmp_path: Path, source_path: str
 ) -> None:
-    index, row, _package = _fixture()
+    index, row, package = _fixture()
     index = copy.deepcopy(index)
     index["recipes"] = [copy.deepcopy(row)]
     index["recipes"][0]["source_path"] = source_path
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        assert request.url.path.endswith("index.json")
-        return httpx2.Response(
-            200,
-            headers={"content-type": "application/json"},
-            content=json.dumps(index).encode(),
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
+    client = SignedRecipeRelease(index, lambda _location: package).client(
+        tmp_path / "packages"
     )
     with pytest.raises(RecipePackageError, match="invalid"):
         client.list()
@@ -335,22 +285,8 @@ def test_candidate_package_rejects_model_snapshot_digest_mismatch(
     assert isinstance(row_package, dict)
     row_package["sha256"] = hashlib.sha256(package).hexdigest()
     row_package["expected_bytes"] = len(package)
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=json.dumps(index).encode(),
-            )
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
+    client = SignedRecipeRelease(index, lambda _location: package).client(
+        tmp_path / "packages"
     )
     with pytest.raises(RecipePackageError, match="invalid"):
         client.fetch(client.list().items[0].uri)
@@ -362,21 +298,8 @@ def test_candidate_package_imports_into_canonical_controller_documents(
 ) -> None:
     index, row, package = _fixture()
     index["recipes"] = [row]
-    index_bytes = json.dumps(index).encode()
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200, headers={"content-type": "application/json"}, content=index_bytes
-            )
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
+    client = SignedRecipeRelease(index, lambda _location: package).client(
+        tmp_path / "packages"
     )
     item = client.fetch(client.list().items[0].uri)
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
@@ -521,23 +444,7 @@ def test_package_with_an_incompatible_document_does_not_block_other_packages(
     first["package"]["sha256"] = hashlib.sha256(incompatible).hexdigest()
     first["package"]["expected_bytes"] = len(incompatible)
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=json.dumps(index).encode(),
-            )
-        path = next(key for key in packages if request.url.path.endswith(key))
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=packages[path]
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
-    )
+    client = SignedRecipeRelease(index, packages).client(tmp_path / "packages")
     snapshot = client.list()
     client.prepare(snapshot)
     skipped, kept = snapshot.items

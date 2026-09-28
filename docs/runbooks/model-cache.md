@@ -40,9 +40,8 @@ weights. An in-progress refresh keeps the previous verified copy available.
 Upstream preparation, including Hugging Face downloads, shares a bounded pool
 of eight concurrent files across active cache operations. Each file of at least
 64 MiB may use four resumable HTTP range requests when temporary disk space
-allows, for up to 32 simultaneous data requests. The
-`VONK_MODEL_CACHE_PARALLEL_DOWNLOADS` setting controls the file pool, accepts
-1 through 16, and defaults to 8. It does not set a per-connection speed limit.
+allows, for up to 32 simultaneous data requests. There is no per-connection
+speed limit.
 
 ## Remove and cancel
 

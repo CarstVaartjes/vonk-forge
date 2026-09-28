@@ -590,7 +590,7 @@ fn configured_install(paths: &InstallPaths, ca: &[u8], state: &str) {
     fs::write(
         &paths.config,
         format!(
-            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\nfabric_address = \"192.168.100.10\"\nfabric_bandwidth_mbps = 200000\n",
+            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\nfabric_address = \"192.168.100.10\"\nfabric_bandwidth_mbps = 200000\n",
             paths.ca.display(),
             ca_fingerprint(ca),
         ),
@@ -774,23 +774,16 @@ fn fresh_preparation_discovers_and_prompts_before_a_stdin_only_sudo_handoff() {
     )
     .unwrap();
 
-    assert_eq!(prepare_runner.commands.len(), 2);
-    assert!(
-        prepare_runner
-            .commands
-            .iter()
-            .all(|command| command.program == std::path::Path::new("/usr/bin/curl"))
-    );
-    assert!(
-        prepare_runner.commands[0]
-            .args
-            .contains(&"--insecure".to_owned())
-    );
-    assert!(
-        prepare_runner.commands[1]
-            .args
-            .contains(&"--cacert".to_owned())
-    );
+    // Besides read-only host address detection, discovery is exactly two
+    // curl requests: the pinned-fingerprint probe, then verified TLS.
+    let curls = prepare_runner
+        .commands
+        .iter()
+        .filter(|command| command.program == std::path::Path::new("/usr/bin/curl"))
+        .collect::<Vec<_>>();
+    assert_eq!(curls.len(), 2);
+    assert!(curls[0].args.contains(&"--insecure".to_owned()));
+    assert!(curls[1].args.contains(&"--cacert".to_owned()));
 
     let mut root_runner = RecordingRunner::default();
     handoff_to_root_with_authority(&prepared, &mut root_runner, &ReleaseAuthority::canonical())
@@ -870,11 +863,18 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
     let ca = controller_ca();
     fs::write(&install_paths.hosts, "127.0.0.1 localhost\n").unwrap();
     let mut prepare_runner = runner_with_private_controller_bootstrap(&ca);
+    // The Controller's command supplies the NAS address, enrollment URL and
+    // CA fingerprint; only this host's own addresses remain to be asked.
     let mut prompt = fresh_answers(&ca);
-    prompt.values.remove(2);
+    prompt.values.drain(0..3);
     let prepared = prepare_setup(
         &request(temporary.path())
             .with_controller_address(Some("192.168.1.231"))
+            .unwrap()
+            .with_enrollment_values(
+                Some("https://enroll.example.test"),
+                Some(&ca_fingerprint(&ca)),
+            )
             .unwrap(),
         &install_paths,
         &mut prompt,
@@ -882,7 +882,11 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
         CallerIdentity::unprivileged(1000),
     )
     .unwrap();
-    for command in &prepare_runner.commands {
+    for command in prepare_runner
+        .commands
+        .iter()
+        .filter(|command| command.program == std::path::Path::new("/usr/bin/curl"))
+    {
         assert!(command.args.windows(2).any(|arguments| {
             arguments == ["--resolve", "enroll.example.test:443:192.168.1.231"]
         }));

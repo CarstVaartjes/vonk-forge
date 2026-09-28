@@ -56,9 +56,7 @@ fn cli_version_and_self_test_share_the_compiled_semantic_identity() {
          ca_path = \"{}\"\n\
          ca_sha256 = \"{}\"\n\
          data_dir = \"{}\"\n\
-         node_id = \"{NODE_ID}\"\n\
-         poll_min_seconds = 2\n\
-         poll_max_seconds = 60\n",
+         node_id = \"{NODE_ID}\"\n",
         ca_path.display(),
         hex::encode(Sha256::digest(certificate.der())),
         data.display(),

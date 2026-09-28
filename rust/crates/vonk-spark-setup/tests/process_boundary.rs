@@ -127,7 +127,10 @@ impl CommandRunner for ApplyRecordingRunner {
 
 impl CommandRunner for BootstrapRunner {
     fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
-        assert_eq!(command.program, Path::new("/usr/bin/curl"));
+        // Host address detection is unavailable here; setup asks instead.
+        if command.program != Path::new("/usr/bin/curl") {
+            return Err("unavailable".to_owned());
+        }
         Ok(CommandOutput::success(self.body.clone()))
     }
 
@@ -357,7 +360,7 @@ fn configured_upgrade(paths: &InstallPaths) {
     fs::write(
         &paths.config,
         format!(
-            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{fingerprint}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\nfabric_address = \"192.168.100.10\"\nfabric_bandwidth_mbps = 200000\n",
+            "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{fingerprint}\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\nfabric_address = \"192.168.100.10\"\nfabric_bandwidth_mbps = 200000\n",
             paths.ca.display(),
         ),
     )

@@ -28,7 +28,6 @@ fn compiled_controller_image_matches_the_oci_platform_policy() {
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: data.path(),
-        huggingface_curl_config: None,
     };
     // Consume the actual Controller fixture without rewriting its image fields.
     let plan = compiled_plan();
@@ -42,7 +41,6 @@ fn image_policy_rejects_architecture_aliases_and_invalid_identity() {
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: data.path(),
-        huggingface_curl_config: None,
     };
     for architecture in [
         "linux/arm64",

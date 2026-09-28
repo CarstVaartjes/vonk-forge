@@ -48,10 +48,6 @@ def test_postgres_backup_restore():
             "-v",
             f"{tmp}/secret:/run/secrets/postgres-password:ro",
             "-e",
-            "VONK_BACKUP_INTERVAL_SECONDS=2",
-            "-e",
-            "VONK_BACKUP_KEEP=2",
-            "-e",
             "VONK_BACKUP_OFFHOST_PATH=/offhost",
             "-v",
             f"{tmp}/backups:/backups",
@@ -89,7 +85,9 @@ def test_postgres_backup_restore():
             "-c",
             "CREATE TABLE backup_probe(value text); INSERT INTO backup_probe VALUES ('restored');",
         )
-        deadline = time.monotonic() + 20
+        # Every start takes a backup; restart for a second one with the probe.
+        run("restart", a)
+        deadline = time.monotonic() + 60
         files = []
         while time.monotonic() < deadline:
             files = sorted((tmp / "backups").glob("postgres-*.sql.gz"))
@@ -233,8 +231,6 @@ def test_postgres_backup_worker_resumes_when_directory_appears():
             "POSTGRES_DB=control",
             "-e",
             "POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password",
-            "-e",
-            "VONK_BACKUP_INTERVAL_SECONDS=86400",
             "-v",
             f"{tmp}/secret:/run/secrets/postgres-password:ro",
             "-v",

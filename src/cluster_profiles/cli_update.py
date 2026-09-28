@@ -42,6 +42,18 @@ _NOTICE_FAILURE_RETRY_SECONDS = 900
 _NOTICE_LOCK_STALE_SECONDS = 30
 
 
+def _embedded_public_key() -> Path:
+    """The installer release signing key shipped inside the CLI itself."""
+
+    packaged = files("cluster_profiles").joinpath("installer-release-public.pem")
+    if packaged.is_file():
+        return Path(str(packaged))
+    return Path(__file__).resolve().parents[2] / "install/installer-release-public.pem"
+
+
+INSTALLER_PUBLIC_KEY = _embedded_public_key()
+
+
 class CliUpdateError(ValueError):
     """The requested CLI update cannot be safely verified or installed."""
 
@@ -49,9 +61,10 @@ class CliUpdateError(ValueError):
 def configured_update_channel() -> str:
     """Return the configured accepted release channel for CLI updates."""
 
-    channel = os.environ.get("VONK_CLI_UPDATE_CHANNEL", "stable")
+    channel = os.environ.get("VONK_CLI_UPDATE_CHANNEL", "stable").strip().lower()
+    # An unrecognized value follows the stable channel rather than blocking.
     if channel not in ("stable", "dev"):
-        raise CliUpdateError("VONK_CLI_UPDATE_CHANNEL must be stable or dev")
+        channel = "stable"
     return channel
 
 
@@ -244,13 +257,16 @@ def _signed_release(
 def run_update(
     *,
     channel: str,
-    public_key: Path,
     origin: str,
     apply: bool,
+    public_key: Path | None = None,
     download: Callable[[str, int], bytes] = _download,
 ) -> dict[str, object]:
     release, base = _signed_release(
-        channel=channel, public_key=public_key, origin=origin, download=download
+        channel=channel,
+        public_key=public_key or INSTALLER_PUBLIC_KEY,
+        origin=origin,
+        download=download,
     )
     current = current_build()
     target_source = release["source_sha"]
@@ -328,17 +344,11 @@ def run_update(
 def _notice_context(
     public_key: Path | None = None,
 ) -> tuple[Path, Path, str, str] | None:
-    if os.environ.get("VONK_CLI_UPDATE_NOTICES") != "1":
-        return None
     try:
         channel = configured_update_channel()
     except CliUpdateError:
         return None
-    if public_key is None:
-        configured = os.environ.get("VONK_INSTALLER_PUBLIC_KEY_FILE")
-        if not configured:
-            return None
-        public_key = Path(configured)
+    public_key = public_key or INSTALLER_PUBLIC_KEY
     try:
         descriptor = os.open(public_key, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
         try:

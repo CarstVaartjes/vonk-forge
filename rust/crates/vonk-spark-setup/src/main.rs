@@ -71,6 +71,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         std::env::current_exe()?,
     )?
     .with_controller_address(std::env::var("VONK_CONTROLLER_ADDRESS").ok().as_deref())?
+    .with_enrollment_values(
+        std::env::var("VONK_ENROLLMENT_URL").ok().as_deref(),
+        std::env::var("VONK_CONTROLLER_CA_SHA256").ok().as_deref(),
+    )?
     .with_enroll(cli.enroll)
     .with_firewall_inputs(FirewallInputs::from_environment()?);
     validate_system_host(&request)?;

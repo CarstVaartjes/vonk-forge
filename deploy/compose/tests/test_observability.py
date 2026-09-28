@@ -101,13 +101,7 @@ def test_every_service_has_bounded_logging() -> None:
 def test_controller_observation_writer_uses_only_its_persistent_named_volume() -> None:
     document = _rendered()
     api = document["services"]["control-api"]
-    path = "/run/vonk-deployment-observations/observations.json"
     assert api["user"] == "0:0"
-    assert api["environment"]["VONK_DEPLOYMENT_OBSERVATIONS_FILE"] == path
-    assert (
-        "VONK_DEPLOYMENT_OBSERVATIONS_FILE"
-        not in document["services"]["control-worker"]["environment"]
-    )
     [mount] = [
         item
         for item in api["volumes"]

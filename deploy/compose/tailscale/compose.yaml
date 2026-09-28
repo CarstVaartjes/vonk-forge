@@ -7,8 +7,8 @@ x-tailscale-logging: &tailscale-logging
 services:
   tailscale-gateway:
     profiles: [secure-remote]
-    image: ${TAILSCALE_IMAGE:-tailscale/tailscale:v1.102.5}
-    hostname: ${VONK_TAILSCALE_GATEWAY_HOSTNAME:-vonk-forge-gateway}
+    image: tailscale/tailscale:v1.102.5
+    hostname: vonk-forge-gateway
     restart: unless-stopped
     logging: *tailscale-logging
     read_only: true
@@ -16,13 +16,11 @@ services:
       TS_AUTH_ONCE: "true"
       TS_CLIENT_ID: file:/run/secrets/tailscale-oauth-client-id
       TS_EXTRA_ARGS: --advertise-tags=tag:vonk-gateway
-      TS_HOSTNAME: ${VONK_TAILSCALE_GATEWAY_HOSTNAME:-vonk-forge-gateway}
+      TS_HOSTNAME: vonk-forge-gateway
       TS_SOCKET: /var/run/tailscale/tailscaled.sock
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "true"
-      # Production gateways must survive extended offline periods. Acceptance
-      # overrides this to true so disposable CI nodes leave no tailnet state.
-      VONK_TAILSCALE_EPHEMERAL: ${VONK_TAILSCALE_EPHEMERAL:-false}
+    # Production gateways are durable nodes that survive long offline periods.
     command:
       - /bin/sh
       - -eu
@@ -32,19 +30,11 @@ services:
           printf '%s\n' 'Tailscale OAuth client secret input is invalid' >&2
           exit 1
         fi
-        case "$${VONK_TAILSCALE_EPHEMERAL}" in
-          true|false) ;;
-          *)
-            printf '%s\n' 'VONK_TAILSCALE_EPHEMERAL must be true or false' >&2
-            exit 1
-            ;;
-        esac
         umask 077
         tr -d '\r\n' < /run/secrets/tailscale-oauth-client-secret \
           > /tmp/tailscale-oauth-client-secret
         test -s /tmp/tailscale-oauth-client-secret
-        printf '?ephemeral=%s&preauthorized=true' \
-          "$${VONK_TAILSCALE_EPHEMERAL}" \
+        printf '?ephemeral=false&preauthorized=true' \
           >> /tmp/tailscale-oauth-client-secret
         chmod 0400 /tmp/tailscale-oauth-client-secret
         exec env \
@@ -70,7 +60,7 @@ services:
 
   tailscale-configurator:
     profiles: [secure-remote]
-    image: ${TAILSCALE_IMAGE:-tailscale/tailscale:v1.102.5}
+    image: tailscale/tailscale:v1.102.5
     restart: unless-stopped
     logging: *tailscale-logging
     read_only: true
@@ -82,12 +72,6 @@ services:
       # report the default topology healthy while a selected Hermes route is
       # still absent.
       VONK_SELECTED_PROFILES: ${COMPOSE_PROFILES:-}
-      VONK_TAILSCALE_EPHEMERAL: ${VONK_TAILSCALE_EPHEMERAL:-false}
-      VONK_TAILSCALE_CONTROL_SERVICE: ${VONK_TAILSCALE_CONTROL_SERVICE:-svc:vonk-forge}
-      VONK_TAILSCALE_HERMES_API_SERVICE: ${VONK_TAILSCALE_HERMES_API_SERVICE:-svc:hermes-api}
-      VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE: ${VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE:-svc:hermes-dashboard}
-      TS_REQUIRE_PRIMARY_ROUTES: ${TS_REQUIRE_PRIMARY_ROUTES:-1}
-      TS_REQUIRE_SERVICE_HOST: ${TS_REQUIRE_SERVICE_HOST:-1}
     volumes:
       - tailscale-socket:/var/run/tailscale
       - ./configure.sh:/usr/local/bin/configure-tailscale:ro
@@ -111,9 +95,9 @@ services:
 
 secrets:
   tailscale-oauth-client-id:
-    file: ${TAILSCALE_OAUTH_CLIENT_ID_FILE:?set Tailscale OAuth client ID secret file}
+    file: ../secrets/tailscale-oauth-client-id
   tailscale-oauth-client-secret:
-    file: ${TAILSCALE_OAUTH_CLIENT_SECRET_FILE:?set Tailscale OAuth client secret file}
+    file: ../secrets/tailscale-oauth-client-secret
 
 networks:
   tailnet-control-plane: {}

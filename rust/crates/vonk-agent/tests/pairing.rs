@@ -25,16 +25,16 @@ const COMMON: &str = r#"ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
 ca_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 data_dir = "/var/lib/vonk-forge"
 node_id = "spk_0123456789abcdef0123456789abcdef"
-poll_min_seconds = 2
-poll_max_seconds = 60
 "#;
 
 #[test]
-fn config_is_strict_and_rejects_secret_fields() {
+fn config_written_by_an_older_setup_still_parses() {
+    // Retired keys are ignored so a package upgrade never strands a Spark.
     let document = format!(
-        "enrollment_url = \"https://enroll.vonk.test/\"\ncontroller_url = \"https://agents.vonk.test/\"\n{COMMON}token = \"must-not-be-configurable\"\n"
+        "enrollment_url = \"https://enroll.vonk.test/\"\ncontroller_url = \"https://agents.vonk.test/\"\n{COMMON}poll_min_seconds = 2\npoll_max_seconds = 60\n"
     );
-    assert!(AgentConfig::parse(&document).is_err());
+    let config = AgentConfig::parse(&document).unwrap();
+    assert_eq!(config.controller_url.as_str(), "https://agents.vonk.test/");
 }
 
 #[test]
@@ -178,11 +178,8 @@ async fn pairing_rejects_controller_url_before_any_identity_material_is_written(
         ca_sha256: hex::encode(Sha256::digest(ca.der())),
         data_dir: data_dir.clone(),
         node_id: NODE_ID.to_owned(),
-        poll_min_seconds: 2,
-        poll_max_seconds: 60,
         fabric_address: None,
         fabric_bandwidth_mbps: None,
-        huggingface_curl_config: None,
     };
     let evidence = EnrollmentEvidence {
         agent_digest: "a".repeat(64),

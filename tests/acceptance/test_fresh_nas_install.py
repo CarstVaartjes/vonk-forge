@@ -199,89 +199,33 @@ def nas_responses(
     hermes: bool,
     control_service: str = "svc:vonk-forge",
     hermes_dashboard_service: str = "svc:hermes-dashboard",
-    enrollment_hostname: str | None = None,
-    agent_hostname: str | None = None,
-    registry_hostname: str | None = None,
 ) -> list[tuple[str, str]]:
+    """The installer's secure-remote prompts, in order.
+
+    Everything else (management and fabric CIDRs, derived hostnames, internal
+    secrets, and the PKI) is defaulted or generated without a prompt.
+    """
+    del hermes_dashboard_service  # derived from the control hostname
     control_hostname = tailscale_service_hostname(control_service, tailnet_suffix)
-    hermes_dashboard_hostname = tailscale_service_hostname(
-        hermes_dashboard_service, tailnet_suffix
-    )
-    enrollment_hostname = enrollment_hostname or f"enroll.acceptance.{tailnet_suffix}"
-    agent_hostname = agent_hostname or f"agents.acceptance.{tailnet_suffix}"
-    registry_hostname = registry_hostname or f"registry.acceptance.{tailnet_suffix}"
-    derived_enrollment_hostname = f"enroll.{tailnet_suffix}"
-    derived_agent_hostname = f"agents.{tailnet_suffix}"
-    derived_registry_hostname = f"registry.{tailnet_suffix}"
-    hostnames = {
-        "Control hostname (vonk-forge.<tailnet>.ts.net)": control_hostname,
-        f"Agent enrollment hostname (enroll.<tailnet>.ts.net) [{derived_enrollment_hostname}]": enrollment_hostname,
-        f"Agent controller hostname (agents.<tailnet>.ts.net) [{derived_agent_hostname}]": agent_hostname,
-        f"Registry hostname (registry.<tailnet>.ts.net) [{derived_registry_hostname}]": registry_hostname,
-    }
-    responses = [
+    return [
         (
             "Install mode: secure-remote (Tailscale) or lab (LAN only) [secure-remote / lab]: ",
             "secure-remote",
         ),
         ("Reserved NAS LAN IP: ", nas_ip),
-        ("Trusted Spark management CIDRs: ", "192.168.1.0/24"),
-        (
-            "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ",
-            "",
-        ),
-        *((f"{label}: ", value) for label, value in hostnames.items()),
-        ("Vonk Forge administrator password (leave blank to generate): ", ""),
+        ("Control hostname (vonk-forge.<tailnet>.ts.net): ", control_hostname),
         ("Tailscale OAuth client ID: ", oauth_client_id),
         ("Tailscale OAuth client secret: ", oauth_client_secret),
-        ("LiteLLM upstream provider API key: ", upstream_key),
+        (
+            "LiteLLM upstream provider API key (optional; leave blank to skip): ",
+            upstream_key,
+        ),
         (
             "Hugging Face access token (optional; leave blank for public models): ",
             "",
         ),
+        ("Enable the optional Hermes agent? [y/N]: ", "y" if hermes else "n"),
     ]
-    for label in (
-        "PostgreSQL control password",
-        "LiteLLM database password",
-        "Controller token-signing key",
-        "Prometheus metrics token",
-        "LiteLLM administrator key",
-        "Grafana administrator password",
-        "Internal agent proxy token",
-        "Hermes API key",
-    ):
-        responses.append((f"{label} (leave blank to generate): ", ""))
-    for label in (
-        "Workload package grant Ed25519 key",
-        "Workload receipt Ed25519 key",
-        "Host runtime grant Ed25519 key",
-    ):
-        responses.append(
-            (f"{label} (existing PEM path; leave blank to generate): ", "")
-        )
-    responses.extend(
-        (
-            (
-                "Step CA/controller PKI (existing bundle secrets directory; leave blank to generate): ",
-                "",
-            ),
-            ("Enable the optional Hermes agent? [y/N]: ", "y" if hermes else "n"),
-        )
-    )
-    if hermes:
-        responses.extend(
-            (
-                (
-                    "Hermes dashboard HTTPS origin: ",
-                    f"https://{hermes_dashboard_hostname}",
-                ),
-                (
-                    "Dedicated Hermes LiteLLM client key (leave blank to generate): ",
-                    "",
-                ),
-            )
-        )
-    return responses
 
 
 def tailscale_service_hostname(service: str, tailnet_suffix: str) -> str:
@@ -301,6 +245,13 @@ def configure_tailnet_service_names(
     hermes_dashboard: str,
     require_external_tailnet_client: bool,
 ) -> None:
+    """Point one bundle at disposable, isolated acceptance tailnet identities.
+
+    Production has no switches for these: the acceptance run edits its own
+    copy of the rendered Compose file (an ephemeral gateway with a unique
+    hostname and service names, and relaxed readiness when no independent
+    tailnet client can observe the service host).
+    """
     services = {
         "VONK_TAILSCALE_CONTROL_SERVICE": control,
         "VONK_TAILSCALE_HERMES_API_SERVICE": hermes_api,
@@ -312,33 +263,60 @@ def configure_tailnet_service_names(
         raise AcceptanceError("acceptance Tailscale Service names are invalid")
     if TAILSCALE_HOSTNAME.fullmatch(gateway_hostname) is None:
         raise AcceptanceError("acceptance Tailscale gateway hostname is invalid")
-    settings = services | {
-        "VONK_TAILSCALE_EPHEMERAL": "true",
-        "VONK_TAILSCALE_GATEWAY_HOSTNAME": gateway_hostname,
-        "TS_REQUIRE_PRIMARY_ROUTES": ("1" if require_external_tailnet_client else "0"),
-        # A child tailnet without a separate client cannot reliably publish a
-        # service-host mapping. Keep the gateway and exact Serve checks active,
-        # while leaving service-host/route publication to external acceptance.
-        "TS_REQUIRE_SERVICE_HOST": ("1" if require_external_tailnet_client else "0"),
-    }
-    environment = bundle / ".env"
+    compose_path = bundle / "docker-compose.yaml"
     try:
-        metadata = environment.lstat()
-        source = environment.read_text(encoding="utf-8")
-    except OSError as error:
-        raise AcceptanceError("bundle environment is unavailable") from error
-    if environment.is_symlink() or not environment.is_file() or metadata.st_nlink != 1:
-        raise AcceptanceError("bundle environment is unsafe")
-    if any(f"{name}=" in source for name in settings):
-        raise AcceptanceError("bundle already selects Tailscale acceptance settings")
-    suffix = "" if source.endswith("\n") else "\n"
-    environment.write_text(
-        source
-        + suffix
-        + "".join(f"{name}={value}\n" for name, value in settings.items()),
+        metadata = compose_path.lstat()
+        document = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        gateway = document["services"]["tailscale-gateway"]
+        configurator = document["services"]["tailscale-configurator"]
+        command = gateway["command"]
+    except (OSError, TypeError, KeyError, yaml.YAMLError) as error:
+        raise AcceptanceError(
+            "bundle Compose Tailscale services are invalid"
+        ) from error
+    if compose_path.is_symlink() or metadata.st_nlink != 1:
+        raise AcceptanceError("bundle Compose file is unsafe")
+    durable = "?ephemeral=false&preauthorized=true"
+    if not isinstance(command, list) or sum(durable in part for part in command) != 1:
+        raise AcceptanceError("bundle Tailscale gateway bootstrap is not canonical")
+    gateway["command"] = [
+        part.replace(durable, "?ephemeral=true&preauthorized=true") for part in command
+    ]
+    gateway["hostname"] = gateway_hostname
+    gateway["environment"]["TS_HOSTNAME"] = gateway_hostname
+    required = "1" if require_external_tailnet_client else "0"
+    configurator["environment"].update(
+        services
+        | {
+            "VONK_TAILSCALE_EPHEMERAL": "true",
+            # A child tailnet without a separate client cannot reliably publish
+            # a service-host mapping. Keep the gateway and exact Serve checks
+            # active, while leaving service-host/route publication to external
+            # acceptance.
+            "TS_REQUIRE_PRIMARY_ROUTES": required,
+            "TS_REQUIRE_SERVICE_HOST": required,
+        }
+    )
+    hermes = document["services"].get("hermes-agent")
+    if isinstance(hermes, dict):
+        hermes["environment"]["API_SERVER_CORS_ORIGINS"] = (
+            "https://"
+            + hermes_dashboard.removeprefix("svc:")
+            + "."
+            + control_hostname_suffix(bundle)
+        )
+    compose_path.write_text(
+        yaml.safe_dump(document, sort_keys=False, default_flow_style=False),
         encoding="utf-8",
     )
-    os.chmod(environment, metadata.st_mode & 0o777)
+    os.chmod(compose_path, metadata.st_mode & 0o777)
+
+
+def control_hostname_suffix(bundle: Path) -> str:
+    control = parsed_environment(bundle).get("VONK_CONTROL_HOSTNAME", "")
+    if "." not in control:
+        raise AcceptanceError("bundle control hostname is invalid")
+    return control.split(".", 1)[1]
 
 
 def generate_bundle(
@@ -404,7 +382,8 @@ def is_channel_image(image: str, channel: str | None = None) -> bool:
             )
             is not None
         )
-    return re.fullmatch(r"[a-z0-9][a-z0-9./_-]*:latest", image) is not None
+    # Third-party images keep the exact version the release was tested with.
+    return PINNED_IMAGE.fullmatch(image) is not None
 
 
 def run(
@@ -613,7 +592,7 @@ def assert_repeatable(first: Path, second: Path) -> None:
     second_env = parsed_environment(second)
     if set(first_env) != set(second_env):
         raise AcceptanceError("two clean NAS runs produced different .env keys")
-    for name in set(first_env) - {"AGENT_CA_PROVISIONER_KID"}:
+    for name in set(first_env):
         if first_env[name] != second_env[name]:
             raise AcceptanceError(
                 f"non-secret generated input {name} is not repeatable"
@@ -1725,7 +1704,7 @@ def main() -> None:
         raise AcceptanceError("acceptance workspace is unavailable")
     nas_ip = host_ipv4()
     nas_bind_ip = nas_bind_ipv4(nas_ip)
-    enrollment_hostname = f"enroll.acceptance.{tailnet_suffix}"
+    enrollment_hostname = f"enroll.{control_hostname}"
     fixtures = compose_compatibility_fixtures()
     require_external_tailnet_client = require_tailnet_client()
 
@@ -1791,7 +1770,7 @@ def main() -> None:
                 nas_ip=nas_ip,
                 control_hostname=control_hostname,
                 enrollment_hostname=enrollment_hostname,
-                registry_hostname=f"registry.acceptance.{tailnet_suffix}",
+                registry_hostname=f"registry.{control_hostname}",
                 tailnet_suffix=tailnet_suffix,
                 hermes=True,
                 control_service=services["control"],

@@ -45,9 +45,7 @@ fn executable_upgrades_a_complete_bundle_with_piped_stdio() {
             "env": "VONK_HERMES_ENABLED",
             "prompt": "Enable Hermes?",
             "enabled_value": "true",
-            "disabled_value": "false",
-            "required_values": [],
-            "secrets": []
+            "disabled_value": "false"
           }
         }"#,
     )

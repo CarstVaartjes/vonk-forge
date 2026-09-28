@@ -88,7 +88,7 @@ def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
         "https://install.example/artifacts/release/bootstraps/spark",
         cwd=tmp_path,
         environment=environment,
-        enrollment_url="https://enroll.spark.localhost:8443",
+        enrollment_url="https://enroll.vonk-forge-spark-local.spark.acceptance.invalid:8443",
         ca_sha256="a" * 64,
         pairing_token=token,
         interactive=interactive,
@@ -105,7 +105,9 @@ def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
         "--enroll",
     ]
     answers = [answer for _, answer in observed["responses"]]
-    assert "https://enroll.spark.localhost:8443" in answers
+    assert (
+        "https://enroll.vonk-forge-spark-local.spark.acceptance.invalid:8443" in answers
+    )
     assert "a" * 64 in answers
     assert answers.count(token) == 1
     assert observed["forbidden_values"] == [token]
@@ -176,7 +178,7 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         "minTLSCertDuration": "90s",
     }
     compose = (bundle / "docker-compose.yaml").read_text()
-    assert "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS: '90'" in compose
+    assert "CERTIFICATE_LIFETIME" not in compose
     assert "127.0.0.1::8080" in compose
     assert "- cluster-egress" in compose
     assert "header_up X-Vonk-Agent-Source 172.31.42.1" in caddy_path.read_text()
@@ -224,23 +226,22 @@ def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
         @staticmethod
         def request(method, path, payload=None, **kwargs):
             calls.append((method, path, kwargs))
-            if method == "POST" and path == "/api/catalog/managed-recipes/sync":
-                return 200, {
-                    "state": "current",
-                    "commit": fixture.source_commit,
-                    # The canary Recipe plus its catalog model document.
-                    "total_count": 2,
-                    "processed_count": 2,
-                    "imported_count": 1,
-                    "unchanged_count": 0,
-                    "problems": [],
-                }
             if method == "GET" and path == "/api/recipe/library":
                 return 200, {"recipes": []}
             raise AssertionError((method, path, payload, kwargs))
 
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = Control()
+    run._import_canary_catalog = lambda _fixture, _request_key: {
+        "state": "current",
+        "commit": fixture.source_commit,
+        # The canary Recipe plus its catalog model document.
+        "total_count": 2,
+        "processed_count": 2,
+        "imported_count": 1,
+        "unchanged_count": 0,
+        "problems": [],
+    }
     run.browser = object()
     run.synthetic_canary_fixture = fixture
     run._installation_failure = lambda _stage, error: lifecycle.LifecycleError(
@@ -250,11 +251,7 @@ def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
     with pytest.raises(lifecycle.LifecycleError, match="exact synthetic canary Recipe"):
         run._run_synthetic_canary("spk_" + "1" * 32)
 
-    assert calls[1] == (
-        "GET",
-        "/api/recipe/library",
-        {"query": {"all_models": "true"}},
-    )
+    assert calls == [("GET", "/api/recipe/library", {"query": {"all_models": "true"}})]
 
 
 def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
@@ -372,31 +369,15 @@ def test_synthetic_canary_download_uses_the_current_operator_request_shape() -> 
     )
 
 
-def test_canonical_canary_package_ancestors_are_traversable_with_private_umask(
+def test_canary_catalog_import_hands_the_exact_fixture_to_the_controller(
     tmp_path: Path,
 ) -> None:
     lifecycle = _module()
-    bundle = tmp_path / "bundle"
-    (bundle / "secrets/runtime-configs").mkdir(parents=True)
-    (bundle / "secrets/runtime-configs/caddyfile").write_text(
-        "header_up X-Vonk-Agent-Source {http.request.remote.host}\n"
-    )
-    (bundle / "docker-compose.yaml").write_text(
-        "services:\n"
-        "  control-api:\n"
-        "    environment: {}\n"
-        "  caddy:\n"
-        "    configs:\n"
-        "      - source: caddyfile\n"
-        "        target: /etc/caddy/Caddyfile\n"
-    )
     fixture = lifecycle.CanonicalCanaryFixture(
         index_path=Path("index.json"),
-        index_bytes=b"{}",
-        package_path=PurePosixPath(
-            "tests/fixtures/canonical-synthetic-canary/package/canary.tar.gz"
-        ),
-        package_bytes=b"package",
+        index_bytes=b'{"source_commit": "' + b"a" * 40 + b'"}',
+        package_path=PurePosixPath("package.tar.gz"),
+        package_bytes=bytes(range(256)),
         source_commit="a" * 40,
         publisher="vonk-forge-test",
         slug="canonical-synthetic-canary",
@@ -406,17 +387,96 @@ def test_canonical_canary_package_ancestors_are_traversable_with_private_umask(
         serving_check={},
         recipe={},
     )
-    previous_umask = os.umask(0o077)
-    try:
-        lifecycle._configure_canonical_canary_library(bundle, fixture)
-    finally:
-        os.umask(previous_umask)
+    commands: list[tuple[list[str], str | None]] = []
 
-    serving_root = bundle / "secrets/synthetic-recipe-library"
-    package_target = serving_root / Path(*fixture.package_path.parts)
-    for directory in package_target.parents:
-        if directory.is_relative_to(serving_root):
-            assert directory.stat().st_mode & 0o777 == 0o755
+    def run_command(command, *, input_text=None, **_kwargs):
+        commands.append((list(command), input_text))
+        return subprocess.CompletedProcess(
+            command, 0, stdout='warning\n{"state": "current"}\n', stderr=""
+        )
+
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.project = "vonk-spark-1-arm64"
+    run._run_command = run_command
+
+    assert run._import_canary_catalog(fixture, "request-key") == {"state": "current"}
+
+    [(command, input_text)] = commands
+    assert command[command.index("exec") :][:7] == [
+        "exec",
+        "-T",
+        "--user",
+        "10001:10001",
+        "control-api",
+        "python",
+        "-c",
+    ]
+    assert command[-1] == lifecycle.CANARY_CATALOG_IMPORT.read_text()
+    assert input_text is not None
+    payload = json.loads(input_text)
+    assert payload["request_key"] == "request-key"
+    assert payload["index"].encode() == fixture.index_bytes
+    assert base64.b64decode(payload["package"]) == fixture.package_bytes
+
+
+def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> None:
+    """The in-container program imports the real canary through catalog sync."""
+    pytest.importorskip("vonk_control", reason="requires the control environment")
+    library = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
+    if not library:
+        pytest.skip("set VONK_RECIPE_LIBRARY_ROOT to the canonical recipe library")
+    from datetime import UTC, datetime
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control.auth import TokenCodec
+    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.models import Base
+    from vonk_control.source_bundles import SourceBundleStore
+
+    specification = importlib.util.spec_from_file_location(
+        "spark_canary_catalog_import", _module().CANARY_CATALOG_IMPORT
+    )
+    assert specification is not None and specification.loader is not None
+    program = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(program)
+    index_path = Path(library) / "tests/fixtures/canonical-synthetic-canary/index.json"
+    index = json.loads(index_path.read_text())
+    package = (Path(library) / index["recipes"][0]["package"]["path"]).read_bytes()
+    digest = index["recipes"][0]["package"]["sha256"]
+    archive = program._cache_package(tmp_path / "packages", package, digest)
+    assert archive == tmp_path / "packages" / digest[:2] / f"{digest}.tar.gz"
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 9, 28, tzinfo=UTC)
+    sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=CatalogService(
+            sessions,
+            clock=clock,
+            cursors=TokenCodec(b"s" * 32).cursor_codec(),
+            source_bundles=SourceBundleStore(tmp_path / "bundles"),
+        ),
+        reader=program.FixtureReader(index, archive),
+        clock=clock,
+    )
+
+    view = sync.sync(
+        request_key="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        trigger="manual",
+        actor=program.SYNC_ACTOR,
+        expected_commit=index["source_commit"],
+    )
+
+    assert (view.state, view.commit, view.imported_count, view.problems) == (
+        "current",
+        index["source_commit"],
+        1,
+        (),
+    )
 
 
 def test_synthetic_device_is_resolved_by_the_native_docker_daemon(
@@ -475,13 +535,10 @@ def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.synthetic_fabric_octet = 42
 
-    replacements = run._controller_response_replacements()
+    values = run._controller_site_values()
 
-    assert replacements["Trusted Spark management CIDRs: "] == "172.16.0.0/12"
-    assert (
-        replacements["Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: "]
-        == "198.19.42.0/24"
-    )
+    assert values["VONK_MANAGEMENT_CIDRS"] == "172.16.0.0/12"
+    assert values["VONK_DIRECT_FABRIC_CIDRS"] == "198.19.42.0/24"
 
 
 def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
@@ -513,7 +570,6 @@ def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
 
     assert run.firewall_environment["VONK_NAS_MANAGEMENT_IP"] == "172.31.42.2"
     assert run.firewall_environment["VONK_NODE_MANAGEMENT_IP"] == "172.31.42.1"
-    assert run.firewall_environment["VONK_FABRIC_BANDWIDTH_MBPS"] == "200000"
     assert run.firewall_environment["VONK_NODE_FABRIC_IP"] == "198.19.42.1"
     assert run.firewall_environment["VONK_PEER_FABRIC_IP"] == "198.19.42.2"
     assert len(run.synthetic_interfaces) == 2
@@ -766,17 +822,17 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
     grant = {
         "ca_fingerprint": "a" * 64,
         "controller_address": "127.0.0.1",
-        "controller_endpoint": "https://agents.spark.localhost:8443",
-        "enrollment_endpoint": "https://enroll.spark.localhost:8443",
+        "controller_endpoint": "https://agents.vonk-forge-spark-local.spark.acceptance.invalid:8443",
+        "enrollment_endpoint": "https://enroll.vonk-forge-spark-local.spark.acceptance.invalid:8443",
         "expires_at": "2026-08-22T20:00:00Z",
         "id": "11111111-1111-1111-1111-111111111111",
         "installer_url": "https://install.vonkforge.ai/dev/spark",
         "purpose": "new-node",
         "service_hostnames": [
             "vonk-forge-acceptance.tailnet.example",
-            "enroll.spark.localhost",
-            "agents.spark.localhost",
-            "registry.spark.localhost",
+            "enroll.vonk-forge-spark-local.spark.acceptance.invalid",
+            "agents.vonk-forge-spark-local.spark.acceptance.invalid",
+            "registry.vonk-forge-spark-local.spark.acceptance.invalid",
         ],
         "token": "t" * 43,
     }

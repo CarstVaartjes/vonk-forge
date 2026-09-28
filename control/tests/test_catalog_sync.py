@@ -7,7 +7,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx2
 import pytest
 import vonk_control.catalog_entities as catalog_entities_module
 from sqlalchemy import create_engine, select, update
@@ -35,13 +34,14 @@ from vonk_control.recipe_library_types import (
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
-from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 ROOT = recipe_library_root()
+pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
 
 def _active_revision(session, document_id: str) -> CatalogDocumentRevision | None:
@@ -110,25 +110,8 @@ def _fixture(
     tmp_path: Path,
 ) -> tuple[sessionmaker, CatalogService, Reader, RecipeLibraryItem]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
-    row = index["recipes"][0]
-    package = (ROOT / row["package"]["path"]).read_bytes()
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=json.dumps(index).encode(),
-            )
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
-    )
+    index["recipes"] = index["recipes"][:1]
+    client = SignedRecipeRelease.from_library(index, ROOT).client(tmp_path / "packages")
     snapshot = client.list()
     item = client.fetch(snapshot.items[0].uri)
     # The snapshot carries one recipe, so it only needs that recipe's Models;
@@ -766,31 +749,6 @@ def test_sync_round_trip_rejects_malformed_persisted_result(tmp_path, damage):
         sync.automatic()
 
 
-def _client_for_index(tmp_path: Path, index: dict[str, object]) -> RecipePackageClient:
-    packages = {
-        row["package"]["path"]: (ROOT / row["package"]["path"]).read_bytes()
-        for row in index["recipes"]  # type: ignore[union-attr]
-    }
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=json.dumps(index).encode(),
-            )
-        path = next(key for key in packages if request.url.path.endswith(key))
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=packages[path]
-        )
-
-    return RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
-    )
-
-
 def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     tmp_path: Path,
 ) -> None:
@@ -804,7 +762,11 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     skipped_model = models[0]["document"]["identity"]
     skipped_recipe = recipes[0]["document"]["identity"]
 
-    snapshot = _client_for_index(tmp_path, index).list()
+    snapshot = (
+        SignedRecipeRelease.from_library(index, ROOT)
+        .client(tmp_path / "packages")
+        .list()
+    )
 
     assert len(snapshot.catalog_entities) == len(models) - 1
     assert [(item.publisher, item.slug) for item in snapshot.items] == [

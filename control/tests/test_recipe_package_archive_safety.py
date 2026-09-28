@@ -7,9 +7,9 @@ own `validate_recipe_archive` never meets an adversary -- its only caller valida
 the archive it assembled a line earlier -- so the adversarial cases belong here, in
 front of the copy that actually parses untrusted bytes.
 
-Every case serves bytes whose declared `package.sha256` matches what is sent, so the
-transport digest check passes and any rejection has to come from the archive
-validation itself. The closing group covers the resource limits that stop a published
+Every case serves bytes whose declared `package.sha256` matches what is sent and
+what the signed release lists, so the transport digest checks pass and any
+rejection has to come from the archive validation itself. The closing group covers the resource limits that stop a published
 archive from exhausting the Controller.
 """
 
@@ -24,18 +24,15 @@ import tarfile
 from collections.abc import Callable
 from typing import Any
 
-import httpx2
 import pytest
 from vonk_control import recipe_packages
-from vonk_control.recipe_packages import (
-    PACKAGE_MEDIA_TYPE,
-    RecipePackageClient,
-    RecipePackageError,
-)
+from vonk_control.recipe_packages import RecipePackageError
 
 from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 Member = tuple[tarfile.TarInfo, bytes | None]
+pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
 
 def _canonical(value: object) -> bytes:
@@ -135,22 +132,8 @@ def _reject(
     served_row["package"]["sha256"] = hashlib.sha256(package).hexdigest()
     served_row["package"]["expected_bytes"] = len(package)
     served["recipes"] = [served_row]
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=_canonical(served),
-            )
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
+    client = SignedRecipeRelease(served, lambda _location: package).client(
+        tmp_path / "packages"
     )
     try:
         with pytest.raises(RecipePackageError) as caught:

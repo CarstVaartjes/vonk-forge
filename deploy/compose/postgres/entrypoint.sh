@@ -90,12 +90,9 @@ fi
 # LiteLLM. Publish only complete dumps; failed attempts never prune good backups.
 backup_loop() (
   umask 077
-  interval=${VONK_BACKUP_INTERVAL_SECONDS:-86400}
-  keep=${VONK_BACKUP_KEEP:-7}
-  case "$interval:$keep" in *[!0-9:]*|:*|*:) echo "Invalid backup settings" >&2; exit 1;; esac
-  if [ "$interval" -eq 0 ] || [ "$keep" -eq 0 ]; then
-    echo "Backup interval and retention must be positive" >&2; exit 1
-  fi
+  # One backup at startup, then daily; keep the newest week of dumps.
+  interval=86400
+  keep=7
   temporary=/backups/.postgres-backup.tmp
   state_temporary=/state/.last-successful-backup.epoch.tmp
   verification_temporary=/state/.last-backup-restore-verification.epoch.tmp

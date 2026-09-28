@@ -107,7 +107,7 @@ def test_hermes_uses_only_caddy_lease_edge_and_authenticated_gateway() -> None:
     assert environment["HERMES_DASHBOARD"] == "1"
     assert environment["HERMES_DASHBOARD_BASIC_AUTH_USERNAME"] == "hermes"
     assert environment["MESSAGING_CWD"] == "/workspace"
-    assert environment["API_SERVER_CORS_ORIGINS"] == "https://hermes.test.example"
+    assert environment["VONK_CONTROL_HOSTNAME"] == "control.test.example"
     assert service["depends_on"] == {
         "hermes-litellm-key-provisioner": {
             "condition": "service_healthy",
@@ -154,16 +154,21 @@ def _run_entrypoint(
     litellm_secret = root / "run/secrets/hermes-litellm-key"
     if litellm_payload is not None:
         litellm_secret.write_bytes(litellm_payload)
+    # Run the real entrypoint against the temporary secret root, stopping
+    # before it hands over to the upstream init.
+    script = (HERMES / "entrypoint.sh").read_text()
+    script = script.replace("/run/secrets/", f"{root}/run/secrets/")
+    script = script.replace(
+        "exec /init ", 'printf "%s\\n" "$API_SERVER_CORS_ORIGINS"; exit 0; '
+    )
+    entrypoint = tmp_path / "entrypoint.sh"
+    entrypoint.write_text(script)
     return subprocess.run(
-        ["sh", str(HERMES / "entrypoint.sh")],
+        ["sh", str(entrypoint)],
         capture_output=True,
         check=False,
         text=True,
-        env=os.environ
-        | {
-            "HERMES_ENTRYPOINT_TEST_ROOT": str(root),
-            "HERMES_ENTRYPOINT_TEST_ONLY": "1",
-        },
+        env=os.environ | {"VONK_CONTROL_HOSTNAME": "vonk-forge.tail1.ts.net"},
     )
 
 
@@ -191,6 +196,8 @@ def test_entrypoint_rejects_symlink_and_accepts_32_byte_key(tmp_path: Path) -> N
     assert _run_entrypoint(tmp_path / "link", None, symlink=True).returncode != 0
     result = _run_entrypoint(tmp_path / "valid", b"a" * 32 + b"\n")
     assert result.returncode == 0, result.stderr
+    # The dashboard origin is the sibling Tailscale Service of the control host.
+    assert result.stdout.strip() == "https://hermes-dashboard.tail1.ts.net"
 
 
 @pytest.mark.parametrize(
@@ -246,21 +253,3 @@ def test_profile_scoped_key_provisioner_has_only_key_management_authority() -> N
         "--check",
     ]
     assert not service.get("ports")
-
-
-def test_runtime_harness_covers_security_health_and_persistence() -> None:
-    harness = (COMPOSE / "tests/hermes-agent-runtime.sh").read_text()
-    for required in (
-        "8642",
-        "9119",
-        "hermes-api-key",
-        "--force-recreate",
-        "ReadonlyRootfs",
-        "CapAdd",
-        "Devices",
-        "docker.sock",
-        "/workspace",
-        "/opt/data",
-        "hermes-inference",
-    ):
-        assert required in harness

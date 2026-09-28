@@ -51,11 +51,11 @@ fn generated_text_ed25519_keys_and_postgres_urls_are_valid_and_related() {
           "secrets": [],
           "generated_secrets": {
             "random_text": [
-              {"file": "postgres-password", "prompt": "Control database password", "bytes": 32},
-              {"file": "litellm-database-password", "prompt": "LiteLLM database password", "bytes": 32}
+              {"file": "postgres-password", "bytes": 32},
+              {"file": "litellm-database-password", "bytes": 32}
             ],
             "ed25519_pkcs8_pem": [
-              {"file": "token-signing-key", "prompt": "Token signing key"}
+              {"file": "token-signing-key"}
             ],
             "postgres_urls": [
               {
@@ -85,7 +85,7 @@ fn generated_text_ed25519_keys_and_postgres_urls_are_valid_and_related() {
     .expect("valid generated-secret payload");
     let temporary = tempdir().expect("temporary directory");
     let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(b"\n\n\n".to_vec()), &mut output);
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
     let generator = SequenceGenerator::new(["control:p@ss word/?", "litellm-secret"]);
 
     let result = prepare(
@@ -96,6 +96,7 @@ fn generated_text_ed25519_keys_and_postgres_urls_are_valid_and_related() {
     )
     .expect("generated bundle");
 
+    assert!(output.is_empty(), "generated secrets must not prompt");
     assert_eq!(
         std::fs::read_to_string(result.root.join("secrets/postgres-password"))
             .expect("control password"),
@@ -126,10 +127,7 @@ const PKI_PAYLOAD: &[u8] = br#"{
   "docker_compose_yaml": "services: {}\n",
   "internal_values": [],
   "required_values": [
-    {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname"},
-    {"env": "VONK_AGENT_ENROLL_HOSTNAME", "prompt": "Enrollment hostname"},
-    {"env": "VONK_AGENT_HOSTNAME", "prompt": "Agent hostname"},
-    {"env": "VONK_REGISTRY_HOSTNAME", "prompt": "Registry hostname"}
+    {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"}
   ],
   "secrets": [],
   "generated_secrets": {
@@ -138,15 +136,8 @@ const PKI_PAYLOAD: &[u8] = br#"{
     "postgres_urls": []
   },
   "step_ca_controller": {
-    "prompt": "Step CA/controller PKI",
-    "hostname_envs": [
-      "VONK_CONTROL_HOSTNAME",
-      "VONK_AGENT_ENROLL_HOSTNAME",
-      "VONK_AGENT_HOSTNAME",
-      "VONK_REGISTRY_HOSTNAME"
-    ],
+    "hostname_env": "VONK_CONTROL_HOSTNAME",
     "provisioner_name": "vonk-forge-agent",
-    "kid_env": "AGENT_CA_PROVISIONER_KID",
     "password_bytes": 32,
     "files": {
       "root_certificate": "step-ca/root-certificate",
@@ -179,6 +170,28 @@ fn pki_payload() -> CanonicalTemplatePayload {
     CanonicalTemplatePayload::from_json(PKI_PAYLOAD).expect("valid PKI payload")
 }
 
+/// The controller SANs: the control hostname plus the names derived from it.
+fn controller_sans(control: &str) -> Vec<String> {
+    std::iter::once(control.to_owned())
+        .chain(["enroll", "agents", "registry"].map(|prefix| format!("{prefix}.{control}")))
+        .collect()
+}
+
+fn dns_sans(certificate: &x509_parser::certificate::X509Certificate<'_>) -> Vec<String> {
+    certificate
+        .subject_alternative_name()
+        .expect("valid SAN extension")
+        .expect("SAN extension present")
+        .value
+        .general_names
+        .iter()
+        .filter_map(|name| match name {
+            x509_parser::extensions::GeneralName::DNSName(value) => Some((*value).to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn parse_certificate(pem: &[u8]) -> x509_parser::certificate::X509Certificate<'static> {
     let (_, pem) = x509_parser::pem::parse_x509_pem(pem).expect("certificate PEM");
     let leaked = Box::leak(pem.contents.into_boxed_slice());
@@ -188,13 +201,7 @@ fn parse_certificate(pem: &[u8]) -> x509_parser::certificate::X509Certificate<'s
 
 fn install_pki_bundle(output_root: &Path) -> PathBuf {
     let mut output = Vec::new();
-    let mut prompt = PromptIo::new(
-        Cursor::new(
-            b"control.example.test\nenroll.example.test\nagents.example.test\nregistry.example.test\n\n"
-                .to_vec(),
-        ),
-        &mut output,
-    );
+    let mut prompt = PromptIo::new(Cursor::new(b"control.example.test\n".to_vec()), &mut output);
     prepare(
         &pki_payload(),
         SetupRequest::install(output_root),
@@ -312,13 +319,8 @@ fn replace_controller_leaf(
         Issuer::from_ca_cert_pem(&intermediate_pem, intermediate_key).expect("intermediate issuer");
 
     let controller_key = KeyPair::generate_for(&PKCS_ED25519).expect("controller key");
-    let mut params = CertificateParams::new(vec![
-        "control.example.test".to_owned(),
-        "enroll.example.test".to_owned(),
-        "agents.example.test".to_owned(),
-        "registry.example.test".to_owned(),
-    ])
-    .expect("controller certificate parameters");
+    let mut params = CertificateParams::new(controller_sans("control.example.test"))
+        .expect("controller certificate parameters");
     params.not_before = not_before;
     params.not_after = not_after;
     params
@@ -485,26 +487,9 @@ fn assert_controller_pair_is_current_and_coherent(secrets: &Path) {
         (396 * 24 * 60 * 60..=397 * 24 * 60 * 60).contains(&remaining_seconds),
         "renewed controller certificate must have 397-day validity"
     );
-    let sans = certificate
-        .subject_alternative_name()
-        .expect("SAN extension")
-        .expect("SAN present")
-        .value
-        .general_names
-        .iter()
-        .filter_map(|name| match name {
-            x509_parser::extensions::GeneralName::DNSName(value) => Some(*value),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
     assert_eq!(
-        sans,
-        [
-            "control.example.test",
-            "enroll.example.test",
-            "agents.example.test",
-            "registry.example.test"
-        ]
+        dns_sans(&certificate),
+        controller_sans("control.example.test")
     );
     let key_pem =
         std::fs::read_to_string(secrets.join("controller-server-key")).expect("controller key");
@@ -581,61 +566,6 @@ fn upgrade_renews_controller_leaf_with_29_days_remaining_and_preserves_authority
 }
 
 #[test]
-fn upgrade_reissues_only_the_controller_leaf_when_hostnames_change() {
-    let temporary = tempdir().expect("temporary directory");
-    let bundle = clone_pki_bundle(temporary.path());
-    let secrets = bundle.join("secrets");
-    let environment_before =
-        std::fs::read_to_string(bundle.join(".env")).expect("environment before hostname change");
-    let environment_after = environment_before
-        .replace("enroll.example.test", "enroll.changed.example.test")
-        .replace("agents.example.test", "agents.changed.example.test")
-        .replace("registry.example.test", "registry.changed.example.test");
-    std::fs::write(bundle.join(".env"), &environment_after).expect("write changed hostnames");
-    let certificate_before =
-        std::fs::read(secrets.join("controller-server-certificate")).expect("cert before");
-    let key_before = std::fs::read(secrets.join("controller-server-key")).expect("key before");
-    let authority_before = authority_snapshot(&secrets);
-
-    upgrade_pki_bundle(temporary.path()).expect("hostname change renews controller leaf");
-
-    let certificate_after =
-        std::fs::read(secrets.join("controller-server-certificate")).expect("cert after");
-    assert_ne!(certificate_after, certificate_before);
-    assert_ne!(
-        std::fs::read(secrets.join("controller-server-key")).expect("key after"),
-        key_before
-    );
-    assert_eq!(authority_snapshot(&secrets), authority_before);
-    assert_eq!(
-        std::fs::read_to_string(bundle.join(".env")).expect("environment after"),
-        environment_after
-    );
-    let certificate = parse_certificate(&certificate_after);
-    let hostnames = certificate
-        .subject_alternative_name()
-        .expect("valid SAN extension")
-        .expect("SAN extension")
-        .value
-        .general_names
-        .iter()
-        .filter_map(|name| match name {
-            x509_parser::extensions::GeneralName::DNSName(value) => Some(*value),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        hostnames,
-        [
-            "control.example.test",
-            "enroll.changed.example.test",
-            "agents.changed.example.test",
-            "registry.changed.example.test",
-        ]
-    );
-}
-
-#[test]
 fn upgrade_preserves_controller_leaf_with_31_days_remaining_byte_for_byte() {
     let temporary = tempdir().expect("temporary directory");
     let bundle = clone_pki_bundle(temporary.path());
@@ -663,7 +593,7 @@ fn upgrade_preserves_controller_leaf_with_31_days_remaining_byte_for_byte() {
 }
 
 #[test]
-fn upgrade_renews_controller_leaf_when_preserved_hostnames_change() {
+fn upgrade_renews_controller_leaf_when_the_control_hostname_changes() {
     let temporary = tempdir().expect("temporary directory");
     let bundle = clone_pki_bundle(temporary.path());
     let secrets = bundle.join("secrets");
@@ -673,12 +603,10 @@ fn upgrade_renews_controller_leaf_when_preserved_hostnames_change() {
     let authority_before = authority_snapshot(&secrets);
     let environment_path = bundle.join(".env");
     let environment = std::fs::read_to_string(&environment_path).expect("environment");
-    let updated_environment = environment
-        .replace("control.example.test", "control.renamed.example.test")
-        .replace("enroll.example.test", "enroll.renamed.example.test")
-        .replace("agents.example.test", "agents.renamed.example.test")
-        .replace("registry.example.test", "registry.renamed.example.test");
-    std::fs::write(&environment_path, updated_environment).expect("update environment");
+    let updated_environment =
+        environment.replace("control.example.test", "control.renamed.example.test");
+    assert_ne!(updated_environment, environment);
+    std::fs::write(&environment_path, &updated_environment).expect("update environment");
 
     upgrade_pki_bundle(temporary.path()).expect("hostname change renews controller leaf");
 
@@ -691,30 +619,16 @@ fn upgrade_renews_controller_leaf_when_preserved_hostnames_change() {
         old_key
     );
     assert_eq!(authority_snapshot(&secrets), authority_before);
+    assert_eq!(
+        std::fs::read_to_string(&environment_path).expect("environment after"),
+        updated_environment
+    );
 
     let certificate_bytes =
         std::fs::read(secrets.join("controller-server-certificate")).expect("controller cert");
-    let certificate = parse_certificate(&certificate_bytes);
-    let sans = certificate
-        .subject_alternative_name()
-        .expect("SAN extension")
-        .expect("SAN present")
-        .value
-        .general_names
-        .iter()
-        .filter_map(|name| match name {
-            x509_parser::extensions::GeneralName::DNSName(value) => Some(*value),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
     assert_eq!(
-        sans,
-        [
-            "control.renamed.example.test",
-            "enroll.renamed.example.test",
-            "agents.renamed.example.test",
-            "registry.renamed.example.test"
-        ]
+        dns_sans(&parse_certificate(&certificate_bytes)),
+        controller_sans("control.renamed.example.test")
     );
 }
 
@@ -850,27 +764,7 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
         "intermediate authority key identifier must match the root subject key identifier"
     );
 
-    let sans = server
-        .subject_alternative_name()
-        .expect("SAN extension")
-        .expect("SAN present")
-        .value
-        .general_names
-        .iter()
-        .filter_map(|name| match name {
-            x509_parser::extensions::GeneralName::DNSName(value) => Some(*value),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        sans,
-        [
-            "control.example.test",
-            "enroll.example.test",
-            "agents.example.test",
-            "registry.example.test"
-        ]
-    );
+    assert_eq!(dns_sans(&server), controller_sans("control.example.test"));
     let server_key_pem =
         std::fs::read_to_string(secrets.join("controller-server-key")).expect("server key");
     let server_key = KeyPair::from_pem(&server_key_pem).expect("server PKCS#8 key");
@@ -940,8 +834,6 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
         ca_config["authority"]["provisioners"][0]["name"],
         "vonk-forge-agent"
     );
-    let environment = std::fs::read_to_string(generated_bundle.join(".env")).expect("environment");
-    assert!(environment.contains(&format!("AGENT_CA_PROVISIONER_KID={expected_kid}\n")));
 
     #[cfg(unix)]
     {
@@ -965,6 +857,18 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     let secrets = bundle.join("secrets");
     let private_jwk_before =
         std::fs::read(secrets.join("agent-ca-credential")).expect("private JWK before upgrade");
+    let certificate_before =
+        std::fs::read(secrets.join("controller-server-certificate")).expect("cert before upgrade");
+    // A bundle from before the single control hostname still carries the
+    // separately configured names and the provisioner KID; they are inert.
+    let mut environment = std::fs::read_to_string(bundle.join(".env")).expect("environment");
+    environment.push_str(
+        "VONK_AGENT_ENROLL_HOSTNAME=enroll.example.test\n\
+         VONK_AGENT_HOSTNAME=agents.example.test\n\
+         VONK_REGISTRY_HOSTNAME=registry.example.test\n\
+         AGENT_CA_PROVISIONER_KID=legacy-kid\n",
+    );
+    std::fs::write(bundle.join(".env"), environment).expect("legacy environment");
     let mut upgrade_output = Vec::new();
     let mut upgrade_prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut upgrade_output);
     prepare(
@@ -979,6 +883,10 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
         std::fs::read(secrets.join("agent-ca-credential")).expect("private JWK after upgrade"),
         private_jwk_before
     );
+    assert_eq!(
+        std::fs::read(secrets.join("controller-server-certificate")).expect("cert after upgrade"),
+        certificate_before
+    );
 
     std::fs::remove_file(secrets.join("controller-server-key")).expect("remove one PKI member");
     let mut partial_output = Vec::new();
@@ -991,79 +899,4 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     )
     .expect_err("partial PKI is rejected rather than regenerated");
     assert!(error.to_string().contains("partial"));
-}
-
-#[test]
-fn complete_existing_pki_can_be_imported_without_regeneration() {
-    let source = tempdir().expect("source directory");
-    let source_bundle = clone_pki_bundle(source.path());
-    let payload = pki_payload();
-
-    let target = tempdir().expect("target directory");
-    #[cfg(unix)]
-    let import_directory = {
-        use std::os::unix::fs::symlink;
-
-        let linked_bundle = target.path().join("linked-source-bundle");
-        symlink(&source_bundle, &linked_bundle).expect("import ancestor symlink");
-        linked_bundle.join("secrets")
-    };
-    #[cfg(not(unix))]
-    let import_directory = source_bundle.join("secrets");
-    let input = format!(
-        "control.example.test\nenroll.example.test\nagents.example.test\nregistry.example.test\n{}\n",
-        import_directory.display()
-    );
-    let mut target_output = Vec::new();
-    let mut target_prompt = PromptIo::new(Cursor::new(input.into_bytes()), &mut target_output);
-    let target_result = prepare(
-        &payload,
-        SetupRequest::install(target.path()),
-        &mut target_prompt,
-        &SequenceGenerator::new([]),
-    )
-    .expect("imported PKI");
-
-    for path in PKI_FILES {
-        assert_eq!(
-            std::fs::read(source_bundle.join("secrets").join(path))
-                .unwrap_or_else(|error| panic!("source {path}: {error}")),
-            std::fs::read(target_result.root.join("secrets").join(path))
-                .unwrap_or_else(|error| panic!("target {path}: {error}")),
-            "imported {path}"
-        );
-    }
-    assert_eq!(
-        std::fs::read_to_string(source_bundle.join(".env")).expect("source environment"),
-        std::fs::read_to_string(target_result.root.join(".env")).expect("target environment")
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn pki_import_rejects_a_symlink_selected_as_the_directory_leaf() {
-    use std::os::unix::fs::symlink;
-
-    let source = tempdir().expect("source directory");
-    let source_result = clone_pki_bundle(source.path());
-    let target = tempdir().expect("target directory");
-    let linked_secrets = target.path().join("linked-secrets");
-    symlink(source_result.join("secrets"), &linked_secrets).expect("import leaf symlink");
-    let input = format!(
-        "control.example.test\nenroll.example.test\nagents.example.test\nregistry.example.test\n{}\n",
-        linked_secrets.display()
-    );
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(input.into_bytes()), &mut output);
-
-    let error = prepare(
-        &pki_payload(),
-        SetupRequest::install(target.path()),
-        &mut prompt,
-        &SequenceGenerator::new([]),
-    )
-    .expect_err("a selected import leaf symlink is rejected");
-
-    assert!(error.to_string().contains("symbolic link"));
-    assert!(!target.path().join("vonk-forge").exists());
 }

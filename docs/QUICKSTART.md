@@ -15,14 +15,13 @@ curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
 Answer `lab` at the install mode prompt (the default, Secure remote, needs
-Tailscale), enter the NAS's reserved LAN IPv4 address, and
-optionally enter a Hugging Face token for gated models. The project is created
+Tailscale), enter the NAS's reserved LAN IPv4 address, and optionally enter a
+LiteLLM upstream key and a Hugging Face token for gated models. The project is created
 in `vonk-forge/`. The administrator username is `admin`; its generated password
 is saved in `vonk-forge/secrets/admin-password`.
 
-The default Lab mode management network is `192.168.1.0/24`. If the LAN uses a
-different subnet, edit `VONK_MANAGEMENT_CIDRS` in `.env` before starting the
-project. Add LAN DNS records for `vonk-forge.local`, `enroll.vonk-forge.local`,
+The Spark management network defaults to the NAS's own /24. To narrow it (for
+example to the Sparks' exact addresses), edit `VONK_MANAGEMENT_CIDRS` in `.env`. Add LAN DNS records for `vonk-forge.local`, `enroll.vonk-forge.local`,
 `agents.vonk-forge.local`, and `registry.vonk-forge.local`, all pointing to the
 NAS address. On a small lab network, equivalent host-file entries can be used.
 
@@ -43,9 +42,8 @@ limited to your trusted LAN and do not forward port 8443 from the internet.
 
 ## Add a Spark
 
-Create a one-use enrollment grant in **Fleet**. On the Spark, use the generated
-install command and set `VONK_CONTROLLER_ADDRESS` to the NAS LAN address. The
-Spark must resolve the three `enroll`, `agents`, and `registry` hostnames above
+Create a one-use enrollment grant in **Fleet**. On the Spark, run the generated
+install command; it already carries the NAS LAN address. The Spark must resolve the three `enroll`, `agents`, and `registry` hostnames above
 to that same address. Import the local CA certificate on any client that needs
 to connect to the controller or Spark-facing HTTPS endpoints.
 
