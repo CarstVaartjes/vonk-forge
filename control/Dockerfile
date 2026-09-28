@@ -115,7 +115,10 @@ ARG SKOPEO_ARM64_DIGEST
 # The pinned skopeo image ships /etc/ssl/certs as a symlink into /etc/pki/tls,
 # while the Python base has a real directory there; COPY cannot replace a
 # directory with a symlink, so drop the base directory before the copy below.
-RUN groupadd --gid 10001 control \
+# The runtime installs nothing, so the base image's pip (and the libraries it
+# vendors) is removed rather than shipped.
+RUN python -m pip uninstall --yes --root-user-action=ignore pip \
+    && groupadd --gid 10001 control \
     && useradd --uid 10001 --gid 10001 --no-create-home control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control-cache \
