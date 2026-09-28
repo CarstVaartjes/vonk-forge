@@ -371,7 +371,6 @@ def assemble_production_worker(
     from .distributed_recovery import DistributedRecoveryCoordinator
     from .distribution import build_distribution_service_from_components
     from .distribution_executor import CompositeDistributionPhaseExecutor
-    from .failure_evidence import FailureEvidenceService
     from .fleet_profiles import build_production_fleet_profile_service
     from .install_admission import (
         InstallAdmissionService,
@@ -500,8 +499,7 @@ def assemble_production_worker(
         ),
         manage_route_leases_in_background=True,
     )
-    failure_evidence = FailureEvidenceService(sessions, clock=clock)
-    worker_background_services = (*background_services, failure_evidence.tick)
+    worker_background_services = tuple(background_services)
     worker_background_closers = (*background_closers, recipe_operations.close)
     close_artifact_executor = getattr(artifact_phase_executor, "close", None)
     if callable(close_artifact_executor):

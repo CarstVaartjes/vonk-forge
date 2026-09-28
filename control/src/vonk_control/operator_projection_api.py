@@ -36,7 +36,6 @@ from .enrollment_contract import (
     EnrollmentId,
 )
 from .failure_evidence import (
-    EvidenceRetention,
     FailureEvidenceBundle,
     collect_failure,
     failed_attempt_condition,
@@ -320,20 +319,18 @@ class _AgentEnrollmentAdapter:
         services.enrollment.revoke_node(node_id, actor)
 
 
-#: The failure-evidence retention window is owned by ``EvidenceRetention``; the
-#: log projection never scans further back than the evidence it can still read.
-_EVIDENCE_RETENTION = EvidenceRetention()
+#: How far back the log projection narrates failed agent attempts by default.
+_AGENT_LOG_LOOKBACK = timedelta(days=14)
 #: A fixed number of Controller job-log blobs per query, matching the previous
 #: bounded read.
 _JOB_LOG_SCAN_LIMIT = 512
-#: A fixed number of failed agent attempts per query.  Retention, not this
-#: projection, owns how long they stay readable.
+#: A fixed number of failed agent attempts per query.
 _AGENT_LOG_SCAN_LIMIT = 128
 #: A hard ceiling on projected agent entries before the caller's ``lines`` cut.
 _AGENT_LOG_ENTRY_LIMIT = 4_096
 #: Which attempts an operator must be able to read back is owned by
 #: ``failed_attempt_condition`` in the failure-evidence module, so this
-#: projection and the durable evidence collector cannot disagree about it.
+#: projection and the diagnostics download cannot disagree about it.
 #: The headline and level one attempt state narrates.  A lapse and a wait are
 #: things an operator must act on, not errors that claim the start died.
 _ATTEMPT_OUTCOME: Mapping[str, tuple[str, LogLevel]] = {
@@ -467,9 +464,9 @@ def _failure_log_entries(
     # no receipt at all, so the default "operation_failed" would name a refusal
     # that never happened.
     if has_receipt:
-        add(f"error_code={bundle.receipt.error_code}")
-    if bundle.receipt.detail:
-        add(f"detail={bundle.receipt.detail}")
+        add(f"error_code={bundle.error_code}")
+    if bundle.detail:
+        add(f"detail={bundle.detail}")
     # The Controller's own record of the wait, which the agent's receipt cannot
     # carry: it is what says the effect is unobserved rather than dead.
     if controller_reason is not None and controller_reason != bundle.summary:
@@ -592,11 +589,7 @@ class ControllerJobLogProvider:
         self, node_id: str, *, since: datetime | None
     ) -> list[FleetLogEntry]:
         now = _aware(self._clock())
-        cutoff = (
-            _aware(since)
-            if since is not None
-            else now - timedelta(days=_EVIDENCE_RETENTION.days)
-        )
+        cutoff = _aware(since) if since is not None else now - _AGENT_LOG_LOOKBACK
         with self._sessions() as session:
             rows = list(
                 session.execute(
@@ -639,8 +632,6 @@ class ControllerJobLogProvider:
                 "attempt": attempt.attempt,
                 "kind": operation.kind,
                 "node_ids": [operation.node_id],
-                "authority_revision": operation.authority_revision,
-                "payload_digest": operation.payload_digest,
                 "updated_at": observed_at.isoformat(),
                 "source": "agent",
                 "progress": attempt.progress,

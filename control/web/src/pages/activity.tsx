@@ -540,19 +540,16 @@ function CanonicalOperationDetails({api, detail, onUpdate}: {
     }
   }, [api, detail.id, onUpdate]);
   const active = ["queued", "running", "pending", "planned"].includes(detail.state);
-  const awaitingEvidence = ["failed", "waiting-for-operator"].includes(detail.state) && !detail.evidence_download;
   useEffect(() => {
-    if (!active && !awaitingEvidence) return;
+    if (!active) return;
     let loading = false;
-    let checks = 0;
     const timer = window.setInterval(() => {
       if (loading) return;
-      if (!active && checks++ >= 6) { window.clearInterval(timer); return; }
       loading = true;
       void refresh().finally(() => { loading = false; });
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [active, awaitingEvidence, refresh]);
+  }, [active, refresh]);
   const availability = detail.failure && "code" in detail.failure
     ? availabilityFailure(detail.failure) : undefined;
   return <div className="activity-job-reason" style={{gap: ".5rem"}}>

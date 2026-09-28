@@ -8,9 +8,17 @@ selects its validator before the HTTP response union is serialized.
 
 Agent failure reasons, summaries, error codes, diagnostics, and activation
 receipts retain their protocol meaning and bounds. Sanitization occurs when
-agent evidence is accepted. Evidence-download metadata remains separate from
-the agent's result. Artifact process receipts retain their full output manifest
-on the artifact-job endpoint and expose the process failure reason in Activity.
+agent evidence is accepted. Artifact process receipts retain their full output
+manifest on the artifact-job endpoint and expose the process failure reason in
+Activity.
+
+A failed attempt's "Download diagnostics" file
+(`GET /api/operations/{id}/evidence?attempt=N`) is rendered on request from the
+durable attempt result, job result or progress; nothing is copied or stored for
+it. The file carries the summary, error code, phase, category, redacted
+stdout/stderr tails and the agent's `FailureDiagnostics`. Operation responses
+name it through `evidence_download.href` only while that attempt is a failure
+attempt.
 
 The cache writes `AvailabilityOperationFailure` directly into durable failure
 state. Exception codes and recovery choices are translated once, at creation.

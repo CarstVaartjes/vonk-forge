@@ -1,26 +1,25 @@
-"""Automatic diagnostics from durable failures, isolated from execution.
+"""Failure diagnostics rendered on request from durable failure rows.
 
-No commands or network calls run here. Agent observations are already captured
-at the failure; an offline node therefore never delays Controller collection.
+No commands or network calls run here, and nothing is stored: the bundle is a
+redacted view of the attempt result, job result or progress the Controller
+already keeps, so an offline node never delays it and a later read never
+disagrees with the row it describes.
 """
 
 from __future__ import annotations
 
-import hashlib
 import re
-import time
 import unicodedata
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Literal
 from urllib.parse import quote
 
 from pydantic import ConfigDict, Field, TypeAdapter
-from sqlalchemy import String, and_, cast, func, or_, select
+from sqlalchemy import String, and_, cast, or_, select
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
 
 from .bounded_json import BoundedJSONError, mapping, require_integer, sequence
-from .failure_evidence_models import FailureEvidenceCursor, FailureEvidenceRecord
 from .logging import redact_text
 from .models import (
     AgentOperation,
@@ -29,17 +28,11 @@ from .models import (
     Job,
     ModelCacheOperation,
 )
-from .operation_contract import (
-    OperationEvidenceDownload,
-    OperationEvidenceProvenance,
-    OperationFailureEvidence,
-)
+from .operation_contract import OperationEvidenceDownload
 from .strict_json import StrictJSONModel
 
-MAX_BUNDLE_BYTES = 32 * 1024
 MAX_LOG_BYTES = 2048
 MAX_LOG_LINES = 32
-COLLECTION_SECONDS = 0.25
 _SENSITIVE = re.compile(
     r"password|secret|token|authorization|cookie|credential|private.?key|api.?key|environment",
     re.IGNORECASE,
@@ -109,10 +102,6 @@ class EvidenceContext(EvidenceModel):
     attempt: int = Field(ge=0)
     kind: str = Field(min_length=1, max_length=80)
     node_ids: list[str] = Field(max_length=128)
-    omitted_node_count: int = Field(default=0, ge=0)
-    authority_revision: str | None = None
-    plan_digest: str | None = None
-    payload_digest: str | None = None
     updated_at: str
     source: EvidenceSource
     rank: int | None = Field(default=None, ge=0)
@@ -123,18 +112,11 @@ class FailureEvidenceBundle(EvidenceModel):
     context: EvidenceContext
     collected_at: str
     summary: str = Field(max_length=512)
+    error_code: str = Field(min_length=1, max_length=64)
+    detail: str | None = Field(default=None, max_length=1024)
     diagnostics: FailureDiagnostics
-    receipt: OperationFailureEvidence
     collector_errors: list[str] = Field(max_length=8)
 
-
-#: The Controller database budget for retained failure evidence.  The record
-#: count is not a second, independent cap: it is exactly the number of
-#: maximum-size bundles this budget holds, so the count can never refuse a
-#: bundle the byte budget still has room for.  Evidence is per attempt, so this
-#: one budget is what bounds a retried operation's whole attempt history.
-EVIDENCE_BYTE_BUDGET = 64 * 1024**2
-MAX_RETAINED_ENTRIES = EVIDENCE_BYTE_BUDGET // MAX_BUNDLE_BYTES
 
 #: The attempt states whose own terminal failure receipt must stay readable.
 #: ``expired`` is not among them by itself: a lease lapse or a supersession owns
@@ -144,12 +126,6 @@ MAX_RETAINED_ENTRIES = EVIDENCE_BYTE_BUDGET // MAX_BUNDLE_BYTES
 FAILED_ATTEMPT_STATES = ("failed", "waiting-for-operator")
 #: The one state a superseded or lapsed attempt keeps while owning no receipt.
 EXPIRED_ATTEMPT_STATE = "expired"
-
-
-class EvidenceRetention(EvidenceModel):
-    days: int = Field(default=14, ge=1, le=365)
-    max_entries: int = Field(default=MAX_RETAINED_ENTRIES, ge=1, le=10000)
-    max_bytes: int = Field(default=EVIDENCE_BYTE_BUDGET, ge=MAX_BUNDLE_BYTES)
 
 
 def _aware(value: datetime) -> datetime:
@@ -220,35 +196,18 @@ def log_tail(value: str) -> FailureLogTail:
     )
 
 
-def failure_receipt(result: Mapping[str, object]) -> OperationFailureEvidence:
-    """Reuse the fixed operation failure contract; never export a loose receipt."""
+def failure_code(result: Mapping[str, object]) -> tuple[str, str | None]:
+    """Return the stable error code and redacted detail a failure result names."""
     code = result.get("error_code") or result.get("code") or "operation_failed"
     code = re.sub(r"[^a-z0-9_]", "_", str(code).lower())[:64]
     if not code or not code[0].isalpha():
         code = "operation_failed"
-    summary = (
-        safe_text(
-            str(
-                result.get("summary")
-                or result.get("reason")
-                or result.get("detail")
-                or "Operation failed"
-            )
-        )[:256]
-        or "Operation failed"
-    )
     detail = (
         result.get("detail")
         or result.get("diagnostic")
         or result.get("helper_error_code")
     )
-    return OperationFailureEvidence(
-        error_code=code,
-        summary=summary,
-        detail=safe_text(str(detail))[:1024] if detail is not None else None,
-        retryable=result.get("retryable") is True,
-        uncertain=result.get("uncertain") is True,
-    )
+    return code, safe_text(str(detail))[:1024] if detail is not None else None
 
 
 def classification(kind: str, result: Mapping[str, object]) -> FailureCategory:
@@ -270,12 +229,6 @@ def _required_text(value: object, detail: str) -> str:
     if not isinstance(value, str):
         raise BoundedJSONError(f"{detail} is invalid")
     return value
-
-
-def _optional_text(value: object, detail: str) -> str | None:
-    """Return a persisted optional string without coercing a wrong JSON type."""
-
-    return None if value is None else _required_text(value, detail)
 
 
 def _optional_int(value: object, detail: str) -> int | None:
@@ -358,7 +311,7 @@ def collect_failure(
             if item.get("node_ids")
             else [],
         )
-    receipt = failure_receipt(result)
+    error_code, detail = failure_code(result)
     summary = (
         result.get("summary")
         or result.get("reason")
@@ -378,24 +331,15 @@ def collect_failure(
             attempt=require_integer(item.get("attempt"), "operation attempt"),
             kind=_required_text(item["kind"], "operation kind"),
             node_ids=node_ids[:128],
-            omitted_node_count=max(0, len(node_ids) - 128),
-            authority_revision=_optional_text(
-                item.get("authority_revision"), "operation authority revision"
-            ),
-            plan_digest=_optional_text(
-                item.get("plan_digest"), "operation plan digest"
-            ),
-            payload_digest=_optional_text(
-                item.get("payload_digest"), "operation payload digest"
-            ),
             updated_at=_required_text(item["updated_at"], "operation updated_at"),
             source=source,
             rank=_optional_int(item.get("rank"), "operation rank"),
         ),
         collected_at=now.isoformat(),
         summary=safe_text(str(summary))[:512],
+        error_code=error_code,
+        detail=detail,
         diagnostics=diagnostics,
-        receipt=receipt,
         collector_errors=errors,
     )
 
@@ -403,8 +347,8 @@ def collect_failure(
 def failed_attempt_condition(operation, attempt):
     """SQL predicate: this attempt's failure evidence must stay readable.
 
-    One owner for "which attempt is a failure attempt": the durable evidence
-    collector and the operator log projection both select attempts through this
+    One owner for "which attempt is a failure attempt": the diagnostics
+    download and the operator log projection both select attempts through this
     predicate, so neither can drift into showing or hiding an attempt the other
     disagrees about.  An attempt qualifies when its own state is a terminal
     failure, when it lapsed its lease but kept the agent's late failure receipt,
@@ -430,302 +374,178 @@ def failed_attempt_condition(operation, attempt):
     )
 
 
+def _fallback_bundle(
+    item: Mapping[str, object], *, now: datetime
+) -> FailureEvidenceBundle:
+    """A bounded bundle for a row the collector could not read.
+
+    The download reports the collector failure separately and never echoes the
+    exception, which may quote the unredacted value that broke it.
+    """
+    empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
+    result = mapping(item.get("result")) or {}
+    error_code, _ = failure_code(result)
+    return FailureEvidenceBundle(
+        context=EvidenceContext(
+            operation_id=str(item["id"]),
+            attempt=require_integer(item["attempt"], "operation attempt"),
+            kind=str(item["kind"]),
+            node_ids=_required_node_ids(item.get("node_ids"))[:128],
+            updated_at=str(item["updated_at"]),
+            source="agent" if item.get("node_ids") else "controller",
+        ),
+        collected_at=now.isoformat(),
+        summary=safe_text(
+            str(result.get("reason") or result.get("summary") or "Operation failed")
+        )[:512],
+        error_code=error_code,
+        diagnostics=FailureDiagnostics(
+            collected_at=now.isoformat(),
+            phase="unknown",
+            category="unknown",
+            stdout=empty,
+            stderr=empty,
+            versions=[],
+            sandbox=[],
+            storage=[],
+            preflight=[],
+            collector_errors=[],
+        ),
+        collector_errors=["collector-failed"],
+    )
+
+
+def evidence_href(operation_id: str, attempt: int) -> str:
+    return f"/api/operations/{quote(operation_id, safe='')}/evidence?attempt={attempt}"
+
+
 class FailureEvidenceService:
-    def __init__(
-        self, sessions, *, clock=None, retention: EvidenceRetention | None = None
-    ):
+    """Render one failed attempt's diagnostics from its durable row on request."""
+
+    def __init__(self, sessions, *, clock=None):
         self.sessions = sessions
         self.clock = clock or (lambda: datetime.now(UTC))
-        self.retention = retention or EvidenceRetention()
-        self.last_collection_error: str | None = None
-        self._next_family = 0
 
-    def capture(self, item: Mapping[str, object]) -> bool:
+    def read(self, operation_id: str, attempt: int) -> FailureEvidenceBundle:
+        """Return the redacted bundle, or raise ``KeyError`` for no failed attempt."""
+        item = self._failed_item(operation_id, attempt)
+        if item is None:
+            raise KeyError(operation_id)
         now = _aware(self.clock())
         try:
-            bundle = collect_failure(item, now=now)
+            return collect_failure(item, now=now)
         except Exception:  # noqa: BLE001 - diagnostics cannot replace the original operation result
-            # Keep a separately typed collector failure without re-running the
-            # failed collector or altering the original durable result.
-            empty = FailureLogTail(
-                text="", truncated=False, dropped_bytes=0, dropped_lines=0
-            )
-            result = mapping(item.get("result")) or {}
-            node_ids = _required_node_ids(item.get("node_ids"))
-            bundle = FailureEvidenceBundle(
-                context=EvidenceContext(
-                    operation_id=str(item["id"]),
-                    attempt=require_integer(item["attempt"], "operation attempt"),
-                    kind=str(item["kind"]),
-                    node_ids=node_ids[:128],
-                    omitted_node_count=max(0, len(node_ids) - 128),
-                    updated_at=str(item["updated_at"]),
-                    source="agent" if item.get("node_ids") else "controller",
-                ),
-                collected_at=now.isoformat(),
-                summary=safe_text(
-                    str(
-                        result.get("reason")
-                        or result.get("summary")
-                        or "Operation failed"
-                    )
-                )[:512],
-                diagnostics=FailureDiagnostics(
-                    collected_at=now.isoformat(),
-                    phase="unknown",
-                    category="unknown",
-                    stdout=empty,
-                    stderr=empty,
-                    versions=[],
-                    sandbox=[],
-                    storage=[],
-                    preflight=[],
-                    collector_errors=[],
-                ),
-                receipt=failure_receipt(result),
-                collector_errors=["collector-failed"],
-            )
-        content = bundle.model_dump_json().encode()
-        if len(content) > MAX_BUNDLE_BYTES:
-            raise ValueError("failure evidence exceeds its storage bound")
-        digest = hashlib.sha256(content).hexdigest()
-        with self.sessions.begin() as session:
-            key = (bundle.context.operation_id, bundle.context.attempt)
-            if session.get(FailureEvidenceRecord, key) is not None:
-                return False
-            session.add(
-                FailureEvidenceRecord(
-                    operation_id=key[0],
-                    attempt=key[1],
-                    sha256=digest,
-                    content=content,
-                    collected_at=now,
-                )
-            )
-        self.prune()
-        return True
-
-    def read(
-        self, operation_id: str, attempt: int | None = None
-    ) -> tuple[bytes, str, FailureEvidenceBundle]:
-        with self.sessions() as session:
-            query = select(FailureEvidenceRecord).where(
-                FailureEvidenceRecord.operation_id == operation_id
-            )
-            if attempt is not None:
-                query = query.where(FailureEvidenceRecord.attempt == attempt)
-            row = session.scalar(
-                query.order_by(FailureEvidenceRecord.attempt.desc()).limit(1)
-            )
-            if row is None or _aware(row.collected_at) < _aware(
-                self.clock()
-            ) - timedelta(days=self.retention.days):
-                raise KeyError(operation_id)
-            content, digest = row.content, row.sha256
-        if hashlib.sha256(content).hexdigest() != digest:
-            raise ValueError("failure evidence digest mismatch")
-        bundle = FailureEvidenceBundle.model_validate_json(content)
-        return content, digest, bundle
+            return _fallback_bundle(item, now=now)
 
     def decorate(self, item: Mapping[str, object]) -> dict[str, object]:
-        result: dict[str, object] = dict(mapping(item.get("result")) or {})
-        try:
-            content, digest, bundle = self.read(
-                _required_text(item["id"], "operation id"),
-                require_integer(item["attempt"], "operation attempt"),
-            )
-        except KeyError:
-            # No retained evidence for this attempt; omission stays correct.
-            # A record that exists but no longer validates raises out of
-            # ``read`` and must not be reported as absent, matching the
-            # standalone /evidence route's validation failure.
+        """Name the diagnostics download when this failed attempt has one."""
+        if item.get("state") not in FAILED_ATTEMPT_STATES:
             return dict(item)
-        result["evidence_download"] = OperationEvidenceDownload(
-            media_type="application/json",
-            size_bytes=len(content),
-            sha256=digest,
-            href=f"/api/operations/{quote(str(item['id']), safe='')}/evidence?attempt={item['attempt']}",
-        ).model_dump(mode="json")
-        result["provenance"] = OperationEvidenceProvenance(
-            source=bundle.context.source,
-            collected_at=bundle.collected_at,
-            evidence_digest=digest,
-            authority_revision=bundle.context.authority_revision,
-        ).model_dump(mode="json")
-        return dict(item, result=result)
+        operation_id = _required_text(item["id"], "operation id")
+        attempt = require_integer(item["attempt"], "operation attempt")
+        if self._failed_item(operation_id, attempt) is None:
+            return dict(item)
+        return dict(
+            item,
+            evidence_download=OperationEvidenceDownload(
+                href=evidence_href(operation_id, attempt)
+            ).model_dump(mode="json"),
+        )
 
-    def prune(self) -> int:
-        with self.sessions.begin() as session:
-            rows = session.execute(
-                select(
-                    FailureEvidenceRecord.operation_id,
-                    FailureEvidenceRecord.attempt,
-                    FailureEvidenceRecord.collected_at,
-                    func.length(FailureEvidenceRecord.content).label("size_bytes"),
-                ).order_by(
-                    FailureEvidenceRecord.collected_at.desc(),
-                    FailureEvidenceRecord.operation_id,
-                )
-            ).all()
-            total_bytes = 0
-            removed = 0
-            cutoff = _aware(self.clock()) - timedelta(days=self.retention.days)
-            for index, row in enumerate(rows):
-                total_bytes += row.size_bytes
-                if (
-                    index >= self.retention.max_entries
-                    or total_bytes > self.retention.max_bytes
-                    or _aware(row.collected_at) < cutoff
-                ):
-                    record = session.get(
-                        FailureEvidenceRecord, (row.operation_id, row.attempt)
-                    )
-                    if record is not None:
-                        session.delete(record)
-                    removed += 1
-            return removed
-
-    def tick(self, *, limit: int = 32) -> bool:
-        """Incrementally snapshot failed attempts; cursor survives retention/restart."""
-        deadline = time.monotonic() + COLLECTION_SECONDS
-        captured = False
-        try:
-            self.prune()
-            families = ("agent", "job", "model-cache", "fleet-profile")
-            ordered = families[self._next_family :] + families[: self._next_family]
-            self._next_family = (self._next_family + 1) % len(families)
-            for family in ordered:
-                if time.monotonic() >= deadline:
-                    break
-                for item in self._page(family, max(1, min(limit, 32))):
-                    if time.monotonic() >= deadline:
-                        break
-                    captured = self.capture(item) or captured
-                    with self.sessions.begin() as session:
-                        cursor = session.get(FailureEvidenceCursor, family)
-                        if cursor is None:
-                            cursor = FailureEvidenceCursor(family=family)
-                            session.add(cursor)
-                        updated_at = _required_text(
-                            item["updated_at"], "operation updated_at"
-                        )
-                        cursor.updated_at = datetime.fromisoformat(updated_at)
-                        cursor.operation_id = _required_text(item["id"], "operation id")
-                        cursor.attempt = require_integer(
-                            item["attempt"], "operation attempt"
-                        )
-            self.last_collection_error = None
-        except Exception:  # noqa: BLE001 - worker diagnostics must not interrupt execution
-            self.last_collection_error = "failure-evidence-collection-unavailable"
-        return captured
-
-    def _page(self, family: str, limit: int) -> list[dict[str, object]]:
+    def _failed_item(self, operation_id: str, attempt: int) -> dict[str, object] | None:
+        """Load one failed attempt from whichever durable family owns the id."""
         with self.sessions() as session:
-            cursor = session.get(FailureEvidenceCursor, family)
-            cutoff = _aware(self.clock()) - timedelta(days=self.retention.days)
-            after = (
-                max(cutoff, _aware(cursor.updated_at)) if cursor is not None else cutoff
-            )
-            last_id = cursor.operation_id if cursor is not None else ""
-            last_attempt = cursor.attempt if cursor is not None else -1
-            model = {
-                "agent": AgentOperation,
-                "job": Job,
-                "model-cache": ModelCacheOperation,
-                "fleet-profile": FleetProfileApplication,
-            }[family]
-            attempt = (
-                AgentOperationAttempt.attempt
-                if family == "agent"
-                else model.attempt
-                if family == "model-cache"
-                else model.progress["attempt"].as_integer()
-                if family == "fleet-profile"
-                else model.current_attempt
-            )
-            state = AgentOperationAttempt.state if family == "agent" else model.state
-            # Agent operations keep one row per attempt, so they select through
-            # the shared attempt rule; the other families own a single attempt
-            # in place and are selected by their own state.
-            failures = (
-                failed_attempt_condition(model, AgentOperationAttempt)
-                if family == "agent"
-                else state.in_(FAILED_ATTEMPT_STATES)
-            )
-            query = (
-                select(model, AgentOperationAttempt)
-                if family == "agent"
-                else select(model)
-            )
-            if family == "agent":
-                query = query.join(
+            row = session.execute(
+                select(AgentOperation, AgentOperationAttempt)
+                .join(
                     AgentOperationAttempt,
-                    AgentOperationAttempt.operation_id == model.id,
+                    AgentOperationAttempt.operation_id == AgentOperation.id,
                 )
-            query = (
-                query.where(
-                    failures,
-                    or_(
-                        model.updated_at > after,
-                        and_(model.updated_at == after, model.id > last_id),
-                        and_(
-                            model.updated_at == after,
-                            model.id == last_id,
-                            attempt > last_attempt,
-                        ),
-                    ),
+                .where(
+                    AgentOperation.id == operation_id,
+                    AgentOperationAttempt.attempt == attempt,
+                    failed_attempt_condition(AgentOperation, AgentOperationAttempt),
                 )
-                .order_by(model.updated_at, model.id, attempt)
-                .limit(limit)
-            )
-            result = []
-            for row in session.execute(query):
-                operation = row[0]
-                member = row[1] if family == "agent" else operation
-                if family == "fleet-profile":
-                    from .fleet_profiles import FleetProfileService
+            ).first()
+            if row is not None:
+                operation, member = row
+                return self._item(
+                    operation,
+                    attempt=member.attempt,
+                    kind=operation.kind,
+                    node_ids=[operation.node_id],
+                    source="agent",
+                    progress=member.progress,
+                    result=member.result,
+                )
+            job = session.get(Job, operation_id)
+            if (
+                job is not None
+                and job.state in FAILED_ATTEMPT_STATES
+                and job.current_attempt == attempt
+            ):
+                return self._item(
+                    job,
+                    attempt=attempt,
+                    kind=job.kind,
+                    node_ids=job.targets,
+                    source="controller",
+                    progress=None,
+                    result=job.result,
+                )
+            cache = session.get(ModelCacheOperation, operation_id)
+            if (
+                cache is not None
+                and cache.state in FAILED_ATTEMPT_STATES
+                and cache.attempt == attempt
+            ):
+                return self._item(
+                    cache,
+                    attempt=attempt,
+                    kind=cache.kind,
+                    node_ids=[],
+                    source="controller",
+                    progress=cache.progress,
+                    result=None,
+                )
+            application = session.get(FleetProfileApplication, operation_id)
+            if application is not None and application.state in FAILED_ATTEMPT_STATES:
+                from .fleet_profiles import FleetProfileService
 
-                    item = FleetProfileService._operation_item(operation)
-                    item["source"] = "controller"
-                    item["plan_digest"] = operation.plan_digest
-                    item["result"] = item["result"] or item["failure"]
-                    result.append(item)
-                    continue
-                number = (
-                    member.attempt
-                    if family in {"agent", "model-cache"}
-                    else member.current_attempt
-                )
-                payload = getattr(operation, "payload", {}) or {}
-                result.append(
-                    {
-                        "id": operation.id,
-                        "attempt": number,
-                        "kind": "fleet-profile.apply"
-                        if family == "fleet-profile"
-                        else operation.kind,
-                        "node_ids": [operation.node_id]
-                        if family == "agent"
-                        else getattr(operation, "targets", []),
-                        "authority_revision": getattr(
-                            operation, "authority_revision", None
-                        ),
-                        "payload_digest": getattr(operation, "payload_digest", None),
-                        "plan_digest": getattr(operation, "plan_digest", None)
-                        or payload.get("plan_digest"),
-                        "updated_at": _aware(operation.updated_at).isoformat(),
-                        "source": "agent" if family == "agent" else "controller",
-                        "rank": payload.get("rank")
-                        if type(payload.get("rank")) is int
-                        else None,
-                        "progress": getattr(member, "progress", None),
-                        "result": getattr(member, "result", None)
-                        or payload.get("failure")
-                        or {
-                            "reason": getattr(operation, "last_error", None)
-                            or getattr(operation, "status_reason", None)
-                            or "Operation failed"
-                        },
-                    }
-                )
-            return result
+                item = FleetProfileService._operation_item(application)
+                if item["attempt"] != attempt:
+                    return None
+                item["source"] = "controller"
+                item["result"] = item["result"] or item["failure"]
+                return item
+        return None
+
+    @staticmethod
+    def _item(
+        operation,
+        *,
+        attempt: int,
+        kind: str,
+        node_ids: object,
+        source: EvidenceSource,
+        progress: object,
+        result: object,
+    ) -> dict[str, object]:
+        payload = getattr(operation, "payload", None) or {}
+        return {
+            "id": operation.id,
+            "attempt": attempt,
+            "kind": kind,
+            "node_ids": node_ids,
+            "updated_at": _aware(operation.updated_at).isoformat(),
+            "source": source,
+            "rank": payload.get("rank") if type(payload.get("rank")) is int else None,
+            "progress": progress,
+            "result": result
+            or payload.get("failure")
+            or {
+                "reason": getattr(operation, "last_error", None)
+                or getattr(operation, "status_reason", None)
+                or "Operation failed"
+            },
+        }
