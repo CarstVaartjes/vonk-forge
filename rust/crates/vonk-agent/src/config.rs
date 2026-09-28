@@ -23,8 +23,10 @@ pub enum ConfigError {
     Unsafe(&'static str),
 }
 
+/// The Spark's site configuration. Keys this agent no longer reads (for
+/// example the retired poll bounds) are ignored, so a Spark set up by an older
+/// release keeps starting after a package upgrade.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct AgentConfig {
     pub enrollment_url: Url,
     pub controller_url: Url,
