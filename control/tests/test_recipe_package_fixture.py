@@ -433,6 +433,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         library_commit=changed_index["source_commit"],
         source_path=current_row["source_path"],
     )
+    assert offline.release is not None
     catalog.import_recipe_library(
         "offline-test",
         library_commit=offline.library_commit,
