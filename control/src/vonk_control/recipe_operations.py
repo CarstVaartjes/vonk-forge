@@ -3129,7 +3129,6 @@ class RecipeOperationService:
                 or not isinstance(runtime_image, Mapping)
                 or not isinstance(placement, Mapping)
                 or identity.get("recipe_revision_sha256") != revision.content_digest
-                or runtime.get("image_digest") != installation.image_digest
                 or runtime_image.get("image_digest") != installation.image_digest
                 or placement.get("rank") != node.rank
                 or placement.get("role") != node.role

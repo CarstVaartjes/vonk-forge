@@ -16,7 +16,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.runtime_preflight import mandatory_capabilities, request_digest
+from vonk_control.runtime_preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
 from .test_recipe_operations import NOW, setup_services
@@ -60,12 +60,8 @@ def _finish(sessions, checkpoint, now, *, failed=None, fingerprint="a" * 64):
                 agent_certificate_serial="serial-0",
                 state="succeeded",
                 result={
-                    "schema_version": 1,
                     "fingerprint": fingerprint,
-                    "request_sha256": request_digest(request),
                     "observed_at": int(now.timestamp()),
-                    "duration_ms": 1,
-                    "cached": False,
                     "findings": [
                         {
                             "capability": capability,
