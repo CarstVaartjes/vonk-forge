@@ -430,7 +430,7 @@ def _missing_prerequisite(marker: str, item: pytest.Item) -> str | None:
     if marker == "needs_recipe_library":
         configured = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
         if not configured or not (Path(configured) / "catalog-index.json").is_file():
-            return "needs_recipe_library tests require VONK_RECIPE_LIBRARY_ROOT with catalog-index.json"
+            return "needs_recipe_library tests require VONK_RECIPE_LIBRARY_ROOT with a built catalog-index.json (scripts/build-recipe-library)"
     if marker == "needs_rust_probe" and not sys.platform.startswith("linux"):
         return "needs_rust_probe tests drive Linux-only agent wire probes"
     if marker == "postgres":

@@ -10,7 +10,8 @@ plane; the recipe repository owns the reviewed model and recipe material.
 | Concern | Authority |
 | --- | --- |
 | JSON schemas, harness compilers, admission, installation, and Spark acceptance | `vonk-forge` at an exact platform commit |
-| Canonical `ModelDefinition` and `RecipeDefinition` documents, index, and independent recipe packages | `vonk-forge-recipes` at an exact library commit |
+| Canonical `ModelDefinition` and `RecipeDefinition` documents | `vonk-forge-recipes` at an exact library commit |
+| Catalog index and independent recipe packages | Signed `vonk-forge-recipes` GitHub release built from that commit |
 | Installed state, active runs, routes, and local acceptance evidence | Local control-plane PostgreSQL |
 | Weights, OCI layers, secrets, and fleet state | Never stored in the recipe repository |
 
@@ -21,12 +22,41 @@ download or use.
 
 ## Development versus production
 
-The Controller watches the recipe library's reviewed `main` branch, but each
-sync first resolves that branch to one immutable Git commit. Every imported
-recipe, dependency, source bundle, and receipt is then verified against that
-exact snapshot. The local controller resolves every recipe dependency by
-`kind`, `publisher`, `slug`, and content digest; it never turns a branch,
-display name, or `latest` tag directly into execution authority.
+The catalog index and recipe packages are not committed to the recipe
+repository. Its `publish.yml` workflow builds them from the release commit and
+attaches them to a GitHub release together with `SHA256SUMS` and
+`SHA256SUMS.sigstore.json`, a keyless GitHub artifact attestation over
+`SHA256SUMS`. The Controller follows the newest release by default; set
+`VONK_RECIPE_LIBRARY_RELEASE` to an exact `vMAJOR.MINOR.PATCH` tag to hold one.
+
+Each sync verifies, before importing anything:
+
+1. the Sigstore bundle offline against the Sigstore public-good trust root
+   packaged at `control/src/vonk_control/resources/sigstore-trusted-root.json`;
+2. that its certificate names the pinned publisher: identity
+   `https://github.com/CarstVaartjes/vonk-forge-recipes/.github/workflows/publish.yml@refs/heads/main`,
+   issuer `https://token.actions.githubusercontent.com`, source repository ID
+   `1336002555` (never reused after a rename or deletion), ref
+   `refs/heads/main` and a GitHub-hosted runner;
+3. that the attestation's only subject is the downloaded `SHA256SUMS`, and
+   that its provenance and certificate name the same source commit;
+4. that `catalog-index.json` matches its `SHA256SUMS` digest and records that
+   signed commit as `source_commit`;
+5. that every package the index names is listed in `SHA256SUMS` with the
+   index's own digest, and that downloaded package bytes match both.
+
+An unsigned, wrongly signed, or inconsistent release fails the sync with a
+`recipe_release.*` or `recipe_package.*` code and never replaces the imported
+catalog. When GitHub is unreachable, the Controller reuses the previous
+verified generation from its state directory, re-verifying the stored
+signature. Automatic sync retries a failed attempt after 30 seconds, doubling
+up to the sync interval. The packaged trust root is refreshed deliberately with
+the pinned `sigstore` dependency when Sigstore rotates its keys.
+
+Every imported recipe, dependency, source bundle, and receipt is verified
+against the release's exact commit. The local controller resolves every recipe
+dependency by `kind`, `publisher`, `slug`, and content digest; it never turns
+a branch, display name, or `latest` tag directly into execution authority.
 
 The Controller refreshes the managed catalog automatically every 15 minutes by
 default. Set `VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS` between 60 and 86400
@@ -72,16 +102,20 @@ From the exact platform task worktree and an owned recipe-library checkout:
 export VONK_PLATFORM_ROOT="$PWD"
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 
-cd "$VONK_RECIPE_LIBRARY_ROOT"
-tools/build-catalog-index
-tools/build-catalog-index --check
+scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
 "$VONK_PLATFORM_ROOT/control/.venv/bin/python" \
   "$VONK_PLATFORM_ROOT/scripts/validate-recipe-library" \
   --library-root "$VONK_RECIPE_LIBRARY_ROOT" \
   --platform-root "$VONK_PLATFORM_ROOT" \
   --json
-cd "$VONK_PLATFORM_ROOT"
 ```
+
+`scripts/build-recipe-library` runs the recipe checkout's own
+`tools/build-catalog-index`, which writes the ignored `catalog-index.json`,
+`qualification/qualification-index.json` and `packages/` build outputs in
+place. Platform CI, the reusable recipe validator, `scripts/qualify-recipe`,
+the campaign runner and the tests read those outputs; run the command again
+after changing the checkout.
 
 Set the library path to its owning task worktree when recipe edits are in
 progress; do not regenerate over another task's uncommitted library files.
@@ -110,9 +144,9 @@ Structural output is repository evidence only. Container qualification remains
 an environment-dependent native `linux/arm64` gate, and Spark acceptance
 requires the designated physical lane.
 
-The Controller is the only import path. It resolves the configured library
-branch to one immutable commit, validates the package index and dependency
-closure, and records the durable result through
+The Controller is the only import path. It resolves the configured signed
+release, validates the package index and dependency closure, and records the
+durable result through
 `POST /api/catalog/managed-recipes/sync`. Use the matching
 `GET /api/catalog/managed-recipes/sync-status` response to inspect the
 commit, counts, conflicts, and withdrawn revisions. There is no platform-local
@@ -136,10 +170,12 @@ execution.
 
 In the production Compose topology the control API retains no general outbound
 network. Its GitHub client uses internal Caddy listeners that accept only
-repository-scoped `GET` requests, remove credentials, and relay the commit
-lookup to `api.github.com` and immutable catalog/package paths to
-`raw.githubusercontent.com`. The NAS therefore needs ordinary outbound HTTPS
-and DNS access, but it never needs a GitHub token.
+repository-scoped `GET` requests and remove credentials: `:8083` relays the
+release lookup to `api.github.com` (one unauthenticated REST call per sync),
+and `:8085` relays release asset downloads to `github.com` and GitHub's release
+asset origin, `release-assets.githubusercontent.com`, scoped to the recipe
+repository's numeric ID. The NAS therefore needs ordinary outbound HTTPS and
+DNS access, but it never needs a GitHub token.
 
 ## Custom libraries
 

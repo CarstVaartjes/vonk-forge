@@ -14,6 +14,7 @@ dependencies = [
   "psycopg[binary]==3.3.5",
   "PyJWT==2.13.0",
   "PyYAML==6.0.3",
+  "sigstore==4.5.0",
   "sqlalchemy==2.0.42",
   "vonk-cluster-profiles==0.1.1",
   "tomli-w==1.2.0",
