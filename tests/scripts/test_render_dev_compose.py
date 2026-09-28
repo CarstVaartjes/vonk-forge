@@ -191,6 +191,8 @@ def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
         assert actual_modes == expected_modes, service_name
 
 
+# Starts a real PostgreSQL container and runs initdb (~8-12 s on CI runners).
+@pytest.mark.slow(30)
 @pytest.mark.lane
 def test_rendered_postgres_configs_start_with_an_inert_initializer(
     tmp_path: Path,

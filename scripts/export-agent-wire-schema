@@ -35,9 +35,10 @@ def export_schema() -> dict[str, object]:
 
     from vonk_control.contract_graph import discover_contracts, schema_application
 
-    for browser_auth in (False, True):
-        _operations, api_models = discover_contracts(schema_application(browser_auth=browser_auth))
-        models.update(api_models)
+    # The browser-auth application adds routes to the plain one, so its
+    # contracts are the complete set.
+    _operations, api_models = discover_contracts(schema_application(browser_auth=True))
+    models.update(api_models)
     ordered = sorted(models, key=lambda model: (model.__module__, model.__name__))
     if len({model.__name__ for model in ordered}) != len(ordered):
         raise ValueError("Wire model names collide across canonical modules")
