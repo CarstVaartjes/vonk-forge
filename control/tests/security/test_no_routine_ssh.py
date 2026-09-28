@@ -102,35 +102,13 @@ def test_production_worker_has_no_cluster_egress_network() -> None:
     assert "CONTROL_WORKER_IMAGE" in worker
 
 
-# Slow by design: it builds the real worker image, the only way to prove the
-# shipped filesystem lacks git and ssh.
-@pytest.mark.slow(60)
-@pytest.mark.lane  # Builds and runs the worker image.
-@pytest.mark.linux_only
-@pytest.mark.needs_buildx
+# The runtime proof that the shipped filesystem lacks git and ssh. It checks
+# the worker image the image-build CI job built once; it never builds one.
+@pytest.mark.built_image
+@pytest.mark.lane  # Runs the prebuilt worker image.
 def test_built_worker_image_contains_no_direct_transport_executable(
-    control_image_build_args: list[str],
+    worker_image: str,
 ) -> None:
-    image = "vonk-control-worker:test-no-routine-ssh"
-    build = subprocess.run(
-        [
-            "docker",
-            "build",
-            "--file",
-            "control/Dockerfile",
-            *control_image_build_args,
-            "--target",
-            "worker",
-            "--tag",
-            image,
-            ".",
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert build.returncode == 0, build.stderr
     inspect = subprocess.run(
         [
             "docker",
@@ -138,7 +116,7 @@ def test_built_worker_image_contains_no_direct_transport_executable(
             "--rm",
             "--entrypoint",
             "/bin/sh",
-            image,
+            worker_image,
             "-eu",
             "-c",
             (

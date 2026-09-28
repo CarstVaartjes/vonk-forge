@@ -75,6 +75,19 @@ of sleeping, shrink fixtures to the boundary under test). On a machine that is
 knowingly overloaded, `--test-budget-scale=2` (or `0` to disable) relaxes the
 check locally; CI always runs at the default scale.
 
+No test builds a container image. Checks that need the real Controller or
+worker image carry `@pytest.mark.built_image` and take the image from
+`VONK_TEST_CONTROLLER_IMAGE` or `VONK_TEST_WORKER_IMAGE`: each is a quick
+`docker run` against an image that is already built, well inside the normal
+budget. The "Controller image build tests" CI job builds both targets of
+`control/Dockerfile` once (buildx with the GitHub Actions cache), then runs
+`pytest -q -m built_image control/tests`; the control suite shards deselect
+them with `-m "not built_image"`, and the CI gate requires that job whenever
+the control suite is selected. Without the variable such a test skips locally
+and fails in CI. `scripts/test-local --with-image-build` builds the two images
+first and includes the checks; by default they are skipped. Prefer a static
+check of the Dockerfile or build inputs where that proves the property.
+
 The local `control` project refers to the ignored protocol wheel under
 `inventory/wheels`. `scripts/test-local` builds and verifies it automatically.
 For direct `uv sync --project control` or `uv run --project control` commands,

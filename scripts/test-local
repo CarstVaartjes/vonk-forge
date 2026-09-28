@@ -6,43 +6,82 @@ cd "$root"
 
 usage() {
     cat <<'USAGE'
-Usage: scripts/test-local [--changed [BASE]]
+Usage: scripts/test-local [--changed [BASE]] [--with-image-build]
 
 Without arguments, run the complete repository and Controller suites (Linux
 lanes go to the vonk-ci OrbStack VM on macOS).
 
---changed [BASE]  Fast inner loop: run only the test files that directly
-                  exercise files changed since BASE (default: the merge base
-                  with origin/main), including uncommitted and untracked
-                  changes. Not a substitute for the full run before review.
+--changed [BASE]    Fast inner loop: run only the test files that directly
+                    exercise files changed since BASE (default: the merge base
+                    with origin/main), including uncommitted and untracked
+                    changes. Not a substitute for the full run before review.
+--with-image-build  Build the Controller and worker images once from
+                    control/Dockerfile and also run the built_image checks
+                    against them (CI does this in its own job). Skipped by
+                    default.
 USAGE
 }
 
 changed_mode=false
 changed_base=
-case "${1:-}" in
-    "") ;;
-    --changed)
-        changed_mode=true
-        changed_base=${2:-}
-        ;;
-    -h|--help)
-        usage
-        exit 0
-        ;;
-    *)
-        usage >&2
-        exit 2
-        ;;
-esac
+include_image_build=false
+while (($#)); do
+    case "$1" in
+        --changed)
+            changed_mode=true
+            if [[ -n "${2:-}" && "$2" != --* ]]; then
+                changed_base=$2
+                shift
+            fi
+            ;;
+        --with-image-build)
+            include_image_build=true
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+# Adds the built_image deselection to a marker expression unless requested.
+with_image_build_selection() {
+    local expression=$1
+    if [[ "$include_image_build" == true ]]; then
+        printf '%s' "$expression"
+    elif [[ -n "$expression" ]]; then
+        printf '(%s) and not built_image' "$expression"
+    else
+        printf 'not built_image'
+    fi
+}
+
+# Builds each image once; the built_image tests only inspect and run them.
+build_test_images() {
+    export VONK_TEST_CONTROLLER_IMAGE=vonk-control:test-local
+    export VONK_TEST_WORKER_IMAGE=vonk-control-worker:test-local
+    docker build --file control/Dockerfile --target api \
+        --tag "$VONK_TEST_CONTROLLER_IMAGE" .
+    docker build --file control/Dockerfile --target worker \
+        --tag "$VONK_TEST_WORKER_IMAGE" .
+}
 
 scripts/build-control-wheel
+if [[ "$include_image_build" == true ]]; then
+    build_test_images
+fi
 recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
 linux_markers='linux_only or needs_systemd or postgres'
 portable_markers='not linux_only and not needs_systemd and not needs_rust_probe and not postgres'
 
 run_python_suites() {
-    local marker_expression=$1
+    local marker_expression
+    marker_expression=$(with_image_build_selection "$1")
     local uv_project_environment=${UV_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-root-venv"}
     local uv_control_environment=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"}
     local uv_cache_dir=${UV_CACHE_DIR:-"/private/tmp/vonk-test-local-uv-cache"}
@@ -139,13 +178,19 @@ run_changed_tests() {
         export VONK_RECIPE_LIBRARY_ROOT="$recipe_root"
     fi
     local status=0
+    local marker_args=()
+    local marker_expression
+    marker_expression=$(with_image_build_selection "")
+    if [[ -n "$marker_expression" ]]; then
+        marker_args=(-m "$marker_expression")
+    fi
     if ((${#repository_files[@]})); then
         echo "Repository suite: ${#repository_files[@]} changed-path test files"
         UV_CACHE_DIR="$uv_cache_dir" \
             UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-root-venv"} \
             uv run --python 3.14 --frozen \
             ${VONK_RECIPE_LIBRARY_ROOT:+--with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts"} \
-            pytest -q -n auto --dist loadfile "${repository_files[@]}" || status=1
+            pytest -q -n auto --dist loadfile "${marker_args[@]}" "${repository_files[@]}" || status=1
     fi
     if ((${#control_files[@]})); then
         echo "Controller suite: ${#control_files[@]} changed-path test files"
@@ -154,7 +199,7 @@ run_changed_tests() {
             UV_CACHE_DIR="$uv_cache_dir" \
                 UV_PROJECT_ENVIRONMENT=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"} \
                 uv run --frozen --with-editable .. \
-                pytest -q -n auto --dist loadfile "${control_files[@]}"
+                pytest -q -n auto --dist loadfile "${marker_args[@]}" "${control_files[@]}"
         ) || status=1
     fi
     if ((${#compose_files[@]})); then
@@ -162,7 +207,7 @@ run_changed_tests() {
         UV_CACHE_DIR="$uv_cache_dir" \
             UV_PROJECT_ENVIRONMENT=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"} \
             uv run --project control --frozen --with-editable . \
-            pytest -q "${compose_files[@]}" || status=1
+            pytest -q "${marker_args[@]}" "${compose_files[@]}" || status=1
     fi
     return "$status"
 }

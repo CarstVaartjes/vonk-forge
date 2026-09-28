@@ -50,6 +50,7 @@ _REGISTERED_MARKERS = (
     "linux_only: requires a Linux operating system or Linux container behavior",
     "needs_dpkg_deb: requires the Debian package builder at /usr/bin/dpkg-deb",
     "needs_buildx: requires the Docker Buildx plugin for image builds",
+    "built_image: checks a prebuilt Controller or worker image named by VONK_TEST_CONTROLLER_IMAGE or VONK_TEST_WORKER_IMAGE; runs only in the Controller image build CI job",
     "needs_systemd: requires systemd tools or a systemd host",
     "needs_recipe_library: requires VONK_RECIPE_LIBRARY_ROOT to name the canonical recipe checkout",
     "needs_rust_probe: requires Rust wire probes built by scripts/tests/run_agent_wire_contracts.py",

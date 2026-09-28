@@ -38,6 +38,7 @@ def _valid(**overrides: str):
         "controller-spark-wire": "success",
         "repository": "skipped",
         "control": "success",
+        "control-image-build": "success",
         "web": "success",
         "generated": "skipped",
         "compose": "success",
@@ -64,6 +65,7 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
         "controller-spark-wire",
         "repository",
         "control",
+        "control-image-build",
         "web",
         "generated",
         "compose",
@@ -107,3 +109,11 @@ def test_wire_contract_is_required_for_either_language_change(area, result) -> N
         "controller-spark-wire" in error
         for error in _module().verify("success", selected, results)
     )
+
+
+def test_controller_image_build_tests_are_required_with_the_control_suite() -> None:
+    selected, results = _valid()
+    results["control-image-build"] = "skipped"
+    assert _module().verify("success", selected, results) == [
+        "control-image-build result is 'skipped', expected 'success'"
+    ]
