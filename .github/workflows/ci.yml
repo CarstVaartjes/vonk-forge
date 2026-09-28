@@ -377,9 +377,19 @@ jobs:
             aptly aardvark-dns crun dbus-user-session fuse-overlayfs netavark podman slirp4netns uidmap
       - parallel:
           - name: Test bounded aptly state compaction
+            env:
+              VONK_CI_PREREQUISITES: needs_aptly
             run: >-
               uv run --python 3.14 --frozen --with pytest==9.1.1
               pytest -q tests/scripts/test_agent_apt_compaction_integration.py
+          - name: Verify Rust agent advertises Controller capabilities
+            env:
+              VONK_AGENT_BINARY: target/debug/vonk-agent
+              VONK_CI_PREREQUISITES: needs_agent_binary
+            run: >-
+              cargo build --locked -p vonk-agent --bin vonk-agent &&
+              uv run --python 3.14 --frozen --with pytest==9.1.1
+              pytest -q tests/acceptance/test_rust_agent_parity.py
           - name: Test Spark rootless Podman OCI import
             run: >-
               cargo test --locked -p vonk-agent --test recipe_builder
@@ -677,6 +687,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.github/actions/prepare-control-wheel
       - name: Install supported completion shells
         run: |
           sudo apt-get update
@@ -707,9 +719,13 @@ jobs:
                 --index "$SHARD_INDEX" --total "$SHARD_TOTAL"
           )
           ((${#shard_files[@]} > 0))
+          # A per-test deadline turns a hung test into a named failure long
+          # before the job timeout cancels the shard without logs.
           uv run --python 3.14 --frozen --with pytest==9.1.1 \
+            --with pytest-timeout==2.4.0 \
             --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
             pytest -q -o junit_family=xunit1 \
+            --timeout=300 --timeout-method=signal \
             --junitxml="$RUNNER_TEMP/repository-junit.xml" --basetemp="$RUNNER_TEMP/repository-pytest" \
             "${shard_files[@]}"
 

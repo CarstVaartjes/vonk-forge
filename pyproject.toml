@@ -83,6 +83,7 @@ markers = [
     "needs_dpkg: requires the Debian version comparison tool",
     "needs_docker: requires a working Docker daemon for container tests",
     "needs_cargo: requires the Rust toolchain to build an integration probe",
+    "needs_agent_binary: requires VONK_AGENT_BINARY to name a built vonk-agent binary",
     "needs_aptly: requires aptly for package repository integration tests",
     "needs_backup_container: requires the opt-in PostgreSQL backup container lane",
     "postgres: requires the explicit PostgreSQL test service configured by the test",
