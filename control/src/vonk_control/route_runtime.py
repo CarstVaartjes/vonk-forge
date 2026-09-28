@@ -43,6 +43,10 @@ class RouteRuntimeError(RuntimeError):
     """A route bundle could not be safely staged, activated, or inspected."""
 
 
+class RouteUpdateFenced(RouteRuntimeError):
+    """Normal publication waits while a Controller update holds the fence."""
+
+
 def _encoded(value: Mapping[str, object]) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
@@ -261,7 +265,7 @@ class AtomicRouteBundlePublisher:
                 raise RouteRuntimeError("route update boundary is not active")
             return
         if key != active:
-            raise RouteRuntimeError("route publication is fenced by an update boundary")
+            raise RouteUpdateFenced("route publication is fenced by an update boundary")
 
     def claim_update_boundary(self, key: str) -> None:
         """Fence normal publication behind one durable update boundary key."""
