@@ -225,8 +225,10 @@ def test_update_installs_only_changed_signed_wheel(
 
     def install(command, **kwargs):
         seen.append(command)
-        assert "--no-deps" in command and "--offline" in command
-        assert command[1:3] == ["pip", "install"]
+        # Installed as a uv tool, so the release's dependencies resolve and
+        # the tool receipt follows the new wheel.
+        assert command[1:6] == ["tool", "install", "--force", "--python", "3.14"]
+        assert command[-1].endswith(".whl")
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(cli_update.subprocess, "run", install)

@@ -15,14 +15,13 @@ vonkctl update --apply --public-key /path/to/installer-public.pem
 
 The command verifies the unexpired signed channel pointer, immutable signed
 release and exact CLI wheel digest. `--apply` installs only when the accepted
-source commit differs from the currently installed CLI. It uses `uv pip` in the
-exact Python virtual environment running `vonkctl`, with dependency resolution
-disabled; `uv` must be available and that environment must already have the CLI
-dependencies. The command neither edits
+source commit differs from the currently installed CLI. It reinstalls the
+verified wheel with `uv tool install --force --python 3.14`, the same command the
+installer uses, so dependencies a release adds or raises are resolved from the
+package index; `uv` must be available. The command neither edits
 Controller credentials nor changes the chosen channel or installer signing key.
 It does not update the Controller or Sparks. A failed verification leaves the
-installed CLI intact. The virtual environment must be writable; run the command
-from the environment you intend to update.
+installed CLI intact.
 
 Set `VONK_INSTALLER_PUBLIC_KEY_FILE` to the trusted public key to avoid repeating
 `--public-key`. CLI updates default to the `stable` channel. Set

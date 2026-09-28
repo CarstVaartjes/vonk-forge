@@ -134,7 +134,8 @@ tool dependency goes into a dependency group and the lock.
 Tests never download, build an environment or pull an image. A test that needs
 a wheel builds it with the locked `hatchling` in the running interpreter; one
 that installs a wheel into a scratch venv installs it `--no-deps` and links the
-CLI's own locked dependencies, which `scripts/sync-cli-dependencies` prepares; Docker-backed tests use the pinned images
+CLI's own locked dependencies, which `scripts/sync-cli-dependencies` prepares
+(`scripts/test` runs it first); Docker-backed tests use the pinned images
 `scripts/pull-test-images` pulls beforehand (CI does the same, with retries).
 
 Use a writable, task-specific uv cache. Replace `vonk-example-change` in these

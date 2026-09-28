@@ -77,6 +77,12 @@ run() {
     uv run --project control --frozen pytest -q -p no:cacheprovider "$@"
 }
 
+# The installed-CLI tests link the CLI's locked dependencies from this
+# environment; keep it current so a dependency change cannot leave it stale.
+if [[ "$suite" == repository || "$suite" == control ]]; then
+    scripts/sync-cli-dependencies
+fi
+
 if [[ -n "$shard" ]]; then
     [[ "$shard" =~ ^([0-9]+)/([0-9]+)$ ]] || { echo "--shard must be I/N" >&2; exit 2; }
     index=$((BASH_REMATCH[1] - 1))

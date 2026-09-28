@@ -227,7 +227,7 @@ PY
     chmod 600 "$saved_key_tmp" || fail "cannot secure the verified release public key"
     mv -f -- "$saved_key_tmp" "$public_key_destination" || fail "cannot save the verified release public key"
     saved_key_tmp=
-    uv tool install --force "$wheel" || fail "uv could not install the verified CLI wheel"
+    uv tool install --force --python 3.14 "$wheel" || fail "uv could not install the verified CLI wheel"
     printf '%s\n' "vonkctl $cli_version is installed. Run 'vonkctl --version' to confirm."
     printf '%s\n' "For signed updates, run: vonkctl update --apply --public-key '$public_key_destination'"
     exit 0
