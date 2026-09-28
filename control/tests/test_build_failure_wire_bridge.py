@@ -272,8 +272,10 @@ def test_native_source_fetch_failure_reaches_availability_owner(
         # fenced queue boundary before the parent is allowed to classify it.
         jobs.record_result(result)
         with sessions() as session:
-            accepted_job = session.get(Job, result.job_id)
-            stored_operation = session.get(AgentOperation, result.operation_id)
+            accepted_job = session.get(Job, build_job.id)
+            stored_operation = session.get(
+                AgentOperation, fenced_operation(sessions, first_claim).id
+            )
             assert accepted_job is not None and stored_operation is not None
             assert accepted_job.state == "failed"
             assert stored_operation.state == "failed"
