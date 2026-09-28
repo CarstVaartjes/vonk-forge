@@ -126,12 +126,89 @@ def test_failed_probe_is_reissued_after_backoff(tmp_path):
     assert blocked is None
     assert waiting.pending_job_id is None
     assert waiting.next_check_at is not None
-
     clock.now = waiting.next_check_at
     retried, blocked = service.ensure(previous=waiting, **arguments)
     assert blocked is None
     assert retried.pending_job_id is not None
     assert retried.pending_job_id != checkpoint.pending_job_id
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "controller.authentication_required",
+        "controller.request_rejected",
+        "controller.fleet.enrollment_denied",
+        "helper.authorization_invalid",
+        "helper.message_invalid",
+        "helper.operation_invalid",
+        "helper.artifact_invalid",
+        "helper.runtime_image_identity_invalid",
+        "helper.peer_invalid",
+        "helper_grant_node_mismatch",
+        "helper_grant_unauthorized",
+        "helper_request_replayed",
+        "grant_node_mismatch",
+        "grant_unauthorized",
+        "request_replayed",
+        "runtime_preflight.node_revoked",
+        "agent.enrollment.submit.rejected",
+        "enrollment.token_invalid",
+        "enrollment.token_expired",
+        "enrollment.token_revoked",
+        "helper_authority.denied",
+        "helper_authority.invalid",
+        "tombstone_fenced",
+        "tombstone.fenced",
+        "http.401",
+        "http.403",
+        "local.identity_expired",
+        "agent.certificate.rotation.conflict",
+    ],
+)
+def test_security_probe_failures_are_returned_without_reprobe(tmp_path, code: str):
+    sessions, _queue, _clock, _node, service, arguments = _setup(tmp_path)
+    pending, error = service.ensure(**arguments, previous=None)
+    assert error is None and pending.pending_job_id is not None
+    with sessions.begin() as session:
+        child = session.get(Job, pending.pending_job_id)
+        operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == pending.pending_job_id
+            )
+        )
+        assert child is not None and operation is not None
+        child.state = "failed"
+        child.status_reason = f"{code}: security boundary refused"
+        operation.state = "failed"
+
+    checkpoint, blocker = service.ensure(**arguments, previous=pending)
+
+    assert blocker == f"{code}: security boundary refused"
+    assert checkpoint.pending_job_id is None
+    assert checkpoint.next_check_at is None
+
+
+def test_ordinary_stale_preflight_cause_is_preserved_for_retry(tmp_path) -> None:
+    sessions, _queue, clock, _node_id, service, arguments = _setup(tmp_path)
+    pending, error = service.ensure(**arguments, previous=None)
+    assert error is None
+    _finish(sessions, pending, clock.now, fingerprint="b" * 64)
+
+    stale, error = service.ensure(**arguments, previous=pending)
+
+    assert error is None
+    assert stale.next_check_at is not None
+    assert stale.last_failure_code == "runtime_preflight.host_changed"
+    assert "runtime_preflight.host_changed" in (stale.last_failure_detail or "")
+    clock.now = stale.next_check_at
+    recovered, error = service.ensure(**arguments, previous=stale)
+    assert error is None and recovered.pending_job_id is not None
+    _finish(sessions, recovered, clock.now)
+    fresh, error = service.ensure(**arguments, previous=recovered)
+    assert error is None
+    assert fresh.last_failure_code is None
+    assert fresh.last_failure_detail is None
 
 
 def test_removed_node_is_a_terminal_preflight_blocker(tmp_path):

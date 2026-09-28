@@ -969,8 +969,9 @@ def test_expired_preflight_waits_then_accepts_the_same_request(
 
     later = now + timedelta(seconds=716)
     _record_inventory(sessions, node, later)
-    with pytest.raises(InstallPreflightExpired):
+    with pytest.raises(InstallPreflightExpired) as expired:
         service.accept_install(plan, actor="admin", now=later)
+    assert expired.value.code == "runtime_preflight.stale"
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
         assert list(session.scalars(select(ResourceReservation))) == []
@@ -1046,8 +1047,10 @@ def test_moved_host_fingerprint_refreshes_instead_of_failing_the_identical_plan(
             if not value.startswith("runtime.preflight.fingerprint.")
         ] + ["runtime.preflight.fingerprint." + "b" * 64]
 
-    with pytest.raises(InstallPreflightExpired):
+    with pytest.raises(InstallPreflightExpired) as moved:
         service.accept_install(plan, actor="admin", now=later)
+    assert moved.value.code == "runtime_preflight.host_changed"
+    assert "host policy changed" in (moved.value.detail or "")
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
         assert list(session.scalars(select(ResourceReservation))) == []

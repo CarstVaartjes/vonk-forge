@@ -130,6 +130,13 @@ class InstallPreflightExpired(InstallAdmissionBusy):
 
     code = "runtime_preflight.stale"
 
+    def __init__(
+        self, code: str = "runtime_preflight.stale", detail: str | None = None
+    ):
+        self.code = code
+        self.detail = detail
+        super().__init__(f"{code}: {detail}" if detail else code)
+
 
 _RETRYABLE_INSTALL_BLOCKERS = {
     "install.inventory_missing",
@@ -154,7 +161,13 @@ def require_admissible(plan: InstallPlan) -> None:
         return
     codes = {reason.code for node in plan.nodes for reason in node.blockers}
     if codes and codes <= _REFRESHABLE_PREFLIGHT_BLOCKERS:
-        raise InstallPreflightExpired("runtime_preflight.stale")
+        blocker = next(
+            reason
+            for node in plan.nodes
+            for reason in node.blockers
+            if reason.code in _REFRESHABLE_PREFLIGHT_BLOCKERS
+        )
+        raise InstallPreflightExpired(blocker.code, blocker.detail)
     if codes and codes <= _RETRYABLE_INSTALL_BLOCKERS:
         raise InstallAdmissionBusy("install is waiting for inventory or capacity")
     raise InstallPlanConflict(

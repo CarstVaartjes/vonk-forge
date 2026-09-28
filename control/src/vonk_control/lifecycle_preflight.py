@@ -48,6 +48,8 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
     pending_job_id: UuidId | None = None
     pending_node_id: NodeId | None = None
     next_check_at: AwareDatetime | None = None
+    last_failure_code: str | None = None
+    last_failure_detail: str | None = None
     attempts: dict[NodeId, Annotated[int, Field(ge=1)]] = Field(
         default_factory=dict, max_length=33
     )
@@ -64,10 +66,37 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
         return self
 
 
-def _security_failure(reason: str) -> bool:
-    """Keep explicit authority and contract failures fail-closed."""
-    code = reason.split(":", 1)[0].strip().lower()
+def _is_security_failure(code: str) -> bool:
+    """Recognize emitted security refusals until a shared classifier exists."""
     return code in {
+        "controller.authentication_required",
+        "controller.request_rejected",
+        "controller.fleet.enrollment_denied",
+        "agent.certificate.rotation.conflict",
+        "local.identity_expired",
+        "helper.authorization_invalid",
+        "helper.message_invalid",
+        "helper.operation_invalid",
+        "helper.artifact_invalid",
+        "helper.runtime_image_identity_invalid",
+        "helper.peer_invalid",
+        "helper_grant_node_mismatch",
+        "helper_grant_unauthorized",
+        "helper_request_replayed",
+        "grant_node_mismatch",
+        "grant_unauthorized",
+        "request_replayed",
+        "runtime_preflight.node_revoked",
+        "agent.enrollment.submit.rejected",
+        "enrollment.token_invalid",
+        "enrollment.token_expired",
+        "enrollment.token_revoked",
+        "helper_authority.denied",
+        "helper_authority.invalid",
+        "tombstone_fenced",
+        "tombstone.fenced",
+        "http.401",
+        "http.403",
         "permission_denied",
         "forbidden",
         "unauthorized",
@@ -122,7 +151,9 @@ class LifecyclePreflight:
             checkpoint.pending_job_id = None
             checkpoint.pending_node_id = None
             checkpoint.receipts.pop(node_id, None)
-            if _security_failure(reason):
+            checkpoint.next_check_at = None
+            code = reason.split(":", 1)[0].strip().lower()
+            if _is_security_failure(code):
                 return checkpoint, reason
             checkpoint.next_check_at = self._recovery.next_attempt(
                 f"{request_key}:{phase_index}:{node_id}",
@@ -243,6 +274,8 @@ class LifecyclePreflight:
                         now=int(now.timestamp()),
                     )
                     if not blockers:
+                        checkpoint.last_failure_code = None
+                        checkpoint.last_failure_detail = None
                         continue
                     if any(
                         item.code
@@ -256,12 +289,29 @@ class LifecyclePreflight:
                         return checkpoint, "; ".join(item.detail for item in blockers)[
                             :512
                         ]
+                    stale_cause = "; ".join(
+                        f"{item.code}: {item.detail}" for item in blockers
+                    )
                     checkpoint.next_check_at = self._recovery.next_attempt(
                         f"{request_key}:{phase_index}:{node_id}",
                         checkpoint.attempts[node_id],
                         now,
                         ongoing_intent=True,
                     )
+                    checkpoint.last_failure_code = next(
+                        (
+                            item.code
+                            for item in blockers
+                            if item.code
+                            in {
+                                "runtime_preflight.host_changed",
+                                "runtime_preflight.requirements_changed",
+                                "runtime_preflight.stale",
+                            }
+                        ),
+                        "runtime_preflight.stale",
+                    )
+                    checkpoint.last_failure_detail = stale_cause[:512]
                     return checkpoint, None
                 attempt = checkpoint.attempts.get(node_id, 0) + 1
                 checkpoint.attempts[node_id] = attempt

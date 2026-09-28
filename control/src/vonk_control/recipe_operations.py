@@ -1970,6 +1970,10 @@ class RecipeOperationService:
             return existing
         now = self._clock()
         with self._sessions.begin() as session:
+            try:
+                acquire_admission_keys(session, (job_request_key(request_id),))
+            except AdmissionLockBusy as error:
+                raise RunAdmissionBusy("run capacity writer is busy") from error
             replay = self._idempotent_in_session(
                 session,
                 request_id,
