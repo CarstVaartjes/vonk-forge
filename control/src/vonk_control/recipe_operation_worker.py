@@ -19,14 +19,14 @@ from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )
-from .recipe_routes import RecipeRouteNotReady, publication_is_temporary
+from .recipe_routes import RecipeRouteNotReady
 from .recovery_policy import RecoveryPolicy
 
-#: Bounded publication retry.  The first attempt is prompt so a momentary
+#: Capped publication retry.  The first attempt is prompt so a momentary
 #: supervisor hiccup does not delay a ready run, and the cap keeps a
-#: persistent dependency failure from becoming a tight retry loop.  The
-#: budget stays inside the Run/Switch final-verification window, so a
-#: dependency that returns still converges without another operator command.
+#: persistent failure from becoming a tight retry loop.  A running run keeps
+#: retrying for as long as it serves, so a dependency or evidence problem that
+#: clears converges without another operator command.
 _ROUTE_PUBLICATION_RETRY = RecoveryPolicy(
     max_failures=6, base_delay_seconds=5, max_delay_seconds=60
 )
@@ -164,41 +164,24 @@ class RecipeOperationWorker:
         return self._routes.maintain(renew_before_seconds=10) or progressed
 
     def _defer_publication(self, run_id: str, error: BaseException) -> None:
-        """Record one failed publication attempt without losing the run.
+        """Record one failed publication attempt and schedule the next one.
 
-        A temporary dependency failure keeps the run pending at a durable
-        next-attempt time so the existing worker converges once the dependency
-        returns.  An unrecognised failure is not retried: it becomes one
-        precise blocked reason for an explicit disposition, because the
-        Controller cannot distinguish it from an invalid route contract.
+        The run stays ``pending`` with its latest reason while it is running,
+        so the route converges once the cause clears instead of leaving a
+        serving model permanently unlisted.
         """
 
         now = self._clock()
-        detail = f"{type(error).__name__}: {error}"[:512]
-        temporary = publication_is_temporary(error)
         with self._sessions.begin() as session:
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or run.route_state != "pending":
                 return
             attempts = int(run.route_attempts or 0) + 1
             run.route_attempts = attempts
-            if not temporary:
-                run.route_state = "failed"
-                run.route_error = detail
-                run.route_next_attempt_at = None
-                run.updated_at = now
-                return
-            due_at = _ROUTE_PUBLICATION_RETRY.next_attempt(run_id, attempts, now)
-            if due_at is None:
-                run.route_state = "failed"
-                run.route_error = (
-                    f"{detail} (route publication did not converge after "
-                    f"{attempts} attempts)"
-                )[:512]
-                run.route_next_attempt_at = None
-            else:
-                run.route_error = detail
-                run.route_next_attempt_at = due_at
+            run.route_error = f"{type(error).__name__}: {error}"[:512]
+            run.route_next_attempt_at = _ROUTE_PUBLICATION_RETRY.next_attempt(
+                run_id, attempts, now, ongoing_intent=True
+            )
             run.updated_at = now
 
     def _expire_initial_observation_deadline(self) -> bool:
