@@ -470,6 +470,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
                         "input_intent_sha256": "a" * 64,
                     },
                     "build_input_sha256": None,
+                    "claim_until": (now - timedelta(seconds=1)).isoformat(),
                 },
                 result=None,
                 current_attempt=1,
@@ -519,15 +520,9 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
                     "failed_nodes": [],
                     "node_evidence": {
                         plan.builder_node_id: {
-                            "build_input_sha256": "b" * 64,
                             "image_bytes": 1,
                             "image_digest": "sha256:" + "d" * 64,
                             "oci_layout_sha256": "e" * 64,
-                            "policy": {
-                                "passed": True,
-                                "dockerfile": "Dockerfile",
-                                "findings": [],
-                            },
                         }
                     },
                 },
@@ -892,6 +887,7 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
                         "builder_node_id": "builder-node",
                     },
                     "build_input_sha256": "b" * 64,
+                    "claim_until": (now - timedelta(seconds=1)).isoformat(),
                 },
                 current_attempt=1,
                 created_at=now,

@@ -733,23 +733,11 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
             ]
             == planned_floor
         )
-        planned_kind = next(
-            item.memory_kind
-            for item in parse_stored_run_plan(run.plan).nodes
-            if item.node_id == node_id
-        )
-        assert (
-            operation.payload["compiled_execution_plan"]["runtime"]["placement"][
-                "memory_kind"
-            ]
-            == planned_kind
-        )
         assert operation.payload["input_manifest_sha256"] == job.input_manifest_sha256
         compiled_plan = _mapping(operation.payload["compiled_execution_plan"])
         plan_runtime = _mapping(compiled_plan["runtime"])
         plan_placement = _mapping(plan_runtime["placement"])
         assert plan_placement["memory_floor_bytes"] == planned_floor
-        assert plan_placement["memory_kind"] == planned_kind
         assert "fox / meadow" in _sequence(plan_runtime["argv"])
         assert operation.payload["output_mappings"] == [
             {

@@ -339,9 +339,7 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
     projection, sessions, *_ = assessed_library
     later = "spk_" + "f" * 32
     with sessions.begin() as session:
-        node = session.scalar(select(AgentNode))
-        assert node is not None
-        capabilities = tuple(node.capabilities)
+        capabilities = ("runtime.vonk.v1", "recipe.operations.v1")
         session.add(
             AgentNode(
                 node_id=later,

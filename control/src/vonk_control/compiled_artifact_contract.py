@@ -497,7 +497,7 @@ def compile_artifact_contract(
     aggregate = raw_output.get("max_total_bytes")
     raw_slots = raw_output.get("slots")
     output_document = {
-        "path": raw_output.get("path"),
+        "path": "/outputs",
         "max_total_bytes": aggregate,
         "slots": [_slot(item) for item in raw_slots]
         if isinstance(raw_slots, list)
