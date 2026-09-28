@@ -5047,6 +5047,18 @@
             ],
             "title": "Operation Kind"
           },
+          "retry_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Due At"
+          },
           "retry_of_application_id": {
             "anyOf": [
               {
@@ -5378,6 +5390,51 @@
           "assessment"
         ],
         "title": "FleetProfileAssignmentAssessment",
+        "type": "object"
+      },
+      "FleetProfileAssignmentFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "assignment_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment Id"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "terminal": {
+            "default": false,
+            "title": "Terminal",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "FleetProfileAssignmentFailure",
         "type": "object"
       },
       "FleetProfileAssignmentInput": {
@@ -7095,6 +7152,14 @@
             "title": "Actor",
             "type": "string"
           },
+          "assignment_failures": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAssignmentFailure"
+            },
+            "maxItems": 128,
+            "title": "Assignment Failures",
+            "type": "array"
+          },
           "assignment_ids": {
             "items": {
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -7237,6 +7302,13 @@
               }
             ],
             "title": "Status Reason"
+          },
+          "stop_reissue_attempt": {
+            "default": 0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Stop Reissue Attempt",
+            "type": "integer"
           }
         },
         "required": [
@@ -20126,6 +20198,11 @@
             ],
             "title": "Final Verify Started At"
           },
+          "force_replan": {
+            "default": false,
+            "title": "Force Replan",
+            "type": "boolean"
+          },
           "item_index": {
             "default": 0,
             "maximum": 31.0,
@@ -20277,6 +20354,12 @@
             },
             "title": "Phase Results",
             "type": "array"
+          },
+          "phase_retry_generation": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Phase Retry Generation",
+            "type": "integer"
           },
           "preflight": {
             "anyOf": [

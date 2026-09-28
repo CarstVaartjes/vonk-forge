@@ -499,6 +499,10 @@ class _SwitchAdapter:
         del application_id, session
         return False
 
+    def recovery_refused(self, application_id: str, *, session: Session) -> bool:
+        del application_id, session
+        return False
+
     def start(
         self,
         *,
@@ -1108,7 +1112,9 @@ def test_parked_profile_load_fences_workload_before_admission_retry(
         request_key=_uuid(973),
         actor="admin",
     )
-    assert parked.state == "waiting-for-operator"
+    # Admission retries itself; the accepted intent stays queued with a due time.
+    assert parked.state == "queued"
+    assert parked.progress.admission_retry_at is not None
     assert parked.progress.workload_intent_ordinal is None
 
     monkeypatch.setattr(FleetProfileService, "_queue_application", original_queue)
@@ -1143,7 +1149,9 @@ def test_parked_profile_load_rechecks_fencing_after_ordinal_is_bound(
         request_key=_uuid(974),
         actor="admin",
     )
-    assert parked.state == "waiting-for-operator"
+    # Admission retries itself; the accepted intent stays queued with a due time.
+    assert parked.state == "queued"
+    assert parked.progress.admission_retry_at is not None
     assert parked.progress.workload_intent_ordinal is None
 
     assert service.tick() is True
@@ -1180,7 +1188,7 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
         request_key=_uuid(976),
         actor="admin",
     )
-    assert first.state == "waiting-for-operator"
+    assert first.state == "queued"
     assert service.tick() is True
     first = service.application(first.id)
     assert first.progress.workload_intent_ordinal == 1
@@ -1198,7 +1206,7 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
         request_key=_uuid(977),
         actor="admin",
     )
-    assert second.state == "waiting-for-operator"
+    assert second.state == "queued"
     assert service.tick() is True
     first = service.application(first.id)
     second = service.application(second.id)
@@ -2972,18 +2980,13 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
         }
 
 
-def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
+def test_profile_apply_uses_latest_saved_profile_when_digest_is_stale() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-
-    with pytest.raises(FleetProfileConflict, match="stale"):
-        service.apply(
-            profile.id, plan_digest="f" * 64, request_key=_uuid(5), actor="admin"
-        )
 
     updated = service.update(
         profile.id,
@@ -2993,6 +2996,11 @@ def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
         actor="admin",
     )
     assert updated.profile_digest != profile.profile_digest
+    application = service.apply(
+        profile.id, plan_digest="f" * 64, request_key=_uuid(5), actor="admin"
+    )
+    assert application.profile_digest == updated.profile_digest
+    assert application.state == "queued"
 
 
 def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation() -> (
@@ -3369,13 +3377,14 @@ def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -
     )
     assert reason.severity == "error"
     assert "cannot attest" in reason.detail
-    with pytest.raises(FleetProfileConflict, match="preview is blocked"):
-        service.apply(
-            profile.id,
-            plan_digest=preview.plan_digest,
-            request_key=_uuid(41),
-            actor="admin",
-        )
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(41),
+        actor="admin",
+    )
+    assert application.state == "queued"
+    assert "Next attempt" in (application.status_reason or "")
 
 
 def test_profile_preview_projects_exact_preparation_from_run_switch_authority(

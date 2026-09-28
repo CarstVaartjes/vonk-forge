@@ -45,6 +45,7 @@ class FleetProfileApplicationProgress:
             current_label (Union[None, Unset, str]):
             intended_profile (Union['FleetProfileIntendedConfiguration', None, Unset]):
             operation_kind (Union[Literal['fleet-profile.apply'], None, Unset]):
+            retry_due_at (Union[None, Unset, datetime.datetime]):
             retry_of_application_id (Union[None, Unset, str]):
             step_results (Union[Unset, FleetProfileApplicationProgressStepResults]):
             switch_adapter (Union['FleetProfileSwitchAdapterState', None, Unset]):
@@ -63,6 +64,7 @@ class FleetProfileApplicationProgress:
     current_label: Union[None, Unset, str] = UNSET
     intended_profile: Union['FleetProfileIntendedConfiguration', None, Unset] = UNSET
     operation_kind: Union[Literal['fleet-profile.apply'], None, Unset] = UNSET
+    retry_due_at: Union[None, Unset, datetime.datetime] = UNSET
     retry_of_application_id: Union[None, Unset, str] = UNSET
     step_results: Union[Unset, 'FleetProfileApplicationProgressStepResults'] = UNSET
     switch_adapter: Union['FleetProfileSwitchAdapterState', None, Unset] = UNSET
@@ -137,6 +139,14 @@ class FleetProfileApplicationProgress:
         else:
             operation_kind = self.operation_kind
 
+        retry_due_at: Union[None, Unset, str]
+        if isinstance(self.retry_due_at, Unset):
+            retry_due_at = UNSET
+        elif isinstance(self.retry_due_at, datetime.datetime):
+            retry_due_at = self.retry_due_at.isoformat()
+        else:
+            retry_due_at = self.retry_due_at
+
         retry_of_application_id: Union[None, Unset, str]
         if isinstance(self.retry_of_application_id, Unset):
             retry_of_application_id = UNSET
@@ -190,6 +200,8 @@ class FleetProfileApplicationProgress:
             field_dict["intended_profile"] = intended_profile
         if operation_kind is not UNSET:
             field_dict["operation_kind"] = operation_kind
+        if retry_due_at is not UNSET:
+            field_dict["retry_due_at"] = retry_due_at
         if retry_of_application_id is not UNSET:
             field_dict["retry_of_application_id"] = retry_of_application_id
         if step_results is not UNSET:
@@ -339,6 +351,26 @@ class FleetProfileApplicationProgress:
         operation_kind = _parse_operation_kind(d.pop("operation_kind", UNSET))
 
 
+        def _parse_retry_due_at(data: object) -> Union[None, Unset, datetime.datetime]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                retry_due_at_type_0 = isoparse(data)
+
+
+
+                return retry_due_at_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, Unset, datetime.datetime], data)
+
+        retry_due_at = _parse_retry_due_at(d.pop("retry_due_at", UNSET))
+
+
         def _parse_retry_of_application_id(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -403,6 +435,7 @@ class FleetProfileApplicationProgress:
             current_label=current_label,
             intended_profile=intended_profile,
             operation_kind=operation_kind,
+            retry_due_at=retry_due_at,
             retry_of_application_id=retry_of_application_id,
             step_results=step_results,
             switch_adapter=switch_adapter,
