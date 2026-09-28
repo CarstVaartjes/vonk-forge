@@ -1561,12 +1561,15 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         request_key,
         progress,
         transfer_progress=None,
+        wait_for_busy_owner=False,
     ) -> None:
         assert item_index == 0
         assert actor == "operator"
         assert request_key
         assert not progress
         assert transfer_progress is not None
+        # Off the tick thread, publication waits for the owner row.
+        assert wait_for_busy_owner is True
         transfer_progress("copy", 23, 100)
         entered.set()
         assert release.wait(5)
