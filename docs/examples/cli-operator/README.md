@@ -161,12 +161,12 @@ Code: control.api_error
 Detail: action was not confirmed
 ```
 
-### Stale decision refused and current review displayed
+### Historical capture: stale decision refusal
 
 Capture record `2`; exit `2`.
 
 ```sh
-vonkctl --profile 1 profile load --expected-plan 1b0d557ca344249bf36fd29a9747627ea9939962bb8b48d0140b801aa9376163 --request-key 11111111-1111-4111-8111-111111111111 --detach
+vonkctl --profile 1 profile load --expected-plan <captured-digest> --request-key 11111111-1111-4111-8111-111111111111 --detach
 ```
 
 terminal:

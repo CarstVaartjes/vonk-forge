@@ -510,12 +510,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         action="store_true",
         help="Show the Controller-owned removal impact without submitting it",
     )
-    model_remove.add_argument(
-        "--review-digest",
-        type=_sha256_digest,
-        metavar="SHA256",
-        help="Exact removal review digest to accept with --yes",
-    )
     model_cancel = model_actions.add_parser(
         "cancel", help="Cancel one model download while preserving resumable files"
     )
@@ -589,12 +583,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         action="store_true",
         help="Show the Controller-owned removal impact without submitting it",
     )
-    recipe_remove.add_argument(
-        "--review-digest",
-        type=_sha256_digest,
-        metavar="SHA256",
-        help="Exact removal review digest to accept with --yes",
-    )
     recipe_cancel = recipe_actions.add_parser(
         "cancel", help="Cancel one accepted recipe preparation"
     )
@@ -621,12 +609,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--review",
         action="store_true",
         help="Show the exact reconciliation plan without submitting it",
-    )
-    installation_reconcile.add_argument(
-        "--review-digest",
-        type=_sha256_digest,
-        metavar="SHA256",
-        help="Exact reconciliation plan digest to accept with --yes",
     )
 
     add_artifact_job_commands(
@@ -708,9 +690,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     profile_load.set_defaults(outcome_context="mutation", requires_profile=True)
     profile_load.add_argument("--dry-run", action="store_true")
-    profile_load.add_argument(
-        "--expected-plan", help="The exact plan digest reviewed before this load"
-    )
     profile_load.add_argument("--yes", action="store_true")
     profile_load.add_argument("--request-key")
     profile_load.add_argument("--detach", action="store_true")
@@ -1342,8 +1321,6 @@ def _submit_model_removal(
                 "model",
                 "remove",
                 selector,
-                "--review-digest",
-                review_digest,
                 "--yes",
                 "--request-key",
                 key,
@@ -1399,8 +1376,6 @@ def _submit_recipe_removal(
                 "remove",
                 selector,
                 choice,
-                "--review-digest",
-                review_digest,
                 "--yes",
                 "--request-key",
                 key,
@@ -1419,7 +1394,7 @@ def _remove_model(
         raise ValueError("model remove requires a non-empty selector")
     args.selector = selector
     if args.review:
-        if args.yes or args.review_digest is not None or args.request_key is not None:
+        if args.yes or args.request_key is not None:
             raise ValueError(
                 "model remove --review cannot be combined with consent or request flags"
             )
@@ -1466,7 +1441,7 @@ def _remove_recipe(
         raise ValueError("recipe remove requires --with-model or --keep-model")
     with_model = args.with_model and not args.keep_model
     if args.review:
-        if args.yes or args.review_digest is not None or args.request_key is not None:
+        if args.yes or args.request_key is not None:
             raise ValueError(
                 "recipe remove --review cannot be combined with consent or request flags"
             )
@@ -2688,7 +2663,6 @@ def _recipe_installation_reconcile(
     if getattr(args, "review", False):
         if (
             getattr(args, "yes", False)
-            or getattr(args, "review_digest", None) is not None
             or getattr(args, "request_key", None) is not None
             or getattr(args, "detach", False)
         ):
@@ -3469,10 +3443,8 @@ def _profile(
         )
     if action == "load":
         if args.dry_run:
-            if args.expected_plan is not None or args.yes or args.detach:
-                raise ValueError(
-                    "--dry-run cannot be combined with --expected-plan, --yes, or --detach"
-                )
+            if args.yes or args.detach:
+                raise ValueError("--dry-run cannot be combined with --yes or --detach")
             return client.request("POST", f"/api/profile/{number}/preview")
         interactive = (
             not (
@@ -3485,23 +3457,16 @@ def _profile(
         )
         if not args.yes and not interactive:
             raise ValueError("profile load requires --yes in noninteractive mode")
-        expected_digest = args.expected_plan
-        preview: Mapping[str, object] | None = None
-        if expected_digest is None or not args.yes:
-            preview = client.request("POST", f"/api/profile/{number}/preview")
-            if preview.get("allowed") is not True:
-                args.outcome_context = "preview"
-                return preview
-            expected_digest = preview.get("plan_digest")
-            if (
-                not isinstance(expected_digest, str)
-                or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
-            ):
-                raise ControlMalformedResponse(
-                    "profile preview has no valid current plan digest"
-                )
+        preview = client.request("POST", f"/api/profile/{number}/preview")
+        expected_digest = preview.get("plan_digest")
+        if (
+            not isinstance(expected_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
+        ):
+            raise ControlMalformedResponse(
+                "profile preview has no valid current plan digest"
+            )
         if not args.yes:
-            assert preview is not None
             with redirect_stdout(sys.stderr):
                 render_payload(preview, "profile", action="preview")
             _confirm_action(args, f"Load profile {number} with these effects?")
@@ -3515,9 +3480,6 @@ def _profile(
             if error.code not in {None, "http.409", "profile.stale_plan"}:
                 raise
             current = client.request("POST", f"/api/profile/{number}/preview")
-            if current.get("allowed") is not True:
-                args.outcome_context = "preview"
-                return current
             current_digest = current.get("plan_digest")
             if (
                 not isinstance(current_digest, str)

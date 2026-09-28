@@ -7,11 +7,22 @@ import select
 import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlConflict, ControlNotFound
+from cluster_profiles.control_client import (
+    ControlConflict,
+    ControlForbidden,
+    ControlNotFound,
+)
 
 KEY = "11111111-1111-4111-8111-111111111111"
 DIGEST = "c" * 64
 APPLICATION = "33333333-3333-4333-8333-333333333333"
+
+
+def test_profile_load_no_longer_accepts_a_caller_supplied_plan_digest():
+    with pytest.raises(cli._UsageError):
+        cli._parser().parse_args(
+            ("--profile", "2", "profile", "load", "--expected-plan", DIGEST)
+        )
 
 
 class Client:
@@ -85,7 +96,7 @@ class ChangesAfterPreviewClient(Client):
         return super().request(method, path, payload, **kwargs)
 
 
-def test_yes_applies_latest_preview_without_a_user_supplied_digest(capsys):
+def test_yes_applies_latest_preview_without_caller_supplied_digest(capsys):
     client = Client(include_receipt_digest=False)
     assert (
         cli.main(
@@ -109,7 +120,7 @@ def test_yes_applies_latest_preview_without_a_user_supplied_digest(capsys):
     assert sum(path.endswith("/load") for _, path, _ in client.calls) == 1
 
 
-def test_changed_plan_is_refreshed_and_the_same_request_resumes(capsys):
+def test_latest_plan_is_submitted_after_preview_conflict(capsys):
     client = ChangesAfterPreviewClient()
     assert (
         cli.main(
@@ -118,8 +129,6 @@ def test_changed_plan_is_refreshed_and_the_same_request_resumes(capsys):
                 "2",
                 "profile",
                 "load",
-                "--expected-plan",
-                DIGEST,
                 "--yes",
                 "--request-key",
                 KEY,
@@ -131,8 +140,13 @@ def test_changed_plan_is_refreshed_and_the_same_request_resumes(capsys):
         == 0
     )
     capsys.readouterr()
-    assert sum(path.endswith("/preview") for _, path, _ in client.calls) == 1
+    assert sum(path.endswith("/preview") for _, path, _ in client.calls) == 2
     assert sum(path.endswith("/load") for _, path, _ in client.calls) == 2
+    load_bodies = [
+        payload for _, path, payload in client.calls if path.endswith("/load")
+    ]
+    assert load_bodies[0]["plan_digest"] == DIGEST
+    assert load_bodies[1]["plan_digest"] == "d" * 64
 
 
 @pytest.mark.parametrize(
@@ -141,7 +155,6 @@ def test_changed_plan_is_refreshed_and_the_same_request_resumes(capsys):
         (),
         ("--no-input",),
         ("--json",),
-        ("--expected-plan", DIGEST),
     ],
 )
 def test_noninteractive_load_cannot_approve_an_unseen_or_invalid_plan(options, capsys):
@@ -169,7 +182,64 @@ def test_json_dry_run_returns_one_blocked_review_without_load(capsys):
     assert client.calls == [("POST", "/api/profile/2/preview", None)]
 
 
-def test_interactive_blocked_preview_shows_reason_without_prompt_or_load(
+def test_yes_submits_latest_plan_even_when_preview_has_waitable_blockers(capsys):
+    client = Client(blocked=True)
+    assert (
+        cli.main(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "load",
+                "--yes",
+                "--request-key",
+                KEY,
+                "--detach",
+                "--json",
+            ),
+            control_client=client,
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert [path for _, path, _ in client.calls] == [
+        "/api/profile/2/preview",
+        "/api/profile/2/load",
+    ]
+
+
+def test_preview_authorization_denial_still_stops_before_load(capsys):
+    class DeniedPreviewClient(Client):
+        def request(self, method, path, payload=None, **kwargs):
+            if path.endswith("/preview"):
+                self.calls.append((method, path, payload))
+                raise ControlForbidden(403, "profile preview denied")
+            return super().request(method, path, payload, **kwargs)
+
+    client = DeniedPreviewClient()
+    assert (
+        cli.main(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "load",
+                "--yes",
+                "--request-key",
+                KEY,
+                "--detach",
+                "--json",
+            ),
+            control_client=client,
+        )
+        == 2
+    )
+    output = capsys.readouterr()
+    assert json.loads(output.out)["code"] == "http.403"
+    assert [path for _, path, _ in client.calls] == ["/api/profile/2/preview"]
+
+
+def test_interactive_blocked_preview_can_be_confirmed_and_submitted(
     monkeypatch, capsys
 ):
     import sys
@@ -183,6 +253,7 @@ def test_interactive_blocked_preview_shows_reason_without_prompt_or_load(
             monkeypatch.setattr(sys, "stdin", terminal_input)
             monkeypatch.setattr(sys, "stderr", terminal_error)
             client = Client(blocked=True)
+            os.write(master, b"yes\n")
             code = cli.main(
                 ("--profile", "2", "profile", "load"), control_client=client
             )
@@ -191,12 +262,14 @@ def test_interactive_blocked_preview_shows_reason_without_prompt_or_load(
             while select.select([master], [], [], 0)[0]:
                 transcript.extend(os.read(master, 65536))
         output = capsys.readouterr()
-        assert code == 2
-        assert output.out == ""
-        assert "Blocked" in transcript.decode()
+        assert code == 0
+        assert output.out
         assert "Missing exact model archive" in transcript.decode()
-        assert "[y/N]" not in transcript.decode()
-        assert [path for _, path, _ in client.calls] == ["/api/profile/2/preview"]
+        assert "[y/N]" in transcript.decode()
+        assert [path for _, path, _ in client.calls] == [
+            "/api/profile/2/preview",
+            "/api/profile/2/load",
+        ]
     finally:
         os.close(master)
         os.close(slave)
@@ -252,9 +325,7 @@ def test_terminal_reviews_and_confirms_once(answer, expected, monkeypatch, capsy
         os.close(slave)
 
 
-def test_interactive_supplied_digest_still_shows_current_effect_review(
-    monkeypatch, capsys
-):
+def test_interactive_load_still_shows_current_effect_review(monkeypatch, capsys):
     import sys
 
     master, slave = os.openpty()
@@ -273,8 +344,6 @@ def test_interactive_supplied_digest_still_shows_current_effect_review(
                     "2",
                     "profile",
                     "load",
-                    "--expected-plan",
-                    DIGEST,
                     "--detach",
                 ),
                 control_client=client,
@@ -298,9 +367,7 @@ def test_interactive_supplied_digest_still_shows_current_effect_review(
         os.close(slave)
 
 
-def test_interactive_supplied_digest_does_not_block_the_latest_preview(
-    monkeypatch, capsys
-):
+def test_interactive_load_uses_latest_preview(monkeypatch, capsys):
     import sys
 
     current_digest = "d" * 64
@@ -320,8 +387,6 @@ def test_interactive_supplied_digest_does_not_block_the_latest_preview(
                     "2",
                     "profile",
                     "load",
-                    "--expected-plan",
-                    DIGEST,
                     "--detach",
                 ),
                 control_client=client,
@@ -383,8 +448,6 @@ def test_changed_image_plan_can_be_loaded_without_repeating_review(monkeypatch, 
                     "2",
                     "profile",
                     "load",
-                    "--expected-plan",
-                    DIGEST,
                     "--detach",
                 ),
                 control_client=client,
@@ -441,8 +504,6 @@ def test_unbound_load_receipt_is_only_looked_up_and_never_replayed(binding, caps
             "2",
             "profile",
             "load",
-            "--expected-plan",
-            DIGEST,
             "--yes",
             "--json",
         ),
@@ -456,6 +517,6 @@ def test_unbound_load_receipt_is_only_looked_up_and_never_replayed(binding, caps
     assert document["request_key"] == KEY
     assert document["submission"]["acceptance"] == "unknown"
     paths = [path for _method, path, _payload in client.calls]
-    assert paths.count("/api/profile/2/preview") == 0
+    assert paths.count("/api/profile/2/preview") == 1
     assert paths.count("/api/profile/2/load") >= 1
     assert paths.count(f"/api/profile/2/requests/{KEY}") >= 1

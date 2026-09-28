@@ -442,8 +442,6 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
         "1",
         "profile",
         "load",
-        "--expected-plan",
-        "c" * 64,
         "--yes",
         "--json",
     ) == browser_transport.request("POST", "/api/profile/1/load", load_request)

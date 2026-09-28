@@ -68,6 +68,8 @@ class FakeClient:
         self._validate_request(method, path, payload, query)
         self.calls.append((method, path, payload, query))
         response = self.responses.get((method, path), {})
+        if method == "POST" and path.endswith("/preview") and not response:
+            response = {"allowed": True, "plan_digest": "c" * 64}
         if isinstance(response, list):
             # The final entry is sticky so a caller can describe a dependency
             # that keeps answering the same way, including one that stays
@@ -1305,8 +1307,6 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
             "remove",
             selector,
             "--yes",
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             request_key,
             "--detach",
@@ -1551,8 +1551,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
                 "--yes",
                 "--request-key",
                 request_key,
-                "--review-digest",
-                _REVIEW_DIGEST,
                 "--json",
             )
             if model_receipt_only_reconnect
@@ -1561,8 +1559,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
                 "remove",
                 selector,
                 "--yes",
-                "--review-digest",
-                _REVIEW_DIGEST,
                 "--json",
             )
         )
@@ -1573,8 +1569,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             selector,
             "--keep-model",
             "--yes",
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--json",
         )
     client = FakeClient({("POST", path): receipt})
@@ -2276,8 +2270,6 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),
@@ -2286,10 +2278,11 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
 
     assert status == 0 and payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
+        "/api/profile/1/preview",
         "/api/profile/1/load",
         f"/api/profile/applications/{application_id}",
     ]
-    assert client.calls[0][2] == {
+    assert client.calls[1][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111",
         "plan_digest": "c" * 64,
     }
@@ -2310,8 +2303,6 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),
@@ -2319,7 +2310,7 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
     )
 
     assert status != 0
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
     assert not any(call[1].endswith("/progress") for call in client.calls)
 
 
@@ -2601,8 +2592,6 @@ def test_lost_mutation_response_still_names_the_request_key() -> None:
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),
@@ -2634,8 +2623,6 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),
@@ -2644,7 +2631,7 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
 
     assert status == 0
     assert payload["id"] == operation
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
 
 
 def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> None:
@@ -2668,8 +2655,6 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--request-key",
             key,
@@ -2695,6 +2680,7 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
         "request_key": key,
     }
     assert [call[:2] for call in client.calls] == [
+        ("POST", "/api/profile/1/preview"),
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/applications/{operation}"),
     ]
@@ -2721,8 +2707,6 @@ def test_lost_load_response_retries_only_with_original_request_key() -> None:
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),

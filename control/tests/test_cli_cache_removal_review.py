@@ -230,31 +230,47 @@ def test_json_review_command_is_read_only_and_returns_exact_owner_document(
     ]
 
 
-def test_noninteractive_yes_without_digest_refuses_before_controller_read() -> None:
-    client = _FakeController(_review("model", "publisher/model"))
-    args = _parse("--json", "model", "remove", "publisher/model", "--yes")
+def test_noninteractive_yes_uses_the_latest_controller_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeController(_unblocked_review(_review("model", "publisher/model")))
+    _accept_response_contracts(monkeypatch)
+    args = _parse("--json", "model", "remove", "publisher/model", "--yes", "--detach")
 
-    with pytest.raises(ValueError, match="--review-digest SHA256 --yes"):
-        controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
-    assert client.calls == []
+    assert result["review_digest"] == _REVIEW_DIGEST
+    assert [path for _, path, _, _ in client.calls] == [
+        "/api/model/publisher%2Fmodel/remove-review",
+        "/api/model/publisher%2Fmodel/remove",
+    ]
 
 
-def test_noninteractive_digest_without_yes_refuses_before_controller_read() -> None:
-    client = _FakeController(_review("model", "publisher/model"))
-    args = _parse(
-        "--json",
-        "model",
-        "remove",
-        "publisher/model",
-        "--review-digest",
-        _REVIEW_DIGEST,
-    )
-
-    with pytest.raises(ValueError, match="requires --yes"):
-        controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
-
-    assert client.calls == []
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("model", "remove", "publisher/model", "--review-digest", _REVIEW_DIGEST),
+        (
+            "recipe",
+            "remove",
+            "publisher/recipe",
+            "--keep-model",
+            "--review-digest",
+            _REVIEW_DIGEST,
+        ),
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            _REQUEST_KEY,
+            "--review-digest",
+            _REVIEW_DIGEST,
+        ),
+    ],
+)
+def test_removed_review_digest_flags_are_rejected(argv: tuple[str, ...]) -> None:
+    with pytest.raises(cli._UsageError):
+        _parse(*argv)
 
 
 def test_interactive_review_is_rendered_before_prompt_and_post(
@@ -306,27 +322,28 @@ def test_review_presentation_keeps_owner_findings_and_blockers(
     assert "Next: inspect-owner" in text
 
 
-def test_stale_scripted_review_refuses_without_post_or_automatic_refresh(
+def test_scripted_remove_uses_latest_review_without_digest_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeController(
         _unblocked_review(_review("model", "publisher/model", digest="c" * 64))
     )
+    _accept_response_contracts(monkeypatch)
     args = _parse(
         "--json",
         "model",
         "remove",
         "publisher/model",
-        "--review-digest",
-        _REVIEW_DIGEST,
         "--yes",
+        "--detach",
     )
 
-    with pytest.raises(ControlConflict, match="review changed"):
-        controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
-    assert [(method, path) for method, path, _, _ in client.calls] == [
-        ("GET", "/api/model/publisher%2Fmodel/remove-review")
+    assert result["review_digest"] == "c" * 64
+    assert [(method, path) for method, path, _, _ in client.calls][-2:] == [
+        ("GET", "/api/model/publisher%2Fmodel/remove-review"),
+        ("POST", "/api/model/publisher%2Fmodel/remove"),
     ]
 
 
@@ -337,9 +354,8 @@ def test_wrong_selector_review_refuses_before_consent_or_post() -> None:
         "model",
         "remove",
         "publisher/model",
-        "--review-digest",
-        _REVIEW_DIGEST,
         "--yes",
+        "--detach",
     )
 
     with pytest.raises(ControlMalformedResponse, match="another selector"):
@@ -366,8 +382,6 @@ def test_review_get_preserves_denial_and_timeout_classification(
         "model",
         "remove",
         "publisher/model",
-        "--review-digest",
-        _REVIEW_DIGEST,
         "--yes",
     )
 
@@ -430,8 +444,6 @@ def test_same_key_replay_precedes_review_lookup_and_uses_stored_digest(
         "publisher/model",
         "--request-key",
         _REQUEST_KEY,
-        "--review-digest",
-        _REVIEW_DIGEST,
         "--yes",
         "--detach",
     )
@@ -445,7 +457,7 @@ def test_same_key_replay_precedes_review_lookup_and_uses_stored_digest(
     ]
 
 
-def test_same_key_cannot_be_replayed_with_a_different_review_digest(
+def test_same_key_reconciles_even_when_receipt_digest_differs_from_latest_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     receipt: dict[str, object] = {
@@ -465,15 +477,14 @@ def test_same_key_cannot_be_replayed_with_a_different_review_digest(
         "publisher/model",
         "--request-key",
         _REQUEST_KEY,
-        "--review-digest",
-        _REVIEW_DIGEST,
         "--yes",
+        "--detach",
     )
     _accept_response_contracts(monkeypatch)
 
-    with pytest.raises(ControlMalformedResponse, match="another request"):
-        controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
+    assert result == receipt
     assert [(method, path) for method, path, _, _ in client.calls] == [
         ("GET", f"/api/model/requests/{_REQUEST_KEY}")
     ]
@@ -516,8 +527,6 @@ def test_scripted_recipe_remove_binds_digest_and_explicit_model_choice(
         "remove",
         "publisher/recipe",
         "--keep-model",
-        "--review-digest",
-        _REVIEW_DIGEST,
         "--yes",
         "--detach",
     )
@@ -558,8 +567,6 @@ def test_recipe_remove_accepts_owner_normalized_selector_receipt(
         "remove",
         "Publisher/Recipe",
         "--keep-model",
-        "--review-digest",
-        _REVIEW_DIGEST,
         "--yes",
         "--detach",
     )
@@ -571,22 +578,3 @@ def test_recipe_remove_accepts_owner_normalized_selector_receipt(
         "/api/recipe/Publisher%2FRecipe/remove-review",
         "/api/recipe/Publisher%2FRecipe/remove",
     ]
-
-
-def test_invalid_review_digest_is_rejected_by_parser(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    assert (
-        cli.main(
-            (
-                "--json",
-                "model",
-                "remove",
-                "publisher/model",
-                "--review-digest",
-                "not-a-digest",
-            )
-        )
-        == 2
-    )
-    assert "complete lowercase SHA-256" in capsys.readouterr().out

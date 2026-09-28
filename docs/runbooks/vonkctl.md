@@ -250,20 +250,20 @@ partial files are retained; cancellation does not evict them. Reconnect with
 Removal first presents the Controller-owned review: exact assets, their
 verified/partial/missing/unknown readiness and byte counts, saved references,
 active work, and blockers. `model remove SELECTOR --review` is read-only and
-prints the review digest for scripts. In a terminal, `model remove SELECTOR`
+prints the review details for scripts. In a terminal, `model remove SELECTOR`
 shows the same impact before asking for consent. A scripted request must pass
-the exact digest and explicit consent:
+explicit consent; submission reads the current review automatically:
 
 ```bash
 REVIEW=$(vonkctl --json model remove qwen-3.8-nvfp4 --review)
-REVIEWED_DIGEST=$(printf '%s' "$REVIEW" | jq -r .review_digest)
+printf '%s\n' "$REVIEW" | jq .
 vonkctl --json model remove qwen-3.8-nvfp4 \
-  --review-digest "$REVIEWED_DIGEST" --yes --request-key REQUEST_UUID --detach
+  --yes --request-key REQUEST_UUID --detach
 ```
 
-The Controller rechecks the same digest at acceptance. If the reviewed impact
-changed, the CLI refuses without retrying against the new review; inspect it and
-make a new explicit decision. Accepted references can block removal, and an
+The digest is internal protocol bookkeeping, not a separate CLI consent token.
+The Controller remains authoritative for authorization and exact target
+identity. Accepted references can block removal, and an
 unavailable reference scan is an explicit refusal. Removal does not cancel
 another download or build, stop a Spark workload, or erase a saved profile.
 
@@ -302,18 +302,17 @@ Recipe removal requires an explicit `--keep-model` or `--with-model` choice.
 The read-only `--review` form reports the exact recipe revision and affected
 archives/model assets, readiness, references, active work, blockers, and digest.
 In a terminal, the removal command shows that impact before asking for consent.
-For a scripted request, first capture the review and pass its exact digest with
-`--yes`:
+For a scripted request, inspect the review if needed, then submit with `--yes`:
 
 ```bash
 REVIEW=$(vonkctl --json recipe remove qwen-code --keep-model --review)
-REVIEWED_DIGEST=$(printf '%s' "$REVIEW" | jq -r .review_digest)
+printf '%s\n' "$REVIEW" | jq .
 vonkctl --json recipe remove qwen-code --keep-model \
-  --review-digest "$REVIEWED_DIGEST" --yes --request-key REQUEST_UUID --detach
+  --yes --request-key REQUEST_UUID --detach
 ```
 
-The Controller rechecks the review digest before accepting removal. A changed
-review is refused and is never automatically resubmitted. `--with-model` binds
+Submission reads and binds the latest Controller review automatically.
+`--with-model` binds
 the exact reviewed model-removal child and completes only after that child
 settles. Shared model files needed by retained cache entries are preserved.
 Use `recipe progress --request-key REQUEST_UUID --follow` to reconnect to the
@@ -323,17 +322,17 @@ Installation reconciliation targets one exact stopped installation whose
 stored identity or installed-node state is invalid. It checks the original
 successful install receipts and previews the current per-node cleanup effects;
 it does not select a recipe by name or remove Controller cache assets. Review
-the plan, then pass its digest and a retained request UUID to accept it:
+the plan, then submit with a retained request UUID:
 
 ```bash
 REVIEW=$(vonkctl --json recipe installation reconcile INSTALLATION_UUID --review)
-REVIEWED_DIGEST=$(printf '%s' "$REVIEW" | jq -r .plan_digest)
+printf '%s\n' "$REVIEW" | jq .
 vonkctl --json recipe installation reconcile INSTALLATION_UUID \
-  --review-digest "$REVIEWED_DIGEST" --yes --request-key REQUEST_UUID --detach
+  --yes --request-key REQUEST_UUID --detach
 ```
 
-The Controller rechecks the exact installation identity and plan digest before
-accepting cleanup. The same request UUID reconnects to an accepted operation,
+Submission reads the current plan automatically. The Controller rechecks the
+exact installation identity before accepting cleanup. The same request UUID reconnects to an accepted operation,
 including after a lost response; a failed lookup does not authorize a new
 request. Follow the typed Run/Switch operation receipt with the returned
 operation ID or rerun the same command with its original request UUID.
@@ -642,21 +641,19 @@ the Controller error code and original detail in JSON output for debugging.
 
 In an interactive terminal, load shows the current review and asks for one
 default-no confirmation. `--detach` returns the accepted application instead
-of following it. For scripts, JSON, redirected input, or `--no-input`, supply
-both the digest you reviewed and `--yes`; `--yes` alone is insufficient:
+of following it. For scripts, JSON, redirected input, or `--no-input`, use
+`--yes`; the CLI fetches the latest plan before submitting:
 
 ```bash
 vonkctl --profile 2 --json profile load --dry-run > reviewed-plan.json
-# Inspect the allowed state and effects, then set REVIEWED_DIGEST to plan_digest.
-vonkctl --profile 2 --json profile load --expected-plan "$REVIEWED_DIGEST" --yes --detach
+# Inspect the plan, then submit the latest plan.
+vonkctl --profile 2 --json profile load --yes --detach
 ```
 
-A blocked dry-run exits 2 and submits nothing. When the Controller refuses a
-load because its reviewed plan changed, the CLI displays one fresh review on
-stderr and stops with the original refusal. Review the new effects before
-starting another load with its current digest; the CLI never resubmits that
-replacement automatically. If the fresh review cannot be read, the original
-refusal remains. Do not combine `--dry-run` with `--expected-plan`, `--yes`, or
+A dry-run reports the current plan without submitting. With `--yes`, the CLI
+submits the latest plan even when waitable blockers are present; the Controller
+parks the request until they clear. Authentication and authorization failures
+such as 401 or 403 remain refusals. Do not combine `--dry-run` with `--yes` or
 `--detach`.
 
 Profile authoring stores the canonical recipe identity (`publisher/slug`), sorted
@@ -666,10 +663,9 @@ before saving; the web editor likewise sends the selected library row's
 canonical selector. It does not pin a recipe revision or declare a subset scope.
 The Controller returns warnings for incomplete groups and resource pressure at
 save time. A load preview reports blockers, resolved immutable identities, the
-whole-fleet snapshot, resource fit, and a `plan_digest`. The CLI submits that
-digest with the load request, and the Controller rejects the request if the
-preview no longer describes the current plan, including current fleet
-membership.
+whole-fleet snapshot, resource fit, and a `plan_digest`. The CLI binds its
+current preview to submission; the Controller revalidates the plan and parks
+requests with waitable blockers until their dependencies clear.
 
 ### Batched recipe qualification
 

@@ -62,16 +62,16 @@ references, active work and blockers. In a terminal, omit `--review` to display
 that impact and answer the confirmation. Recipe removal always requires the
 explicit `--keep-model` or `--with-model` choice.
 
-Scripts must obtain the review first, then pass its exact digest with explicit
-consent. For example, after reviewing the model response:
+Scripts may inspect the review first, then submit with explicit consent. The
+CLI fetches and binds the latest review automatically:
 
 ```bash
-vonkctl model remove MODEL --review-digest REVIEW_SHA256 --yes
+vonkctl model remove MODEL --yes
 ```
 
-Replace `REVIEW_SHA256` with the digest returned by the review. Recipe scripts
-also pass the same retention choice they reviewed. Changed effects are refused
-and require a new review; `--yes` alone is insufficient. See the
+Recipe scripts also pass the chosen retention behavior. The digest is internal
+protocol bookkeeping; authorization and exact target identity remain
+Controller-enforced. See the
 [CLI runbook](vonkctl.md) for complete JSON examples and request-key recovery.
 
 Removal persists exact intent before deleting bytes and reports accepted,
