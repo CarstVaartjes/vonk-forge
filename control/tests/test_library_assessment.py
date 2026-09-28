@@ -153,7 +153,7 @@ def test_missing_nas_assets_do_not_hide_a_fitting_recipe_or_create_work(
             "model-not-cached" in reason["detail"]
             for reason in check["cache"]["reasons"]
         )
-        render_payload(response.json(), "recipe", action="library")
+        render_payload(response.json(), "recipe", action="library", wide=True)
         rendered = capsys.readouterr().out
         assert "Fleet fit: ready" in rendered
         assert "Exact NAS assets: blocked" in rendered

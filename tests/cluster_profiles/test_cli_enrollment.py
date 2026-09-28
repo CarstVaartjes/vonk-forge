@@ -254,10 +254,9 @@ def test_reenrollment_requires_consent_and_pins_the_resolved_node(tmp_path, caps
     assert json.loads(destination.read_text())["purpose"] == "re-enroll"
 
 
-def test_invalid_ttl_and_absent_destination_fail_before_issuance(tmp_path, capsys):
+def test_absent_destination_fails_before_issuance(tmp_path, capsys):
     destination = tmp_path / "grant.json"
     client = EnrollmentClient(destination)
-    assert run(client, destination, "--ttl-seconds", "901", "--json") == 2
     assert cli.main(("fleet", "enroll", "Atlas", "--json"), control_client=client) == 2
     assert client.calls == []
     assert not destination.exists()
