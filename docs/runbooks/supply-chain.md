@@ -56,9 +56,12 @@ protocol wheel and SPDX 2.3 files are build outputs. Generate release evidence
 into a separate directory:
 
 ```bash
-uv build --project agent_protocol --wheel --out-dir inventory/wheels
+scripts/build-control-wheel
 scripts/verify-supply-chain --output-dir /tmp/vonk-supply-chain --json
 ```
+
+The helper builds the protocol wheel from source and verifies its SHA-256
+against the Controller lock before local syncs, runs, or Docker image builds.
 
 ## Local diagnostic builds
 

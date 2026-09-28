@@ -73,8 +73,8 @@ jobs:
           python-version: "3.14"
           enable-cache: true
           cache-dependency-glob: agent_protocol/pyproject.toml
-      - name: Build protocol wheel from source
-        run: uv build --project agent_protocol --wheel --out-dir inventory/wheels
+      - name: Build protocol wheel and verify Controller lock hash
+        run: scripts/build-control-wheel
 
       - name: Scan public image source inputs
         run: scripts/verify-public-image-inputs

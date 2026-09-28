@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${1:-}" == "--root" ]]; then
+    if (($# != 2)); then
+        echo "usage: scripts/build-control-wheel [--root REPOSITORY_ROOT]" >&2
+        exit 2
+    fi
+    root="$(cd "$2" && pwd)"
+    shift 2
+fi
+if (($# != 0)); then
+    echo "usage: scripts/build-control-wheel [--root REPOSITORY_ROOT]" >&2
+    exit 2
+fi
+
+wheel_name=vonk_agent_protocol-3.0.0-py3-none-any.whl
+wheel_path="$root/inventory/wheels/$wheel_name"
+lock_path="$root/control/uv.lock"
+
+mkdir -p "$(dirname "$wheel_path")"
+(cd "$root" && uv build --project agent_protocol --wheel --out-dir inventory/wheels)
+
+python3 - "$lock_path" "$wheel_path" <<'PY'
+import hashlib
+import sys
+import tomllib
+from pathlib import Path
+
+lock_path, wheel_path = map(Path, sys.argv[1:])
+packages = [
+    package
+    for package in tomllib.loads(lock_path.read_text(encoding="utf-8"))["package"]
+    if package["name"] == "vonk-agent-protocol"
+]
+if len(packages) != 1:
+    raise SystemExit("control/uv.lock must contain exactly one vonk-agent-protocol package")
+wheels = packages[0].get("wheels", [])
+expected = [
+    wheel["hash"].removeprefix("sha256:")
+    for wheel in wheels
+    if wheel.get("filename") == wheel_path.name
+]
+if len(expected) != 1:
+    raise SystemExit(
+        f"control/uv.lock must pin exactly one hash for {wheel_path.name}"
+    )
+actual = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+if actual != expected[0]:
+    raise SystemExit(
+        "Built agent protocol wheel does not match control/uv.lock: "
+        f"expected sha256:{expected[0]}, got sha256:{actual}. "
+        "If agent_protocol changed intentionally, refresh the locked wheel hash "
+        "with the reviewed control lock update."
+    )
+print(f"Verified {wheel_path.name} against control/uv.lock (sha256:{actual})")
+PY

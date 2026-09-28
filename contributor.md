@@ -14,5 +14,8 @@ merged into the repository.
 
 Run `scripts/test-local` from your worktree for the repository and Controller
 pytest suites. On macOS it sends Linux-marked tests to the `vonk-ci` OrbStack
-VM when available. See [Testing and CI](docs/testing-and-ci.md) for focused
-commands and the other acceptance lanes.
+VM when available; the script builds the local agent protocol wheel and checks
+it against `control/uv.lock` before running Controller commands. For direct
+Controller commands, run `scripts/build-control-wheel` once first. See
+[Testing and CI](docs/testing-and-ci.md) for focused commands and the other
+acceptance lanes.

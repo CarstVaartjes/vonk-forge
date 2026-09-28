@@ -3,6 +3,7 @@ set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+scripts/build-control-wheel
 recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
 linux_markers='linux_only or needs_systemd or postgres'
 portable_markers='not linux_only and not needs_systemd and not needs_rust_probe and not postgres'

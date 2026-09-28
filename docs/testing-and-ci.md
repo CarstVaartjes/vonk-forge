@@ -40,6 +40,12 @@ For the complete local repository and Controller pytest suites, run:
 scripts/test-local
 ```
 
+The local `control` project refers to the ignored protocol wheel under
+`inventory/wheels`. `scripts/test-local` builds and verifies it automatically.
+For direct `uv sync --project control` or `uv run --project control` commands,
+run `scripts/build-control-wheel` once first; it also checks the wheel against
+the hash locked in `control/uv.lock`.
+
 On Linux, this runs both suites in full. On macOS, it runs portable tests on
 the host and sends tests marked `linux_only`, `needs_systemd`,
 `needs_rust_probe`, or `postgres` to the `vonk-ci` OrbStack VM when available.
@@ -176,6 +182,7 @@ UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --frozen ruff chec
 
 # Python types. Pyright reads [tool.pyright] and resolves imports from the
 # control virtualenv, so sync that project once first.
+scripts/build-control-wheel
 UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
   uv sync --project control --frozen
 UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache scripts/check-python-types
@@ -188,6 +195,7 @@ npm run build --prefix control/web
 # Rust wire structures: fail if they no longer match the Pydantic schemas.
 # This runs the typify code generator with cargo, then compares its output.
 # The generator runs on macOS too; it does not build the Linux-only agent.
+scripts/build-control-wheel
 UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
   uv run --project control --frozen --with-editable . \
   python scripts/generate-agent-wire --check

@@ -105,6 +105,8 @@ jobs:
           # Enabling setup-uv's cache here can fail post-job when no cache path
           # is created; dependency-using jobs below keep caching enabled.
           enable-cache: false
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.github/actions/prepare-control-wheel
       - name: Run Ruff
         shell: bash
         run: |
@@ -154,8 +156,8 @@ jobs:
           python-version: "3.14"
           enable-cache: true
           cache-dependency-glob: agent_protocol/pyproject.toml
-      - name: Build protocol wheel from source
-        run: uv build --project agent_protocol --wheel --out-dir inventory/wheels
+      - name: Build protocol wheel and verify Controller lock hash
+        run: scripts/build-control-wheel
       - name: Include protocol wheel with generated release evidence
         run: |
           mkdir -p "$RUNNER_TEMP/supply-chain"
@@ -298,6 +300,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.github/actions/prepare-control-wheel
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt
       - name: Restore Rust dependency cache
@@ -350,6 +354,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.github/actions/prepare-control-wheel
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -476,6 +482,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.github/actions/prepare-control-wheel
       - name: Generate the OpenAPI schema without Node tooling
         id: generation
         shell: bash
@@ -548,6 +556,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.github/actions/prepare-control-wheel
       - name: Pull exact PostgreSQL integration image
         run: >-
           docker pull
@@ -769,6 +779,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.github/actions/prepare-control-wheel
       - name: Prepare locked Controller dependencies
         run: scripts/retry-dependency-fetch uv sync --project control --frozen --python 3.14
       - name: Run complete control suite
