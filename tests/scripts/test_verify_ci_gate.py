@@ -42,6 +42,7 @@ def _valid(**overrides: str):
         "generated": "skipped",
         "compose": "success",
         "catalog-runtime": "success",
+        "supply-chain": "success",
     }
     selected.update({key: value for key, value in overrides.items() if key in selected})
     results.update({key: value for key, value in overrides.items() if key in results})
@@ -77,6 +78,13 @@ def test_rejects_selector_failure_and_unexpected_skip() -> None:
     errors = _module().verify("failure", selected, results)
     assert any("selector result" in error for error in errors)
     assert any("rust-quality-gate result" in error for error in errors)
+
+
+def test_supply_chain_verification_is_required() -> None:
+    selected, results = _valid()
+    results["supply-chain"] = "failure"
+    errors = _module().verify("success", selected, results)
+    assert errors == ["supply-chain result is 'failure', expected 'success'"]
 
 
 def test_rejects_failure_cancelled_and_unexpected_success() -> None:

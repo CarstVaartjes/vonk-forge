@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import math
+import os
 import struct
 import tempfile
 import unittest
@@ -11,12 +11,13 @@ import zlib
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 from cluster_profiles import glb_validation
 from cluster_profiles.qualification_fixtures import FixtureError, _glb_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTEXTS = ("platform",)
-VALIDATOR_SHA256 = "740cbcd2a36546c39eaf67d26f3485f5c31f00a946ed116e53ef2c08934cf6c1"
 
 
 def _json_object(value: object) -> dict[str, object]:
@@ -306,20 +307,21 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.rejected(document, builder, "textured-pbr", "distinct embedded images")
 
-    def test_validator_has_cross_repository_byte_identity(self) -> None:
-        """The validator is one file copied verbatim into the recipe library.
+    @pytest.mark.needs_recipe_library
+    def test_validator_matches_recipe_library_adapters(self) -> None:
+        library_root = Path(os.environ["VONK_RECIPE_LIBRARY_ROOT"])
+        platform_validator = (
+            ROOT / "src/cluster_profiles/glb_validation.py"
+        ).read_bytes()
+        recipe_validators = tuple(
+            path.read_bytes()
+            for path in sorted(
+                (library_root / "adapters/three-d").glob("*/glb_validation.py")
+            )
+        )
 
-        The sibling checkout under ``VONK_RECIPE_LIBRARY_ROOT`` carries five
-        byte-identical copies, one per 3-D adapter, and its
-        ``tests/test_three_d_glb_validation.py`` pins this same digest. So
-        editing ``glb_validation.py`` at all -- including a comment or a type
-        annotation -- means changing all five copies and both pinned digests
-        together, across two repositories. Do that as a deliberate, coordinated
-        change rather than as a drive-by tidy-up.
-        """
-
-        content = (ROOT / "src/cluster_profiles/glb_validation.py").read_bytes()
-        self.assertEqual(hashlib.sha256(content).hexdigest(), VALIDATOR_SHA256)
+        self.assertTrue(recipe_validators)
+        self.assertTrue(all(value == platform_validator for value in recipe_validators))
 
     def test_rejects_out_of_range_indices_and_nonfinite_or_degenerate_positions(
         self,

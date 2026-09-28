@@ -203,6 +203,7 @@ revision. The examples below use the standard `/opt/vonk-forge-recipes` path.
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 uv sync --dev
+scripts/build-control-wheel
 
 # Fast tier: hermetic and parallel, no Docker/PostgreSQL/cargo/host tooling.
 uv run --project control --frozen --with-editable . \

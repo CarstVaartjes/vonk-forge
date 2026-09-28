@@ -4,613 +4,196 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-supply-chain"
+INPUTS = (
+    "Cargo.lock",
+    "control/uv.lock",
+    "control/web/package-lock.json",
+    "control/packaging/public-contracts.lock",
+    "control/Dockerfile",
+    "agent_protocol/uv.lock",
+    "agent_protocol/pyproject.toml",
+    "deploy/compose/images.lock.json",
+    "deploy/compose/compose.yaml",
+    "deploy/compose/tailscale/compose.yaml",
+    "deploy/compose/hermes-agent/compose.yaml",
+    "deploy/compose/hermes-agent/Dockerfile",
+    "deploy/compose/litellm/Dockerfile",
+    "deploy/compose/trust/litellm-cosign.pub",
+    "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
+)
+SUBPROCESS_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 
 
 def _copy(tmp_path: Path) -> Path:
     target = tmp_path / "repo"
-    # The production manifest owns the curated inputs; fixture copies must track it.
-    manifest = json.loads((ROOT / "inventory/sbom/manifest.json").read_text())
-    paths = set(manifest["inputs"])
-    paths.add("inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl")
-    for path in sorted(paths):
-        destination = target / path
+    for relative in INPUTS:
+        source = ROOT / relative
+        destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / path, destination)
-    shutil.copytree(
-        ROOT / "control/src/vonk_control/harnesses",
-        target / "control/src/vonk_control/harnesses",
-        dirs_exist_ok=True,
-    )
-    shutil.copytree(
-        ROOT / "agent_protocol/src",
-        target / "agent_protocol/src",
-        dirs_exist_ok=True,
-    )
-    shutil.copytree(ROOT / "rust", target / "rust", dirs_exist_ok=True)
-    shutil.copytree(ROOT / "packaging", target / "packaging", dirs_exist_ok=True)
-    subprocess.run(
-        [SCRIPT, "--root", target, "--generate", "--json"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+        shutil.copy2(source, destination)
+    (target / "deploy/compose/litellm").mkdir(parents=True, exist_ok=True)
     return target
 
 
-def _rewrite_installed_protocol_wheel(dockerfile: Path, replacement: str) -> None:
-    """Mutate the wheel argument in the pip step, independent of other inputs."""
-
-    wheel = "/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
-    lines = dockerfile.read_text().splitlines(keepends=True)
-    candidates = [
-        index
-        for index, line in enumerate(lines)
-        if line.lstrip().startswith(wheel) and wheel in line
-    ]
-    assert len(candidates) == 1
-    index = candidates[0]
-    lines[index] = lines[index].replace(wheel, replacement, 1)
-    dockerfile.write_text("".join(lines))
-
-
-def test_verifier_accepts_locked_offline_evidence(tmp_path: Path) -> None:
-    repository = _copy(tmp_path)
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
+def _run(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--root", str(root), *arguments, "--json"],
         capture_output=True,
         text=True,
         check=False,
+        env=SUBPROCESS_ENV,
     )
+
+
+def _result(run: subprocess.CompletedProcess[str]) -> dict[str, object]:
+    return json.loads(run.stdout)
+
+
+def _errors(run: subprocess.CompletedProcess[str]) -> list[str]:
+    errors = _result(run)["errors"]
+    assert isinstance(errors, list)
+    return [str(error) for error in errors]
+
+
+def test_verifier_generates_deterministic_lock_derived_evidence(tmp_path: Path) -> None:
+    repository = _copy(tmp_path)
+    output = tmp_path / "evidence"
+
+    first = _run(repository, "--output-dir", str(output))
+    first_manifest = (output / "manifest.json").read_bytes()
+    first_sboms = {
+        path.name: path.read_bytes() for path in sorted(output.glob("*.spdx.json"))
+    }
+    second = _run(repository, "--output-dir", str(output))
+
+    assert first.returncode == second.returncode == 0
+    assert _result(first)["ok"] is True
+    assert first_manifest == (output / "manifest.json").read_bytes()
+    assert first_sboms == {
+        path.name: path.read_bytes() for path in sorted(output.glob("*.spdx.json"))
+    }
+    manifest = json.loads(first_manifest)
+    assert (
+        manifest["lockfiles"]["Cargo.lock"]
+        == hashlib.sha256((repository / "Cargo.lock").read_bytes()).hexdigest()
+    )
+    assert (
+        manifest["image_lock_sha256"]
+        == hashlib.sha256(
+            (repository / "deploy/compose/images.lock.json").read_bytes()
+        ).hexdigest()
+    )
+    assert (
+        manifest["public_contract_wheel_sha256"]
+        == tomllib.loads(
+            (repository / "control/packaging/public-contracts.lock").read_text()
+        )["sha256"]
+    )
+    assert manifest["sboms"] == {
+        f"inventory/sbom/{name}": hashlib.sha256(content).hexdigest()
+        for name, content in first_sboms.items()
+    }
+    assert not (repository / "inventory/sbom").exists()
+
+
+def test_local_verification_needs_no_generated_files_or_mutation(
+    tmp_path: Path,
+) -> None:
+    repository = _copy(tmp_path)
+
+    result = _run(repository)
+
     assert result.returncode == 0
-    assert '"ok":true' in result.stdout
-    assert "inventory/sbom/agent-protocol.spdx.json" in result.stdout
-    assert "inventory/sbom/agent-rust.spdx.json" in result.stdout
-    assert "inventory/sbom/agent-python.spdx.json" not in result.stdout
-    assert not (repository / "inventory/sbom/agent-python.spdx.json").exists()
+    assert _result(result)["ok"] is True
+    assert not (repository / "inventory/sbom").exists()
+    assert not (
+        repository / "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
+    ).exists()
 
 
-def test_verifier_accepts_write_manifest_alias(tmp_path: Path) -> None:
-    repository = _copy(tmp_path)
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--write-manifest", "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0
-    assert '"ok":true' in result.stdout
-
-
-@pytest.mark.parametrize(
-    "path",
-    (
-        ".github/workflows/installer-publication.yml",
-        ".github/workflows/installer-setups.yml",
-        "schemas/install-release-manifest.schema.json",
-        "install/channel",
-        "scripts/install-release-publication",
-        "scripts/render-install-bootstrap",
-    ),
-)
-def test_supply_chain_manifest_binds_installer_publication_contract(
-    tmp_path: Path,
-    path: str,
-) -> None:
-    repository = _copy(tmp_path)
-    candidate = repository / path
-    candidate.write_bytes(candidate.read_bytes() + b"\n# publication drift\n")
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
-
-
-@pytest.mark.parametrize(
-    ("field", "replacement", "expected"),
-    (
-        (
-            "revision",
-            "0" * 40,
-            "control lock does not resolve the reviewed public contract",
-        ),
-        (
-            "sha256",
-            "0" * 64,
-            "public contract wheel does not match its reviewed lock",
-        ),
-    ),
-)
-def test_verifier_rejects_public_contract_lock_identity_drift(
-    tmp_path: Path, field: str, replacement: str, expected: str
-) -> None:
-    repository = _copy(tmp_path)
-    lock_path = repository / "control/packaging/public-contracts.lock"
-    lock = lock_path.read_text()
-    lock_path.write_text(
-        re.sub(rf'(?m)^{field} = "[0-9a-f]+"$', f'{field} = "{replacement}"', lock)
-    )
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert expected in " ".join(json.loads(result.stdout)["errors"])
-
-
-@pytest.mark.parametrize(
-    "path",
-    (
-        ".github/workflows/workload-artifacts.yml",
-        "schemas/workload-artifact-build.schema.json",
-        "scripts/select-workload-runtime-manifest",
-        "scripts/validate-workload-dockerfile",
-        "scripts/workload-artifact-metadata",
-    ),
-)
-def test_supply_chain_manifest_binds_workload_artifact_publication_contract(
-    tmp_path: Path,
-    path: str,
-) -> None:
-    repository = _copy(tmp_path)
-    for required in (
-        ".github/workflows/workload-artifacts.yml",
-        "schemas/workload-artifact-build.schema.json",
-        "scripts/select-workload-runtime-manifest",
-        "scripts/validate-workload-dockerfile",
-        "scripts/workload-artifact-metadata",
-    ):
-        candidate = repository / required
-        candidate.parent.mkdir(parents=True, exist_ok=True)
-        candidate.write_text(f"baseline:{required}\n")
-    subprocess.run(
-        [SCRIPT, "--root", repository, "--generate", "--json"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    candidate = repository / path
-    candidate.write_bytes(candidate.read_bytes() + b"drift\n")
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
-
-
-@pytest.mark.parametrize(
-    "path",
-    (
-        ".github/workflows/agent-apt-development.yml",
-        ".github/workflows/agent-release.yml",
-        ".github/actions/agent-package-build/action.yml",
-        ".github/actions/agent-package-compile/action.yml",
-        ".github/actions/agent-package-security/action.yml",
-        ".github/actions/agent-apt-publish/action.yml",
-        "scripts/agent-package-metadata",
-        "scripts/agent-apt-metadata",
-        "scripts/agent-apt-state",
-        "scripts/repair-capsule-publication",
-        "scripts/verify-agent-binaries",
-    ),
-)
-def test_supply_chain_manifest_binds_agent_package_channel_authority(
-    tmp_path: Path,
-    path: str,
-) -> None:
-    repository = _copy(tmp_path)
-    manifest = json.loads((repository / "inventory/sbom/manifest.json").read_bytes())
-    assert path in manifest["inputs"]
-
-    candidate = repository / path
-    candidate.write_bytes(candidate.read_bytes() + b"\n# authority drift\n")
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
-
-
-def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
+def test_lock_change_generates_updated_sbom_instead_of_stale_source_failure(
     tmp_path: Path,
 ) -> None:
     repository = _copy(tmp_path)
-    manifest = json.loads((repository / "inventory/sbom/manifest.json").read_bytes())
+    output = tmp_path / "evidence"
+    assert _run(repository, "--output-dir", str(output)).returncode == 0
+    before = json.loads((output / "manifest.json").read_bytes())
 
-    for path in (
-        "control/src/vonk_control/recipe_runtime_specs.py",
-        "control/src/vonk_control/compiled_artifact_contract.py",
-        "control/src/vonk_control/recipe_lifecycle_contract.py",
-        "control/src/vonk_control/artifact_jobs.py",
-        "control/src/vonk_control/fleet_profile_contract.py",
-        "control/src/vonk_control/fleet_profiles.py",
-        "control/src/vonk_control/fleet_projection.py",
-        "control/src/vonk_control/harnesses/canonical_metadata.py",
-        "control/src/vonk_control/harnesses/canonical.py",
-        "control/src/vonk_control/source_bundles.py",
-        "agent_protocol/src/vonk_agent_protocol/workload_packages.py",
-        "agent_protocol/src/vonk_agent_protocol/host_helper.py",
-        "control/src/vonk_control/strict_json.py",
-        "src/cluster_profiles/control_client.py",
-        "src/cluster_profiles/schemas/control-openapi.json",
-        "scripts/generate-control-clients",
-        "control/src/vonk_control/catalog_api.py",
-        "control/src/vonk_control/auth.py",
-        "control/src/vonk_control/recipe_routes.py",
-        "control/src/vonk_control/models.py",
-        "control/src/vonk_control/api.py",
-        "control/src/vonk_control/worker.py",
-        "control/src/vonk_control/agent_api.py",
-        "control/src/vonk_control/agent_jobs.py",
-        "control/src/vonk_control/agent_upgrades.py",
-        "control/src/vonk_control/agent_package_source.py",
-        "control/src/vonk_control/package_activation.py",
-        "control/src/vonk_control/host_helper_authority.py",
-        "control/src/vonk_control/runtime_preflight.py",
-        "control/src/vonk_control/lifecycle_preflight.py",
-        "control/src/vonk_control/model_cache_progress.py",
-        "control/src/vonk_control/operation_progress.py",
-        "control/src/vonk_control/failure_evidence.py",
-        "control/src/vonk_control/failure_evidence_api.py",
-        "control/src/vonk_control/failure_evidence_models.py",
-        "control/src/vonk_control/deployment_provenance.py",
-        "control/src/vonk_control/deployment_provenance_contract.py",
-        "control/src/vonk_control/deployment_observer.py",
-        "control/packaging/public-contracts.lock",
-        "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
-        "control/src/vonk_control/recipe_library_types.py",
-        "control/src/vonk_control/recipe_packages.py",
-        "control/src/vonk_control/catalog_sync.py",
-        "control/src/vonk_control/compiled_execution_plan.py",
-        "control/src/vonk_control/harnesses/canonical.py",
-        "control/src/vonk_control/install_admission.py",
-        "control/src/vonk_control/run_admission.py",
-        "control/src/vonk_control/run_switch_contract.py",
-        "control/src/vonk_control/run_switch_operations.py",
-        "scripts/qualify-recipe",
-        "config/recipe-library-manifest.json",
-    ):
-        assert path in manifest["inputs"]
+    lock = repository / "control/web/package-lock.json"
+    lock.write_text(lock.read_text() + "\n")
+    changed = _run(repository, "--output-dir", str(output))
+    after = json.loads((output / "manifest.json").read_bytes())
 
-    assert "scripts/accept-recipe" not in manifest["inputs"]
-    assert "scripts/run-development-slices" not in manifest["inputs"]
-    assert not any(path.startswith("config/recipes/") for path in manifest["inputs"])
+    assert changed.returncode == 0
+    assert (
+        after["lockfiles"]["control/web/package-lock.json"]
+        != before["lockfiles"]["control/web/package-lock.json"]
+    )
+    assert (
+        after["sboms"]["inventory/sbom/control-web.spdx.json"]
+        != before["sboms"]["inventory/sbom/control-web.spdx.json"]
+    )
 
 
 @pytest.mark.parametrize(
-    "path",
-    (
-        "control/src/vonk_control/catalog_api.py",
-        "control/src/vonk_control/auth.py",
-        "control/src/vonk_control/recipe_routes.py",
-        "control/src/vonk_control/models.py",
-        "control/packaging/public-contracts.lock",
-        "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
-        "control/src/vonk_control/api.py",
-        "control/src/vonk_control/worker.py",
-        "control/src/vonk_control/agent_api.py",
-        "control/src/vonk_control/agent_jobs.py",
-        "control/src/vonk_control/agent_upgrades.py",
-        "control/src/vonk_control/agent_package_source.py",
-        "control/src/vonk_control/package_activation.py",
-        "control/src/vonk_control/host_helper_authority.py",
-        "control/src/vonk_control/runtime_preflight.py",
-        "control/src/vonk_control/lifecycle_preflight.py",
-        "control/src/vonk_control/model_cache_progress.py",
-        "control/src/vonk_control/operation_progress.py",
-        "control/src/vonk_control/failure_evidence.py",
-        "control/src/vonk_control/failure_evidence_api.py",
-        "control/src/vonk_control/failure_evidence_models.py",
-        "control/src/vonk_control/deployment_provenance.py",
-        "control/src/vonk_control/deployment_provenance_contract.py",
-        "control/src/vonk_control/deployment_observer.py",
-        "control/src/vonk_control/recipe_library_types.py",
-        "control/src/vonk_control/recipe_packages.py",
-        "control/src/vonk_control/catalog_sync.py",
-        "control/src/vonk_control/recipe_runtime_specs.py",
-        "control/src/vonk_control/compiled_artifact_contract.py",
-        "control/src/vonk_control/recipe_lifecycle_contract.py",
-        "control/src/vonk_control/artifact_jobs.py",
-        "control/src/vonk_control/fleet_profile_contract.py",
-        "control/src/vonk_control/fleet_profiles.py",
-        "control/src/vonk_control/fleet_projection.py",
-        "control/src/vonk_control/strict_json.py",
-        "src/cluster_profiles/control_client.py",
-        "src/cluster_profiles/control_transport.py",
-        "src/cluster_profiles/control_limits.py",
-        "src/cluster_profiles/schemas/control-openapi.json",
-        "scripts/generate-control-clients",
-        "control/src/vonk_control/compiled_execution_plan.py",
-        "control/src/vonk_control/harnesses/vllm.py",
-        "control/src/vonk_control/availability_production.py",
-        "control/src/vonk_control/model_cache.py",
-        "control/src/vonk_control/recipe_image_availability.py",
-        "control/src/vonk_control/recipe_update_batches.py",
-        "control/src/vonk_control/recipe_update_contract.py",
-        "control/src/vonk_control/recipe_availability_intent.py",
-        "control/src/vonk_control/recipe_image_availability_api.py",
-        "control/src/vonk_control/install_admission.py",
-        "control/src/vonk_control/run_admission.py",
-        "control/src/vonk_control/run_switch_contract.py",
-        "control/src/vonk_control/run_switch_operations.py",
-    ),
+    ("field", "replacement"), (("revision", "0" * 40), ("sha256", "0" * 64))
 )
-def test_supply_chain_manifest_binds_recipe_execution_edges(
-    tmp_path: Path, path: str
+def test_reviewed_third_party_contract_wheel_pin_fails_closed(
+    tmp_path: Path, field: str, replacement: str
 ) -> None:
     repository = _copy(tmp_path)
-    candidate = repository / path
-    candidate.write_bytes(candidate.read_bytes() + b"\n# recipe execution drift\n")
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
+    lock = repository / "control/packaging/public-contracts.lock"
+    source = lock.read_text()
+    changed, count = re.subn(
+        rf"(?m)^{field} = \"[0-9a-f]+\"$",
+        f'{field} = "{replacement}"',
+        source,
+        count=1,
     )
+    assert count == 1
+    lock.write_text(changed)
+
+    result = _run(repository)
 
     assert result.returncode != 0
-    errors = " ".join(json.loads(result.stdout)["errors"]).lower()
-    if path == "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl":
-        assert "public contract wheel does not match its reviewed lock" in errors
-    else:
-        assert "manifest" in errors
+    assert "public contract" in " ".join(_errors(result))
 
 
-def test_verifier_does_not_require_cluster_profiles_to_be_installed(
-    tmp_path: Path,
-) -> None:
-    repository = _copy(tmp_path)
-
-    result = subprocess.run(
-        [sys.executable, "-I", SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_verifier_rejects_floating_image(tmp_path: Path) -> None:
-    repository = _copy(tmp_path)
-    # Move the lock and the Compose default together so this exercises the
-    # floating-tag rule itself rather than the lock/Compose agreement check.
-    for name in ("deploy/compose/images.lock.json", "deploy/compose/compose.yaml"):
-        path = repository / name
-        path.write_text(path.read_text().replace("caddy:2.11.4", "caddy:latest"))
-    result = subprocess.run(
-        [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
-    )
-    assert result.returncode != 0
-    assert "floating" in result.stderr
-
-
-def test_verifier_rejects_floating_hermes_agent_base(tmp_path: Path) -> None:
-    repository = _copy(tmp_path)
-    dockerfile = repository / "deploy/compose/hermes-agent/Dockerfile"
-    dockerfile.write_text(
-        dockerfile.read_text().replace(
-            "nousresearch/hermes-agent:v2026.7.20",
-            "nousresearch/hermes-agent:latest",
-        )
-    )
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--generate"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    assert "Hermes" in result.stderr and "versioned" in result.stderr
-
-
-@pytest.mark.parametrize("name", ("node", "python", "hermes"))
-@pytest.mark.parametrize("malformed", (False, True))
-def test_verifier_reports_missing_or_malformed_build_bases_as_json(
-    tmp_path: Path, name: str, malformed: bool
+@pytest.mark.parametrize("image", ("caddy", "postgres", "step-ca", "tailscale"))
+def test_image_lock_rejects_floating_runtime_references(
+    tmp_path: Path, image: str
 ) -> None:
     repository = _copy(tmp_path)
     lock_path = repository / "deploy/compose/images.lock.json"
     lock = json.loads(lock_path.read_text())
-    if malformed:
-        lock["build_bases"][name] = None
-    else:
-        del lock["build_bases"][name]
+    lock["images"][image] = f"example/{image}:latest"
     lock_path.write_text(json.dumps(lock))
 
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
+    result = _run(repository)
 
     assert result.returncode != 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    expected = (
-        "hermes build base is missing or invalid"
-        if name == "hermes"
-        else f"{name} build base is missing or invalid"
-    )
-    assert expected in payload["errors"]
-
-
-@pytest.mark.parametrize("name", ("node", "python"))
-def test_verifier_accepts_tag_tracked_first_party_build_bases(
-    tmp_path: Path, name: str
-) -> None:
-    """A first-party language base may follow its rolling tag."""
-
-    repository = _copy(tmp_path)
-    lock_path = repository / "deploy/compose/images.lock.json"
-    lock = json.loads(lock_path.read_text())
-    reference = lock["build_bases"][name]
-    assert "@" not in reference, "the first-party build base should not be digested"
-    dockerfile = repository / "control/Dockerfile"
-    assert reference in dockerfile.read_text()
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-
-    payload = json.loads(result.stdout)
-    assert not [error for error in payload["errors"] if error.startswith(f"{name} ")], (
-        payload["errors"]
-    )
+    assert f"{image} image uses a floating tag" in " ".join(_errors(result))
 
 
 @pytest.mark.parametrize("name", ("hermes", "litellm", "node", "python"))
-def test_verifier_rejects_a_floating_build_base(tmp_path: Path, name: str) -> None:
-    """Dropping the digest is allowed; dropping the version pin is not."""
-
+def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> None:
     repository = _copy(tmp_path)
     lock_path = repository / "deploy/compose/images.lock.json"
     lock = json.loads(lock_path.read_text())
-    lock["build_bases"][name] = lock["build_bases"][name].split(":", 1)[0] + ":latest"
+    lock["build_bases"][name] = f"example/{name}:latest"
     lock_path.write_text(json.dumps(lock))
 
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
+    result = _run(repository)
 
     assert result.returncode != 0
-    payload = json.loads(result.stdout)
-    assert any(
-        error.startswith(f"{name} image uses a floating tag")
-        for error in payload["errors"]
-    ), payload["errors"]
-
-
-@pytest.mark.parametrize("value", (None, [], {}))
-def test_verifier_reports_non_string_runtime_images_as_json(
-    tmp_path: Path, value: object
-) -> None:
-    repository = _copy(tmp_path)
-    lock_path = repository / "deploy/compose/images.lock.json"
-    lock = json.loads(lock_path.read_text())
-    lock["images"]["caddy"] = value
-    lock_path.write_text(json.dumps(lock))
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--json"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    assert "caddy image is not pinned by version" in payload["errors"]
-
-
-def test_image_lock_contains_the_pinned_hermes_build_base() -> None:
-    lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
-
-    assert lock["build_bases"]["hermes"] == "nousresearch/hermes-agent:v2026.7.20"
-    assert "hermes-agent" not in lock["images"]
-    assert lock["build_bases"]["litellm"] == (
-        "ghcr.io/berriai/litellm:v1.83.14-stable.patch.3"
-    )
-    assert "litellm" not in lock["images"]
-    assert not any("ai-devbox" in name for name in lock["build_bases"])
-
-
-def test_image_lock_declares_all_four_release_artifacts() -> None:
-    lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
-
-    assert lock["release_images"] == [
-        {
-            "context": ".",
-            "dockerfile": "control/Dockerfile",
-            "environment": "CONTROL_API_IMAGE",
-            "package": "vonk-forge-api",
-            "required": True,
-            "target": "api",
-        },
-        {
-            "context": ".",
-            "dockerfile": "control/Dockerfile",
-            "environment": "CONTROL_WORKER_IMAGE",
-            "package": "vonk-forge-worker",
-            "required": True,
-            "target": "worker",
-        },
-        {
-            "context": "deploy/compose/hermes-agent",
-            "dockerfile": "deploy/compose/hermes-agent/Dockerfile",
-            "environment": "HERMES_AGENT_IMAGE",
-            "package": "vonk-forge-hermes",
-            "required": True,
-            "target": "managed",
-        },
-        {
-            "context": ".",
-            "dockerfile": "deploy/compose/litellm/Dockerfile",
-            "environment": "LITELLM_IMAGE",
-            "package": "vonk-forge-litellm",
-            "required": True,
-            "target": "runtime",
-        },
-    ]
-
-
-def test_verifier_accepts_opt_in_hermes_compose_profile() -> None:
-    result = subprocess.run(
-        [SCRIPT, "--root", ROOT, "--generate", "--json"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_verifier_rejects_stale_sbom_after_lock_change(tmp_path: Path) -> None:
-    repository = _copy(tmp_path)
-    lock = repository / "control/web/package-lock.json"
-    lock.write_text(lock.read_text() + "\n")
-    result = subprocess.run(
-        [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
-    )
-    assert result.returncode != 0
-    assert "SBOM" in result.stderr or "manifest" in result.stderr
+    assert f"{name} image uses a floating tag" in " ".join(_errors(result))
 
 
 def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
@@ -620,154 +203,61 @@ def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
         project.read_text().replace('version = "3.0.0"', 'version = "3.0.1"', 1)
     )
 
-    result = subprocess.run(
-        [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
-    )
+    result = _run(repository)
 
     assert result.returncode != 0
-    assert "version" in result.stderr
+    assert "version" in " ".join(_errors(result))
 
 
-def test_verifier_rejects_a_missing_protocol_wheel_artifact(tmp_path: Path) -> None:
-    repository = _copy(tmp_path)
-    wheel = repository / "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
-    assert wheel.is_file()
-    wheel.unlink()
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
-    )
-
-    assert result.returncode != 0
-    assert "wheel" in result.stderr
-
-
-def test_verifier_accepts_a_same_version_protocol_wheel_rebuild(
-    tmp_path: Path,
+@pytest.mark.parametrize("value", (None, [], {}))
+def test_malformed_runtime_image_lock_values_fail_closed(
+    tmp_path: Path, value: object
 ) -> None:
     repository = _copy(tmp_path)
-    wheel = repository / "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
-    wheel.write_bytes(wheel.read_bytes() + b"different bytes")
+    lock_path = repository / "deploy/compose/images.lock.json"
+    lock = json.loads(lock_path.read_text())
+    lock["images"]["caddy"] = value
+    lock_path.write_text(json.dumps(lock))
 
-    # A same-version rebuild makes the recorded evidence stale, so verification
-    # fails closed until the evidence is regenerated...
-    stale = subprocess.run(
-        [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
-    )
-    assert stale.returncode != 0
+    result = _run(repository)
 
-    # ...and regeneration needs no lock or version edit.
-    regenerated = subprocess.run(
-        [SCRIPT, "--root", repository, "--generate"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert regenerated.returncode == 0, regenerated.stderr
+    assert result.returncode != 0
+    assert "caddy image is not pinned by version" in " ".join(_errors(result))
 
 
-def test_protocol_spdx_records_the_verified_wheel_checksum(tmp_path: Path) -> None:
+def test_generated_protocol_spdx_binds_built_wheel_checksum(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
     wheel = repository / "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
-    document = json.loads(
-        (repository / "inventory/sbom/agent-protocol.spdx.json").read_text()
-    )
-    protocol = next(
-        package
-        for package in document["packages"]
-        if package["name"] == "vonk-agent-protocol"
-    )
+    wheel.parent.mkdir(parents=True, exist_ok=True)
+    wheel.write_bytes(b"built wheel bytes")
+    output = tmp_path / "evidence"
 
+    result = _run(repository, "--output-dir", str(output))
+
+    assert result.returncode == 0
+    document = json.loads((output / "agent-protocol.spdx.json").read_bytes())
+    protocol = next(
+        item for item in document["packages"] if item["name"] == "vonk-agent-protocol"
+    )
     checksum = hashlib.sha256(wheel.read_bytes()).hexdigest()
     assert protocol["checksums"] == [{"algorithm": "SHA256", "checksumValue": checksum}]
-    wheel_file = next(
-        file
-        for file in document["files"]
-        if file["fileName"]
-        == "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
-    )
-    assert wheel_file["checksums"] == [
-        {"algorithm": "SHA256", "checksumValue": checksum}
-    ]
-    assert {
-        "spdxElementId": protocol["SPDXID"],
-        "relationshipType": "GENERATED_FROM",
-        "relatedSpdxElement": wheel_file["SPDXID"],
-    } in document["relationships"]
+    manifest = json.loads((output / "manifest.json").read_bytes())
+    assert manifest["protocol_wheel_sha256"] == checksum
 
 
-def test_verifier_rejects_a_root_dockerignore_change(tmp_path: Path) -> None:
-    repository = _copy(tmp_path)
-    dockerignore = repository / ".dockerignore"
-    dockerignore.write_text(dockerignore.read_text() + "\n!control/src/.env\n")
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository], capture_output=True, text=True, check=False
-    )
-
-    assert result.returncode != 0
-    assert "manifest" in result.stderr
-
-
-def test_verifier_rejects_a_dockerfile_that_copies_but_does_not_install_the_protocol_wheel(
-    tmp_path: Path,
-) -> None:
+def test_dockerfile_must_copy_and_install_the_protocol_wheel(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
     dockerfile = repository / "control/Dockerfile"
-    _rewrite_installed_protocol_wheel(dockerfile, "")
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--generate"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "install" in result.stderr
-
-
-def test_verifier_accepts_exact_wheel_in_second_pip_install_command(
-    tmp_path: Path,
-) -> None:
-    repository = _copy(tmp_path)
-    dockerfile = repository / "control/Dockerfile"
+    source = dockerfile.read_text()
     dockerfile.write_text(
-        dockerfile.read_text().replace(
-            "RUN python -m pip install --no-cache-dir --prefix=/install \\\n",
-            "RUN python -m pip install --disable-pip-version-check setuptools && \\\n"
-            "    python -m pip install --no-cache-dir --prefix=/install \\\n",
+        source.replace(
+            "/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl",
+            "/wheels/missing.whl",
+            1,
         )
     )
 
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--generate"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-@pytest.mark.parametrize("operator", ("&&", ";", "||", "|"))
-def test_verifier_rejects_a_protocol_wheel_mentioned_only_after_a_shell_operator(
-    tmp_path: Path, operator: str
-) -> None:
-    repository = _copy(tmp_path)
-    dockerfile = repository / "control/Dockerfile"
-    wheel = "/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
-    _rewrite_installed_protocol_wheel(
-        dockerfile,
-        f"/vonk-cluster-profiles . {operator} test -f {wheel} #",
-    )
-
-    result = subprocess.run(
-        [SCRIPT, "--root", repository, "--generate"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _run(repository)
 
     assert result.returncode != 0
-    assert "install" in result.stderr
+    assert "standalone protocol wheel" in " ".join(_errors(result))

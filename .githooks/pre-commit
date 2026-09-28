@@ -3,24 +3,29 @@ set -eu
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-
-# Generated evidence must describe the exact tree being committed.  A staged
-# subset alongside other tracked edits would let the hook hash bytes that are
-# not part of the commit, so ask the caller to stage the complete change first.
-if [ -n "$(git diff --name-only)" ]; then
-    echo "manifest hook: stage all tracked edits before committing" >&2
-    exit 1
+export UV_CACHE_DIR=${UV_CACHE_DIR:-/private/tmp/vonk-forge-hook-uv-cache}
+export UV_TOOL_DIR=${UV_TOOL_DIR:-/private/tmp/vonk-forge-hook-uv-tools}
+protocol_wheel=inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl
+generated_protocol_wheel=false
+cleanup_generated_wheel() {
+    if [ "$generated_protocol_wheel" = true ]; then
+        rm -f "$protocol_wheel"
+    fi
+}
+if [ ! -f "$protocol_wheel" ]; then
+    generated_protocol_wheel=true
+    trap cleanup_generated_wheel EXIT
+    uv build --project agent_protocol --wheel --out-dir inventory/wheels
 fi
 
-scripts/verify-supply-chain --generate --json
-git add inventory/sbom inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl
+# SBOMs and their input manifest are generated in CI from the checked-in
+# lockfiles. The local hook validates authored locks and image pins without
+# modifying or staging generated inventory.
 scripts/verify-supply-chain --json
 changed_python=$(git diff --cached --name-only -- '*.py')
 if [ -n "$changed_python" ]; then
     printf '%s\n' "$changed_python" | xargs uvx --from ruff==0.16.1 ruff check --force-exclude
     printf '%s\n' "$changed_python" | xargs uvx --from ruff==0.16.1 ruff format --check --force-exclude
 fi
-UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-forge-hook-uv-cache}" \
-    uv sync --project control --frozen
-UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-forge-hook-uv-cache}" \
-    scripts/check-python-types
+uv sync --project control --frozen
+scripts/check-python-types

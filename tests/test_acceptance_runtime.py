@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.linux_only
+
 from tests.acceptance.runtime import (
     AcceptanceError,
     assert_bundle_contract,

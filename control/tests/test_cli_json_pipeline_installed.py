@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -65,11 +64,15 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
             certificate=certificate,
             headers=headers,
         )
-        consumer_environment = {
-            **os.environ,
-            "PYTHONNOUSERSITE": "1",
-            "PYTHONPATH": "",
-        }
+        from tests.subprocess_environment import isolated_environment
+
+        consumer_environment = isolated_environment(
+            tmp_path / "consumer-home",
+            extra={
+                "PYTHONNOUSERSITE": "1",
+                "PYTHONPATH": "",
+            },
+        )
 
         with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as cli_stderr_file:
             cli = subprocess.Popen(
