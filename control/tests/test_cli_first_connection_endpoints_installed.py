@@ -52,7 +52,6 @@ from vonk_control.models import (
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
-    RoutePublication,
     RunNode,
 )
 from vonk_control.operation_api import durable_operation_services
@@ -481,30 +480,26 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
     assert refreshed_endpoint.api_base == "https://testserver/v1"
     assert refreshed_endpoint.backend_api_base == "http://10.0.0.9:8000/v1"
 
-    with sessions() as session:
-        publication = session.scalar(select(RoutePublication).limit(1))
-        assert publication is not None and publication.lease_expires_at is not None
-        expires_at = publication.lease_expires_at
-    expired_api, expired_codec = _api(
+    # Without new generations the published route stays published: nothing
+    # expires it while the Controller is idle or stalled.
+    later_api, later_codec = _api(
         sessions,
         route_root,
         profiles=profiles,
-        projection_now=expires_at + timedelta(microseconds=1),
+        projection_now=ROUTE_NOW + timedelta(hours=1),
     )
-    expired_token = expired_codec.issue(
-        Actor("viewer", "viewer"), ttl_seconds=1_000, now=0
-    )
-    with expired_api:
-        expired = expired_api.get(
+    later_token = later_codec.issue(Actor("viewer", "viewer"), ttl_seconds=1_000, now=0)
+    with later_api:
+        later = later_api.get(
             "/api/profile/3/endpoints",
             params={"alias": "qwen"},
-            headers={"Authorization": f"Bearer {expired_token}"},
+            headers={"Authorization": f"Bearer {later_token}"},
         )
-    assert expired.status_code == 200, expired.text
-    expired_view = FleetProfileEndpointsView.model_validate_json(expired.text)
-    assert expired_view.assignments is not None
-    assert expired_view.assignments[0].state == "expired"
-    assert expired_view.assignments[0].endpoint is None
+    assert later.status_code == 200, later.text
+    later_view = FleetProfileEndpointsView.model_validate_json(later.text)
+    assert later_view.assignments is not None
+    assert later_view.assignments[0].state == "published"
+    assert later_view.assignments[0].endpoint is not None
 
 
 @pytest.mark.lane
@@ -616,8 +611,6 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
             tmp_path,
         )
         assert human.returncode == 0, human.stdout + human.stderr
-        expected_expiry = datetime.fromisoformat(endpoint.expires_at).isoformat(sep=" ")
-        assert f"Route expires at: {expected_expiry}" in human.stdout
         assert (
             "  export OPENAI_BASE_URL=" + shlex.quote(endpoint.api_base) in human.stdout
         )

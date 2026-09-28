@@ -2793,12 +2793,6 @@
             "title": "Backend Api Base",
             "type": "string"
           },
-          "expires_at": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Expires At",
-            "type": "string"
-          },
           "generation": {
             "minimum": 1.0,
             "title": "Generation",
@@ -2825,7 +2819,6 @@
           "alias",
           "api_base",
           "backend_api_base",
-          "expires_at",
           "generation",
           "node_id",
           "observed_at",

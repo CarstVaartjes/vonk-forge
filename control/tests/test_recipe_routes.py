@@ -11,9 +11,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.route_activation import ROUTE_LEASE_SECONDS
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -48,7 +46,6 @@ from vonk_control.recipe_routes import (
     RecipeRouteService,
 )
 from vonk_control.route_runtime import (
-    RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     RouteRuntimeError,
 )
@@ -107,8 +104,7 @@ class OverlapPublisher(AtomicRecipeRoutePublisher):
             tuple(sorted(candidate.state.aliases)), candidate.state.digest
         )
 
-    def publish_empty(self, route_digest, *, expires_at):
-        del expires_at
+    def publish_empty(self, route_digest):
         return self._record((), route_digest)
 
     def _record(self, aliases: tuple[str, ...], digest: str) -> LiteLlmGeneration:
@@ -445,12 +441,10 @@ def setup(
         return accepted
 
     clock = clock or (lambda: NOW)
-    publisher = AtomicRouteBundlePublisher(
-        tmp_path / "litellm", clock=clock, validate_litellm=apply
-    )
+    publisher = AtomicRouteBundlePublisher(tmp_path / "litellm", validate_litellm=apply)
     service = RecipeRouteService(
         sessions,
-        publisher=AtomicRecipeRoutePublisher(publisher, clock=clock),
+        publisher=AtomicRecipeRoutePublisher(publisher),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
         maximum_age_seconds=120,
@@ -602,13 +596,10 @@ def add_running_run(
 def atomic_service(
     service: RecipeRouteService, root: Path, clock
 ) -> RecipeRouteService:
-    runtime = AtomicRouteBundlePublisher(
-        root,
-        clock=clock,
-    )
+    runtime = AtomicRouteBundlePublisher(root)
     return RecipeRouteService(
         service.sessions,
-        publisher=AtomicRecipeRoutePublisher(runtime, clock=clock),
+        publisher=AtomicRecipeRoutePublisher(runtime),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
         maximum_age_seconds=120,
@@ -793,10 +784,8 @@ def test_invalid_candidate_retains_previous_generation(tmp_path: Path) -> None:
         publisher=AtomicRecipeRoutePublisher(
             AtomicRouteBundlePublisher(
                 tmp_path / "litellm",
-                clock=lambda: NOW,
                 validate_litellm=lambda _: False,
             ),
-            clock=lambda: NOW,
         ),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=lambda: NOW,
@@ -923,8 +912,8 @@ class _TransientFirstPublish:
             raise self._error
         return self._inner.publish_run(run_id)
 
-    def maintain(self, *, renew_before_seconds: int = 10) -> bool:
-        return self._inner.maintain(renew_before_seconds=renew_before_seconds)
+    def maintain(self) -> bool:
+        return self._inner.maintain()
 
 
 def _aware(value: datetime) -> datetime:
@@ -1108,8 +1097,7 @@ def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
                 path="memory",
             )
 
-        def maintain(self, *, renew_before_seconds: int = 10) -> bool:
-            assert renew_before_seconds == 10
+        def maintain(self) -> bool:
             self.maintained += 1
             return True
 
@@ -1208,11 +1196,10 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     service, _publisher, _applied, run_id = setup(tmp_path / "database")
     atomic = AtomicRouteBundlePublisher(
         tmp_path / "live",
-        clock=lambda: NOW,
     )
     service = RecipeRouteService(
         service.sessions,
-        publisher=AtomicRecipeRoutePublisher(atomic, clock=lambda: NOW),
+        publisher=AtomicRecipeRoutePublisher(atomic),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=lambda: NOW,
         maximum_age_seconds=120,
@@ -1323,19 +1310,6 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert wrong_owner_endpoint.assignments[0].state == "withdrawn"
     assert wrong_owner_endpoint.assignments[0].endpoint is None
 
-    expired = durable_operation_services(
-        service.sessions,
-        tmp_path / "live",
-        clock=lambda: NOW + timedelta(seconds=181),
-        cursors=TokenCodec(b"k" * 32).cursor_codec(),
-        profile_endpoint_intent=profile_endpoint_intent,
-    )
-    assert expired.profile_endpoint is not None
-    expired_endpoint = expired.profile_endpoint(3, "qwen", GATEWAY)
-    assert expired_endpoint.assignments is not None
-    assert expired_endpoint.assignments[0].state == "expired"
-    assert expired_endpoint.assignments[0].endpoint is None
-
     from vonk_control import operation_api
 
     verify_bundle = operation_api.verify_active_route_bundle
@@ -1402,7 +1376,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert withdrawn.assignments[0].endpoint is None
 
 
-def test_worker_renews_from_fresh_all_rank_evidence_and_recovers_owner(
+def test_worker_republishes_from_fresh_all_rank_evidence_and_recovers_owner(
     tmp_path: Path,
 ) -> None:
     clock = MutableClock(NOW)
@@ -1426,28 +1400,44 @@ def test_worker_renews_from_fresh_all_rank_evidence_and_recovers_owner(
         assert (
             run.route_generation is not None and run.route_generation > first.generation
         )
-        assert publication.lease_expires_at is not None
-        assert publication.lease_expires_at.replace(tzinfo=UTC) == (
-            clock.now + timedelta(seconds=180)
-        )
+        assert publication.generation == run.route_generation
 
 
-def test_fresh_health_timestamp_does_not_churn_route_before_renewal_window(
-    tmp_path: Path,
-) -> None:
+def test_fresh_health_timestamp_does_not_churn_route(tmp_path: Path) -> None:
     clock = MutableClock(NOW)
     base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
     service = atomic_service(base, tmp_path / "live", clock)
     first = service.publish_run(run_id)
 
-    clock.now += timedelta(seconds=1)
-    with service.sessions.begin() as session:
-        for node in session.query(RunNode).filter_by(run_id=run_id):
-            node.updated_at = clock.now
-
-    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is False
+    worker = RecipeOperationWorker(service.sessions, service, clock=clock)
+    for _ in range(3):
+        clock.now += timedelta(seconds=100)
+        with service.sessions.begin() as session:
+            for node in session.query(RunNode).filter_by(run_id=run_id):
+                node.updated_at = clock.now
+        assert worker.tick() is False
     with service.sessions() as session:
         assert _recipe_run(session, run_id).route_generation == first.generation
+
+
+def test_worker_republishes_when_the_live_marker_is_unreadable(tmp_path: Path) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    root = tmp_path / "live"
+    service = atomic_service(base, root, clock)
+    first = service.publish_run(run_id)
+
+    # A marker in a retired format (or otherwise unreadable) must not block
+    # publication: the worker replaces it with the next generation.
+    activation = root / "activation.json"
+    retired = json.loads(activation.read_bytes()) | {"expires_at": NOW.isoformat()}
+    activation.write_text(json.dumps(retired))
+
+    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+    marker = AtomicRouteBundlePublisher(root).inspect()
+    assert marker.generation == first.generation + 1
+    with service.sessions() as session:
+        assert _publication_owner(session).owner_generation == marker.generation
 
 
 def test_worker_withdraws_when_rank_health_is_stale_while_agent_is_active(
@@ -1580,20 +1570,7 @@ def _recipe_owner_id(session) -> str:
     return owner.authority_id
 
 
-def _withdrawn_empty_publication(
-    tmp_path: Path, *, engine: Engine, clock: MutableClock
-) -> tuple[RecipeRouteService, Path, str, LiteLlmGeneration]:
-    service, _publisher, _applied, run_id = setup(
-        tmp_path / "database", clock=clock, engine=engine
-    )
-    root = tmp_path / "live"
-    routes = atomic_service(service, root, clock)
-    routes.publish_run(run_id)
-    withdrawn = routes.withdraw_run(run_id)
-    return routes, root, run_id, withdrawn
-
-
-def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
+def test_postgres_current_publication_withdrawal_and_owner_recovery(
     tmp_path: Path, postgres_engine, monkeypatch
 ) -> None:
     from vonk_control.route_runtime import verify_active_route_bundle
@@ -1607,7 +1584,7 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
     root = tmp_path / "live"
     service = atomic_service(base, root, clock)
     first = service.publish_run(run_id)
-    bundle = verify_active_route_bundle(root, clock=clock)
+    bundle = verify_active_route_bundle(root)
     request = _supervisor(monkeypatch, root)._active_request()
     assert request is not None and request.activation_sha256 == bundle.marker.digest
     with service.sessions() as session:
@@ -1623,191 +1600,18 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
             node.updated_at = clock.now
         session.delete(session.get(RoutePublicationOwner, 1))
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
-    renewed = verify_active_route_bundle(root, clock=clock)
+    renewed = verify_active_route_bundle(root)
     assert renewed.marker.generation > first.generation
     with service.sessions() as session:
         owner = _publication_owner(session)
         assert owner.owner_generation == renewed.marker.generation
 
     service.withdraw_run(run_id)
-    withdrawn = verify_active_route_bundle(root, clock=clock)
+    withdrawn = verify_active_route_bundle(root)
     assert withdrawn.marker.state == "maintenance"
     assert withdrawn.marker.generation > renewed.marker.generation
     assert withdrawn.routes["routes"] == {}
     assert _supervisor(monkeypatch, root)._active_request() is not None
-
-
-def test_postgres_expired_empty_route_renews_once_and_restores_supervisor_access(
-    tmp_path: Path, postgres_engine, monkeypatch
-) -> None:
-    from vonk_control.route_runtime import verify_active_route_bundle
-
-    from .test_route_runtime import _supervisor
-
-    clock = MutableClock(NOW)
-    routes, root, _run_id, withdrawn = _withdrawn_empty_publication(
-        tmp_path, engine=postgres_engine, clock=clock
-    )
-    initial = verify_active_route_bundle(root, clock=clock).marker
-    assert initial.generation == withdrawn.generation
-    assert initial.state == "maintenance"
-
-    # A healthy empty route stays stable until the configured renewal window.
-    assert routes.maintain() is False
-    assert AtomicRouteBundlePublisher(root, clock=clock).inspect() == initial
-
-    with routes.sessions() as session:
-        publication = _publication(session, RECIPE_ROUTE_AUTHORITY_ID)
-        assert publication.lease_expires_at is not None
-        expires_at = publication.lease_expires_at.replace(tzinfo=UTC)
-    clock.now = expires_at + timedelta(seconds=1)
-    supervisor = _supervisor(monkeypatch, root)
-    # The supervisor keeps serving the expired marker; renewal is Controller-side.
-    assert supervisor._active_request() is not None
-
-    # Independent workers serialize through the real PostgreSQL owner row.
-    # Only the first tick activates a new empty bundle.
-    second_routes = atomic_service(routes, root, clock)
-    workers = (
-        RecipeOperationWorker(routes.sessions, routes, clock=clock),
-        RecipeOperationWorker(second_routes.sessions, second_routes, clock=clock),
-    )
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda worker: worker.tick(), workers))
-    assert sorted(results) == [False, True]
-
-    renewed = verify_active_route_bundle(root, clock=clock)
-    assert renewed.marker.generation == initial.generation + 1
-    assert renewed.marker.state == "maintenance"
-    assert renewed.routes["routes"] == {}
-    assert renewed.litellm["model_list"] == []
-    with routes.sessions() as session:
-        owner = _publication_owner(session)
-        publication = _publication(session, owner.authority_id)
-        assert owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
-        assert owner.owner_generation == renewed.marker.generation
-        assert publication.state == "routes-withdrawn"
-        assert publication.lease_expires_at is not None
-        assert publication.lease_expires_at.replace(tzinfo=UTC) == (
-            clock.now + timedelta(seconds=ROUTE_LEASE_SECONDS)
-        )
-    request = supervisor._active_request()
-    assert request is not None
-    assert request.marker["generation"] == renewed.marker.generation
-
-
-@pytest.mark.parametrize(
-    "owner_change", ["foreign-authority", "newer-generation", "foreign-activation"]
-)
-def test_postgres_empty_route_renewal_preserves_newer_or_foreign_owner(
-    tmp_path: Path, postgres_engine, owner_change: str
-) -> None:
-    from vonk_control.route_runtime import verify_active_route_bundle
-
-    clock = MutableClock(NOW)
-    routes, root, _run_id, _withdrawn = _withdrawn_empty_publication(
-        tmp_path, engine=postgres_engine, clock=clock
-    )
-    runtime = AtomicRouteBundlePublisher(root, clock=clock)
-    stored = verify_active_route_bundle(root, clock=clock).marker
-
-    if owner_change == "foreign-activation":
-        foreign_authority = str(uuid4())
-        from .test_route_runtime import _publish
-
-        _publish(
-            runtime,
-            authority_id=foreign_authority,
-            plan_digest="f" * 64,
-            evidence_set_digest="f" * 64,
-            routes=b"{}\n",
-            expires_at=clock.now + timedelta(seconds=ROUTE_LEASE_SECONDS),
-            state="maintenance",
-        )
-    else:
-        with routes.sessions.begin() as session:
-            owner = _publication_owner(session)
-            publication = _publication(session, owner.authority_id)
-            assert publication.generation is not None
-            if owner_change == "foreign-authority":
-                foreign_authority = str(uuid4())
-                session.add(
-                    RecipeRouteAuthority(
-                        authority_id=foreign_authority,
-                        created_at=clock.now,
-                        updated_at=clock.now,
-                    )
-                )
-                session.flush()
-                owner.authority_id = foreign_authority
-            else:
-                owner.owner_generation = publication.generation + 1
-
-    with routes.sessions() as session:
-        publication = _publication(session, RECIPE_ROUTE_AUTHORITY_ID)
-        assert publication.lease_expires_at is not None
-        clock.now = publication.lease_expires_at.replace(tzinfo=UTC) + timedelta(
-            seconds=1
-        )
-    marker_before = runtime.inspect(verify_lease=False)
-
-    assert routes.maintain() is False
-    assert runtime.inspect(verify_lease=False) == marker_before
-    with routes.sessions() as session:
-        owner = _publication_owner(session)
-        publication = _publication(session, RECIPE_ROUTE_AUTHORITY_ID)
-        assert publication.generation == stored.generation
-        if owner_change == "foreign-authority":
-            assert owner.authority_id != RECIPE_ROUTE_AUTHORITY_ID
-        elif owner_change == "newer-generation":
-            assert owner.owner_generation == stored.generation + 1
-        else:
-            assert owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
-            assert owner.owner_generation == stored.generation
-
-
-def test_postgres_empty_route_renewal_recovers_exact_unprojected_activation(
-    tmp_path: Path, postgres_engine, monkeypatch
-) -> None:
-    from vonk_control.route_runtime import verify_active_route_bundle
-
-    from .test_route_runtime import _supervisor
-
-    clock = MutableClock(NOW)
-    routes, root, _run_id, _withdrawn = _withdrawn_empty_publication(
-        tmp_path, engine=postgres_engine, clock=clock
-    )
-    initial = verify_active_route_bundle(root, clock=clock).marker
-    with routes.sessions() as session:
-        publication = _publication(session, RECIPE_ROUTE_AUTHORITY_ID)
-        assert publication.lease_expires_at is not None
-        route_digest = publication.plan_digest
-        clock.now = publication.lease_expires_at.replace(tzinfo=UTC) + timedelta(
-            seconds=1
-        )
-
-    # Recreate the durable state after activation reached disk but before its
-    # new generation and lease were projected into PostgreSQL.
-    runtime = AtomicRouteBundlePublisher(root, clock=clock)
-    AtomicRecipeRoutePublisher(runtime, clock=clock).publish_empty(
-        route_digest,
-        expires_at=clock.now + timedelta(seconds=ROUTE_LEASE_SECONDS),
-    )
-    unprojected = runtime.inspect(verify_lease=False)
-    assert unprojected.generation == initial.generation + 1
-    with routes.sessions() as session:
-        assert _publication_owner(session).owner_generation == initial.generation
-
-    assert routes.maintain() is True
-    recovered = verify_active_route_bundle(root, clock=clock)
-    assert recovered.marker == unprojected
-    assert _supervisor(monkeypatch, root)._active_request() is not None
-    with routes.sessions() as session:
-        owner = _publication_owner(session)
-        publication = _publication(session, owner.authority_id)
-        assert owner.owner_generation == unprojected.generation
-        assert publication.generation == unprojected.generation
-        assert publication.activation_marker_digest == unprojected.digest
 
 
 def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
@@ -1821,7 +1625,7 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
     with base.sessions() as session:
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)
-        marker = AtomicRouteBundlePublisher(root, clock=lambda: NOW).inspect()
+        marker = AtomicRouteBundlePublisher(root).inspect()
         assert owner.owner_generation == marker.generation == publication.generation
         assert publication.activation_marker_digest == marker.digest
         assert marker.generation == max(result.generation for result in results)
@@ -1854,9 +1658,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
             fail_ack[0] = False
             raise OSError("supervisor acknowledgement lost")
 
-    runtime = AtomicRouteBundlePublisher(
-        root, clock=clock, await_supervisor_ack=acknowledge
-    )
+    runtime = AtomicRouteBundlePublisher(root, await_supervisor_ack=acknowledge)
     if failure_point == "before-activation":
         activate = runtime._activate
         fail_activate = [True]
@@ -1870,7 +1672,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
         runtime._activate = activate_once
     service = RecipeRouteService(
         base.sessions,
-        publisher=AtomicRecipeRoutePublisher(runtime, clock=clock),
+        publisher=AtomicRecipeRoutePublisher(runtime),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
         maximum_age_seconds=120,
@@ -1903,7 +1705,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
 
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
     marker_after_failure = (
-        AtomicRouteBundlePublisher(root, clock=clock).inspect()
+        AtomicRouteBundlePublisher(root).inspect()
         if failure_point == "after-activation"
         else None
     )
@@ -1919,11 +1721,11 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
 
     clock.now = due_at + timedelta(seconds=1)
     restarted_runtime = AtomicRouteBundlePublisher(
-        root, clock=clock, await_supervisor_ack=acknowledge
+        root, await_supervisor_ack=acknowledge
     )
     restarted_service = RecipeRouteService(
         base.sessions,
-        publisher=AtomicRecipeRoutePublisher(restarted_runtime, clock=clock),
+        publisher=AtomicRecipeRoutePublisher(restarted_runtime),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
         maximum_age_seconds=120,
@@ -1932,7 +1734,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
         RecipeOperationWorker(base.sessions, restarted_service, clock=clock).tick()
         is True
     )
-    final_marker = AtomicRouteBundlePublisher(root, clock=clock).inspect()
+    final_marker = AtomicRouteBundlePublisher(root).inspect()
     with base.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.route_state == "published"

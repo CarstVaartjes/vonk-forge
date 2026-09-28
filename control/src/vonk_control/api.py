@@ -1389,15 +1389,13 @@ def production_app(settings: Settings | None = None) -> FastAPI:
 
     recipe_route_runtime = AtomicRouteBundlePublisher(
         Path("/routes"),
-        clock=clock,
-        maximum_lease_seconds=300,
         await_supervisor_ack=FileSupervisorAcknowledger(
             Path("/supervisor/ack.json"), clock=clock
         ),
     )
     recipe_routes = RecipeRouteService(
         sessions,
-        publisher=AtomicRecipeRoutePublisher(recipe_route_runtime, clock=clock),
+        publisher=AtomicRecipeRoutePublisher(recipe_route_runtime),
         management_policy=ManagementAddressPolicy.parse(
             settings.management_cidrs,
             forbidden_cidrs=settings.direct_fabric_cidrs,
