@@ -76,7 +76,7 @@ function api(
   resumeJob = vi.fn().mockResolvedValue({id: "operation-1", state: "queued"}),
 ): Pick<ControlApi, "audit" | "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation"> {
   return {
-    operations: vi.fn().mockResolvedValue({schema_version: 2, operations: [], total: 0, next_cursor: null}),
+    operations: vi.fn().mockResolvedValue({operations: [], total: 0, next_cursor: null}),
     operation: vi.fn(),
     audit: loadAudit,
     job: loadJob,
@@ -490,7 +490,7 @@ test("discloses bounded API windows and loads older operations when a cursor is 
 
 function canonicalOperation(overrides: Partial<OperationDetail> = {}): OperationDetail {
   return {
-    schema_version: 2, id: "profile-attempt-1", parent_id: null,
+    id: "profile-attempt-1", parent_id: null,
     kind: "profile.load", state: "failed", attempt: 1,
     node_ids: [TARGET_ID], created_at: "2026-08-15T12:00:00Z",
     progress: {phase: "prepare", completed_bytes: 0, total_bytes_known: false},
@@ -502,7 +502,7 @@ function canonicalOperation(overrides: Partial<OperationDetail> = {}): Operation
 
 function canonicalApi(operations: OperationDetail[]) {
   const client = api(vi.fn().mockResolvedValue({events: []}), vi.fn().mockResolvedValue({jobs: [], total: 0, next_cursor: null}));
-  vi.mocked(client.operations).mockResolvedValue({schema_version: 2, operations, total: operations.length, next_cursor: null});
+  vi.mocked(client.operations).mockResolvedValue({operations, total: operations.length, next_cursor: null});
   return client;
 }
 
@@ -593,9 +593,9 @@ test("paginates jobs and canonical operations independently after a partial page
   const second = canonicalOperation({id: "older-operation", kind: "profile.load"});
   const client = canonicalApi([first]);
   vi.mocked(client.operations)
-    .mockResolvedValueOnce({schema_version: 2, operations: [first], next_cursor: "operations-next", total: 2})
+    .mockResolvedValueOnce({operations: [first], next_cursor: "operations-next", total: 2})
     .mockRejectedValueOnce(new Error("cursor fetch failed"))
-    .mockResolvedValueOnce({schema_version: 2, operations: [first, second], next_cursor: null, total: 2});
+    .mockResolvedValueOnce({operations: [first, second], next_cursor: null, total: 2});
   vi.mocked(client.jobs)
     .mockResolvedValueOnce({jobs: [], next_cursor: "jobs-next", total: 1})
     .mockResolvedValueOnce({jobs: [{id: first.id, kind: "agent-upgrade", state: "running", created_at: "2026-08-15T12:00:00Z"}], next_cursor: null, total: 1});

@@ -301,11 +301,9 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     detail = client.get(f"/api/operations/{item['id']}", headers=operator)
 
     assert listed.status_code == 200
-    assert listed.json()["schema_version"] == 2
     assert listed.json()["total"] == 1
     assert listed.json()["operations"][0]["parent_id"] == item["parent_id"]
     assert listed.json()["operations"][0]["node_ids"] == [NODE_ID]
-    assert listed.json()["operations"][0]["schema_version"] == 2
     assert listed.json()["operations"][0]["recovery"] == {
         "uncertain": True,
         "actions": ["inspect"],
@@ -502,7 +500,6 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     )
 
     assert first.status_code == 200
-    assert first.json()["schema_version"] == 2
     assert first.json()["total"] == 2
     assert first.json()["operations"][0]["id"] == "cache-1"
     assert first.json()["operations"][0]["node_ids"] == []

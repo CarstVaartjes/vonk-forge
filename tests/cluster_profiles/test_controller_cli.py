@@ -500,7 +500,7 @@ def test_recipe_installation_reconcile_rejects_security_or_changed_preview(
     key = "11111111-1111-4111-8111-111111111111"
     apply = f"/api/recipe/installations/{installation_id}/reconcile"
     preview = f"{apply}/preview"
-    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    empty = {"operations": [], "next_cursor": None, "total": 0}
     client = FakeClient(
         {
             ("GET", "/api/operations"): empty,
@@ -562,7 +562,7 @@ def test_recipe_installation_reconcile_submits_despite_ordinary_blockers(
     blocked["blockers"] = [
         {"code": "run-switch.capacity_busy", "detail": "capacity is busy"}
     ]
-    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    empty = {"operations": [], "next_cursor": None, "total": 0}
     client = FakeClient(
         {
             ("GET", "/api/operations"): empty,
@@ -727,7 +727,7 @@ def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identit
     key = "11111111-1111-4111-8111-111111111111"
     apply = f"/api/recipe/installations/{installation_id}/reconcile"
     preview = f"{apply}/preview"
-    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    empty = {"operations": [], "next_cursor": None, "total": 0}
     operation = _reconciliation_operation(key, installation_id)
     client = FakeClient(
         {

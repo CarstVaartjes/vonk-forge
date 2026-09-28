@@ -337,7 +337,6 @@ class OperationOwnerReference(StrictModel):
 
 
 class OperationDetailResponse(StrictModel):
-    schema_version: Literal[2] = 2
     id: str = Field(min_length=1, max_length=128)
     parent_id: str | None = Field(default=None, max_length=128)
     node_ids: list[NodeIdentifier] = Field(max_length=1024)
@@ -376,7 +375,6 @@ class OperationDetailResponse(StrictModel):
 
 
 class OperationsResponse(StrictModel):
-    schema_version: Literal[2] = 2
     operations: list[OperationDetailResponse] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=512)
     total: int = Field(ge=0)
