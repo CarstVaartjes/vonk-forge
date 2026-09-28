@@ -108,12 +108,8 @@ cache that reduced build overhead from 0.42s to 0.13s.
 
 Timings move with host load and this machine's sleep behaviour. Earlier runs
 before probe batching reported 3m44s–7m03s for the first selection and one
-passing release-publication test. The bridge suites alone, given the probe environment
-`run_agent_wire_contracts.py` builds, are **55 passed, 1 skipped**; the skip is
-`test_operation_progress_wire_bridge.py`, which skips unless
-`VONK_PROGRESS_WIRE_PROBE` is set and for which the runner builds no probe — CI
-skips it too, and this lane deliberately reproduces CI rather than papering over
-the gap.
+passing release-publication test. The runner builds every Rust probe the
+bridge suites consume, so none of them skips for a missing probe.
 
 To force a fully cold run, `rm -rf "$XDG_CACHE_HOME/vonk-forge/agent-wire-linux"`
 and `docker image rm vonk-forge-agent-wire-linux`. Rebuilding the image while

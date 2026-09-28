@@ -12,7 +12,7 @@ import vonk_control.catalog_entities as catalog_entities_module
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
-from vonk_control.catalog_repository import CatalogRepository
+from vonk_control.catalog_queries import active_head_revision
 from vonk_control.catalog_revision_contract import (
     CatalogRevisionContractError,
     read_catalog_projection,
@@ -41,6 +41,16 @@ from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_relea
 
 ROOT = recipe_library_root()
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
+
+
+def _active_revision(session, document_id: str) -> CatalogDocumentRevision | None:
+    return session.scalar(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.document_id == document_id,
+            CatalogDocumentRevision.state == "active",
+            active_head_revision(),
+        )
+    )
 
 
 def _document_section(document: dict[str, object], key: str) -> dict[str, object]:
@@ -395,9 +405,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
         assert head.active_revision_id == first.identity.recipe_revision_id
         assert head.candidate_revision_id is None
         assert head.generation == 3
-        recipe_active = CatalogRepository().active_revision(
-            session, first.identity.recipe_id
-        )
+        recipe_active = _active_revision(session, first.identity.recipe_id)
         assert recipe_active is not None
         assert recipe_active.id == first.identity.recipe_revision_id
         assert (

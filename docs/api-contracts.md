@@ -27,15 +27,21 @@ legacy compatibility.
 | Route activation marker | `vonk_agent_protocol.route_activation.ActivationMarker` | Controller publisher and the exact shared model packaged in LiteLLM |
 | Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
 | Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
+| Global container-runtime policy and problem schemas | `vonk-forge-web` `schemas/`, copied into `schemas/global/` at the commit in `schemas/global/contract.lock.json` | Rust agent OCI policy (`vonk-agent/src/oci.rs`) |
+
+To take a newer `vonk-forge-web` revision of the global schemas, run
+`scripts/update-global-contracts --commit <full-sha>` with a clean
+`vonk-forge-web` checkout next to this repository (or pass `--repo`). It
+copies the schemas byte for byte and rewrites the lock with their hashes;
+review and commit both.
 
 Model and Recipe are the two **authoring** contracts. Operations, progress,
 telemetry, and device messages also need wire contracts; they do not become
 additional recipe documents for users to maintain.
 
 Storage ownership is separate from schema ownership. Follow the
-[architecture boundary](architecture-overview.md#state-ownership) and pending
-[storage plan](plans/resilient-artifact-storage.md): canonical typed artifact
-records will move to managed storage, while SQL keeps coordinated intent,
+[architecture boundary](architecture-overview.md#state-ownership): canonical
+typed artifact records belong in managed storage, while SQL keeps coordinated intent,
 authorization, exact references, and audit. A shared DTO is not permission to
 persist two authoritative copies of its availability or checkpoint fields.
 Regenerate connected clients/wire schemas when contracts change; validate

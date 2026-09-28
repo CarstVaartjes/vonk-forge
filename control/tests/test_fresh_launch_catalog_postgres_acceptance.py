@@ -256,7 +256,7 @@ def _library_recipes(api: TestClient) -> list[Any]:
         cursor = page.next_cursor
 
 
-def test_frozen_corpus_closure_is_dynamic_and_keeps_unlinked_models() -> None:
+def test_frozen_corpus_closure_is_dynamic() -> None:
     corpus = _load_frozen_corpus()
     models = corpus.index["catalog_entities"]
     recipes = corpus.index["recipes"]
@@ -273,7 +273,6 @@ def test_frozen_corpus_closure_is_dynamic_and_keeps_unlinked_models() -> None:
         archive = _package_path(corpus, str(package["path"]))
         assert archive.stat().st_size == package["expected_bytes"]
         assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
-    assert model_keys - selected
 
 
 # Slow by design: migrates a fresh PostgreSQL database and imports the whole

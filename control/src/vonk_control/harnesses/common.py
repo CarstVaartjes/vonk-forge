@@ -1,20 +1,15 @@
-"""Shared fail-closed validation for execution-harness compilers."""
+"""Shared fail-closed validation for execution-harness projections."""
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from math import isfinite
 from pathlib import PurePosixPath
 
 from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
 
-from ..bounded_json import sequence
 from ..runtime_writable_paths import (
-    RUNTIME_REQUIREMENT_DECLARATION,
     effective_environment,
-    reject_recipe_environment,
     resolve_requirements,
     split_requirements,
     telemetry_contract,
@@ -30,28 +25,6 @@ from .canonical_metadata import CANONICAL_HARNESSES
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
-_SAFE_ENGINE_OPTION_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
-_SAFE_ENGINE_ENVIRONMENT_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
-_FORBIDDEN_ENGINE_ENVIRONMENT_NAMES = frozenset(
-    {
-        "BASH_ENV",
-        "CUDA_INJECTION32_PATH",
-        "CUDA_INJECTION64_PATH",
-        "ENV",
-        "GCONV_PATH",
-        "NODE_OPTIONS",
-        "PATH",
-        "PERL5OPT",
-        "PYTHONBREAKPOINT",
-        "PYTHONHOME",
-        "PYTHONPATH",
-        "PYTHONSTARTUP",
-        "RUBYOPT",
-        "SHELLOPTS",
-    }
-)
-_FORBIDDEN_ENGINE_ENVIRONMENT_PREFIXES = ("DYLD_", "LD_", "VONK_")
-_SAFE_ADAPTER_BASENAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _SAFE_ARTIFACT_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
 _SHELL_EXECUTABLES = frozenset(
@@ -66,16 +39,6 @@ _BUILTIN_HARNESS_SLUGS = frozenset(metadata.slug for metadata in CANONICAL_HARNE
 
 class HarnessCompileError(ValueError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class ArgumentSpec:
-    """One recipe argument admitted by a concrete built-in compiler."""
-
-    flag: str
-    takes_value: bool = True
-    emit: bool = True
-    validate: Callable[[str], bool] = lambda _value: True
 
 
 def structured_command(
@@ -102,27 +65,6 @@ def structured_command(
         and sum(len(item.encode("utf-8")) for item in command) > MAX_ARGV_BYTES
     ):
         raise HarnessCompileError("harness command exceeds its total argv bound")
-    return command
-
-
-def custom_adapter_command(value: object) -> tuple[str, ...]:
-    command = structured_command(value)
-    executable = command[0]
-    path = PurePosixPath(executable)
-    if (
-        not executable.startswith("/")
-        or "//" in executable
-        or "\\" in executable
-        or "/./" in executable
-        or "/../" in executable
-        or executable.endswith(("/", "/.", "/.."))
-        or path.as_posix() != executable
-        or path.parent != _CUSTOM_ADAPTER_BIN
-        or _SAFE_ADAPTER_BASENAME.fullmatch(path.name) is None
-    ):
-        raise HarnessCompileError(
-            "custom adapter executable is outside the dedicated allowlist"
-        )
     return command
 
 
@@ -298,177 +240,6 @@ def _disjoint_mount_paths(paths: tuple[str, ...]) -> None:
             raise HarnessCompileError("harness mounts overlap")
 
 
-def require_entrypoint(
-    recipe: Mapping[str, object], expected: tuple[str, ...]
-) -> Mapping[str, object]:
-    runtime = recipe.get("runtime")
-    if not isinstance(runtime, Mapping):
-        raise HarnessCompileError("harness recipe runtime is invalid")
-    entrypoint = runtime.get("entrypoint")
-    if type(entrypoint) is not list or tuple(entrypoint) != expected:
-        raise HarnessCompileError("harness recipe entrypoint is invalid")
-    structured_command(tuple(entrypoint))
-    return runtime
-
-
-def compile_arguments(
-    recipe: Mapping[str, object],
-    parameters: Mapping[str, object],
-    specifications: Mapping[str, ArgumentSpec],
-) -> tuple[tuple[str, ...], dict[str, str | bool]]:
-    """Render exact typed recipe arguments through one engine allowlist."""
-    runtime = recipe.get("runtime")
-    arguments = runtime.get("arguments") if isinstance(runtime, Mapping) else None
-    if type(arguments) is not list or not isinstance(parameters, Mapping):
-        raise HarnessCompileError("harness recipe arguments are invalid")
-    declarations = _parameter_declarations(recipe.get("parameters"))
-    rendered: list[str] = []
-    parsed: dict[str, str | bool] = {}
-    referenced: set[str] = set()
-    for item in arguments:
-        if not isinstance(item, Mapping) or set(item) not in (
-            {"name", "value"},
-            {"name", "parameter"},
-        ):
-            raise HarnessCompileError("harness recipe argument is invalid")
-        name = item.get("name")
-        if type(name) is not str:
-            raise HarnessCompileError("harness recipe argument is invalid")
-        specification = specifications.get(name)
-        unknown_specification = specification is None
-        if specification is None:
-            if _SAFE_ENGINE_OPTION_NAME.fullmatch(name) is None:
-                raise HarnessCompileError(
-                    f"harness engine option name is invalid: {name}"
-                )
-            # The recipe is bound to a trusted, digest-pinned runtime. Preserve
-            # safe options so a newer runtime can consume them without a
-            # platform allowlist silently dropping intent.
-            specification = ArgumentSpec(f"--{name}")
-        if specification.flag in parsed and not unknown_specification:
-            raise HarnessCompileError(
-                f"harness argument is repeated: {specification.flag}"
-            )
-        if "parameter" in item:
-            parameter = item.get("parameter")
-            if type(parameter) is not str or parameter not in declarations:
-                raise HarnessCompileError("harness parameter reference is invalid")
-            if parameter not in parameters:
-                raise HarnessCompileError("harness parameter value is missing")
-            value = parameters[parameter]
-            _validate_parameter_value(parameter, value, declarations[parameter])
-            referenced.add(parameter)
-        else:
-            value = item.get("value")
-        if specification.takes_value:
-            text = _safe_scalar(value, "harness argument value")
-            if not specification.validate(text):
-                raise HarnessCompileError(f"harness argument value is invalid: {name}")
-            parsed[specification.flag] = text
-            if specification.emit:
-                rendered.extend((specification.flag, text))
-        else:
-            if type(value) is not bool:
-                raise HarnessCompileError(
-                    f"harness presence argument value is invalid: {name}"
-                )
-            parsed[specification.flag] = value
-            if specification.emit and value:
-                rendered.append(specification.flag)
-    if (
-        any(type(name) is not str for name in parameters)
-        or set(parameters) != referenced
-    ):
-        raise HarnessCompileError("harness parameters are not exact")
-    structured_command(("/opt/vonk/bin/argv-check", *rendered), canonical_argv=True)
-    return tuple(rendered), parsed
-
-
-def require_literal_arguments(
-    recipe: Mapping[str, object], names: frozenset[str], *, label: str
-) -> None:
-    """Require selected identity-bearing arguments to be recipe literals."""
-    runtime = recipe.get("runtime")
-    arguments = runtime.get("arguments") if isinstance(runtime, Mapping) else None
-    if type(arguments) is not list:
-        raise HarnessCompileError(f"{label} is invalid")
-    selected = [
-        item
-        for item in arguments
-        if isinstance(item, Mapping) and item.get("name") in names
-    ]
-    if (
-        len(selected) != len(names)
-        or {item.get("name") for item in selected} != names
-        or any(set(item) != {"name", "value"} for item in selected)
-    ):
-        raise HarnessCompileError(f"{label} must be a literal immutable workflow")
-
-
-def compile_environment(
-    recipe: Mapping[str, object],
-    distribution: Mapping[str, object],
-    allowlist: frozenset[str],
-    *,
-    engine_slug: str | None = None,
-) -> tuple[tuple[str, str], ...]:
-    del distribution, allowlist
-    runtime = recipe.get("runtime")
-    environment = runtime.get("environment") if isinstance(runtime, Mapping) else None
-    if type(environment) is not list:
-        raise HarnessCompileError("harness environment is invalid")
-    result: list[tuple[str, str]] = []
-    names: set[str] = set()
-    for item in environment:
-        if not isinstance(item, Mapping) or set(item) != {"name", "value"}:
-            raise HarnessCompileError("harness environment is invalid")
-        name = item.get("name")
-        if (
-            type(name) is not str
-            or _SAFE_ENGINE_ENVIRONMENT_NAME.fullmatch(name) is None
-            or name in _FORBIDDEN_ENGINE_ENVIRONMENT_NAMES
-            or (
-                name != RUNTIME_REQUIREMENT_DECLARATION
-                and name.startswith(_FORBIDDEN_ENGINE_ENVIRONMENT_PREFIXES)
-            )
-            or name in names
-        ):
-            raise HarnessCompileError("harness environment name is invalid")
-        result.append((name, _safe_scalar(item.get("value"), "harness environment")))
-        names.add(name)
-    if engine_slug is not None:
-        declared, remaining = split_requirements(result)
-        resolve_requirements(engine_slug, declared)
-        reject_recipe_environment(engine_slug, remaining)
-    return tuple(result)
-
-
-def require_openai_interface(recipe: Mapping[str, object]) -> int:
-    interfaces = recipe.get("interfaces")
-    if type(interfaces) is not list or len(interfaces) != 1:
-        raise HarnessCompileError("harness interface is invalid")
-    interface = interfaces[0]
-    if not isinstance(interface, Mapping) or interface.get("adapter") != "openai":
-        raise HarnessCompileError("harness interface is incompatible")
-    port = interface.get("port")
-    if type(port) is not int or not 1024 <= port <= 65535:
-        raise HarnessCompileError("harness interface port is invalid")
-    return port
-
-
-def require_job_interface(recipe: Mapping[str, object], allowed: frozenset[str]) -> str:
-    interfaces = recipe.get("interfaces")
-    if type(interfaces) is not list or len(interfaces) != 1:
-        raise HarnessCompileError("harness interface is invalid")
-    interface = interfaces[0]
-    adapter = interface.get("adapter") if isinstance(interface, Mapping) else None
-    if type(adapter) is not str or adapter not in allowed:
-        raise HarnessCompileError("harness interface is incompatible")
-    if interface.get("path") != "/outputs":
-        raise HarnessCompileError("harness job interface path is invalid")
-    return adapter
-
-
 def job_input_contract(recipe: Mapping[str, object]) -> Mapping[str, object] | None:
     """Return the exact per-job input contract, if this recipe declares one."""
     interfaces = recipe.get("interfaces")
@@ -549,39 +320,6 @@ def job_input_contract(recipe: Mapping[str, object]) -> Mapping[str, object] | N
                 raise HarnessCompileError("harness input slot contract is invalid")
             identifiers.add(slot["id"])
     return value
-
-
-def require_mime_validator(
-    recipe: Mapping[str, object], interface: str, output_mime: str
-) -> None:
-    expected_family = {
-        "image-job": "image/",
-        "audio-job": "audio/",
-        "video-job": "video/",
-        "mesh-job": "model/",
-    }.get(interface)
-    if (
-        not output_mime
-        or "/" not in output_mime
-        or (expected_family is not None and not output_mime.startswith(expected_family))
-    ):
-        raise HarnessCompileError("harness job interface MIME family is incompatible")
-    validation = recipe.get("validation")
-    validators = (
-        validation.get("validators") if isinstance(validation, Mapping) else None
-    )
-    check = "artifact.mime." + output_mime.replace("/", "-")
-    if type(validators) is not list or len(validators) != 1:
-        raise HarnessCompileError("harness requires one declared MIME validator")
-    validator = validators[0]
-    checks = validator.get("checks") if isinstance(validator, Mapping) else None
-    if (
-        not isinstance(validator, Mapping)
-        or validator.get("interface") != interface
-        or type(checks) is not list
-        or checks != [check]
-    ):
-        raise HarnessCompileError("harness requires one declared MIME validator")
 
 
 def validate_topology(
@@ -889,16 +627,6 @@ def model_artifact_mounts(
     return tuple(result)
 
 
-def primary_model_artifact_mount(
-    recipe: Mapping[str, object],
-) -> tuple[str, str]:
-    """Resolve the sole artifact, or the explicit ``target`` artifact."""
-    mounts = model_artifact_mounts(recipe)
-    if len(mounts) == 1:
-        return mounts[0]
-    return next(item for item in mounts if item[0] == "target")
-
-
 def integer(minimum: int, maximum: int) -> Callable[[str], bool]:
     def validate(value: str) -> bool:
         try:
@@ -910,22 +638,6 @@ def integer(minimum: int, maximum: int) -> Callable[[str], bool]:
     return validate
 
 
-def decimal(minimum: float, maximum: float) -> Callable[[str], bool]:
-    def validate(value: str) -> bool:
-        try:
-            parsed = float(value)
-        except ValueError:
-            return False
-        return isfinite(parsed) and minimum <= parsed <= maximum
-
-    return validate
-
-
-def one_of(*accepted: str) -> Callable[[str], bool]:
-    values = frozenset(accepted)
-    return lambda value: value in values
-
-
 def model_file(*suffixes: str) -> Callable[[str], bool]:
     return lambda value: (
         value.startswith("/models/")
@@ -934,108 +646,8 @@ def model_file(*suffixes: str) -> Callable[[str], bool]:
     )
 
 
-def source_bundle_file(value: str) -> bool:
-    path = PurePosixPath(value)
-    return (
-        value.startswith("/opt/vonk/source/")
-        and "//" not in value
-        and "\\" not in value
-        and "/./" not in value
-        and "/../" not in value
-        and path.as_posix() == value
-        and path.suffix == ".py"
-    )
-
-
-def require_source_bundle_identity(recipe: Mapping[str, object]) -> None:
-    build = recipe.get("build")
-    context = build.get("context") if isinstance(build, Mapping) else None
-    required = {"sha256", "expected_bytes", "media_type"}
-    allowed = required | {"path"}
-    path = context.get("path") if isinstance(context, Mapping) else None
-    path_is_valid = path is None or (
-        type(path) is str
-        and bool(path)
-        and not path.startswith("/")
-        and "\\" not in path
-        and all(part not in {"", ".", ".."} for part in path.split("/"))
-        and PurePosixPath(path).as_posix() == path
-    )
-    if (
-        not isinstance(context, Mapping)
-        or not required <= set(context)
-        or not set(context) <= allowed
-        or type(context.get("sha256")) is not str
-        or not sha256(str(context["sha256"]))
-        or type(context.get("expected_bytes")) is not int
-        or context["expected_bytes"] < 1
-        or context.get("media_type")
-        != "application/vnd.vonk-forge.source-bundle.v1+tar"
-        or not path_is_valid
-    ):
-        raise HarnessCompileError("PyTorch pipeline source bundle identity is invalid")
-
-
-def workflow_file(value: str) -> bool:
-    path = PurePosixPath(value)
-    return (
-        value.startswith("/opt/vonk/source/workflows/")
-        and "//" not in value
-        and "\\" not in value
-        and "/./" not in value
-        and "/../" not in value
-        and path.as_posix() == value
-        and path.suffix == ".json"
-    )
-
-
 def sha256(value: str) -> bool:
     return re.fullmatch(r"[a-f0-9]{64}", value) is not None
-
-
-def _safe_scalar(value: object, label: str) -> str:
-    if type(value) is bool:
-        rendered = str(value).lower()
-    elif type(value) in (str, int):
-        rendered = str(value)
-    else:
-        raise HarnessCompileError(f"{label} value is invalid")
-    if "\x00" in rendered or len(rendered.encode("utf-8")) > 65_536:
-        raise HarnessCompileError(f"{label} value exceeds the bounded argv contract")
-    return rendered
-
-
-def _parameter_declarations(value: object) -> dict[str, Mapping[str, object]]:
-    if type(value) is not list:
-        raise HarnessCompileError("harness parameter declarations are invalid")
-    declarations: dict[str, Mapping[str, object]] = {}
-    for item in value:
-        name = item.get("name") if isinstance(item, Mapping) else None
-        if type(name) is not str or name in declarations:
-            raise HarnessCompileError("harness parameter declarations are invalid")
-        declarations[name] = item
-    return declarations
-
-
-def _validate_parameter_value(
-    name: str, value: object, declaration: Mapping[str, object]
-) -> None:
-    kind = declaration.get("type")
-    minimum = declaration.get("minimum")
-    maximum = declaration.get("maximum")
-    valid = (
-        kind == "integer"
-        and type(value) is int
-        and (type(minimum) is not int or value >= minimum)
-        and (type(maximum) is not int or value <= maximum)
-    ) or (kind == "boolean" and type(value) is bool)
-    if kind in {"string", "enum"}:
-        allowed_values = sequence(declaration.get("allowed_values"))
-        valid = type(value) is str and (
-            kind != "enum" or (allowed_values is not None and value in allowed_values)
-        )
-    if not valid:
-        raise HarnessCompileError(f"harness parameter value is invalid: {name}")
 
 
 def _require_recipe_mounts(
@@ -1078,67 +690,3 @@ def _require_recipe_mounts(
         != expected_mounts
     ):
         raise HarnessCompileError("harness recipe mounts or input mount are invalid")
-
-
-class SyntheticHarnessCompiler:
-    """Test-only compiler double; production composition never registers it."""
-
-    contract_version = 1
-
-    def __init__(
-        self,
-        slug: str,
-        *,
-        source_bundle_digest: str | None = None,
-        source_bundle_signer: str | None = None,
-    ) -> None:
-        self.slug = slug
-        self.source_bundle_digest = source_bundle_digest
-        self.source_bundle_signer = source_bundle_signer
-
-    def compile(
-        self,
-        recipe: Mapping[str, object],
-        distribution: Mapping[str, object],
-        patch: Mapping[str, object] | None,
-        parameters: Mapping[str, object],
-        topology: Mapping[str, object],
-        role: str,
-        rank: int,
-    ) -> HarnessProjection:
-        runtime = recipe.get("runtime")
-        entrypoint = runtime.get("entrypoint") if isinstance(runtime, Mapping) else None
-        security = distribution.get("security")
-        if not isinstance(security, Mapping):
-            raise HarnessCompileError("runtime distribution security is invalid")
-        capabilities = security.get("capabilities")
-        if type(capabilities) is not list or not all(
-            type(value) is str for value in capabilities
-        ):
-            raise HarnessCompileError("runtime distribution capabilities are invalid")
-        image = distribution.get("image")
-        network_mode = security.get("network_mode")
-        user = security.get("user")
-        if (
-            type(image) is not str
-            or type(network_mode) is not str
-            or type(user) is not str
-        ):
-            raise HarnessCompileError(
-                "runtime distribution security strings are invalid"
-            )
-        return HarnessProjection(
-            slug=self.slug,
-            contract_version=self.contract_version,
-            command=structured_command(entrypoint),
-            image=image,
-            network_mode=network_mode,
-            architecture="linux/arm64",
-            user=user,
-            no_new_privileges=security.get("no_new_privileges") is True,
-            capabilities=tuple(capabilities),
-            model_mounts=(HarnessMount("/run/vonk/models", "/models", read_only=True),),
-            output_mount=HarnessMount(
-                "/run/vonk/outputs", "/outputs", read_only=False, isolated=True
-            ),
-        )

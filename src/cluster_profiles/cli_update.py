@@ -302,26 +302,22 @@ def run_update(
             raise CliUpdateError("CLI wheel identity does not match accepted release")
     except (KeyError, ValueError, zipfile.BadZipFile) as error:
         raise CliUpdateError("CLI wheel identity is invalid") from error
-    interpreter = Path(sys.executable)
-    if not (interpreter.parent.parent / "pyvenv.cfg").is_file():
-        raise CliUpdateError(
-            "CLI update requires a writable Python virtual environment"
-        )
     uv = shutil.which("uv")
     if uv is None:
         raise CliUpdateError("CLI update requires uv")
     with tempfile.TemporaryDirectory(prefix="vonkctl-update-") as directory:
         wheel_path = Path(directory) / path.rsplit("/", 1)[-1]
         wheel_path.write_bytes(wheel)
+        # Same form as the installer's first install: uv resolves the wheel's
+        # own dependencies (a release may add or raise one) and its tool
+        # receipt records this release rather than an older one.
         command = [
             uv,
-            "pip",
+            "tool",
             "install",
+            "--force",
             "--python",
-            str(interpreter),
-            "--no-deps",
-            "--reinstall",
-            "--offline",
+            "3.14",
             str(wheel_path),
         ]
         try:
@@ -330,12 +326,10 @@ def run_update(
             )
         except (OSError, subprocess.TimeoutExpired) as error:
             raise CliUpdateError(
-                "CLI installation failed in the current Python environment"
+                "uv could not install the verified CLI wheel"
             ) from error
         if completed.returncode != 0:
-            raise CliUpdateError(
-                "CLI installation failed in the current Python environment"
-            )
+            raise CliUpdateError("uv could not install the verified CLI wheel")
     result["previous"] = current
     result["current"] = {
         "version": release["version"],

@@ -35,6 +35,25 @@ the Fleet SSE stream, reconnects after interruption, and falls back to polling
 without mutating node state. The two-second reporting intent is not a promise
 that every sample reaches the browser.
 
+### How a Spark reports
+
+A separate `vonk-monitor` process (`vonk-forge-monitor.service`, shipped in
+the agent package) samples the host and uploads telemetry; the control agent
+never does. A monitor fault therefore cannot stop command polling or corrupt
+control progress. The monitor uses the agent's configuration and reloads the
+current identity for each upload, so a certificate rotation needs no restart;
+a missing or rotating credential skips that upload and is logged.
+
+Every two seconds it takes one fresh snapshot and attempts at most one upload
+with a two-second timeout. Missed ticks are skipped, and a failed upload drops
+its snapshot: there are no retries, queues or local history. The Controller
+stamps receive time and node identity and owns ordering and aggregation.
+
+Presence comes from successful control-lane contact and telemetry freshness is
+reported separately, so a node can be online while its metrics are stale.
+Inventory is sent at startup, after enrollment or reconnection, and on an
+explicit refresh or change, not on a timer.
+
 ## History resolutions and retention
 
 The history API requires an explicit resolution:

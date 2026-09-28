@@ -1,4 +1,4 @@
-# Verify the platform and workload supply chains
+# Verify the platform supply chain
 
 Standard service images are fixed by version and OCI index digest in
 `deploy/compose/images.lock.json`; Compose uses those exact references as its
@@ -88,76 +88,10 @@ copied from immutable upstream commit
 `0112e53046018d726492c814b3644b7d376029d0`; verify the locked digest, never a
 mutable tag. Store scan/signature attestations with the release evidence.
 
-## Workload artifact build and promotion boundary
+## Recipe workloads
 
-Generic package artifacts have an independent release cadence from
-`vonk-forge`. A generic component that fits the installed node-package ABI does
-not require a platform release. Model recipes instead use the exact
-Library revision and execution-harness gates documented in the
-[recipe operations runbook](model-switching.md). The authorities are
-deliberately separate:
-
-1. A reviewed Git change supplies a bounded generic-package build request. The request
-   names an exact 40-character source commit, a content digest, reviewed source
-   paths, a digest-pinned base image, target architecture, and output repository.
-2. `.github/workflows/workload-artifacts.yml` is a build-only publisher. After
-   the read-only CI gate, its job-scoped package token may push the resulting OCI
-   artifact by digest. It selects and verifies the single executable manifest
-   for the requested platform. It rejects ambiguous JSON and malformed index or
-   descriptor metadata, and requires exactly one canonical BuildKit attestation
-   manifest whose reference annotation binds it to that executable child. It
-   then attaches signed SBOM and provenance evidence to the stable runtime
-   digest. The run-specific outer BuildKit index remains evidence and is never
-   the runtime identity. The token is not a BuildKit input. The job has no
-   platform or workload TUF key and cannot change NAS desired state.
-3. The NAS promotion service independently verifies the request digest, source
-   identity, OCI manifest digest, SBOM, provenance, family policy, and validation
-   evidence. A successful build is only a promotion candidate; it is not an
-   authorized generic-package release.
-4. Workload TUF authorizes the exact immutable generic-package release lock after
-   promotion. Its roots, roles, target prefixes, and signing credentials are
-   separate from platform TUF, so a workload key cannot update `vonk-forge`, its
-   agents, supervisors, protocol, or node policy.
-5. GPU nodes obtain authorized lock metadata from the NAS and fetch large
-   content-addressed payloads from their declared upstream or approved mirror.
-   SSH is not part of this standard path.
-
-Build requests must not contain secrets, registry credentials, free-form build
-arguments, shell commands, host paths, parent-directory traversal, mutable Git
-references, or floating OCI tags. Publication from an ordinary branch or pull
-request is forbidden. Promotion and rollback remain NAS-admin actions recorded
-through the workload release plane; neither action mutates the platform release
-manifest.
-
-Store each reviewed request as `release/workloads/<request-id>.json`. Its
-`context_digest` is the digest of the exact Git archive consumed by the builder:
-
-```bash
-workload_source_commit=$(git rev-parse HEAD)
-workload_context=packages/<family>/<component>
-git archive --format=tar "$workload_source_commit" -- "$workload_context" \
-  | sha256sum
-scripts/workload-artifact-metadata request \
-  release/workloads/<request-id>.json
-```
-
-The validator prints the canonical request and its `build_request_digest`.
-Submit that request through review before manually dispatching the workload
-artifact workflow from the merged `main` revision. Tag-push publication is
-intentionally disabled because a tag can otherwise select its own unreviewed
-workflow definition. A workflow artifact result can be checked locally with:
-
-```bash
-scripts/workload-artifact-metadata result result.json \
-  --request release/workloads/<request-id>.json
-```
-
-That validation proves metadata binding only. W13 promotion remains responsible
-for verifying the registry subject, signed provenance, SBOM, family policy, and
-qualification evidence before workload TUF authorization.
-
-Before promotion, dispatch an unchanged reviewed request twice from accepted
-`main`, validate both workflow artifacts, and require their executable
-`oci_manifest_digest` values to match. BuildKit index digests, invocation
-provenance, SBOM namespaces, and signed-bundle digests are run-specific and may
-differ. An executable-manifest mismatch rejects both candidates.
+Recipe images and model artifacts are not published by this repository. The
+Controller builds or imports them from the exact recipe library revision and
+verifies them before any Spark uses them; see the
+[recipe operations runbook](model-switching.md). There is no separate workload
+artifact publisher or workload signing root.

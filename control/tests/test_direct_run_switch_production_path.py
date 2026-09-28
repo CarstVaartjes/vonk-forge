@@ -78,6 +78,14 @@ PLATFORM_DIGEST = "sha256:" + "e" * 64
 CONFIG_DIGEST = "sha256:" + "c" * 64
 MODEL_DIGEST = "c" * 64
 MODEL_SET_DIGEST = "f" * 64
+# The published example model the recipe fixture selects.
+EXAMPLE_MODEL_DIGEST = content_sha256(
+    ModelDefinition.model_validate_json(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+)
 ARCHIVE = b"direct-published-runtime-archive"
 ARCHIVE_DIGEST = hashlib.sha256(ARCHIVE).hexdigest()
 NODE_ID = "spk_" + "1" * 32
@@ -150,7 +158,7 @@ class _ModelCache:
         assert digest == MODEL_SET_DIGEST
         return (
             {
-                "model_content_sha256": "e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+                "model_content_sha256": EXAMPLE_MODEL_DIGEST,
                 "file_id": "weights",
                 "path": "model.safetensors",
                 "sha256": MODEL_DIGEST,
@@ -384,10 +392,7 @@ def _seed(
     )
     recipe_digest = content_sha256(RecipeDefinition.model_validate(recipe_document))
     model_digest = content_sha256(ModelDefinition.model_validate(model_document))
-    assert (
-        model_digest
-        == "e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c"
-    )
+    assert model_digest == EXAMPLE_MODEL_DIGEST
     with sessions.begin() as session:
         entities = CatalogEntityService(session, clock=lambda: NOW)
         model_revision = entities.create_draft(model_document, actor="test")
@@ -655,7 +660,7 @@ def test_dual_spark_preparation_authorizes_both_execution_roles_for_one_image(
     )
     node_ids = [NODE_ID, "spk_" + "2" * 32]
     request = RunSwitchPreviewRequest(
-        model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+        model_content_sha256=EXAMPLE_MODEL_DIGEST,
         recipe_revision_id=revision_id,
         spark_group=SparkGroup(
             nodes=[
@@ -847,7 +852,7 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
     )
     del mapping_id
     request = RunSwitchPreviewRequest(
-        model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+        model_content_sha256=EXAMPLE_MODEL_DIGEST,
         recipe_revision_id=revision_id,
         spark_group=SparkGroup(
             nodes=[
@@ -973,7 +978,7 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
 
 def _direct_request(revision_id: str) -> RunSwitchPreviewRequest:
     return RunSwitchPreviewRequest(
-        model_content_sha256="e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+        model_content_sha256=EXAMPLE_MODEL_DIGEST,
         recipe_revision_id=revision_id,
         spark_group=SparkGroup(
             nodes=[

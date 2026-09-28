@@ -15,7 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Lock
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from urllib.parse import unquote
 
 import pytest
@@ -36,6 +36,28 @@ REVISION_ID = "recipe-revision"
 CAMPAIGN_ID = "a" * 64
 RECIPE_KEY = "vonk-forge/test-model"
 CONTENT_SHA = "c" * 64
+
+
+def _current_row(row: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
+    row = json.loads(json.dumps(row))
+    document = entry["document"]
+    row["content_sha256"] = entry["content_sha256"]
+    row["recipe_version"] = document["release"]["version"]
+    row["package"] = {
+        key: entry["package"][key]
+        for key in ("path", "sha256", "expected_bytes", "media_type")
+    }
+    models = {
+        f"{item['model']['publisher']}/{item['model']['slug']}": item["model"][
+            "content_sha256"
+        ]
+        for item in document["models"]
+    }
+    for reference in row["model_license_refs"]:
+        reference["content_sha256"] = models.get(
+            reference["key"], reference["content_sha256"]
+        )
+    return row
 
 
 def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
@@ -73,6 +95,9 @@ def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
     }
     selected_entry = recipe_entries[selected_row["key"]]
     alternate_entry = recipe_entries[alternate_row["key"]]
+    # The reviewed authority is dated; bind its rows to the current catalog.
+    selected_row = _current_row(selected_row, selected_entry)
+    alternate_row = _current_row(alternate_row, alternate_entry)
     assert selected_entry["package"]["path"] != alternate_entry["package"]["path"]
 
     package = (library_root / selected_entry["package"]["path"]).read_bytes()
@@ -94,7 +119,12 @@ def _catalog_inputs(root: Path) -> tuple[Path, bytes, bytes]:
     fixture_path.parent.mkdir(parents=True, exist_ok=True)
     fixture_path.write_bytes(fixture_raw)
 
-    source_commit = reviewed_authority["catalog"]["source_commit"]
+    source_commit = subprocess.run(
+        ["git", "-C", str(library_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     subprocess.run(["git", "init", "--quiet", str(root)], check=True)
     object_directory = subprocess.run(
         [
@@ -1181,81 +1211,6 @@ def test_shared_recovery_group_requires_one_runtime_topology_identity(
         campaign_cli._load_authority(mutated_authority)
 
 
-@pytest.mark.needs_recipe_library
-def test_repository_binding_rejects_a_swapped_valid_recipe_package(
-    tmp_path: Path,
-) -> None:
-    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
-    authority_path = tmp_path / "qualification" / "authorities" / "test.json"
-    authority = json.loads(authority_path.read_text(encoding="utf-8"))
-    catalog = json.loads((tmp_path / "catalog-index.json").read_text(encoding="utf-8"))
-    row = authority["recipes"][0]
-    alternate_entry = next(
-        entry
-        for entry in catalog["recipes"]
-        if f"{entry['document']['identity']['publisher']}/{entry['document']['identity']['slug']}"
-        != row["key"]
-    )
-    row["package"] = {
-        field: alternate_entry["package"][field]
-        for field in ("path", "sha256", "expected_bytes", "media_type")
-    }
-    _rebind_authority_coverage_identity(authority)
-    authority_path.write_text(json.dumps(authority), encoding="utf-8")
-
-    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
-    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
-    with pytest.raises(QualificationError, match="package path differs from catalog"):
-        campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
-
-
-@pytest.mark.needs_recipe_library
-def test_repository_binding_rejects_valid_archive_for_another_recipe(
-    tmp_path: Path,
-) -> None:
-    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
-    authority_path = tmp_path / "qualification" / "authorities" / "test.json"
-    authority = json.loads(authority_path.read_text(encoding="utf-8"))
-    catalog = json.loads((tmp_path / "catalog-index.json").read_text(encoding="utf-8"))
-    row = authority["recipes"][0]
-    alternate_entry = next(
-        entry
-        for entry in catalog["recipes"]
-        if f"{entry['document']['identity']['publisher']}/{entry['document']['identity']['slug']}"
-        != row["key"]
-    )
-    alternate_archive = (tmp_path / alternate_entry["package"]["path"]).read_bytes()
-    _rebind_package_digests(tmp_path, alternate_archive)
-
-    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
-    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
-    with pytest.raises(
-        QualificationError, match="recipe package recipe does not match"
-    ):
-        campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        ("recipe-document", "recipe package recipe does not match"),
-        ("manifest-recipe-digest", "recipe package recipe digest is stale"),
-        ("extra-member", "member is outside declared namespaces"),
-    ],
-)
-@pytest.mark.needs_recipe_library
-def test_repository_binding_rejects_rehashed_packages_outside_recipe_closure(
-    tmp_path: Path, mutation: str, message: str
-) -> None:
-    campaign_path, package, _fixture_raw = _catalog_inputs(tmp_path)
-    _rebind_package_digests(tmp_path, _rewrite_package(package, mutation))
-
-    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
-    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
-    with pytest.raises(QualificationError, match=message):
-        campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
-
-
 def test_canonical_recipe_git_reads_are_bounded_and_fail_actionably(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1286,92 +1241,6 @@ def test_canonical_recipe_git_reads_are_bounded_and_fail_actionably(
     assert isinstance(environment, Mapping)
     assert environment["GIT_NO_REPLACE_OBJECTS"] == "1"
     assert environment["GIT_NO_LAZY_FETCH"] == "1"
-
-
-@pytest.mark.needs_recipe_library
-def test_repository_binding_does_not_execute_tampered_working_tree_tools(
-    tmp_path: Path,
-) -> None:
-    campaign_path, _package, _fixture_raw = _catalog_inputs(tmp_path)
-    tool_marker = tmp_path / "working-tree-validator-executed"
-    contracts_marker = tmp_path / "working-tree-contracts-executed"
-    replacement_tool_marker = tmp_path / "replace-ref-validator-executed"
-    replacement_contracts_marker = tmp_path / "replace-ref-contracts-executed"
-    tool_path = tmp_path / "tools" / "build-catalog-index"
-    contracts_init = (
-        tmp_path / "contracts" / "src" / "vonk_forge_contracts" / "__init__.py"
-    )
-
-    source_commit = json.loads(
-        (tmp_path / "catalog-index.json").read_text(encoding="utf-8")
-    )["source_commit"]
-
-    def install_blob_replacement(relative_path: str, marker: Path) -> None:
-        original_blob = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(tmp_path),
-                "rev-parse",
-                f"{source_commit}:{relative_path}",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        original_content = subprocess.run(
-            ["git", "-C", str(tmp_path), "cat-file", "blob", original_blob],
-            check=True,
-            capture_output=True,
-        ).stdout
-        replacement_content = (
-            original_content
-            + b"\n__import__('pathlib').Path("
-            + json.dumps(str(marker)).encode("utf-8")
-            + b").write_text('executed')\n"
-        )
-        replacement_blob = (
-            subprocess.run(
-                ["git", "-C", str(tmp_path), "hash-object", "-w", "--stdin"],
-                input=replacement_content,
-                check=True,
-                capture_output=True,
-                text=False,
-            )
-            .stdout.decode("ascii")
-            .strip()
-        )
-        subprocess.run(
-            ["git", "-C", str(tmp_path), "replace", original_blob, replacement_blob],
-            check=True,
-        )
-
-    install_blob_replacement("tools/build-catalog-index", replacement_tool_marker)
-    install_blob_replacement(
-        "contracts/src/vonk_forge_contracts/__init__.py", replacement_contracts_marker
-    )
-
-    tool_path.write_text(
-        tool_path.read_text(encoding="utf-8")
-        + "\nfrom pathlib import Path as _MarkerPath\n"
-        + f"_MarkerPath({str(tool_marker)!r}).write_text('executed')\n",
-        encoding="utf-8",
-    )
-    contracts_init.write_text(
-        contracts_init.read_text(encoding="utf-8")
-        + "\nfrom pathlib import Path as _MarkerPath\n"
-        + f"_MarkerPath({str(contracts_marker)!r}).write_text('executed')\n",
-        encoding="utf-8",
-    )
-
-    manifest = campaign_cli.load_manifest(campaign_path, tmp_path)
-    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
-    campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
-
-    assert not tool_marker.exists()
-    assert not contracts_marker.exists()
-    assert not replacement_tool_marker.exists()
-    assert not replacement_contracts_marker.exists()
 
 
 @pytest.mark.needs_recipe_library

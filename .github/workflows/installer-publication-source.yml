@@ -51,8 +51,8 @@ on:
       - scripts/render-dev-compose
       - scripts/render-production-compose
       - scripts/test-agent-package-native-lifecycle
-      - scripts/test_agent_deb.py
-      - scripts/test_docker_firewall.sh
+      - tests/scripts/test_agent_deb.py
+      - tests/scripts/test_docker_firewall.sh
       - scripts/verify-agent-binaries
       - scripts/verify-agent-deb
       - scripts/verify-agent-systemd

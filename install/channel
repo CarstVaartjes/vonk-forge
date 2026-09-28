@@ -212,7 +212,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
 if identity != {"schema_version": 1, "release_version": sys.argv[2], "source_sha": sys.argv[3]}:
     raise SystemExit(1)
 PY
-    uv tool install --force "$wheel" || fail "uv could not install the verified CLI wheel"
+    uv tool install --force --python 3.14 "$wheel" || fail "uv could not install the verified CLI wheel"
     printf '%s\n' "vonkctl $cli_version is installed. Run 'vonkctl --version' to confirm."
     printf '%s\n' "For signed updates, run: vonkctl update --apply"
     exit 0

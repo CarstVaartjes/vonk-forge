@@ -898,3 +898,36 @@ timeout or interruption, JSON contains the intact last response under `result`
 and local status under `observation`, including the last observation time,
 age, endpoint path, and reconnect command. A local timeout never rewrites the
 remote operation state as failed.
+
+## Interface contract
+
+These rules come from the CLI operator design and hold for every command.
+Change them only together with the tests that pin them.
+
+- **Four domains.** `fleet`, `model`, `recipe` and `profile` are the operator
+  domains; `update` maintains the CLI itself. Use the existing verbs
+  (`detail`, `download`, `load`, `progress`, `remove`) instead of adding
+  synonyms or aliases.
+- **Selectors.** Lists lead with friendly names and show the exact reusable
+  selector. Fuzzy matching may help a search but never chooses the target of a
+  mutation; an ambiguous name fails and lists the exact candidates.
+- **Profile number.** Read commands may default to Profile 1 and say so.
+  Saving, importing, loading or cancelling profile work needs an explicit
+  `--profile N`. There is no persistent CLI selection.
+- **Consent.** Reads, profile saves and ordinary cache preparation need no
+  confirmation. Loading, cancelling, eviction, re-enrollment, node removal and
+  upgrades show their scope first. `--yes` supplies that consent where
+  supported; `--no-input` only suppresses prompts. Neither changes
+  authorization, blockers or plan preconditions.
+- **Authority.** The Controller owns readiness, admission, retries,
+  cancellation and operation state. The CLI formats those facts, keeps no work
+  queue or state cache, and never restarts remote work because a local timer
+  expired. A request key is created before submission and reused across an
+  uncertain outcome; new deliberate work gets a new key.
+- **Credentials.** Tokens live in a private token file and TLS validation stays
+  on. Diagnostics never suggest bypassing TLS or passing a token as an
+  argument.
+- **Streams and exits.** See [Output and recovery](#output-and-recovery):
+  results on stdout, everything else on stderr, one JSON document with
+  `--json` (also with `--follow`), and exits 0/1/2/130/141 with the meanings
+  given there.

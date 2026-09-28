@@ -14,11 +14,7 @@ does not require routine SSH.
 | Understand what is public and what stays local | [Architecture overview](architecture-overview.md) |
 | Understand the engineering stance | [Engineering principles](engineering-principles.md) |
 | Understand state ownership and deadlock prevention | [Coordination boundaries](architecture-overview.md#coordination-and-deadlock-prevention) |
-| Implement resilient artifact storage | [Storage and coordination plan](plans/resilient-artifact-storage.md) |
-| Follow the current fault-resilience review | [Resilience handover and acceptance criteria](operations/resilience-handover.md) |
 | Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
-| Improve and qualify the terminal interface | [CLI operator experience plan](plans/cli-operator-experience.md) |
-| Implement the terminal interface improvements | [Detailed CLI implementation plan](plans/cli-operator-implementation.md) |
 | Use unattended credentials and redeploy NAS Compose | [Operator CLI access](runbooks/operator-cli-access.md) |
 | Deploy or upgrade the Docker Compose project | [Controller-host deployment](../deploy/compose/README.md) |
 | Configure Tailscale before first install | [Tailscale fresh-install preflight](runbooks/tailscale.md#fresh-install-preflight) |
@@ -81,11 +77,38 @@ flowchart LR
 - [Model and recipe identities](operators/model-catalog.md)
 - [Standard recipe library](operators/recipe-library.md)
 - [Execution harnesses](operators/execution-harnesses.md)
+- [Quickstart](QUICKSTART.md)
+- [Model cache](runbooks/model-cache.md) and
+  [Hugging Face access](model-cache-huggingface-auth.md)
+- [Hermes Agent](runbooks/hermes-agent.md)
+- [Alerts and observability](runbooks/observability.md)
+- [PostgreSQL backups](postgres-backups.md)
+- [Workload recovery](operations/workload-recovery.md)
+- [Signed CLI updates](operators/cli-updates.md)
+- [Agent PKI](runbooks/agent-pki.md)
+- [Spark package upgrade recovery](spark-package-upgrade-recovery.md)
+- [Node-bound agent repair capsules](runbooks/agent-repair-capsule.md)
+- [Spark fabric](runbooks/fabric.md)
 
 ## Release and platform guides
 
 - [Platform release publication](runbooks/platform-release-publication.md)
 - [Agent package release](operations/agent-package-release.md)
+- [Platform supply chain](runbooks/supply-chain.md)
+- [Refresh the pinned container images](image-pin-refresh.md)
+- [Prepare a development NAS deployment](runbooks/development-nas-installation.md)
+- [Development workload acceptance](runbooks/development-agent-workloads.md)
+- [Local Spark installer acceptance](runbooks/local-spark-acceptance.md)
+- [Local Linux lane](local-linux-lane.md)
+
+## Implementation references
+
+- [Error reporting](error-reporting.md)
+- [Operation failure evidence](operation-failure-contract.md)
+- [Image transfer and cache](image-transfer-cache.md)
+- [Recipe image archive uploads](image-upload.md)
+- [Runtime writable-path contract](runtime-writable-path-contract.md)
+- [Recipe library package channel](operations/recipe-library-packages.md)
 
 Use each command's documented review and confirmation options. For example,
 `profile load --dry-run` reviews a fleet load, while `update --apply` installs

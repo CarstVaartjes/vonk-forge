@@ -9,10 +9,7 @@ uses a GPU node hostname or IP address as identity.
 
 This page describes the running architecture and its approved storage direction.
 The [state ownership](#state-ownership) and [artifact recovery](#artifact-recovery)
-sections define the target boundary. The
-[implementation plan](plans/resilient-artifact-storage.md) records the remaining
-work; this documentation does not claim that artifact bookkeeping has already
-moved out of PostgreSQL.
+sections define the boundary.
 
 Uninstall validates the requested installation's current typed metadata, recipe
 identity, and artifact paths, then removes only that installation directory.
@@ -134,9 +131,8 @@ that an archive is available.
 Recent cache-recovery work already reconciles absent bytes after a NAS restore
 and reuses completed transfers. The authorized preparation path can rebuild
 missing source images; a changed output digest requires an explicit new workload
-binding. The [implementation plan](plans/resilient-artifact-storage.md) records
-the completed model-availability and image-receipt changes and their repository
-evidence. Deployed recovery and physical Spark acceptance remain separate
+binding. Model availability and the runtime-image receipt already live in
+managed storage. Deployed recovery and physical Spark acceptance remain separate
 checks. Future ownership changes must update all consumers and retire the old
 path together, while retaining control intent, exact selected identities,
 authorization, reservations, and audit.
