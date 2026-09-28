@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,18 +10,16 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.job_change import JobChange
   from ..models.agent_operation_change import AgentOperationChange
-  from ..models.run_node_change import RunNodeChange
-  from ..models.node_profile_change import NodeProfileChange
   from ..models.installation_node_change import InstallationNodeChange
+  from ..models.job_change import JobChange
+  from ..models.node_profile_change import NodeProfileChange
   from ..models.recipe_installation_change import RecipeInstallationChange
   from ..models.recipe_run_change import RecipeRunChange
+  from ..models.run_node_change import RunNodeChange
 
 
 
@@ -33,28 +33,28 @@ T = TypeVar("T", bound="FleetChangeEvent")
 class FleetChangeEvent:
     """
         Attributes:
-            change (Union['AgentOperationChange', 'InstallationNodeChange', 'JobChange', 'NodeProfileChange',
-                'RecipeInstallationChange', 'RecipeRunChange', 'RunNodeChange']):
-            projection_refresh_required (Union[Unset, bool]):  Default: True.
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            change (AgentOperationChange | InstallationNodeChange | JobChange | NodeProfileChange | RecipeInstallationChange
+                | RecipeRunChange | RunNodeChange):
+            projection_refresh_required (bool | Unset):  Default: True.
+            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
-    change: Union['AgentOperationChange', 'InstallationNodeChange', 'JobChange', 'NodeProfileChange', 'RecipeInstallationChange', 'RecipeRunChange', 'RunNodeChange']
-    projection_refresh_required: Union[Unset, bool] = True
-    schema_version: Union[Literal[1], Unset] = 1
+    change: AgentOperationChange | InstallationNodeChange | JobChange | NodeProfileChange | RecipeInstallationChange | RecipeRunChange | RunNodeChange
+    projection_refresh_required: bool | Unset = True
+    schema_version: Literal[1] | Unset = 1
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.job_change import JobChange
-        from ..models.agent_operation_change import AgentOperationChange
-        from ..models.run_node_change import RunNodeChange
-        from ..models.node_profile_change import NodeProfileChange
-        from ..models.installation_node_change import InstallationNodeChange
-        from ..models.recipe_installation_change import RecipeInstallationChange
-        from ..models.recipe_run_change import RecipeRunChange
+        from ..models.agent_operation_change import AgentOperationChange # noqa: PLC0415
+        from ..models.installation_node_change import InstallationNodeChange # noqa: PLC0415
+        from ..models.job_change import JobChange # noqa: PLC0415
+        from ..models.node_profile_change import NodeProfileChange # noqa: PLC0415
+        from ..models.recipe_installation_change import RecipeInstallationChange # noqa: PLC0415
+        from ..models.recipe_run_change import RecipeRunChange # noqa: PLC0415
+        from ..models.run_node_change import RunNodeChange # noqa: PLC0415
         change: dict[str, Any]
         if isinstance(self.change, NodeProfileChange):
             change = self.change.to_dict()
@@ -93,15 +93,15 @@ class FleetChangeEvent:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.job_change import JobChange
-        from ..models.agent_operation_change import AgentOperationChange
-        from ..models.run_node_change import RunNodeChange
-        from ..models.node_profile_change import NodeProfileChange
-        from ..models.installation_node_change import InstallationNodeChange
-        from ..models.recipe_installation_change import RecipeInstallationChange
-        from ..models.recipe_run_change import RecipeRunChange
+        from ..models.agent_operation_change import AgentOperationChange # noqa: PLC0415
+        from ..models.installation_node_change import InstallationNodeChange # noqa: PLC0415
+        from ..models.job_change import JobChange # noqa: PLC0415
+        from ..models.node_profile_change import NodeProfileChange # noqa: PLC0415
+        from ..models.recipe_installation_change import RecipeInstallationChange # noqa: PLC0415
+        from ..models.recipe_run_change import RecipeRunChange # noqa: PLC0415
+        from ..models.run_node_change import RunNodeChange # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_change(data: object) -> Union['AgentOperationChange', 'InstallationNodeChange', 'JobChange', 'NodeProfileChange', 'RecipeInstallationChange', 'RecipeRunChange', 'RunNodeChange']:
+        def _parse_change(data: object) -> AgentOperationChange | InstallationNodeChange | JobChange | NodeProfileChange | RecipeInstallationChange | RecipeRunChange | RunNodeChange:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -110,7 +110,7 @@ class FleetChangeEvent:
 
 
                 return componentsschemas_fleet_change_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -120,7 +120,7 @@ class FleetChangeEvent:
 
 
                 return componentsschemas_fleet_change_type_1
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -130,7 +130,7 @@ class FleetChangeEvent:
 
 
                 return componentsschemas_fleet_change_type_2
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -140,7 +140,7 @@ class FleetChangeEvent:
 
 
                 return componentsschemas_fleet_change_type_3
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -150,7 +150,7 @@ class FleetChangeEvent:
 
 
                 return componentsschemas_fleet_change_type_4
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -160,7 +160,7 @@ class FleetChangeEvent:
 
 
                 return componentsschemas_fleet_change_type_5
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             if not isinstance(data, dict):
                 raise TypeError()
@@ -175,7 +175,7 @@ class FleetChangeEvent:
 
         projection_refresh_required = d.pop("projection_refresh_required", UNSET)
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 

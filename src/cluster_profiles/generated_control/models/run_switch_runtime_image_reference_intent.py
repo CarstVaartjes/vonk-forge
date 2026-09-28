@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,10 +12,7 @@ from ..models.run_switch_runtime_image_reference_intent_source import check_run_
 from ..models.run_switch_runtime_image_reference_intent_source import RunSwitchRuntimeImageReferenceIntentSource
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Literal, Union, cast
-from typing import Union
 
 
 
@@ -43,11 +42,11 @@ class RunSwitchRuntimeImageReferenceIntent:
             request_key (str):
             source (RunSwitchRuntimeImageReferenceIntentSource):
             workload_intent_ordinal (int):
-            build_id (Union[None, Unset, str]):
-            build_input_sha256 (Union[None, Unset, str]):
-            profile_application_id (Union[None, Unset, str]):
-            registry_manifest_digest (Union[None, Unset, str]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            build_id (None | str | Unset):
+            build_input_sha256 (None | str | Unset):
+            profile_application_id (None | str | Unset):
+            registry_manifest_digest (None | str | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     actor: str
@@ -64,11 +63,11 @@ class RunSwitchRuntimeImageReferenceIntent:
     request_key: str
     source: RunSwitchRuntimeImageReferenceIntentSource
     workload_intent_ordinal: int
-    build_id: Union[None, Unset, str] = UNSET
-    build_input_sha256: Union[None, Unset, str] = UNSET
-    profile_application_id: Union[None, Unset, str] = UNSET
-    registry_manifest_digest: Union[None, Unset, str] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    build_id: None | str | Unset = UNSET
+    build_input_sha256: None | str | Unset = UNSET
+    profile_application_id: None | str | Unset = UNSET
+    registry_manifest_digest: None | str | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -105,25 +104,25 @@ class RunSwitchRuntimeImageReferenceIntent:
 
         workload_intent_ordinal = self.workload_intent_ordinal
 
-        build_id: Union[None, Unset, str]
+        build_id: None | str | Unset
         if isinstance(self.build_id, Unset):
             build_id = UNSET
         else:
             build_id = self.build_id
 
-        build_input_sha256: Union[None, Unset, str]
+        build_input_sha256: None | str | Unset
         if isinstance(self.build_input_sha256, Unset):
             build_input_sha256 = UNSET
         else:
             build_input_sha256 = self.build_input_sha256
 
-        profile_application_id: Union[None, Unset, str]
+        profile_application_id: None | str | Unset
         if isinstance(self.profile_application_id, Unset):
             profile_application_id = UNSET
         else:
             profile_application_id = self.profile_application_id
 
-        registry_manifest_digest: Union[None, Unset, str]
+        registry_manifest_digest: None | str | Unset
         if isinstance(self.registry_manifest_digest, Unset):
             registry_manifest_digest = UNSET
         else:
@@ -202,47 +201,47 @@ class RunSwitchRuntimeImageReferenceIntent:
 
         workload_intent_ordinal = d.pop("workload_intent_ordinal")
 
-        def _parse_build_id(data: object) -> Union[None, Unset, str]:
+        def _parse_build_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         build_id = _parse_build_id(d.pop("build_id", UNSET))
 
 
-        def _parse_build_input_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_build_input_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         build_input_sha256 = _parse_build_input_sha256(d.pop("build_input_sha256", UNSET))
 
 
-        def _parse_profile_application_id(data: object) -> Union[None, Unset, str]:
+        def _parse_profile_application_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         profile_application_id = _parse_profile_application_id(d.pop("profile_application_id", UNSET))
 
 
-        def _parse_registry_manifest_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_registry_manifest_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         registry_manifest_digest = _parse_registry_manifest_digest(d.pop("registry_manifest_digest", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

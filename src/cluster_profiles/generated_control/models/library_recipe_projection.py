@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,19 +9,16 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.recipe_readiness import RecipeReadiness
+  from ..models.library_local_state import LibraryLocalState
   from ..models.library_recipe_identity import LibraryRecipeIdentity
   from ..models.library_resource_projection import LibraryResourceProjection
-  from ..models.library_local_state import LibraryLocalState
   from ..models.recipe_definition import RecipeDefinition
+  from ..models.recipe_readiness import RecipeReadiness
 
 
 
@@ -43,34 +42,34 @@ class LibraryRecipeProjection:
             selector (str):
             updated_at (datetime.datetime):
             usage (list[str]):
-            alignment (Union[None, Unset, str]):
-            assessment (Union['RecipeReadiness', None, Unset]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            alignment (None | str | Unset):
+            assessment (None | RecipeReadiness | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    document: 'RecipeDefinition'
-    identity: 'LibraryRecipeIdentity'
-    local: 'LibraryLocalState'
+    document: RecipeDefinition
+    identity: LibraryRecipeIdentity
+    local: LibraryLocalState
     model_selectors: list[str]
     node_count: int
-    resources: 'LibraryResourceProjection'
+    resources: LibraryResourceProjection
     selector: str
     updated_at: datetime.datetime
     usage: list[str]
-    alignment: Union[None, Unset, str] = UNSET
-    assessment: Union['RecipeReadiness', None, Unset] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    alignment: None | str | Unset = UNSET
+    assessment: None | RecipeReadiness | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_readiness import RecipeReadiness
-        from ..models.library_recipe_identity import LibraryRecipeIdentity
-        from ..models.library_resource_projection import LibraryResourceProjection
-        from ..models.library_local_state import LibraryLocalState
-        from ..models.recipe_definition import RecipeDefinition
+        from ..models.library_local_state import LibraryLocalState # noqa: PLC0415
+        from ..models.library_recipe_identity import LibraryRecipeIdentity # noqa: PLC0415
+        from ..models.library_resource_projection import LibraryResourceProjection # noqa: PLC0415
+        from ..models.recipe_definition import RecipeDefinition # noqa: PLC0415
+        from ..models.recipe_readiness import RecipeReadiness # noqa: PLC0415
         document = self.document.to_dict()
 
         identity = self.identity.to_dict()
@@ -93,13 +92,13 @@ class LibraryRecipeProjection:
 
 
 
-        alignment: Union[None, Unset, str]
+        alignment: None | str | Unset
         if isinstance(self.alignment, Unset):
             alignment = UNSET
         else:
             alignment = self.alignment
 
-        assessment: Union[None, Unset, dict[str, Any]]
+        assessment: dict[str, Any] | None | Unset
         if isinstance(self.assessment, Unset):
             assessment = UNSET
         elif isinstance(self.assessment, RecipeReadiness):
@@ -136,11 +135,11 @@ class LibraryRecipeProjection:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_readiness import RecipeReadiness
-        from ..models.library_recipe_identity import LibraryRecipeIdentity
-        from ..models.library_resource_projection import LibraryResourceProjection
-        from ..models.library_local_state import LibraryLocalState
-        from ..models.recipe_definition import RecipeDefinition
+        from ..models.library_local_state import LibraryLocalState # noqa: PLC0415
+        from ..models.library_recipe_identity import LibraryRecipeIdentity # noqa: PLC0415
+        from ..models.library_resource_projection import LibraryResourceProjection # noqa: PLC0415
+        from ..models.recipe_definition import RecipeDefinition # noqa: PLC0415
+        from ..models.recipe_readiness import RecipeReadiness # noqa: PLC0415
         d = dict(src_dict)
         document = RecipeDefinition.from_dict(d.pop("document"))
 
@@ -169,7 +168,7 @@ class LibraryRecipeProjection:
 
         selector = d.pop("selector")
 
-        updated_at = isoparse(d.pop("updated_at"))
+        updated_at = datetime.datetime.fromisoformat(d.pop("updated_at"))
 
 
 
@@ -177,17 +176,17 @@ class LibraryRecipeProjection:
         usage = cast(list[str], d.pop("usage"))
 
 
-        def _parse_alignment(data: object) -> Union[None, Unset, str]:
+        def _parse_alignment(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         alignment = _parse_alignment(d.pop("alignment", UNSET))
 
 
-        def _parse_assessment(data: object) -> Union['RecipeReadiness', None, Unset]:
+        def _parse_assessment(data: object) -> None | RecipeReadiness | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -200,14 +199,14 @@ class LibraryRecipeProjection:
 
 
                 return assessment_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeReadiness', None, Unset], data)
+            return cast(None | RecipeReadiness | Unset, data)
 
         assessment = _parse_assessment(d.pop("assessment", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

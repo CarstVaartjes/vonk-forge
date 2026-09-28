@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,9 +12,7 @@ from ..models.recipe_http_serving_request_method import check_recipe_http_servin
 from ..models.recipe_http_serving_request_method import RecipeHttpServingRequestMethod
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_http_serving_request_body_type_0 import RecipeHttpServingRequestBodyType0
@@ -32,27 +32,27 @@ class RecipeHttpServingRequest:
             method (RecipeHttpServingRequestMethod):
             path (str):
             transport (Literal['http']):
-            body (Union['RecipeHttpServingRequestBodyType0', None, Unset]):
+            body (None | RecipeHttpServingRequestBodyType0 | Unset):
      """
 
     method: RecipeHttpServingRequestMethod
     path: str
     transport: Literal['http']
-    body: Union['RecipeHttpServingRequestBodyType0', None, Unset] = UNSET
+    body: None | RecipeHttpServingRequestBodyType0 | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_http_serving_request_body_type_0 import RecipeHttpServingRequestBodyType0
+        from ..models.recipe_http_serving_request_body_type_0 import RecipeHttpServingRequestBodyType0 # noqa: PLC0415
         method: str = self.method
 
         path = self.path
 
         transport = self.transport
 
-        body: Union[None, Unset, dict[str, Any]]
+        body: dict[str, Any] | None | Unset
         if isinstance(self.body, Unset):
             body = UNSET
         elif isinstance(self.body, RecipeHttpServingRequestBodyType0):
@@ -77,7 +77,7 @@ class RecipeHttpServingRequest:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_http_serving_request_body_type_0 import RecipeHttpServingRequestBodyType0
+        from ..models.recipe_http_serving_request_body_type_0 import RecipeHttpServingRequestBodyType0 # noqa: PLC0415
         d = dict(src_dict)
         method = check_recipe_http_serving_request_method(d.pop("method"))
 
@@ -90,7 +90,7 @@ class RecipeHttpServingRequest:
         if transport != 'http':
             raise ValueError(f"transport must match const 'http', got '{transport}'")
 
-        def _parse_body(data: object) -> Union['RecipeHttpServingRequestBodyType0', None, Unset]:
+        def _parse_body(data: object) -> None | RecipeHttpServingRequestBodyType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -103,9 +103,9 @@ class RecipeHttpServingRequest:
 
 
                 return body_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeHttpServingRequestBodyType0', None, Unset], data)
+            return cast(None | RecipeHttpServingRequestBodyType0 | Unset, data)
 
         body = _parse_body(d.pop("body", UNSET))
 

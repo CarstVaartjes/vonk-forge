@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import Literal, cast
-from typing import Literal, Union, cast
 
 
 
@@ -32,7 +33,7 @@ class InstallationNodePayload:
             required_bytes (int):
             role (str):
             state (str):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     entity_id: str
@@ -44,7 +45,7 @@ class InstallationNodePayload:
     required_bytes: int
     role: str
     state: str
-    schema_version: Union[Literal[1], Unset] = 1
+    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -115,7 +116,7 @@ class InstallationNodePayload:
 
         state = d.pop("state")
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 

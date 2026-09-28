@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,11 +10,11 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.model_capability_provenance import ModelCapabilityProvenance
   from ..models.model_capability_fact import ModelCapabilityFact
+  from ..models.model_capability_provenance import ModelCapabilityProvenance
 
 
 
@@ -26,22 +28,22 @@ T = TypeVar("T", bound="ModelCapabilities")
 class ModelCapabilities:
     """
         Attributes:
-            facts (list['ModelCapabilityFact']):
+            facts (list[ModelCapabilityFact]):
             provenance (ModelCapabilityProvenance):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    facts: list['ModelCapabilityFact']
-    provenance: 'ModelCapabilityProvenance'
-    schema_version: Union[Literal[2], Unset] = 2
+    facts: list[ModelCapabilityFact]
+    provenance: ModelCapabilityProvenance
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.model_capability_provenance import ModelCapabilityProvenance
-        from ..models.model_capability_fact import ModelCapabilityFact
+        from ..models.model_capability_fact import ModelCapabilityFact # noqa: PLC0415
+        from ..models.model_capability_provenance import ModelCapabilityProvenance # noqa: PLC0415
         facts = []
         for facts_item_data in self.facts:
             facts_item = facts_item_data.to_dict()
@@ -69,8 +71,8 @@ class ModelCapabilities:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.model_capability_provenance import ModelCapabilityProvenance
-        from ..models.model_capability_fact import ModelCapabilityFact
+        from ..models.model_capability_fact import ModelCapabilityFact # noqa: PLC0415
+        from ..models.model_capability_provenance import ModelCapabilityProvenance # noqa: PLC0415
         d = dict(src_dict)
         facts = []
         _facts = d.pop("facts")
@@ -87,7 +89,7 @@ class ModelCapabilities:
 
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

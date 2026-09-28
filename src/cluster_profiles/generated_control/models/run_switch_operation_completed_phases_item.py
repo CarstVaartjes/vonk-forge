@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RunSwitchOperationCompletedPhasesItem = Literal['cleanup', 'final_verify', 'prepare', 'start', 'stop', 'transfer', 'uninstall', 'verify']
 
@@ -6,5 +6,5 @@ RUN_SWITCH_OPERATION_COMPLETED_PHASES_ITEM_VALUES: set[RunSwitchOperationComplet
 
 def check_run_switch_operation_completed_phases_item(value: str) -> RunSwitchOperationCompletedPhasesItem:
     if value in RUN_SWITCH_OPERATION_COMPLETED_PHASES_ITEM_VALUES:
-        return cast(RunSwitchOperationCompletedPhasesItem, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RUN_SWITCH_OPERATION_COMPLETED_PHASES_ITEM_VALUES!r}")

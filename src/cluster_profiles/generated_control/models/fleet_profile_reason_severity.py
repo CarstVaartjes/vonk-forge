@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FleetProfileReasonSeverity = Literal['error', 'info', 'warning']
 
@@ -6,5 +6,5 @@ FLEET_PROFILE_REASON_SEVERITY_VALUES: set[FleetProfileReasonSeverity] = { 'error
 
 def check_fleet_profile_reason_severity(value: str) -> FleetProfileReasonSeverity:
     if value in FLEET_PROFILE_REASON_SEVERITY_VALUES:
-        return cast(FleetProfileReasonSeverity, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FLEET_PROFILE_REASON_SEVERITY_VALUES!r}")

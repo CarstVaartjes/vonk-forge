@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -25,12 +26,12 @@ class ManagedCatalogSyncProblem:
         Attributes:
             code (str):
             detail (str):
-            recipe_uri (Union[None, Unset, str]):
+            recipe_uri (None | str | Unset):
      """
 
     code: str
     detail: str
-    recipe_uri: Union[None, Unset, str] = UNSET
+    recipe_uri: None | str | Unset = UNSET
 
 
 
@@ -41,7 +42,7 @@ class ManagedCatalogSyncProblem:
 
         detail = self.detail
 
-        recipe_uri: Union[None, Unset, str]
+        recipe_uri: None | str | Unset
         if isinstance(self.recipe_uri, Unset):
             recipe_uri = UNSET
         else:
@@ -68,12 +69,12 @@ class ManagedCatalogSyncProblem:
 
         detail = d.pop("detail")
 
-        def _parse_recipe_uri(data: object) -> Union[None, Unset, str]:
+        def _parse_recipe_uri(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         recipe_uri = _parse_recipe_uri(d.pop("recipe_uri", UNSET))
 

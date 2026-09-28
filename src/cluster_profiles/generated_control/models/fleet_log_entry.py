@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,7 +12,6 @@ from ..models.fleet_log_entry_level import check_fleet_log_entry_level
 from ..models.fleet_log_entry_level import FleetLogEntryLevel
 from ..models.fleet_log_entry_source import check_fleet_log_entry_source
 from ..models.fleet_log_entry_source import FleetLogEntrySource
-from dateutil.parser import isoparse
 from typing import cast
 import datetime
 
@@ -82,7 +83,7 @@ class FleetLogEntry:
 
         message = d.pop("message")
 
-        observed_at = isoparse(d.pop("observed_at"))
+        observed_at = datetime.datetime.fromisoformat(d.pop("observed_at"))
 
 
 

@@ -620,7 +620,7 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
 
 
 def test_generated_python_client_parses_documented_operation_errors() -> None:
-    import httpx
+    import httpx2
 
     from cluster_profiles.generated_control.client import Client
     from cluster_profiles.generated_control.models.bounded_error_response import (
@@ -640,7 +640,7 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
         for status_code in status_codes:
             parsed = module._parse_response(
                 client=client,
-                response=httpx.Response(
+                response=httpx2.Response(
                     status_code,
                     json={"detail": f"bounded-{status_code}"},
                 ),

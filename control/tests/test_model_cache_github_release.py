@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -132,15 +132,15 @@ def _release_document(data: bytes) -> dict[str, object]:
     }
 
 
-def _assert_anonymous(request: httpx.Request) -> None:
+def _assert_anonymous(request: httpx2.Request) -> None:
     assert request.headers.get("authorization") is None
     assert request.headers.get("cookie") is None
     assert request.headers.get("user-agent") == GITHUB_USER_AGENT
 
 
-def _client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.Client:
-    return httpx.Client(
-        transport=httpx.MockTransport(handler),
+def _client(handler: Callable[[httpx2.Request], httpx2.Response]) -> httpx2.Client:
+    return httpx2.Client(
+        transport=httpx2.MockTransport(handler),
         follow_redirects=False,
         headers={
             "Authorization": "Bearer client-sentinel",
@@ -152,7 +152,7 @@ def _client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.Client:
     )
 
 
-def _service(sessions, root: Path, client: httpx.Client) -> ModelCacheService:
+def _service(sessions, root: Path, client: httpx2.Client) -> ModelCacheService:
     return ModelCacheService(
         sessions,
         root,
@@ -165,20 +165,20 @@ def _service(sessions, root: Path, client: httpx.Client) -> ModelCacheService:
 
 def _serve_release_and_asset(
     data: bytes,
-    requests: list[httpx.Request],
+    requests: list[httpx2.Request],
     *,
     release: dict[str, object] | None = None,
-    cdn_handler: Callable[[httpx.Request], httpx.Response] | None = None,
-) -> Callable[[httpx.Request], httpx.Response]:
+    cdn_handler: Callable[[httpx2.Request], httpx2.Response] | None = None,
+) -> Callable[[httpx2.Request], httpx2.Response]:
     release_document = release or _release_document(data)
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         _assert_anonymous(request)
         requests.append(request)
         if str(request.url) == RELEASE_URL:
-            return httpx.Response(200, request=request, json=release_document)
+            return httpx2.Response(200, request=request, json=release_document)
         if str(request.url) == ASSET_URL:
-            return httpx.Response(
+            return httpx2.Response(
                 302,
                 request=request,
                 headers={"Location": CDN_URL},
@@ -186,7 +186,7 @@ def _serve_release_and_asset(
         if request.url.host == "release-assets.githubusercontent.com":
             if cdn_handler is not None:
                 return cdn_handler(request)
-            return httpx.Response(200, request=request, content=data)
+            return httpx2.Response(200, request=request, content=data)
         raise AssertionError(f"unexpected provider request: {request.url}")
 
     return handler
@@ -212,7 +212,7 @@ def test_github_release_download_is_asset_id_bound_anonymous_and_reusable_offlin
 ) -> None:
     data = b"verified NAF release asset bytes"
     digest, _selector = _insert_model(sessions, _model(data))
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
     client = _client(_serve_release_and_asset(data, requests))
     service = _service(sessions, tmp_path / "nas-cache", client)
     try:
@@ -242,9 +242,9 @@ def test_github_release_download_is_asset_id_bound_anonymous_and_reusable_offlin
         service.close()
         client.close()
 
-    offline_calls: list[httpx.Request] = []
+    offline_calls: list[httpx2.Request] = []
 
-    def forbidden(request: httpx.Request) -> httpx.Response:
+    def forbidden(request: httpx2.Request) -> httpx2.Response:
         offline_calls.append(request)
         raise AssertionError("verified local bytes must not require GitHub")
 
@@ -284,7 +284,7 @@ def test_github_source_accepts_large_ids_permitted_by_canonical_contract(
     model = ModelDefinition.model_validate(document)
     digest, _selector = _insert_model(sessions, model)
 
-    def forbidden(_request: httpx.Request) -> httpx.Response:
+    def forbidden(_request: httpx2.Request) -> httpx2.Response:
         raise AssertionError(
             "resolving an exact asset identity must not use the network"
         )
@@ -338,7 +338,7 @@ def test_github_metadata_mismatch_blocks_before_asset_transfer(
         asset["digest"] = "sha256:" + ("0" * 64)
     elif change == "malformed-size":
         asset["size"] = str(len(data))
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
     client = _client(_serve_release_and_asset(data, requests, release=release))
     service = _service(sessions, tmp_path / change, client)
     try:
@@ -375,10 +375,10 @@ def test_github_download_rejects_wrong_binary_bytes(
     actual_bytes = b"x" * actual_size
     assert actual_bytes != expected_bytes
     digest, _selector = _insert_model(sessions, _model(expected_bytes))
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def cdn(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, request=request, content=actual_bytes)
+    def cdn(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, request=request, content=actual_bytes)
 
     client = _client(
         _serve_release_and_asset(expected_bytes, requests, cdn_handler=cdn)
@@ -408,12 +408,12 @@ def test_github_asset_redirect_rejects_untrusted_hosts_without_credentials(
 ) -> None:
     data = b"redirect must remain within the release CDN"
     digest, _selector = _insert_model(sessions, _model(data))
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         _assert_anonymous(request)
         requests.append(request)
-        return httpx.Response(
+        return httpx2.Response(
             302,
             request=request,
             headers={"Location": "https://evil.example/steal?sig=private"},
@@ -437,10 +437,12 @@ def test_github_transfer_error_does_not_persist_signed_cdn_url(
 ) -> None:
     data = b"expected content before the CDN connection fails"
     digest, _selector = _insert_model(sessions, _model(data))
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def cdn(request: httpx.Request) -> httpx.Response:
-        raise httpx.ReadTimeout(f"timeout while reading {request.url}", request=request)
+    def cdn(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ReadTimeout(
+            f"timeout while reading {request.url}", request=request
+        )
 
     client = _client(_serve_release_and_asset(data, requests, cdn_handler=cdn))
     service = _service(sessions, tmp_path / "cdn-timeout-cache", client)
@@ -480,7 +482,7 @@ def test_github_transfer_error_does_not_persist_signed_cdn_url(
         client.close()
 
 
-class _ByteStream(httpx.SyncByteStream):
+class _ByteStream(httpx2.SyncByteStream):
     def __init__(self, data: bytes, fragment: int = 256 * 1024) -> None:
         self.data = data
         self.fragment = fragment
@@ -496,13 +498,13 @@ def test_github_release_download_resumes_partial_bytes_after_service_restart(
     data = bytes(range(256)) * 12_000
     digest, _selector = _insert_model(sessions, _model(data))
     ranges: list[str | None] = []
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def cdn(request: httpx.Request) -> httpx.Response:
+    def cdn(request: httpx2.Request) -> httpx2.Response:
         range_header = request.headers.get("range")
         ranges.append(range_header)
         if range_header is None:
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 request=request,
                 stream=_ByteStream(data),
@@ -511,7 +513,7 @@ def test_github_release_download_resumes_partial_bytes_after_service_restart(
         match = re.fullmatch(r"bytes=(\d+)-", range_header)
         assert match is not None
         start = int(match.group(1))
-        return httpx.Response(
+        return httpx2.Response(
             206,
             request=request,
             stream=_ByteStream(data[start:]),
@@ -544,7 +546,7 @@ def test_github_release_download_resumes_partial_bytes_after_service_restart(
     service.close()
     client.close()
 
-    resumed_requests: list[httpx.Request] = []
+    resumed_requests: list[httpx2.Request] = []
     resumed_client = _client(
         _serve_release_and_asset(data, resumed_requests, cdn_handler=cdn)
     )
@@ -606,12 +608,12 @@ def test_github_access_refusal_rate_limit_and_unexpected_redirect_are_distinct(
 ) -> None:
     data = b"public access must be explicit"
     digest, _selector = _insert_model(sessions, _model(data))
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         _assert_anonymous(request)
         requests.append(request)
-        return httpx.Response(status, request=request, headers=headers, json=body)
+        return httpx2.Response(status, request=request, headers=headers, json=body)
 
     client = _client(handler)
     service = _service(sessions, tmp_path / f"status-{status}-{expected_code}", client)

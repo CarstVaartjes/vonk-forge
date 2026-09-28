@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -16,8 +18,6 @@ from ..models.artifact_storage_impact_spark_coverage import ArtifactStorageImpac
 from ..models.artifact_storage_impact_spark_coverage import check_artifact_storage_impact_spark_coverage
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -36,35 +36,35 @@ class ArtifactStorageImpact:
             nas_coverage (ArtifactStorageImpactNasCoverage):
             retention (ArtifactStorageImpactRetention):
             spark_coverage (ArtifactStorageImpactSparkCoverage):
-            artifact_digests (Union[Unset, list[str]]):
-            artifact_set_bytes (Union[None, Unset, int]):
-            artifact_set_sha256 (Union[None, Unset, str]):
-            copied_bytes (Union[Unset, int]):  Default: 0.
-            missing_nas_bytes (Union[None, Unset, int]):
-            missing_spark_bytes (Union[None, Unset, int]):
-            reclaimable_bytes (Union[Unset, int]):  Default: 0.
-            reclaimable_digests (Union[Unset, list[str]]):
-            reclaimed_bytes (Union[Unset, int]):  Default: 0.
-            required_bytes (Union[None, Unset, int]):
-            reused_bytes (Union[Unset, int]):  Default: 0.
-            running_coverage (Union[Unset, ArtifactStorageImpactRunningCoverage]):  Default: 'unknown'.
+            artifact_digests (list[str] | Unset):
+            artifact_set_bytes (int | None | Unset):
+            artifact_set_sha256 (None | str | Unset):
+            copied_bytes (int | Unset):  Default: 0.
+            missing_nas_bytes (int | None | Unset):
+            missing_spark_bytes (int | None | Unset):
+            reclaimable_bytes (int | Unset):  Default: 0.
+            reclaimable_digests (list[str] | Unset):
+            reclaimed_bytes (int | Unset):  Default: 0.
+            required_bytes (int | None | Unset):
+            reused_bytes (int | Unset):  Default: 0.
+            running_coverage (ArtifactStorageImpactRunningCoverage | Unset):  Default: 'unknown'.
      """
 
     nas_coverage: ArtifactStorageImpactNasCoverage
     retention: ArtifactStorageImpactRetention
     spark_coverage: ArtifactStorageImpactSparkCoverage
-    artifact_digests: Union[Unset, list[str]] = UNSET
-    artifact_set_bytes: Union[None, Unset, int] = UNSET
-    artifact_set_sha256: Union[None, Unset, str] = UNSET
-    copied_bytes: Union[Unset, int] = 0
-    missing_nas_bytes: Union[None, Unset, int] = UNSET
-    missing_spark_bytes: Union[None, Unset, int] = UNSET
-    reclaimable_bytes: Union[Unset, int] = 0
-    reclaimable_digests: Union[Unset, list[str]] = UNSET
-    reclaimed_bytes: Union[Unset, int] = 0
-    required_bytes: Union[None, Unset, int] = UNSET
-    reused_bytes: Union[Unset, int] = 0
-    running_coverage: Union[Unset, ArtifactStorageImpactRunningCoverage] = 'unknown'
+    artifact_digests: list[str] | Unset = UNSET
+    artifact_set_bytes: int | None | Unset = UNSET
+    artifact_set_sha256: None | str | Unset = UNSET
+    copied_bytes: int | Unset = 0
+    missing_nas_bytes: int | None | Unset = UNSET
+    missing_spark_bytes: int | None | Unset = UNSET
+    reclaimable_bytes: int | Unset = 0
+    reclaimable_digests: list[str] | Unset = UNSET
+    reclaimed_bytes: int | Unset = 0
+    required_bytes: int | None | Unset = UNSET
+    reused_bytes: int | Unset = 0
+    running_coverage: ArtifactStorageImpactRunningCoverage | Unset = 'unknown'
 
 
 
@@ -77,19 +77,19 @@ class ArtifactStorageImpact:
 
         spark_coverage: str = self.spark_coverage
 
-        artifact_digests: Union[Unset, list[str]] = UNSET
+        artifact_digests: list[str] | Unset = UNSET
         if not isinstance(self.artifact_digests, Unset):
             artifact_digests = self.artifact_digests
 
 
 
-        artifact_set_bytes: Union[None, Unset, int]
+        artifact_set_bytes: int | None | Unset
         if isinstance(self.artifact_set_bytes, Unset):
             artifact_set_bytes = UNSET
         else:
             artifact_set_bytes = self.artifact_set_bytes
 
-        artifact_set_sha256: Union[None, Unset, str]
+        artifact_set_sha256: None | str | Unset
         if isinstance(self.artifact_set_sha256, Unset):
             artifact_set_sha256 = UNSET
         else:
@@ -97,13 +97,13 @@ class ArtifactStorageImpact:
 
         copied_bytes = self.copied_bytes
 
-        missing_nas_bytes: Union[None, Unset, int]
+        missing_nas_bytes: int | None | Unset
         if isinstance(self.missing_nas_bytes, Unset):
             missing_nas_bytes = UNSET
         else:
             missing_nas_bytes = self.missing_nas_bytes
 
-        missing_spark_bytes: Union[None, Unset, int]
+        missing_spark_bytes: int | None | Unset
         if isinstance(self.missing_spark_bytes, Unset):
             missing_spark_bytes = UNSET
         else:
@@ -111,7 +111,7 @@ class ArtifactStorageImpact:
 
         reclaimable_bytes = self.reclaimable_bytes
 
-        reclaimable_digests: Union[Unset, list[str]] = UNSET
+        reclaimable_digests: list[str] | Unset = UNSET
         if not isinstance(self.reclaimable_digests, Unset):
             reclaimable_digests = self.reclaimable_digests
 
@@ -119,7 +119,7 @@ class ArtifactStorageImpact:
 
         reclaimed_bytes = self.reclaimed_bytes
 
-        required_bytes: Union[None, Unset, int]
+        required_bytes: int | None | Unset
         if isinstance(self.required_bytes, Unset):
             required_bytes = UNSET
         else:
@@ -127,7 +127,7 @@ class ArtifactStorageImpact:
 
         reused_bytes = self.reused_bytes
 
-        running_coverage: Union[Unset, str] = UNSET
+        running_coverage: str | Unset = UNSET
         if not isinstance(self.running_coverage, Unset):
             running_coverage = self.running_coverage
 
@@ -190,44 +190,44 @@ class ArtifactStorageImpact:
         artifact_digests = cast(list[str], d.pop("artifact_digests", UNSET))
 
 
-        def _parse_artifact_set_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_artifact_set_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         artifact_set_bytes = _parse_artifact_set_bytes(d.pop("artifact_set_bytes", UNSET))
 
 
-        def _parse_artifact_set_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_artifact_set_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         artifact_set_sha256 = _parse_artifact_set_sha256(d.pop("artifact_set_sha256", UNSET))
 
 
         copied_bytes = d.pop("copied_bytes", UNSET)
 
-        def _parse_missing_nas_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_missing_nas_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         missing_nas_bytes = _parse_missing_nas_bytes(d.pop("missing_nas_bytes", UNSET))
 
 
-        def _parse_missing_spark_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_missing_spark_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         missing_spark_bytes = _parse_missing_spark_bytes(d.pop("missing_spark_bytes", UNSET))
 
@@ -239,12 +239,12 @@ class ArtifactStorageImpact:
 
         reclaimed_bytes = d.pop("reclaimed_bytes", UNSET)
 
-        def _parse_required_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_required_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         required_bytes = _parse_required_bytes(d.pop("required_bytes", UNSET))
 
@@ -252,7 +252,7 @@ class ArtifactStorageImpact:
         reused_bytes = d.pop("reused_bytes", UNSET)
 
         _running_coverage = d.pop("running_coverage", UNSET)
-        running_coverage: Union[Unset, ArtifactStorageImpactRunningCoverage]
+        running_coverage: ArtifactStorageImpactRunningCoverage | Unset
         if isinstance(_running_coverage,  Unset):
             running_coverage = UNSET
         else:

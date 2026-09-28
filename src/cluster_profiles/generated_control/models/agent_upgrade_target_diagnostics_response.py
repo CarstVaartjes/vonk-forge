@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,8 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse
@@ -32,25 +32,25 @@ class AgentUpgradeTargetDiagnosticsResponse:
             retry_queued (bool):
             state (str):
             target_proven (bool):
-            raw_reason (Union[None, Unset, str]):
-            retry_not_before (Union[None, Unset, str]):
+            raw_reason (None | str | Unset):
+            retry_not_before (None | str | Unset):
      """
 
     attempts: int
     node_id: str
-    observed_identity: 'AgentUpgradeIdentityResponse'
+    observed_identity: AgentUpgradeIdentityResponse
     retry_queued: bool
     state: str
     target_proven: bool
-    raw_reason: Union[None, Unset, str] = UNSET
-    retry_not_before: Union[None, Unset, str] = UNSET
+    raw_reason: None | str | Unset = UNSET
+    retry_not_before: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse
+        from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse # noqa: PLC0415
         attempts = self.attempts
 
         node_id = self.node_id
@@ -63,13 +63,13 @@ class AgentUpgradeTargetDiagnosticsResponse:
 
         target_proven = self.target_proven
 
-        raw_reason: Union[None, Unset, str]
+        raw_reason: None | str | Unset
         if isinstance(self.raw_reason, Unset):
             raw_reason = UNSET
         else:
             raw_reason = self.raw_reason
 
-        retry_not_before: Union[None, Unset, str]
+        retry_not_before: None | str | Unset
         if isinstance(self.retry_not_before, Unset):
             retry_not_before = UNSET
         else:
@@ -97,7 +97,7 @@ class AgentUpgradeTargetDiagnosticsResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse
+        from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse # noqa: PLC0415
         d = dict(src_dict)
         attempts = d.pop("attempts")
 
@@ -114,22 +114,22 @@ class AgentUpgradeTargetDiagnosticsResponse:
 
         target_proven = d.pop("target_proven")
 
-        def _parse_raw_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_raw_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         raw_reason = _parse_raw_reason(d.pop("raw_reason", UNSET))
 
 
-        def _parse_retry_not_before(data: object) -> Union[None, Unset, str]:
+        def _parse_retry_not_before(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         retry_not_before = _parse_retry_not_before(d.pop("retry_not_before", UNSET))
 

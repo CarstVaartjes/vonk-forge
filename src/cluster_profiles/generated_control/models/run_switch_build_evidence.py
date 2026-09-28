@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,13 +12,11 @@ from ..models.run_switch_build_evidence_state import check_run_switch_build_evid
 from ..models.run_switch_build_evidence_state import RunSwitchBuildEvidenceState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.build_compatibility_evidence import BuildCompatibilityEvidence
-  from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
   from ..models.build_source_evidence import BuildSourceEvidence
+  from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
 
 
 
@@ -30,45 +30,45 @@ T = TypeVar("T", bound="RunSwitchBuildEvidence")
 class RunSwitchBuildEvidence:
     """
         Attributes:
-            build_id (Union[None, str]):
+            build_id (None | str):
             compatibility (BuildCompatibilityEvidence):
-            image_digest (Union[None, str]):
+            image_digest (None | str):
             runtime (RuntimeImageStorageImpact):
             source (BuildSourceEvidence):
             state (RunSwitchBuildEvidenceState):
-            build_input_sha256 (Union[None, Unset, str]):
-            builder_node_id (Union[None, Unset, str]):
-            detail (Union[None, Unset, str]):
-            image_bytes (Union[None, Unset, int]):
-            oci_layout_sha256 (Union[None, Unset, str]):
+            build_input_sha256 (None | str | Unset):
+            builder_node_id (None | str | Unset):
+            detail (None | str | Unset):
+            image_bytes (int | None | Unset):
+            oci_layout_sha256 (None | str | Unset):
      """
 
-    build_id: Union[None, str]
-    compatibility: 'BuildCompatibilityEvidence'
-    image_digest: Union[None, str]
-    runtime: 'RuntimeImageStorageImpact'
-    source: 'BuildSourceEvidence'
+    build_id: None | str
+    compatibility: BuildCompatibilityEvidence
+    image_digest: None | str
+    runtime: RuntimeImageStorageImpact
+    source: BuildSourceEvidence
     state: RunSwitchBuildEvidenceState
-    build_input_sha256: Union[None, Unset, str] = UNSET
-    builder_node_id: Union[None, Unset, str] = UNSET
-    detail: Union[None, Unset, str] = UNSET
-    image_bytes: Union[None, Unset, int] = UNSET
-    oci_layout_sha256: Union[None, Unset, str] = UNSET
+    build_input_sha256: None | str | Unset = UNSET
+    builder_node_id: None | str | Unset = UNSET
+    detail: None | str | Unset = UNSET
+    image_bytes: int | None | Unset = UNSET
+    oci_layout_sha256: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.build_compatibility_evidence import BuildCompatibilityEvidence
-        from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
-        from ..models.build_source_evidence import BuildSourceEvidence
-        build_id: Union[None, str]
+        from ..models.build_compatibility_evidence import BuildCompatibilityEvidence # noqa: PLC0415
+        from ..models.build_source_evidence import BuildSourceEvidence # noqa: PLC0415
+        from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact # noqa: PLC0415
+        build_id: None | str
         build_id = self.build_id
 
         compatibility = self.compatibility.to_dict()
 
-        image_digest: Union[None, str]
+        image_digest: None | str
         image_digest = self.image_digest
 
         runtime = self.runtime.to_dict()
@@ -77,31 +77,31 @@ class RunSwitchBuildEvidence:
 
         state: str = self.state
 
-        build_input_sha256: Union[None, Unset, str]
+        build_input_sha256: None | str | Unset
         if isinstance(self.build_input_sha256, Unset):
             build_input_sha256 = UNSET
         else:
             build_input_sha256 = self.build_input_sha256
 
-        builder_node_id: Union[None, Unset, str]
+        builder_node_id: None | str | Unset
         if isinstance(self.builder_node_id, Unset):
             builder_node_id = UNSET
         else:
             builder_node_id = self.builder_node_id
 
-        detail: Union[None, Unset, str]
+        detail: None | str | Unset
         if isinstance(self.detail, Unset):
             detail = UNSET
         else:
             detail = self.detail
 
-        image_bytes: Union[None, Unset, int]
+        image_bytes: int | None | Unset
         if isinstance(self.image_bytes, Unset):
             image_bytes = UNSET
         else:
             image_bytes = self.image_bytes
 
-        oci_layout_sha256: Union[None, Unset, str]
+        oci_layout_sha256: None | str | Unset
         if isinstance(self.oci_layout_sha256, Unset):
             oci_layout_sha256 = UNSET
         else:
@@ -135,14 +135,14 @@ class RunSwitchBuildEvidence:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.build_compatibility_evidence import BuildCompatibilityEvidence
-        from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
-        from ..models.build_source_evidence import BuildSourceEvidence
+        from ..models.build_compatibility_evidence import BuildCompatibilityEvidence # noqa: PLC0415
+        from ..models.build_source_evidence import BuildSourceEvidence # noqa: PLC0415
+        from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_build_id(data: object) -> Union[None, str]:
+        def _parse_build_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         build_id = _parse_build_id(d.pop("build_id"))
 
@@ -152,10 +152,10 @@ class RunSwitchBuildEvidence:
 
 
 
-        def _parse_image_digest(data: object) -> Union[None, str]:
+        def _parse_image_digest(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         image_digest = _parse_image_digest(d.pop("image_digest"))
 
@@ -175,52 +175,52 @@ class RunSwitchBuildEvidence:
 
 
 
-        def _parse_build_input_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_build_input_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         build_input_sha256 = _parse_build_input_sha256(d.pop("build_input_sha256", UNSET))
 
 
-        def _parse_builder_node_id(data: object) -> Union[None, Unset, str]:
+        def _parse_builder_node_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         builder_node_id = _parse_builder_node_id(d.pop("builder_node_id", UNSET))
 
 
-        def _parse_detail(data: object) -> Union[None, Unset, str]:
+        def _parse_detail(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         detail = _parse_detail(d.pop("detail", UNSET))
 
 
-        def _parse_image_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_image_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         image_bytes = _parse_image_bytes(d.pop("image_bytes", UNSET))
 
 
-        def _parse_oci_layout_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_oci_layout_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         oci_layout_sha256 = _parse_oci_layout_sha256(d.pop("oci_layout_sha256", UNSET))
 

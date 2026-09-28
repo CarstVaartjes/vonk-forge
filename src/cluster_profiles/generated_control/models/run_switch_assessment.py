@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,16 +10,14 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
+  from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
   from ..models.effective_settings_selection import EffectiveSettingsSelection
-  from ..models.run_switch_reason import RunSwitchReason
   from ..models.freshness_evidence import FreshnessEvidence
   from ..models.rollout_preparation import RolloutPreparation
+  from ..models.run_switch_reason import RunSwitchReason
   from ..models.spark_fit import SparkFit
-  from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
   from ..models.stop_impact import StopImpact
 
 
@@ -33,48 +33,48 @@ class RunSwitchAssessment:
     """ Planner-owned admission and observations shared by operator reviews.
 
         Attributes:
-            alias (Union[None, str]):
+            alias (None | str):
             allowed (bool):
-            blockers (list['RunSwitchReason']):
-            fit_after_stop (Union['SparkFit', None]):
+            blockers (list[RunSwitchReason]):
+            fit_after_stop (None | SparkFit):
             fit_current (SparkFit):
-            stops (list['StopImpact']):
-            warnings (list['RunSwitchReason']):
-            effective_settings (Union['EffectiveSettingsSelection', None, Unset]):
-            freshness (Union[Unset, list['FreshnessEvidence']]):
-            post_stop_memory_check (Union['ConditionalPostStopMemoryCheck', None, Unset]):
-            preparation (Union['RolloutPreparation', None, Unset]):
-            stop_before_prepare (Union[Unset, bool]):  Default: False.
-            stop_before_transfer (Union[Unset, bool]):  Default: False.
+            stops (list[StopImpact]):
+            warnings (list[RunSwitchReason]):
+            effective_settings (EffectiveSettingsSelection | None | Unset):
+            freshness (list[FreshnessEvidence] | Unset):
+            post_stop_memory_check (ConditionalPostStopMemoryCheck | None | Unset):
+            preparation (None | RolloutPreparation | Unset):
+            stop_before_prepare (bool | Unset):  Default: False.
+            stop_before_transfer (bool | Unset):  Default: False.
      """
 
-    alias: Union[None, str]
+    alias: None | str
     allowed: bool
-    blockers: list['RunSwitchReason']
-    fit_after_stop: Union['SparkFit', None]
-    fit_current: 'SparkFit'
-    stops: list['StopImpact']
-    warnings: list['RunSwitchReason']
-    effective_settings: Union['EffectiveSettingsSelection', None, Unset] = UNSET
-    freshness: Union[Unset, list['FreshnessEvidence']] = UNSET
-    post_stop_memory_check: Union['ConditionalPostStopMemoryCheck', None, Unset] = UNSET
-    preparation: Union['RolloutPreparation', None, Unset] = UNSET
-    stop_before_prepare: Union[Unset, bool] = False
-    stop_before_transfer: Union[Unset, bool] = False
+    blockers: list[RunSwitchReason]
+    fit_after_stop: None | SparkFit
+    fit_current: SparkFit
+    stops: list[StopImpact]
+    warnings: list[RunSwitchReason]
+    effective_settings: EffectiveSettingsSelection | None | Unset = UNSET
+    freshness: list[FreshnessEvidence] | Unset = UNSET
+    post_stop_memory_check: ConditionalPostStopMemoryCheck | None | Unset = UNSET
+    preparation: None | RolloutPreparation | Unset = UNSET
+    stop_before_prepare: bool | Unset = False
+    stop_before_transfer: bool | Unset = False
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.effective_settings_selection import EffectiveSettingsSelection
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.freshness_evidence import FreshnessEvidence
-        from ..models.rollout_preparation import RolloutPreparation
-        from ..models.spark_fit import SparkFit
-        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
-        from ..models.stop_impact import StopImpact
-        alias: Union[None, str]
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck # noqa: PLC0415
+        from ..models.effective_settings_selection import EffectiveSettingsSelection # noqa: PLC0415
+        from ..models.freshness_evidence import FreshnessEvidence # noqa: PLC0415
+        from ..models.rollout_preparation import RolloutPreparation # noqa: PLC0415
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
+        from ..models.spark_fit import SparkFit # noqa: PLC0415
+        from ..models.stop_impact import StopImpact # noqa: PLC0415
+        alias: None | str
         alias = self.alias
 
         allowed = self.allowed
@@ -86,7 +86,7 @@ class RunSwitchAssessment:
 
 
 
-        fit_after_stop: Union[None, dict[str, Any]]
+        fit_after_stop: dict[str, Any] | None
         if isinstance(self.fit_after_stop, SparkFit):
             fit_after_stop = self.fit_after_stop.to_dict()
         else:
@@ -108,7 +108,7 @@ class RunSwitchAssessment:
 
 
 
-        effective_settings: Union[None, Unset, dict[str, Any]]
+        effective_settings: dict[str, Any] | None | Unset
         if isinstance(self.effective_settings, Unset):
             effective_settings = UNSET
         elif isinstance(self.effective_settings, EffectiveSettingsSelection):
@@ -116,7 +116,7 @@ class RunSwitchAssessment:
         else:
             effective_settings = self.effective_settings
 
-        freshness: Union[Unset, list[dict[str, Any]]] = UNSET
+        freshness: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.freshness, Unset):
             freshness = []
             for freshness_item_data in self.freshness:
@@ -125,7 +125,7 @@ class RunSwitchAssessment:
 
 
 
-        post_stop_memory_check: Union[None, Unset, dict[str, Any]]
+        post_stop_memory_check: dict[str, Any] | None | Unset
         if isinstance(self.post_stop_memory_check, Unset):
             post_stop_memory_check = UNSET
         elif isinstance(self.post_stop_memory_check, ConditionalPostStopMemoryCheck):
@@ -133,7 +133,7 @@ class RunSwitchAssessment:
         else:
             post_stop_memory_check = self.post_stop_memory_check
 
-        preparation: Union[None, Unset, dict[str, Any]]
+        preparation: dict[str, Any] | None | Unset
         if isinstance(self.preparation, Unset):
             preparation = UNSET
         elif isinstance(self.preparation, RolloutPreparation):
@@ -176,18 +176,18 @@ class RunSwitchAssessment:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.effective_settings_selection import EffectiveSettingsSelection
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.freshness_evidence import FreshnessEvidence
-        from ..models.rollout_preparation import RolloutPreparation
-        from ..models.spark_fit import SparkFit
-        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
-        from ..models.stop_impact import StopImpact
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck # noqa: PLC0415
+        from ..models.effective_settings_selection import EffectiveSettingsSelection # noqa: PLC0415
+        from ..models.freshness_evidence import FreshnessEvidence # noqa: PLC0415
+        from ..models.rollout_preparation import RolloutPreparation # noqa: PLC0415
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
+        from ..models.spark_fit import SparkFit # noqa: PLC0415
+        from ..models.stop_impact import StopImpact # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_alias(data: object) -> Union[None, str]:
+        def _parse_alias(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         alias = _parse_alias(d.pop("alias"))
 
@@ -204,7 +204,7 @@ class RunSwitchAssessment:
             blockers.append(blockers_item)
 
 
-        def _parse_fit_after_stop(data: object) -> Union['SparkFit', None]:
+        def _parse_fit_after_stop(data: object) -> None | SparkFit:
             if data is None:
                 return data
             try:
@@ -215,9 +215,9 @@ class RunSwitchAssessment:
 
 
                 return fit_after_stop_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['SparkFit', None], data)
+            return cast(None | SparkFit, data)
 
         fit_after_stop = _parse_fit_after_stop(d.pop("fit_after_stop"))
 
@@ -247,7 +247,7 @@ class RunSwitchAssessment:
             warnings.append(warnings_item)
 
 
-        def _parse_effective_settings(data: object) -> Union['EffectiveSettingsSelection', None, Unset]:
+        def _parse_effective_settings(data: object) -> EffectiveSettingsSelection | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -260,24 +260,26 @@ class RunSwitchAssessment:
 
 
                 return effective_settings_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['EffectiveSettingsSelection', None, Unset], data)
+            return cast(EffectiveSettingsSelection | None | Unset, data)
 
         effective_settings = _parse_effective_settings(d.pop("effective_settings", UNSET))
 
 
-        freshness = []
         _freshness = d.pop("freshness", UNSET)
-        for freshness_item_data in (_freshness or []):
-            freshness_item = FreshnessEvidence.from_dict(freshness_item_data)
+        freshness: list[FreshnessEvidence] | Unset = UNSET
+        if _freshness is not UNSET:
+            freshness = []
+            for freshness_item_data in _freshness:
+                freshness_item = FreshnessEvidence.from_dict(freshness_item_data)
 
 
 
-            freshness.append(freshness_item)
+                freshness.append(freshness_item)
 
 
-        def _parse_post_stop_memory_check(data: object) -> Union['ConditionalPostStopMemoryCheck', None, Unset]:
+        def _parse_post_stop_memory_check(data: object) -> ConditionalPostStopMemoryCheck | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -290,14 +292,14 @@ class RunSwitchAssessment:
 
 
                 return post_stop_memory_check_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['ConditionalPostStopMemoryCheck', None, Unset], data)
+            return cast(ConditionalPostStopMemoryCheck | None | Unset, data)
 
         post_stop_memory_check = _parse_post_stop_memory_check(d.pop("post_stop_memory_check", UNSET))
 
 
-        def _parse_preparation(data: object) -> Union['RolloutPreparation', None, Unset]:
+        def _parse_preparation(data: object) -> None | RolloutPreparation | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -310,9 +312,9 @@ class RunSwitchAssessment:
 
 
                 return preparation_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RolloutPreparation', None, Unset], data)
+            return cast(None | RolloutPreparation | Unset, data)
 
         preparation = _parse_preparation(d.pop("preparation", UNSET))
 

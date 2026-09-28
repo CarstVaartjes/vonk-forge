@@ -34,7 +34,7 @@ NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
 STOP_RESULT = {"stopped": True}
-PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
+PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
     ROOT / "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
@@ -250,9 +250,9 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         if package["name"] == "vonk-forge-public-contracts"
     )
 
-    assert '"vonk-agent-protocol==3.0.0"' in control_project
+    assert '"vonk-agent-protocol==3.0.1"' in control_project
     assert protocol_sources == [
-        {"path": "../inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"}
+        {"path": "../inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl"}
     ]
     assert control_lock["package"][
         next(
@@ -262,7 +262,7 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         )
     ]["wheels"] == [
         {
-            "filename": "vonk_agent_protocol-3.0.0-py3-none-any.whl",
+            "filename": "vonk_agent_protocol-3.0.1-py3-none-any.whl",
             "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
         }
     ]
@@ -283,10 +283,10 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     assert "COPY control/pyproject.toml ./" in dockerfile
     assert "COPY control/src ./src" in dockerfile
     assert (
-        "COPY inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl /wheels/"
+        "COPY inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl /wheels/"
         in dockerfile
     )
-    assert "/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl" in dockerfile
+    assert "/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl" in dockerfile
     assert (
         "python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /agent-protocol"
         not in dockerfile
@@ -313,7 +313,7 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         "!control/src/**",
         "!control/web/**",
         "control/.venv",
-        "!inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl",
+        "!inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl",
         "!inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
     } <= dockerignore
     assert "!agent_protocol/src/**" not in dockerignore
@@ -366,14 +366,14 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     )
 
     assert direct_url["url"].endswith(
-        "/inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
+        "/inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl"
     )
     assert package["source"] == {
-        "path": "../inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
+        "path": "../inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl"
     }
     assert package["wheels"] == [
         {
-            "filename": "vonk_agent_protocol-3.0.0-py3-none-any.whl",
+            "filename": "vonk_agent_protocol-3.0.1-py3-none-any.whl",
             "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
         }
     ]
@@ -449,7 +449,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
     installed = json.loads(result.stdout)
 
     assert installed == {
-        "protocol": "3.0.0",
+        "protocol": "3.0.1",
         "contracts": "0.1.0",
         "model": "ModelDefinition",
         "recipe": "RecipeDefinition",

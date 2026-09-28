@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.run_switch_reconciliation_target_state import check_run_switch_rec
 from ..models.run_switch_reconciliation_target_state import RunSwitchReconciliationTargetState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -35,7 +35,7 @@ class RunSwitchReconciliationTarget:
             rank (int):
             role (str):
             state (RunSwitchReconciliationTargetState):
-            cleanup_receipt_sha256 (Union[None, Unset, str]):
+            cleanup_receipt_sha256 (None | str | Unset):
      """
 
     compiled_spec_canonical_sha256: str
@@ -46,7 +46,7 @@ class RunSwitchReconciliationTarget:
     rank: int
     role: str
     state: RunSwitchReconciliationTargetState
-    cleanup_receipt_sha256: Union[None, Unset, str] = UNSET
+    cleanup_receipt_sha256: None | str | Unset = UNSET
 
 
 
@@ -69,7 +69,7 @@ class RunSwitchReconciliationTarget:
 
         state: str = self.state
 
-        cleanup_receipt_sha256: Union[None, Unset, str]
+        cleanup_receipt_sha256: None | str | Unset
         if isinstance(self.cleanup_receipt_sha256, Unset):
             cleanup_receipt_sha256 = UNSET
         else:
@@ -117,12 +117,12 @@ class RunSwitchReconciliationTarget:
 
 
 
-        def _parse_cleanup_receipt_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_cleanup_receipt_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         cleanup_receipt_sha256 = _parse_cleanup_receipt_sha256(d.pop("cleanup_receipt_sha256", UNSET))
 

@@ -22,7 +22,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self, TypedDict
 
-import httpx
+import httpx2
 from jsonschema import Draft202012Validator, FormatChecker, validators
 from jsonschema.exceptions import SchemaError
 
@@ -505,7 +505,7 @@ def _response_media_contract(
         )
 
 
-def _validate_generated_request(request: httpx.Request) -> None:
+def _validate_generated_request(request: httpx2.Request) -> None:
     parsed_url = urllib.parse.urlsplit(str(request.url))
     route_path = parsed_url.path
     request_media_type = request.headers.get("content-type", "").split(";", 1)[0]
@@ -529,7 +529,7 @@ def _validate_generated_request(request: httpx.Request) -> None:
 
 
 def _validate_generated_response(
-    request: httpx.Request, response: httpx.Response
+    request: httpx2.Request, response: httpx2.Response
 ) -> None:
     parsed_url = urllib.parse.urlsplit(str(request.url))
     route_path = parsed_url.path
@@ -718,12 +718,12 @@ def _read_control_response(
     return status, content, response_headers
 
 
-class _OpenerTransport(httpx.BaseTransport):
+class _OpenerTransport(httpx2.BaseTransport):
     def __init__(self, opener: Callable[..., _OpenedResponse], timeout: float) -> None:
         self._opener = opener
         self._timeout = timeout
 
-    def handle_request(self, request: httpx.Request) -> httpx.Response:
+    def handle_request(self, request: httpx2.Request) -> httpx2.Response:
         outgoing = urllib.request.Request(
             str(request.url),
             data=request.content or None,
@@ -735,21 +735,21 @@ class _OpenerTransport(httpx.BaseTransport):
         )
         if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
-        return httpx.Response(
+        return httpx2.Response(
             status,
             content=content,
-            headers=httpx.Headers(headers.items()),
+            headers=httpx2.Headers(headers.items()),
             request=request,
         )
 
 
-class _RecordingTransport(httpx.BaseTransport):
-    def __init__(self, transport: httpx.BaseTransport) -> None:
+class _RecordingTransport(httpx2.BaseTransport):
+    def __init__(self, transport: httpx2.BaseTransport) -> None:
         self._transport = transport
-        self.request: httpx.Request | None = None
-        self.response: httpx.Response | None = None
+        self.request: httpx2.Request | None = None
+        self.response: httpx2.Response | None = None
 
-    def handle_request(self, request: httpx.Request) -> httpx.Response:
+    def handle_request(self, request: httpx2.Request) -> httpx2.Response:
         self.request = request
         _validate_generated_request(request)
         response = self._transport.handle_request(request)
@@ -805,7 +805,7 @@ class ControlClient:
 
     def _generated_client(
         self,
-        transport: httpx.BaseTransport,
+        transport: httpx2.BaseTransport,
         headers: Mapping[str, str] | None = None,
     ) -> AuthenticatedClient:
         from .generated_control.client import AuthenticatedClient
@@ -814,7 +814,7 @@ class ControlClient:
             base_url=self._base,
             token=self._token,
             headers={"Accept": "application/json", **dict(headers or {})},
-            timeout=httpx.Timeout(self._timeout),
+            timeout=httpx2.Timeout(self._timeout),
             verify_ssl=True,
             follow_redirects=False,
             httpx_args={"transport": transport},

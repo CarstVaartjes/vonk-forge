@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,9 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import cast
+from typing import Literal, cast
 
 
 
@@ -25,23 +26,23 @@ class RecipeRevisionIntent:
     """
         Attributes:
             recipe_revision_id (str):
-            build_input_sha256 (Union[None, Unset, str]):
-            effective_execution_key (Union[None, Unset, str]):
-            force (Union[Unset, bool]):  Default: False.
-            force_download (Union[Unset, bool]):  Default: False.
-            force_rebuild (Union[Unset, bool]):  Default: False.
-            kind (Union[Literal['revision'], Unset]):  Default: 'revision'.
-            model_digest (Union[None, Unset, str]):
+            build_input_sha256 (None | str | Unset):
+            effective_execution_key (None | str | Unset):
+            force (bool | Unset):  Default: False.
+            force_download (bool | Unset):  Default: False.
+            force_rebuild (bool | Unset):  Default: False.
+            kind (Literal['revision'] | Unset):  Default: 'revision'.
+            model_digest (None | str | Unset):
      """
 
     recipe_revision_id: str
-    build_input_sha256: Union[None, Unset, str] = UNSET
-    effective_execution_key: Union[None, Unset, str] = UNSET
-    force: Union[Unset, bool] = False
-    force_download: Union[Unset, bool] = False
-    force_rebuild: Union[Unset, bool] = False
-    kind: Union[Literal['revision'], Unset] = 'revision'
-    model_digest: Union[None, Unset, str] = UNSET
+    build_input_sha256: None | str | Unset = UNSET
+    effective_execution_key: None | str | Unset = UNSET
+    force: bool | Unset = False
+    force_download: bool | Unset = False
+    force_rebuild: bool | Unset = False
+    kind: Literal['revision'] | Unset = 'revision'
+    model_digest: None | str | Unset = UNSET
 
 
 
@@ -50,13 +51,13 @@ class RecipeRevisionIntent:
     def to_dict(self) -> dict[str, Any]:
         recipe_revision_id = self.recipe_revision_id
 
-        build_input_sha256: Union[None, Unset, str]
+        build_input_sha256: None | str | Unset
         if isinstance(self.build_input_sha256, Unset):
             build_input_sha256 = UNSET
         else:
             build_input_sha256 = self.build_input_sha256
 
-        effective_execution_key: Union[None, Unset, str]
+        effective_execution_key: None | str | Unset
         if isinstance(self.effective_execution_key, Unset):
             effective_execution_key = UNSET
         else:
@@ -70,7 +71,7 @@ class RecipeRevisionIntent:
 
         kind = self.kind
 
-        model_digest: Union[None, Unset, str]
+        model_digest: None | str | Unset
         if isinstance(self.model_digest, Unset):
             model_digest = UNSET
         else:
@@ -106,22 +107,22 @@ class RecipeRevisionIntent:
         d = dict(src_dict)
         recipe_revision_id = d.pop("recipe_revision_id")
 
-        def _parse_build_input_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_build_input_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         build_input_sha256 = _parse_build_input_sha256(d.pop("build_input_sha256", UNSET))
 
 
-        def _parse_effective_execution_key(data: object) -> Union[None, Unset, str]:
+        def _parse_effective_execution_key(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         effective_execution_key = _parse_effective_execution_key(d.pop("effective_execution_key", UNSET))
 
@@ -132,16 +133,16 @@ class RecipeRevisionIntent:
 
         force_rebuild = d.pop("force_rebuild", UNSET)
 
-        kind = cast(Union[Literal['revision'], Unset] , d.pop("kind", UNSET))
+        kind = cast(Literal['revision'] | Unset , d.pop("kind", UNSET))
         if kind != 'revision' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'revision', got '{kind}'")
 
-        def _parse_model_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_model_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_digest = _parse_model_digest(d.pop("model_digest", UNSET))
 

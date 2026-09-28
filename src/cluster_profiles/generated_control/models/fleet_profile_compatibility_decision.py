@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,7 +13,6 @@ from ..models.fleet_profile_compatibility_decision_kind import FleetProfileCompa
 from ..models.fleet_profile_compatibility_decision_stage import check_fleet_profile_compatibility_decision_stage
 from ..models.fleet_profile_compatibility_decision_stage import FleetProfileCompatibilityDecisionStage
 from typing import cast
-from typing import cast, Union
 
 if TYPE_CHECKING:
   from ..models.compatibility_identity import CompatibilityIdentity
@@ -28,7 +29,7 @@ T = TypeVar("T", bound="FleetProfileCompatibilityDecision")
 class FleetProfileCompatibilityDecision:
     """
         Attributes:
-            artifact_sha256 (Union[None, str]):
+            artifact_sha256 (None | str):
             compatibility (CompatibilityIdentity): Immutable inputs for an exceptional reusable preparation artifact.
             kind (FleetProfileCompatibilityDecisionKind):
             node_ids (list[str]):
@@ -36,8 +37,8 @@ class FleetProfileCompatibilityDecision:
             stage (FleetProfileCompatibilityDecisionStage):
      """
 
-    artifact_sha256: Union[None, str]
-    compatibility: 'CompatibilityIdentity'
+    artifact_sha256: None | str
+    compatibility: CompatibilityIdentity
     kind: FleetProfileCompatibilityDecisionKind
     node_ids: list[str]
     ready: bool
@@ -48,8 +49,8 @@ class FleetProfileCompatibilityDecision:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.compatibility_identity import CompatibilityIdentity
-        artifact_sha256: Union[None, str]
+        from ..models.compatibility_identity import CompatibilityIdentity # noqa: PLC0415
+        artifact_sha256: None | str
         artifact_sha256 = self.artifact_sha256
 
         compatibility = self.compatibility.to_dict()
@@ -82,12 +83,12 @@ class FleetProfileCompatibilityDecision:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.compatibility_identity import CompatibilityIdentity
+        from ..models.compatibility_identity import CompatibilityIdentity # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_artifact_sha256(data: object) -> Union[None, str]:
+        def _parse_artifact_sha256(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         artifact_sha256 = _parse_artifact_sha256(d.pop("artifact_sha256"))
 

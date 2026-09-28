@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -26,13 +27,13 @@ class RecipeBuildPolicyFinding:
             code (str):
             detail (str):
             path (str):
-            line (Union[None, Unset, int]):
+            line (int | None | Unset):
      """
 
     code: str
     detail: str
     path: str
-    line: Union[None, Unset, int] = UNSET
+    line: int | None | Unset = UNSET
 
 
 
@@ -45,7 +46,7 @@ class RecipeBuildPolicyFinding:
 
         path = self.path
 
-        line: Union[None, Unset, int]
+        line: int | None | Unset
         if isinstance(self.line, Unset):
             line = UNSET
         else:
@@ -75,12 +76,12 @@ class RecipeBuildPolicyFinding:
 
         path = d.pop("path")
 
-        def _parse_line(data: object) -> Union[None, Unset, int]:
+        def _parse_line(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         line = _parse_line(d.pop("line", UNSET))
 

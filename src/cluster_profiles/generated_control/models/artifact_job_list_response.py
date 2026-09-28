@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -23,17 +25,17 @@ T = TypeVar("T", bound="ArtifactJobListResponse")
 class ArtifactJobListResponse:
     """
         Attributes:
-            jobs (list['ArtifactJobResponse']):
+            jobs (list[ArtifactJobResponse]):
      """
 
-    jobs: list['ArtifactJobResponse']
+    jobs: list[ArtifactJobResponse]
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.artifact_job_response import ArtifactJobResponse
+        from ..models.artifact_job_response import ArtifactJobResponse # noqa: PLC0415
         jobs = []
         for jobs_item_data in self.jobs:
             jobs_item = jobs_item_data.to_dict()
@@ -54,7 +56,7 @@ class ArtifactJobListResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.artifact_job_response import ArtifactJobResponse
+        from ..models.artifact_job_response import ArtifactJobResponse # noqa: PLC0415
         d = dict(src_dict)
         jobs = []
         _jobs = d.pop("jobs")

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,13 +12,12 @@ from ..models.cache_removal_review_resource_kind import CacheRemovalReviewResour
 from ..models.cache_removal_review_resource_kind import check_cache_removal_review_resource_kind
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.cache_removal_asset import CacheRemovalAsset
-  from ..models.cache_removal_finding import CacheRemovalFinding
   from ..models.cache_removal_blocker import CacheRemovalBlocker
+  from ..models.cache_removal_finding import CacheRemovalFinding
 
 
 
@@ -31,41 +32,41 @@ class CacheRemovalReview:
     """ A complete review whose digest is verified during model validation.
 
         Attributes:
-            active_work (list['CacheRemovalFinding']):
-            assets (list['CacheRemovalAsset']):
-            blockers (list['CacheRemovalBlocker']):
+            active_work (list[CacheRemovalFinding]):
+            assets (list[CacheRemovalAsset]):
+            blockers (list[CacheRemovalBlocker]):
             observed_at (str):
-            references (list['CacheRemovalFinding']):
+            references (list[CacheRemovalFinding]):
             resource_kind (CacheRemovalReviewResourceKind):
             review_digest (str):
             selector (str):
             target_identity (str):
-            with_model (Union[None, bool]):
-            action (Union[Literal['remove'], Unset]):  Default: 'remove'.
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            with_model (bool | None):
+            action (Literal['remove'] | Unset):  Default: 'remove'.
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    active_work: list['CacheRemovalFinding']
-    assets: list['CacheRemovalAsset']
-    blockers: list['CacheRemovalBlocker']
+    active_work: list[CacheRemovalFinding]
+    assets: list[CacheRemovalAsset]
+    blockers: list[CacheRemovalBlocker]
     observed_at: str
-    references: list['CacheRemovalFinding']
+    references: list[CacheRemovalFinding]
     resource_kind: CacheRemovalReviewResourceKind
     review_digest: str
     selector: str
     target_identity: str
-    with_model: Union[None, bool]
-    action: Union[Literal['remove'], Unset] = 'remove'
-    schema_version: Union[Literal[2], Unset] = 2
+    with_model: bool | None
+    action: Literal['remove'] | Unset = 'remove'
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.cache_removal_asset import CacheRemovalAsset
-        from ..models.cache_removal_finding import CacheRemovalFinding
-        from ..models.cache_removal_blocker import CacheRemovalBlocker
+        from ..models.cache_removal_asset import CacheRemovalAsset # noqa: PLC0415
+        from ..models.cache_removal_blocker import CacheRemovalBlocker # noqa: PLC0415
+        from ..models.cache_removal_finding import CacheRemovalFinding # noqa: PLC0415
         active_work = []
         for active_work_item_data in self.active_work:
             active_work_item = active_work_item_data.to_dict()
@@ -104,7 +105,7 @@ class CacheRemovalReview:
 
         target_identity = self.target_identity
 
-        with_model: Union[None, bool]
+        with_model: bool | None
         with_model = self.with_model
 
         action = self.action
@@ -137,9 +138,9 @@ class CacheRemovalReview:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.cache_removal_asset import CacheRemovalAsset
-        from ..models.cache_removal_finding import CacheRemovalFinding
-        from ..models.cache_removal_blocker import CacheRemovalBlocker
+        from ..models.cache_removal_asset import CacheRemovalAsset # noqa: PLC0415
+        from ..models.cache_removal_blocker import CacheRemovalBlocker # noqa: PLC0415
+        from ..models.cache_removal_finding import CacheRemovalFinding # noqa: PLC0415
         d = dict(src_dict)
         active_work = []
         _active_work = d.pop("active_work")
@@ -194,19 +195,19 @@ class CacheRemovalReview:
 
         target_identity = d.pop("target_identity")
 
-        def _parse_with_model(data: object) -> Union[None, bool]:
+        def _parse_with_model(data: object) -> bool | None:
             if data is None:
                 return data
-            return cast(Union[None, bool], data)
+            return cast(bool | None, data)
 
         with_model = _parse_with_model(d.pop("with_model"))
 
 
-        action = cast(Union[Literal['remove'], Unset] , d.pop("action", UNSET))
+        action = cast(Literal['remove'] | Unset , d.pop("action", UNSET))
         if action != 'remove' and not isinstance(action, Unset):
             raise ValueError(f"action must match const 'remove', got '{action}'")
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

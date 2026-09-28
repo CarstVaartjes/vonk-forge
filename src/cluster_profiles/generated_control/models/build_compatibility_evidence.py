@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.build_compatibility_evidence_state import BuildCompatibilityEviden
 from ..models.build_compatibility_evidence_state import check_build_compatibility_evidence_state
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -28,16 +28,16 @@ class BuildCompatibilityEvidence:
         Attributes:
             expected_architecture (str):
             state (BuildCompatibilityEvidenceState):
-            detail (Union[None, Unset, str]):
-            evidence_digest (Union[None, Unset, str]):
-            observed_architecture (Union[None, Unset, str]):
+            detail (None | str | Unset):
+            evidence_digest (None | str | Unset):
+            observed_architecture (None | str | Unset):
      """
 
     expected_architecture: str
     state: BuildCompatibilityEvidenceState
-    detail: Union[None, Unset, str] = UNSET
-    evidence_digest: Union[None, Unset, str] = UNSET
-    observed_architecture: Union[None, Unset, str] = UNSET
+    detail: None | str | Unset = UNSET
+    evidence_digest: None | str | Unset = UNSET
+    observed_architecture: None | str | Unset = UNSET
 
 
 
@@ -48,19 +48,19 @@ class BuildCompatibilityEvidence:
 
         state: str = self.state
 
-        detail: Union[None, Unset, str]
+        detail: None | str | Unset
         if isinstance(self.detail, Unset):
             detail = UNSET
         else:
             detail = self.detail
 
-        evidence_digest: Union[None, Unset, str]
+        evidence_digest: None | str | Unset
         if isinstance(self.evidence_digest, Unset):
             evidence_digest = UNSET
         else:
             evidence_digest = self.evidence_digest
 
-        observed_architecture: Union[None, Unset, str]
+        observed_architecture: None | str | Unset
         if isinstance(self.observed_architecture, Unset):
             observed_architecture = UNSET
         else:
@@ -94,32 +94,32 @@ class BuildCompatibilityEvidence:
 
 
 
-        def _parse_detail(data: object) -> Union[None, Unset, str]:
+        def _parse_detail(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         detail = _parse_detail(d.pop("detail", UNSET))
 
 
-        def _parse_evidence_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_evidence_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         evidence_digest = _parse_evidence_digest(d.pop("evidence_digest", UNSET))
 
 
-        def _parse_observed_architecture(data: object) -> Union[None, Unset, str]:
+        def _parse_observed_architecture(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         observed_architecture = _parse_observed_architecture(d.pop("observed_architecture", UNSET))
 

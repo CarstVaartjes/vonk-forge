@@ -299,7 +299,7 @@ fn derive_trivial_defaults(items: &mut Vec<Item>) {
     let mut derived = Vec::new();
     items.retain(|item| {
         let Item::Impl(item) = item else { return true };
-        let Some((_, trait_path, _)) = &item.trait_ else {
+        let Some((trait_path, _)) = &item.trait_ else {
             return true;
         };
         if trait_path.segments.last().unwrap().ident != "Default" {

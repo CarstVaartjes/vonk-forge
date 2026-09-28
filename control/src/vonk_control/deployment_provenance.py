@@ -344,6 +344,8 @@ class DeploymentProvenanceService:
                         if isinstance(operation.payload, Mapping)
                         else None
                     )
+                    if not isinstance(raw_run_id, str):
+                        raw_run_id = None
                     invalid_start_document(
                         operation, "payload", error, run_id=raw_run_id
                     )

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,10 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
+from typing import cast
 from typing import Literal, cast
-from typing import Literal, Union, cast
-from typing import Union
 
 
 
@@ -33,8 +33,8 @@ class RunNodePayload:
             role (str):
             run_id (str):
             state (str):
-            observed_memory_bytes (Union[None, Unset, int]):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            observed_memory_bytes (int | None | Unset):
+            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     entity_id: str
@@ -45,8 +45,8 @@ class RunNodePayload:
     role: str
     run_id: str
     state: str
-    observed_memory_bytes: Union[None, Unset, int] = UNSET
-    schema_version: Union[Literal[1], Unset] = 1
+    observed_memory_bytes: int | None | Unset = UNSET
+    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -69,7 +69,7 @@ class RunNodePayload:
 
         state = self.state
 
-        observed_memory_bytes: Union[None, Unset, int]
+        observed_memory_bytes: int | None | Unset
         if isinstance(self.observed_memory_bytes, Unset):
             observed_memory_bytes = UNSET
         else:
@@ -120,17 +120,17 @@ class RunNodePayload:
 
         state = d.pop("state")
 
-        def _parse_observed_memory_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_observed_memory_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         observed_memory_bytes = _parse_observed_memory_bytes(d.pop("observed_memory_bytes", UNSET))
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 

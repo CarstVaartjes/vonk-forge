@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 WorkloadProvenanceRankAgreement = Literal['match', 'mismatch', 'unknown']
 
@@ -6,5 +6,5 @@ WORKLOAD_PROVENANCE_RANK_AGREEMENT_VALUES: set[WorkloadProvenanceRankAgreement] 
 
 def check_workload_provenance_rank_agreement(value: str) -> WorkloadProvenanceRankAgreement:
     if value in WORKLOAD_PROVENANCE_RANK_AGREEMENT_VALUES:
-        return cast(WorkloadProvenanceRankAgreement, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {WORKLOAD_PROVENANCE_RANK_AGREEMENT_VALUES!r}")

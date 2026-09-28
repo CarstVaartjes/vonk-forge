@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,9 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import cast
+from typing import Literal, cast
 
 
 
@@ -25,15 +26,15 @@ class NodeProfilePayload:
     """
         Attributes:
             node_id (str):
-            display_name_changed (Union[None, Unset, bool]):
-            profile_changed (Union[None, Unset, bool]):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            display_name_changed (bool | None | Unset):
+            profile_changed (bool | None | Unset):
+            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     node_id: str
-    display_name_changed: Union[None, Unset, bool] = UNSET
-    profile_changed: Union[None, Unset, bool] = UNSET
-    schema_version: Union[Literal[1], Unset] = 1
+    display_name_changed: bool | None | Unset = UNSET
+    profile_changed: bool | None | Unset = UNSET
+    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -42,13 +43,13 @@ class NodeProfilePayload:
     def to_dict(self) -> dict[str, Any]:
         node_id = self.node_id
 
-        display_name_changed: Union[None, Unset, bool]
+        display_name_changed: bool | None | Unset
         if isinstance(self.display_name_changed, Unset):
             display_name_changed = UNSET
         else:
             display_name_changed = self.display_name_changed
 
-        profile_changed: Union[None, Unset, bool]
+        profile_changed: bool | None | Unset
         if isinstance(self.profile_changed, Unset):
             profile_changed = UNSET
         else:
@@ -78,27 +79,27 @@ class NodeProfilePayload:
         d = dict(src_dict)
         node_id = d.pop("node_id")
 
-        def _parse_display_name_changed(data: object) -> Union[None, Unset, bool]:
+        def _parse_display_name_changed(data: object) -> bool | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, bool], data)
+            return cast(bool | None | Unset, data)
 
         display_name_changed = _parse_display_name_changed(d.pop("display_name_changed", UNSET))
 
 
-        def _parse_profile_changed(data: object) -> Union[None, Unset, bool]:
+        def _parse_profile_changed(data: object) -> bool | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, bool], data)
+            return cast(bool | None | Unset, data)
 
         profile_changed = _parse_profile_changed(d.pop("profile_changed", UNSET))
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 

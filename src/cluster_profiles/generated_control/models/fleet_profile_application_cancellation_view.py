@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,10 +13,7 @@ from ..models.fleet_profile_application_cancellation_view_cause import FleetProf
 from ..models.fleet_profile_application_cancellation_view_state import check_fleet_profile_application_cancellation_view_state
 from ..models.fleet_profile_application_cancellation_view_state import FleetProfileApplicationCancellationViewState
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 if TYPE_CHECKING:
@@ -34,36 +33,36 @@ class FleetProfileApplicationCancellationView:
 
         Attributes:
             actor (str):
-            cancelled_effects (list['FleetProfileApplicationEffect']):
+            cancelled_effects (list[FleetProfileApplicationEffect]):
             cause (FleetProfileApplicationCancellationViewCause):
-            completed_effects (list['FleetProfileApplicationEffect']):
-            pending_effects (list['FleetProfileApplicationEffect']):
+            completed_effects (list[FleetProfileApplicationEffect]):
+            pending_effects (list[FleetProfileApplicationEffect]):
             request_key (str):
             requested_at (datetime.datetime):
             state (FleetProfileApplicationCancellationViewState):
-            deadline_at (Union[None, Unset, datetime.datetime]):
-            dependency (Union[None, Unset, str]):
-            owner (Union[None, Unset, str]):
+            deadline_at (datetime.datetime | None | Unset):
+            dependency (None | str | Unset):
+            owner (None | str | Unset):
      """
 
     actor: str
-    cancelled_effects: list['FleetProfileApplicationEffect']
+    cancelled_effects: list[FleetProfileApplicationEffect]
     cause: FleetProfileApplicationCancellationViewCause
-    completed_effects: list['FleetProfileApplicationEffect']
-    pending_effects: list['FleetProfileApplicationEffect']
+    completed_effects: list[FleetProfileApplicationEffect]
+    pending_effects: list[FleetProfileApplicationEffect]
     request_key: str
     requested_at: datetime.datetime
     state: FleetProfileApplicationCancellationViewState
-    deadline_at: Union[None, Unset, datetime.datetime] = UNSET
-    dependency: Union[None, Unset, str] = UNSET
-    owner: Union[None, Unset, str] = UNSET
+    deadline_at: datetime.datetime | None | Unset = UNSET
+    dependency: None | str | Unset = UNSET
+    owner: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_application_effect import FleetProfileApplicationEffect
+        from ..models.fleet_profile_application_effect import FleetProfileApplicationEffect # noqa: PLC0415
         actor = self.actor
 
         cancelled_effects = []
@@ -95,7 +94,7 @@ class FleetProfileApplicationCancellationView:
 
         state: str = self.state
 
-        deadline_at: Union[None, Unset, str]
+        deadline_at: None | str | Unset
         if isinstance(self.deadline_at, Unset):
             deadline_at = UNSET
         elif isinstance(self.deadline_at, datetime.datetime):
@@ -103,13 +102,13 @@ class FleetProfileApplicationCancellationView:
         else:
             deadline_at = self.deadline_at
 
-        dependency: Union[None, Unset, str]
+        dependency: None | str | Unset
         if isinstance(self.dependency, Unset):
             dependency = UNSET
         else:
             dependency = self.dependency
 
-        owner: Union[None, Unset, str]
+        owner: None | str | Unset
         if isinstance(self.owner, Unset):
             owner = UNSET
         else:
@@ -141,7 +140,7 @@ class FleetProfileApplicationCancellationView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_application_effect import FleetProfileApplicationEffect
+        from ..models.fleet_profile_application_effect import FleetProfileApplicationEffect # noqa: PLC0415
         d = dict(src_dict)
         actor = d.pop("actor")
 
@@ -182,7 +181,7 @@ class FleetProfileApplicationCancellationView:
 
         request_key = d.pop("request_key")
 
-        requested_at = isoparse(d.pop("requested_at"))
+        requested_at = datetime.datetime.fromisoformat(d.pop("requested_at"))
 
 
 
@@ -192,7 +191,7 @@ class FleetProfileApplicationCancellationView:
 
 
 
-        def _parse_deadline_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_deadline_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -200,34 +199,34 @@ class FleetProfileApplicationCancellationView:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                deadline_at_type_0 = isoparse(data)
+                deadline_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return deadline_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         deadline_at = _parse_deadline_at(d.pop("deadline_at", UNSET))
 
 
-        def _parse_dependency(data: object) -> Union[None, Unset, str]:
+        def _parse_dependency(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         dependency = _parse_dependency(d.pop("dependency", UNSET))
 
 
-        def _parse_owner(data: object) -> Union[None, Unset, str]:
+        def _parse_owner(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         owner = _parse_owner(d.pop("owner", UNSET))
 

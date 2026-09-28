@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -26,16 +27,16 @@ class OperationFailureEvidence:
         Attributes:
             error_code (str):
             summary (str):
-            detail (Union[None, Unset, str]):
-            retryable (Union[Unset, bool]):  Default: False.
-            uncertain (Union[Unset, bool]):  Default: False.
+            detail (None | str | Unset):
+            retryable (bool | Unset):  Default: False.
+            uncertain (bool | Unset):  Default: False.
      """
 
     error_code: str
     summary: str
-    detail: Union[None, Unset, str] = UNSET
-    retryable: Union[Unset, bool] = False
-    uncertain: Union[Unset, bool] = False
+    detail: None | str | Unset = UNSET
+    retryable: bool | Unset = False
+    uncertain: bool | Unset = False
 
 
 
@@ -46,7 +47,7 @@ class OperationFailureEvidence:
 
         summary = self.summary
 
-        detail: Union[None, Unset, str]
+        detail: None | str | Unset
         if isinstance(self.detail, Unset):
             detail = UNSET
         else:
@@ -81,12 +82,12 @@ class OperationFailureEvidence:
 
         summary = d.pop("summary")
 
-        def _parse_detail(data: object) -> Union[None, Unset, str]:
+        def _parse_detail(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         detail = _parse_detail(d.pop("detail", UNSET))
 

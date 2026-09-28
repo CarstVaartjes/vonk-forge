@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,7 +12,6 @@ from ..models.preparation_reason_severity import check_preparation_reason_severi
 from ..models.preparation_reason_severity import PreparationReasonSeverity
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Union
 
 
 
@@ -28,13 +29,13 @@ class PreparationReason:
             code (str):
             detail (str):
             severity (PreparationReasonSeverity):
-            node_ids (Union[Unset, list[str]]):
+            node_ids (list[str] | Unset):
      """
 
     code: str
     detail: str
     severity: PreparationReasonSeverity
-    node_ids: Union[Unset, list[str]] = UNSET
+    node_ids: list[str] | Unset = UNSET
 
 
 
@@ -47,7 +48,7 @@ class PreparationReason:
 
         severity: str = self.severity
 
-        node_ids: Union[Unset, list[str]] = UNSET
+        node_ids: list[str] | Unset = UNSET
         if not isinstance(self.node_ids, Unset):
             node_ids = self.node_ids
 

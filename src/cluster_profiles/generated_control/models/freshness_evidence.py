@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,10 +11,7 @@ from ..types import UNSET, Unset
 from ..models.freshness_evidence_state import check_freshness_evidence_state
 from ..models.freshness_evidence_state import FreshnessEvidenceState
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
@@ -30,18 +29,18 @@ class FreshnessEvidence:
         Attributes:
             source (str):
             state (FreshnessEvidenceState):
-            age_seconds (Union[None, Unset, float]):
-            evidence_digest (Union[None, Unset, str]):
-            maximum_age_seconds (Union[None, Unset, int]):
-            observed_at (Union[None, Unset, datetime.datetime]):
+            age_seconds (float | None | Unset):
+            evidence_digest (None | str | Unset):
+            maximum_age_seconds (int | None | Unset):
+            observed_at (datetime.datetime | None | Unset):
      """
 
     source: str
     state: FreshnessEvidenceState
-    age_seconds: Union[None, Unset, float] = UNSET
-    evidence_digest: Union[None, Unset, str] = UNSET
-    maximum_age_seconds: Union[None, Unset, int] = UNSET
-    observed_at: Union[None, Unset, datetime.datetime] = UNSET
+    age_seconds: float | None | Unset = UNSET
+    evidence_digest: None | str | Unset = UNSET
+    maximum_age_seconds: int | None | Unset = UNSET
+    observed_at: datetime.datetime | None | Unset = UNSET
 
 
 
@@ -52,25 +51,25 @@ class FreshnessEvidence:
 
         state: str = self.state
 
-        age_seconds: Union[None, Unset, float]
+        age_seconds: float | None | Unset
         if isinstance(self.age_seconds, Unset):
             age_seconds = UNSET
         else:
             age_seconds = self.age_seconds
 
-        evidence_digest: Union[None, Unset, str]
+        evidence_digest: None | str | Unset
         if isinstance(self.evidence_digest, Unset):
             evidence_digest = UNSET
         else:
             evidence_digest = self.evidence_digest
 
-        maximum_age_seconds: Union[None, Unset, int]
+        maximum_age_seconds: int | None | Unset
         if isinstance(self.maximum_age_seconds, Unset):
             maximum_age_seconds = UNSET
         else:
             maximum_age_seconds = self.maximum_age_seconds
 
-        observed_at: Union[None, Unset, str]
+        observed_at: None | str | Unset
         if isinstance(self.observed_at, Unset):
             observed_at = UNSET
         elif isinstance(self.observed_at, datetime.datetime):
@@ -108,37 +107,37 @@ class FreshnessEvidence:
 
 
 
-        def _parse_age_seconds(data: object) -> Union[None, Unset, float]:
+        def _parse_age_seconds(data: object) -> float | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, float], data)
+            return cast(float | None | Unset, data)
 
         age_seconds = _parse_age_seconds(d.pop("age_seconds", UNSET))
 
 
-        def _parse_evidence_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_evidence_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         evidence_digest = _parse_evidence_digest(d.pop("evidence_digest", UNSET))
 
 
-        def _parse_maximum_age_seconds(data: object) -> Union[None, Unset, int]:
+        def _parse_maximum_age_seconds(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         maximum_age_seconds = _parse_maximum_age_seconds(d.pop("maximum_age_seconds", UNSET))
 
 
-        def _parse_observed_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_observed_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -146,14 +145,14 @@ class FreshnessEvidence:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                observed_at_type_0 = isoparse(data)
+                observed_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return observed_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         observed_at = _parse_observed_at(d.pop("observed_at", UNSET))
 

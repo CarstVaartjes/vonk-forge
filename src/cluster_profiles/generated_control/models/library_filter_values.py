@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.library_filter_values_sort_type_0 import check_library_filter_valu
 from ..models.library_filter_values_sort_type_0 import LibraryFilterValuesSortType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -31,105 +31,105 @@ class LibraryFilterValues:
     that applied no filter stays valid without inventing values.
 
         Attributes:
-            alignment (Union[Unset, list[str]]):
-            all_models (Union[None, Unset, bool]):
-            family (Union[Unset, list[str]]):
-            fits_fleet (Union[None, Unset, bool]):
-            local_only (Union[None, Unset, bool]):
-            model (Union[Unset, list[str]]):
-            publisher (Union[Unset, list[str]]):
-            quantization (Union[Unset, list[str]]):
-            ready (Union[None, Unset, bool]):
-            search (Union[None, Unset, str]):
-            sort (Union[LibraryFilterValuesSortType0, None, Unset]):
-            sparks (Union[Unset, list[int]]):
-            updated_since (Union[None, Unset, str]):
-            usage (Union[Unset, list[str]]):
-            version (Union[Unset, list[str]]):
+            alignment (list[str] | Unset):
+            all_models (bool | None | Unset):
+            family (list[str] | Unset):
+            fits_fleet (bool | None | Unset):
+            local_only (bool | None | Unset):
+            model (list[str] | Unset):
+            publisher (list[str] | Unset):
+            quantization (list[str] | Unset):
+            ready (bool | None | Unset):
+            search (None | str | Unset):
+            sort (LibraryFilterValuesSortType0 | None | Unset):
+            sparks (list[int] | Unset):
+            updated_since (None | str | Unset):
+            usage (list[str] | Unset):
+            version (list[str] | Unset):
      """
 
-    alignment: Union[Unset, list[str]] = UNSET
-    all_models: Union[None, Unset, bool] = UNSET
-    family: Union[Unset, list[str]] = UNSET
-    fits_fleet: Union[None, Unset, bool] = UNSET
-    local_only: Union[None, Unset, bool] = UNSET
-    model: Union[Unset, list[str]] = UNSET
-    publisher: Union[Unset, list[str]] = UNSET
-    quantization: Union[Unset, list[str]] = UNSET
-    ready: Union[None, Unset, bool] = UNSET
-    search: Union[None, Unset, str] = UNSET
-    sort: Union[LibraryFilterValuesSortType0, None, Unset] = UNSET
-    sparks: Union[Unset, list[int]] = UNSET
-    updated_since: Union[None, Unset, str] = UNSET
-    usage: Union[Unset, list[str]] = UNSET
-    version: Union[Unset, list[str]] = UNSET
+    alignment: list[str] | Unset = UNSET
+    all_models: bool | None | Unset = UNSET
+    family: list[str] | Unset = UNSET
+    fits_fleet: bool | None | Unset = UNSET
+    local_only: bool | None | Unset = UNSET
+    model: list[str] | Unset = UNSET
+    publisher: list[str] | Unset = UNSET
+    quantization: list[str] | Unset = UNSET
+    ready: bool | None | Unset = UNSET
+    search: None | str | Unset = UNSET
+    sort: LibraryFilterValuesSortType0 | None | Unset = UNSET
+    sparks: list[int] | Unset = UNSET
+    updated_since: None | str | Unset = UNSET
+    usage: list[str] | Unset = UNSET
+    version: list[str] | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        alignment: Union[Unset, list[str]] = UNSET
+        alignment: list[str] | Unset = UNSET
         if not isinstance(self.alignment, Unset):
             alignment = self.alignment
 
 
 
-        all_models: Union[None, Unset, bool]
+        all_models: bool | None | Unset
         if isinstance(self.all_models, Unset):
             all_models = UNSET
         else:
             all_models = self.all_models
 
-        family: Union[Unset, list[str]] = UNSET
+        family: list[str] | Unset = UNSET
         if not isinstance(self.family, Unset):
             family = self.family
 
 
 
-        fits_fleet: Union[None, Unset, bool]
+        fits_fleet: bool | None | Unset
         if isinstance(self.fits_fleet, Unset):
             fits_fleet = UNSET
         else:
             fits_fleet = self.fits_fleet
 
-        local_only: Union[None, Unset, bool]
+        local_only: bool | None | Unset
         if isinstance(self.local_only, Unset):
             local_only = UNSET
         else:
             local_only = self.local_only
 
-        model: Union[Unset, list[str]] = UNSET
+        model: list[str] | Unset = UNSET
         if not isinstance(self.model, Unset):
             model = self.model
 
 
 
-        publisher: Union[Unset, list[str]] = UNSET
+        publisher: list[str] | Unset = UNSET
         if not isinstance(self.publisher, Unset):
             publisher = self.publisher
 
 
 
-        quantization: Union[Unset, list[str]] = UNSET
+        quantization: list[str] | Unset = UNSET
         if not isinstance(self.quantization, Unset):
             quantization = self.quantization
 
 
 
-        ready: Union[None, Unset, bool]
+        ready: bool | None | Unset
         if isinstance(self.ready, Unset):
             ready = UNSET
         else:
             ready = self.ready
 
-        search: Union[None, Unset, str]
+        search: None | str | Unset
         if isinstance(self.search, Unset):
             search = UNSET
         else:
             search = self.search
 
-        sort: Union[None, Unset, str]
+        sort: None | str | Unset
         if isinstance(self.sort, Unset):
             sort = UNSET
         elif isinstance(self.sort, str):
@@ -137,25 +137,25 @@ class LibraryFilterValues:
         else:
             sort = self.sort
 
-        sparks: Union[Unset, list[int]] = UNSET
+        sparks: list[int] | Unset = UNSET
         if not isinstance(self.sparks, Unset):
             sparks = self.sparks
 
 
 
-        updated_since: Union[None, Unset, str]
+        updated_since: None | str | Unset
         if isinstance(self.updated_since, Unset):
             updated_since = UNSET
         else:
             updated_since = self.updated_since
 
-        usage: Union[Unset, list[str]] = UNSET
+        usage: list[str] | Unset = UNSET
         if not isinstance(self.usage, Unset):
             usage = self.usage
 
 
 
-        version: Union[Unset, list[str]] = UNSET
+        version: list[str] | Unset = UNSET
         if not isinstance(self.version, Unset):
             version = self.version
 
@@ -207,12 +207,12 @@ class LibraryFilterValues:
         alignment = cast(list[str], d.pop("alignment", UNSET))
 
 
-        def _parse_all_models(data: object) -> Union[None, Unset, bool]:
+        def _parse_all_models(data: object) -> bool | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, bool], data)
+            return cast(bool | None | Unset, data)
 
         all_models = _parse_all_models(d.pop("all_models", UNSET))
 
@@ -220,22 +220,22 @@ class LibraryFilterValues:
         family = cast(list[str], d.pop("family", UNSET))
 
 
-        def _parse_fits_fleet(data: object) -> Union[None, Unset, bool]:
+        def _parse_fits_fleet(data: object) -> bool | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, bool], data)
+            return cast(bool | None | Unset, data)
 
         fits_fleet = _parse_fits_fleet(d.pop("fits_fleet", UNSET))
 
 
-        def _parse_local_only(data: object) -> Union[None, Unset, bool]:
+        def _parse_local_only(data: object) -> bool | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, bool], data)
+            return cast(bool | None | Unset, data)
 
         local_only = _parse_local_only(d.pop("local_only", UNSET))
 
@@ -249,27 +249,27 @@ class LibraryFilterValues:
         quantization = cast(list[str], d.pop("quantization", UNSET))
 
 
-        def _parse_ready(data: object) -> Union[None, Unset, bool]:
+        def _parse_ready(data: object) -> bool | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, bool], data)
+            return cast(bool | None | Unset, data)
 
         ready = _parse_ready(d.pop("ready", UNSET))
 
 
-        def _parse_search(data: object) -> Union[None, Unset, str]:
+        def _parse_search(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         search = _parse_search(d.pop("search", UNSET))
 
 
-        def _parse_sort(data: object) -> Union[LibraryFilterValuesSortType0, None, Unset]:
+        def _parse_sort(data: object) -> LibraryFilterValuesSortType0 | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -282,9 +282,9 @@ class LibraryFilterValues:
 
 
                 return sort_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[LibraryFilterValuesSortType0, None, Unset], data)
+            return cast(LibraryFilterValuesSortType0 | None | Unset, data)
 
         sort = _parse_sort(d.pop("sort", UNSET))
 
@@ -292,12 +292,12 @@ class LibraryFilterValues:
         sparks = cast(list[int], d.pop("sparks", UNSET))
 
 
-        def _parse_updated_since(data: object) -> Union[None, Unset, str]:
+        def _parse_updated_since(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         updated_since = _parse_updated_since(d.pop("updated_since", UNSET))
 

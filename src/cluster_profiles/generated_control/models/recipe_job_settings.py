@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_integer_setting import RecipeIntegerSetting
@@ -29,24 +29,24 @@ class RecipeJobSettings:
     """
         Attributes:
             kind (Literal['job']):
-            concurrency (Union['RecipeIntegerSetting', None, Unset]):
-            knobs (Union[Unset, RecipeJobSettingsKnobs]):
+            concurrency (None | RecipeIntegerSetting | Unset):
+            knobs (RecipeJobSettingsKnobs | Unset):
      """
 
     kind: Literal['job']
-    concurrency: Union['RecipeIntegerSetting', None, Unset] = UNSET
-    knobs: Union[Unset, 'RecipeJobSettingsKnobs'] = UNSET
+    concurrency: None | RecipeIntegerSetting | Unset = UNSET
+    knobs: RecipeJobSettingsKnobs | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_integer_setting import RecipeIntegerSetting
-        from ..models.recipe_job_settings_knobs import RecipeJobSettingsKnobs
+        from ..models.recipe_integer_setting import RecipeIntegerSetting # noqa: PLC0415
+        from ..models.recipe_job_settings_knobs import RecipeJobSettingsKnobs # noqa: PLC0415
         kind = self.kind
 
-        concurrency: Union[None, Unset, dict[str, Any]]
+        concurrency: dict[str, Any] | None | Unset
         if isinstance(self.concurrency, Unset):
             concurrency = UNSET
         elif isinstance(self.concurrency, RecipeIntegerSetting):
@@ -54,7 +54,7 @@ class RecipeJobSettings:
         else:
             concurrency = self.concurrency
 
-        knobs: Union[Unset, dict[str, Any]] = UNSET
+        knobs: dict[str, Any] | Unset = UNSET
         if not isinstance(self.knobs, Unset):
             knobs = self.knobs.to_dict()
 
@@ -75,14 +75,14 @@ class RecipeJobSettings:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_integer_setting import RecipeIntegerSetting
-        from ..models.recipe_job_settings_knobs import RecipeJobSettingsKnobs
+        from ..models.recipe_integer_setting import RecipeIntegerSetting # noqa: PLC0415
+        from ..models.recipe_job_settings_knobs import RecipeJobSettingsKnobs # noqa: PLC0415
         d = dict(src_dict)
         kind = cast(Literal['job'] , d.pop("kind"))
         if kind != 'job':
             raise ValueError(f"kind must match const 'job', got '{kind}'")
 
-        def _parse_concurrency(data: object) -> Union['RecipeIntegerSetting', None, Unset]:
+        def _parse_concurrency(data: object) -> None | RecipeIntegerSetting | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -95,15 +95,15 @@ class RecipeJobSettings:
 
 
                 return concurrency_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeIntegerSetting', None, Unset], data)
+            return cast(None | RecipeIntegerSetting | Unset, data)
 
         concurrency = _parse_concurrency(d.pop("concurrency", UNSET))
 
 
         _knobs = d.pop("knobs", UNSET)
-        knobs: Union[Unset, RecipeJobSettingsKnobs]
+        knobs: RecipeJobSettingsKnobs | Unset
         if isinstance(_knobs,  Unset):
             knobs = UNSET
         else:

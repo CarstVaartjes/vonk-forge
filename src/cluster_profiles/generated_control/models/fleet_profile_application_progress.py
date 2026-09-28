@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,17 +9,14 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 import datetime
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
-  from ..models.fleet_profile_child_progress import FleetProfileChildProgress
   from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
+  from ..models.fleet_profile_child_progress import FleetProfileChildProgress
   from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
   from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
 
@@ -34,58 +33,58 @@ class FleetProfileApplicationProgress:
     """ Typed progress tree persisted with every profile application.
 
         Attributes:
-            admission_attempt (Union[Unset, int]):  Default: 0.
-            admission_pending (Union[Unset, bool]):  Default: False.
-            admission_retry_at (Union[None, Unset, datetime.datetime]):
-            attempt (Union[Unset, int]):  Default: 1.
-            cancellation (Union['FleetProfileApplicationCancellationIntent', None, Unset]):
-            child_progress (Union['FleetProfileChildProgress', None, Unset]):
-            child_source (Union[Literal['switch-adapter'], None, Unset]):
-            completed_steps (Union[Unset, int]):  Default: 0.
-            current_label (Union[None, Unset, str]):
-            intended_profile (Union['FleetProfileIntendedConfiguration', None, Unset]):
-            operation_kind (Union[Literal['fleet-profile.apply'], None, Unset]):
-            retry_due_at (Union[None, Unset, datetime.datetime]):
-            retry_of_application_id (Union[None, Unset, str]):
-            step_results (Union[Unset, FleetProfileApplicationProgressStepResults]):
-            switch_adapter (Union['FleetProfileSwitchAdapterState', None, Unset]):
-            total_steps (Union[Unset, int]):  Default: 0.
-            workload_intent_ordinal (Union[None, Unset, int]):
+            admission_attempt (int | Unset):  Default: 0.
+            admission_pending (bool | Unset):  Default: False.
+            admission_retry_at (datetime.datetime | None | Unset):
+            attempt (int | Unset):  Default: 1.
+            cancellation (FleetProfileApplicationCancellationIntent | None | Unset):
+            child_progress (FleetProfileChildProgress | None | Unset):
+            child_source (Literal['switch-adapter'] | None | Unset):
+            completed_steps (int | Unset):  Default: 0.
+            current_label (None | str | Unset):
+            intended_profile (FleetProfileIntendedConfiguration | None | Unset):
+            operation_kind (Literal['fleet-profile.apply'] | None | Unset):
+            retry_due_at (datetime.datetime | None | Unset):
+            retry_of_application_id (None | str | Unset):
+            step_results (FleetProfileApplicationProgressStepResults | Unset):
+            switch_adapter (FleetProfileSwitchAdapterState | None | Unset):
+            total_steps (int | Unset):  Default: 0.
+            workload_intent_ordinal (int | None | Unset):
      """
 
-    admission_attempt: Union[Unset, int] = 0
-    admission_pending: Union[Unset, bool] = False
-    admission_retry_at: Union[None, Unset, datetime.datetime] = UNSET
-    attempt: Union[Unset, int] = 1
-    cancellation: Union['FleetProfileApplicationCancellationIntent', None, Unset] = UNSET
-    child_progress: Union['FleetProfileChildProgress', None, Unset] = UNSET
-    child_source: Union[Literal['switch-adapter'], None, Unset] = UNSET
-    completed_steps: Union[Unset, int] = 0
-    current_label: Union[None, Unset, str] = UNSET
-    intended_profile: Union['FleetProfileIntendedConfiguration', None, Unset] = UNSET
-    operation_kind: Union[Literal['fleet-profile.apply'], None, Unset] = UNSET
-    retry_due_at: Union[None, Unset, datetime.datetime] = UNSET
-    retry_of_application_id: Union[None, Unset, str] = UNSET
-    step_results: Union[Unset, 'FleetProfileApplicationProgressStepResults'] = UNSET
-    switch_adapter: Union['FleetProfileSwitchAdapterState', None, Unset] = UNSET
-    total_steps: Union[Unset, int] = 0
-    workload_intent_ordinal: Union[None, Unset, int] = UNSET
+    admission_attempt: int | Unset = 0
+    admission_pending: bool | Unset = False
+    admission_retry_at: datetime.datetime | None | Unset = UNSET
+    attempt: int | Unset = 1
+    cancellation: FleetProfileApplicationCancellationIntent | None | Unset = UNSET
+    child_progress: FleetProfileChildProgress | None | Unset = UNSET
+    child_source: Literal['switch-adapter'] | None | Unset = UNSET
+    completed_steps: int | Unset = 0
+    current_label: None | str | Unset = UNSET
+    intended_profile: FleetProfileIntendedConfiguration | None | Unset = UNSET
+    operation_kind: Literal['fleet-profile.apply'] | None | Unset = UNSET
+    retry_due_at: datetime.datetime | None | Unset = UNSET
+    retry_of_application_id: None | str | Unset = UNSET
+    step_results: FleetProfileApplicationProgressStepResults | Unset = UNSET
+    switch_adapter: FleetProfileSwitchAdapterState | None | Unset = UNSET
+    total_steps: int | Unset = 0
+    workload_intent_ordinal: int | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
-        from ..models.fleet_profile_child_progress import FleetProfileChildProgress
-        from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
-        from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
-        from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
+        from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent # noqa: PLC0415
+        from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults # noqa: PLC0415
+        from ..models.fleet_profile_child_progress import FleetProfileChildProgress # noqa: PLC0415
+        from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration # noqa: PLC0415
+        from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState # noqa: PLC0415
         admission_attempt = self.admission_attempt
 
         admission_pending = self.admission_pending
 
-        admission_retry_at: Union[None, Unset, str]
+        admission_retry_at: None | str | Unset
         if isinstance(self.admission_retry_at, Unset):
             admission_retry_at = UNSET
         elif isinstance(self.admission_retry_at, datetime.datetime):
@@ -95,7 +94,7 @@ class FleetProfileApplicationProgress:
 
         attempt = self.attempt
 
-        cancellation: Union[None, Unset, dict[str, Any]]
+        cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
             cancellation = UNSET
         elif isinstance(self.cancellation, FleetProfileApplicationCancellationIntent):
@@ -103,7 +102,7 @@ class FleetProfileApplicationProgress:
         else:
             cancellation = self.cancellation
 
-        child_progress: Union[None, Unset, dict[str, Any]]
+        child_progress: dict[str, Any] | None | Unset
         if isinstance(self.child_progress, Unset):
             child_progress = UNSET
         elif isinstance(self.child_progress, FleetProfileChildProgress):
@@ -111,7 +110,7 @@ class FleetProfileApplicationProgress:
         else:
             child_progress = self.child_progress
 
-        child_source: Union[Literal['switch-adapter'], None, Unset]
+        child_source: Literal['switch-adapter'] | None | Unset
         if isinstance(self.child_source, Unset):
             child_source = UNSET
         else:
@@ -119,13 +118,13 @@ class FleetProfileApplicationProgress:
 
         completed_steps = self.completed_steps
 
-        current_label: Union[None, Unset, str]
+        current_label: None | str | Unset
         if isinstance(self.current_label, Unset):
             current_label = UNSET
         else:
             current_label = self.current_label
 
-        intended_profile: Union[None, Unset, dict[str, Any]]
+        intended_profile: dict[str, Any] | None | Unset
         if isinstance(self.intended_profile, Unset):
             intended_profile = UNSET
         elif isinstance(self.intended_profile, FleetProfileIntendedConfiguration):
@@ -133,13 +132,13 @@ class FleetProfileApplicationProgress:
         else:
             intended_profile = self.intended_profile
 
-        operation_kind: Union[Literal['fleet-profile.apply'], None, Unset]
+        operation_kind: Literal['fleet-profile.apply'] | None | Unset
         if isinstance(self.operation_kind, Unset):
             operation_kind = UNSET
         else:
             operation_kind = self.operation_kind
 
-        retry_due_at: Union[None, Unset, str]
+        retry_due_at: None | str | Unset
         if isinstance(self.retry_due_at, Unset):
             retry_due_at = UNSET
         elif isinstance(self.retry_due_at, datetime.datetime):
@@ -147,17 +146,17 @@ class FleetProfileApplicationProgress:
         else:
             retry_due_at = self.retry_due_at
 
-        retry_of_application_id: Union[None, Unset, str]
+        retry_of_application_id: None | str | Unset
         if isinstance(self.retry_of_application_id, Unset):
             retry_of_application_id = UNSET
         else:
             retry_of_application_id = self.retry_of_application_id
 
-        step_results: Union[Unset, dict[str, Any]] = UNSET
+        step_results: dict[str, Any] | Unset = UNSET
         if not isinstance(self.step_results, Unset):
             step_results = self.step_results.to_dict()
 
-        switch_adapter: Union[None, Unset, dict[str, Any]]
+        switch_adapter: dict[str, Any] | None | Unset
         if isinstance(self.switch_adapter, Unset):
             switch_adapter = UNSET
         elif isinstance(self.switch_adapter, FleetProfileSwitchAdapterState):
@@ -167,7 +166,7 @@ class FleetProfileApplicationProgress:
 
         total_steps = self.total_steps
 
-        workload_intent_ordinal: Union[None, Unset, int]
+        workload_intent_ordinal: int | None | Unset
         if isinstance(self.workload_intent_ordinal, Unset):
             workload_intent_ordinal = UNSET
         else:
@@ -219,17 +218,17 @@ class FleetProfileApplicationProgress:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
-        from ..models.fleet_profile_child_progress import FleetProfileChildProgress
-        from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
-        from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
-        from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
+        from ..models.fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent # noqa: PLC0415
+        from ..models.fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults # noqa: PLC0415
+        from ..models.fleet_profile_child_progress import FleetProfileChildProgress # noqa: PLC0415
+        from ..models.fleet_profile_intended_configuration import FleetProfileIntendedConfiguration # noqa: PLC0415
+        from ..models.fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState # noqa: PLC0415
         d = dict(src_dict)
         admission_attempt = d.pop("admission_attempt", UNSET)
 
         admission_pending = d.pop("admission_pending", UNSET)
 
-        def _parse_admission_retry_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_admission_retry_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -237,21 +236,21 @@ class FleetProfileApplicationProgress:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                admission_retry_at_type_0 = isoparse(data)
+                admission_retry_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return admission_retry_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         admission_retry_at = _parse_admission_retry_at(d.pop("admission_retry_at", UNSET))
 
 
         attempt = d.pop("attempt", UNSET)
 
-        def _parse_cancellation(data: object) -> Union['FleetProfileApplicationCancellationIntent', None, Unset]:
+        def _parse_cancellation(data: object) -> FleetProfileApplicationCancellationIntent | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -264,14 +263,14 @@ class FleetProfileApplicationProgress:
 
 
                 return cancellation_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileApplicationCancellationIntent', None, Unset], data)
+            return cast(FleetProfileApplicationCancellationIntent | None | Unset, data)
 
         cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
 
 
-        def _parse_child_progress(data: object) -> Union['FleetProfileChildProgress', None, Unset]:
+        def _parse_child_progress(data: object) -> FleetProfileChildProgress | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -284,14 +283,14 @@ class FleetProfileApplicationProgress:
 
 
                 return child_progress_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileChildProgress', None, Unset], data)
+            return cast(FleetProfileChildProgress | None | Unset, data)
 
         child_progress = _parse_child_progress(d.pop("child_progress", UNSET))
 
 
-        def _parse_child_source(data: object) -> Union[Literal['switch-adapter'], None, Unset]:
+        def _parse_child_source(data: object) -> Literal['switch-adapter'] | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -300,24 +299,24 @@ class FleetProfileApplicationProgress:
             if child_source_type_0 != 'switch-adapter':
                 raise ValueError(f"child_source_type_0 must match const 'switch-adapter', got '{child_source_type_0}'")
             return child_source_type_0
-            return cast(Union[Literal['switch-adapter'], None, Unset], data)
+            return cast(Literal['switch-adapter'] | None | Unset, data)
 
         child_source = _parse_child_source(d.pop("child_source", UNSET))
 
 
         completed_steps = d.pop("completed_steps", UNSET)
 
-        def _parse_current_label(data: object) -> Union[None, Unset, str]:
+        def _parse_current_label(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         current_label = _parse_current_label(d.pop("current_label", UNSET))
 
 
-        def _parse_intended_profile(data: object) -> Union['FleetProfileIntendedConfiguration', None, Unset]:
+        def _parse_intended_profile(data: object) -> FleetProfileIntendedConfiguration | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -330,14 +329,14 @@ class FleetProfileApplicationProgress:
 
 
                 return intended_profile_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileIntendedConfiguration', None, Unset], data)
+            return cast(FleetProfileIntendedConfiguration | None | Unset, data)
 
         intended_profile = _parse_intended_profile(d.pop("intended_profile", UNSET))
 
 
-        def _parse_operation_kind(data: object) -> Union[Literal['fleet-profile.apply'], None, Unset]:
+        def _parse_operation_kind(data: object) -> Literal['fleet-profile.apply'] | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -346,12 +345,12 @@ class FleetProfileApplicationProgress:
             if operation_kind_type_0 != 'fleet-profile.apply':
                 raise ValueError(f"operation_kind_type_0 must match const 'fleet-profile.apply', got '{operation_kind_type_0}'")
             return operation_kind_type_0
-            return cast(Union[Literal['fleet-profile.apply'], None, Unset], data)
+            return cast(Literal['fleet-profile.apply'] | None | Unset, data)
 
         operation_kind = _parse_operation_kind(d.pop("operation_kind", UNSET))
 
 
-        def _parse_retry_due_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_retry_due_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -359,30 +358,30 @@ class FleetProfileApplicationProgress:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                retry_due_at_type_0 = isoparse(data)
+                retry_due_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return retry_due_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         retry_due_at = _parse_retry_due_at(d.pop("retry_due_at", UNSET))
 
 
-        def _parse_retry_of_application_id(data: object) -> Union[None, Unset, str]:
+        def _parse_retry_of_application_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         retry_of_application_id = _parse_retry_of_application_id(d.pop("retry_of_application_id", UNSET))
 
 
         _step_results = d.pop("step_results", UNSET)
-        step_results: Union[Unset, FleetProfileApplicationProgressStepResults]
+        step_results: FleetProfileApplicationProgressStepResults | Unset
         if isinstance(_step_results,  Unset):
             step_results = UNSET
         else:
@@ -391,7 +390,7 @@ class FleetProfileApplicationProgress:
 
 
 
-        def _parse_switch_adapter(data: object) -> Union['FleetProfileSwitchAdapterState', None, Unset]:
+        def _parse_switch_adapter(data: object) -> FleetProfileSwitchAdapterState | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -404,21 +403,21 @@ class FleetProfileApplicationProgress:
 
 
                 return switch_adapter_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileSwitchAdapterState', None, Unset], data)
+            return cast(FleetProfileSwitchAdapterState | None | Unset, data)
 
         switch_adapter = _parse_switch_adapter(d.pop("switch_adapter", UNSET))
 
 
         total_steps = d.pop("total_steps", UNSET)
 
-        def _parse_workload_intent_ordinal(data: object) -> Union[None, Unset, int]:
+        def _parse_workload_intent_ordinal(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         workload_intent_ordinal = _parse_workload_intent_ordinal(d.pop("workload_intent_ordinal", UNSET))
 

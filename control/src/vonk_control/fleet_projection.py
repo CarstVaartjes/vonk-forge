@@ -690,24 +690,20 @@ def _filter_metrics(
 
 
 type RunPresenceRow = Row[
-    tuple[
-        RunNode,
-        RecipeRun,
-        ClusterMapping,
-        RecipeInstallation,
-        CatalogDocumentRevision,
-        CatalogDocument,
-    ]
+    RunNode,
+    RecipeRun,
+    ClusterMapping,
+    RecipeInstallation,
+    CatalogDocumentRevision,
+    CatalogDocument,
 ]
 
 type InstallationPresenceRow = Row[
-    tuple[
-        InstallationNode,
-        RecipeInstallation,
-        ClusterMapping,
-        CatalogDocumentRevision,
-        CatalogDocument,
-    ]
+    InstallationNode,
+    RecipeInstallation,
+    ClusterMapping,
+    CatalogDocumentRevision,
+    CatalogDocument,
 ]
 
 
@@ -1060,7 +1056,7 @@ class FleetProjection:
     @staticmethod
     def _telemetry_run_rows(
         session: Session, node_id: str
-    ) -> tuple[Row[tuple[RunNode, RecipeRun]], ...]:
+    ) -> tuple[Row[RunNode, RecipeRun], ...]:
         selected = (
             select(RecipeRun.id)
             .join(RunNode, RunNode.run_id == RecipeRun.id)

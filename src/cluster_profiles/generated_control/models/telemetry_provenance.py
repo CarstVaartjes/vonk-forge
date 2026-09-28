@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,10 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
@@ -28,14 +27,14 @@ class TelemetryProvenance:
         Attributes:
             collector (str):
             collector_version (str):
-            host_uptime_seconds (Union[None, Unset, int]):
-            source_observed_at (Union[None, Unset, datetime.datetime]):
+            host_uptime_seconds (int | None | Unset):
+            source_observed_at (datetime.datetime | None | Unset):
      """
 
     collector: str
     collector_version: str
-    host_uptime_seconds: Union[None, Unset, int] = UNSET
-    source_observed_at: Union[None, Unset, datetime.datetime] = UNSET
+    host_uptime_seconds: int | None | Unset = UNSET
+    source_observed_at: datetime.datetime | None | Unset = UNSET
 
 
 
@@ -46,13 +45,13 @@ class TelemetryProvenance:
 
         collector_version = self.collector_version
 
-        host_uptime_seconds: Union[None, Unset, int]
+        host_uptime_seconds: int | None | Unset
         if isinstance(self.host_uptime_seconds, Unset):
             host_uptime_seconds = UNSET
         else:
             host_uptime_seconds = self.host_uptime_seconds
 
-        source_observed_at: Union[None, Unset, str]
+        source_observed_at: None | str | Unset
         if isinstance(self.source_observed_at, Unset):
             source_observed_at = UNSET
         elif isinstance(self.source_observed_at, datetime.datetime):
@@ -83,17 +82,17 @@ class TelemetryProvenance:
 
         collector_version = d.pop("collector_version")
 
-        def _parse_host_uptime_seconds(data: object) -> Union[None, Unset, int]:
+        def _parse_host_uptime_seconds(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         host_uptime_seconds = _parse_host_uptime_seconds(d.pop("host_uptime_seconds", UNSET))
 
 
-        def _parse_source_observed_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_source_observed_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -101,14 +100,14 @@ class TelemetryProvenance:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                source_observed_at_type_0 = isoparse(data)
+                source_observed_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return source_observed_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         source_observed_at = _parse_source_observed_at(d.pop("source_observed_at", UNSET))
 

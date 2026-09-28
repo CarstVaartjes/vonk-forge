@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -13,7 +15,6 @@ from ..models.model_capability_fact_evidence_status import ModelCapabilityFactEv
 from ..models.model_capability_fact_support import check_model_capability_fact_support
 from ..models.model_capability_fact_support import ModelCapabilityFactSupport
 from typing import cast
-from typing import cast, Union
 
 
 
@@ -29,13 +30,13 @@ class ModelCapabilityFact:
     """
         Attributes:
             capability (ModelCapabilityFactCapability):
-            evidence_digest (Union[None, str]):
+            evidence_digest (None | str):
             evidence_status (ModelCapabilityFactEvidenceStatus):
             support (ModelCapabilityFactSupport):
      """
 
     capability: ModelCapabilityFactCapability
-    evidence_digest: Union[None, str]
+    evidence_digest: None | str
     evidence_status: ModelCapabilityFactEvidenceStatus
     support: ModelCapabilityFactSupport
 
@@ -46,7 +47,7 @@ class ModelCapabilityFact:
     def to_dict(self) -> dict[str, Any]:
         capability: str = self.capability
 
-        evidence_digest: Union[None, str]
+        evidence_digest: None | str
         evidence_digest = self.evidence_digest
 
         evidence_status: str = self.evidence_status
@@ -75,10 +76,10 @@ class ModelCapabilityFact:
 
 
 
-        def _parse_evidence_digest(data: object) -> Union[None, str]:
+        def _parse_evidence_digest(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         evidence_digest = _parse_evidence_digest(d.pop("evidence_digest"))
 

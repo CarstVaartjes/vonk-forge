@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,26 +9,23 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
-  from ..models.fleet_profile_definition import FleetProfileDefinition
-  from ..models.fleet_profile_preparation_decision import FleetProfilePreparationDecision
-  from ..models.fleet_profile_effects import FleetProfileEffects
-  from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
   from ..models.fleet_profile_admission_decision import FleetProfileAdmissionDecision
+  from ..models.fleet_profile_assignment import FleetProfileAssignment
   from ..models.fleet_profile_assignment_assessment import FleetProfileAssignmentAssessment
   from ..models.fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
-  from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
+  from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
+  from ..models.fleet_profile_definition import FleetProfileDefinition
+  from ..models.fleet_profile_effects import FleetProfileEffects
   from ..models.fleet_profile_plan_step import FleetProfilePlanStep
-  from ..models.fleet_profile_assignment import FleetProfileAssignment
+  from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
+  from ..models.fleet_profile_preparation_decision import FleetProfilePreparationDecision
   from ..models.fleet_profile_reason import FleetProfileReason
+  from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
 
 
 
@@ -40,66 +39,66 @@ T = TypeVar("T", bound="FleetProfilePreview")
 class FleetProfilePreview:
     """
         Attributes:
-            admission_decisions (list['FleetProfileAdmissionDecision']):
+            admission_decisions (list[FleetProfileAdmissionDecision]):
             allowed (bool):
-            assessments (list['FleetProfileAssignmentAssessment']):
-            assignments (list['FleetProfileAssignmentPreview']):
+            assessments (list[FleetProfileAssignmentAssessment]):
+            assignments (list[FleetProfileAssignmentPreview]):
             effects (FleetProfileEffects): Identified live effects, including complete distributed membership.
             generated_at (datetime.datetime):
             plan_digest (str):
-            preparation_decisions (list['FleetProfilePreparationDecision']):
-            profile_definition (Union['FleetProfileDefinition', None]):
+            preparation_decisions (list[FleetProfilePreparationDecision]):
+            profile_definition (FleetProfileDefinition | None):
             profile_digest (str):
             profile_id (str):
             profile_name (str):
-            profile_revision (Union[None, int]):
-            reasons (list['FleetProfileReason']):
-            resolved_assignments (list['FleetProfileAssignment']):
+            profile_revision (int | None):
+            reasons (list[FleetProfileReason]):
+            resolved_assignments (list[FleetProfileAssignment]):
             scope (FleetProfileScopePreview):
-            steps (list['FleetProfilePlanStep']):
+            steps (list[FleetProfilePlanStep]):
             summary (FleetProfilePlanSummary):
-            preparations (Union[Unset, list['FleetProfileAssignmentPreparation']]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            preparations (list[FleetProfileAssignmentPreparation] | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    admission_decisions: list['FleetProfileAdmissionDecision']
+    admission_decisions: list[FleetProfileAdmissionDecision]
     allowed: bool
-    assessments: list['FleetProfileAssignmentAssessment']
-    assignments: list['FleetProfileAssignmentPreview']
-    effects: 'FleetProfileEffects'
+    assessments: list[FleetProfileAssignmentAssessment]
+    assignments: list[FleetProfileAssignmentPreview]
+    effects: FleetProfileEffects
     generated_at: datetime.datetime
     plan_digest: str
-    preparation_decisions: list['FleetProfilePreparationDecision']
-    profile_definition: Union['FleetProfileDefinition', None]
+    preparation_decisions: list[FleetProfilePreparationDecision]
+    profile_definition: FleetProfileDefinition | None
     profile_digest: str
     profile_id: str
     profile_name: str
-    profile_revision: Union[None, int]
-    reasons: list['FleetProfileReason']
-    resolved_assignments: list['FleetProfileAssignment']
-    scope: 'FleetProfileScopePreview'
-    steps: list['FleetProfilePlanStep']
-    summary: 'FleetProfilePlanSummary'
-    preparations: Union[Unset, list['FleetProfileAssignmentPreparation']] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    profile_revision: int | None
+    reasons: list[FleetProfileReason]
+    resolved_assignments: list[FleetProfileAssignment]
+    scope: FleetProfileScopePreview
+    steps: list[FleetProfilePlanStep]
+    summary: FleetProfilePlanSummary
+    preparations: list[FleetProfileAssignmentPreparation] | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
-        from ..models.fleet_profile_definition import FleetProfileDefinition
-        from ..models.fleet_profile_preparation_decision import FleetProfilePreparationDecision
-        from ..models.fleet_profile_effects import FleetProfileEffects
-        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
-        from ..models.fleet_profile_admission_decision import FleetProfileAdmissionDecision
-        from ..models.fleet_profile_assignment_assessment import FleetProfileAssignmentAssessment
-        from ..models.fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
-        from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
-        from ..models.fleet_profile_plan_step import FleetProfilePlanStep
-        from ..models.fleet_profile_assignment import FleetProfileAssignment
-        from ..models.fleet_profile_reason import FleetProfileReason
+        from ..models.fleet_profile_admission_decision import FleetProfileAdmissionDecision # noqa: PLC0415
+        from ..models.fleet_profile_assignment import FleetProfileAssignment # noqa: PLC0415
+        from ..models.fleet_profile_assignment_assessment import FleetProfileAssignmentAssessment # noqa: PLC0415
+        from ..models.fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation # noqa: PLC0415
+        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview # noqa: PLC0415
+        from ..models.fleet_profile_definition import FleetProfileDefinition # noqa: PLC0415
+        from ..models.fleet_profile_effects import FleetProfileEffects # noqa: PLC0415
+        from ..models.fleet_profile_plan_step import FleetProfilePlanStep # noqa: PLC0415
+        from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary # noqa: PLC0415
+        from ..models.fleet_profile_preparation_decision import FleetProfilePreparationDecision # noqa: PLC0415
+        from ..models.fleet_profile_reason import FleetProfileReason # noqa: PLC0415
+        from ..models.fleet_profile_scope_preview import FleetProfileScopePreview # noqa: PLC0415
         admission_decisions = []
         for admission_decisions_item_data in self.admission_decisions:
             admission_decisions_item = admission_decisions_item_data.to_dict()
@@ -136,7 +135,7 @@ class FleetProfilePreview:
 
 
 
-        profile_definition: Union[None, dict[str, Any]]
+        profile_definition: dict[str, Any] | None
         if isinstance(self.profile_definition, FleetProfileDefinition):
             profile_definition = self.profile_definition.to_dict()
         else:
@@ -148,7 +147,7 @@ class FleetProfilePreview:
 
         profile_name = self.profile_name
 
-        profile_revision: Union[None, int]
+        profile_revision: int | None
         profile_revision = self.profile_revision
 
         reasons = []
@@ -176,7 +175,7 @@ class FleetProfilePreview:
 
         summary = self.summary.to_dict()
 
-        preparations: Union[Unset, list[dict[str, Any]]] = UNSET
+        preparations: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.preparations, Unset):
             preparations = []
             for preparations_item_data in self.preparations:
@@ -221,18 +220,18 @@ class FleetProfilePreview:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
-        from ..models.fleet_profile_definition import FleetProfileDefinition
-        from ..models.fleet_profile_preparation_decision import FleetProfilePreparationDecision
-        from ..models.fleet_profile_effects import FleetProfileEffects
-        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
-        from ..models.fleet_profile_admission_decision import FleetProfileAdmissionDecision
-        from ..models.fleet_profile_assignment_assessment import FleetProfileAssignmentAssessment
-        from ..models.fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
-        from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
-        from ..models.fleet_profile_plan_step import FleetProfilePlanStep
-        from ..models.fleet_profile_assignment import FleetProfileAssignment
-        from ..models.fleet_profile_reason import FleetProfileReason
+        from ..models.fleet_profile_admission_decision import FleetProfileAdmissionDecision # noqa: PLC0415
+        from ..models.fleet_profile_assignment import FleetProfileAssignment # noqa: PLC0415
+        from ..models.fleet_profile_assignment_assessment import FleetProfileAssignmentAssessment # noqa: PLC0415
+        from ..models.fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation # noqa: PLC0415
+        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview # noqa: PLC0415
+        from ..models.fleet_profile_definition import FleetProfileDefinition # noqa: PLC0415
+        from ..models.fleet_profile_effects import FleetProfileEffects # noqa: PLC0415
+        from ..models.fleet_profile_plan_step import FleetProfilePlanStep # noqa: PLC0415
+        from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary # noqa: PLC0415
+        from ..models.fleet_profile_preparation_decision import FleetProfilePreparationDecision # noqa: PLC0415
+        from ..models.fleet_profile_reason import FleetProfileReason # noqa: PLC0415
+        from ..models.fleet_profile_scope_preview import FleetProfileScopePreview # noqa: PLC0415
         d = dict(src_dict)
         admission_decisions = []
         _admission_decisions = d.pop("admission_decisions")
@@ -271,7 +270,7 @@ class FleetProfilePreview:
 
 
 
-        generated_at = isoparse(d.pop("generated_at"))
+        generated_at = datetime.datetime.fromisoformat(d.pop("generated_at"))
 
 
 
@@ -288,7 +287,7 @@ class FleetProfilePreview:
             preparation_decisions.append(preparation_decisions_item)
 
 
-        def _parse_profile_definition(data: object) -> Union['FleetProfileDefinition', None]:
+        def _parse_profile_definition(data: object) -> FleetProfileDefinition | None:
             if data is None:
                 return data
             try:
@@ -299,9 +298,9 @@ class FleetProfilePreview:
 
 
                 return profile_definition_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileDefinition', None], data)
+            return cast(FleetProfileDefinition | None, data)
 
         profile_definition = _parse_profile_definition(d.pop("profile_definition"))
 
@@ -312,10 +311,10 @@ class FleetProfilePreview:
 
         profile_name = d.pop("profile_name")
 
-        def _parse_profile_revision(data: object) -> Union[None, int]:
+        def _parse_profile_revision(data: object) -> int | None:
             if data is None:
                 return data
-            return cast(Union[None, int], data)
+            return cast(int | None, data)
 
         profile_revision = _parse_profile_revision(d.pop("profile_revision"))
 
@@ -360,17 +359,19 @@ class FleetProfilePreview:
 
 
 
-        preparations = []
         _preparations = d.pop("preparations", UNSET)
-        for preparations_item_data in (_preparations or []):
-            preparations_item = FleetProfileAssignmentPreparation.from_dict(preparations_item_data)
+        preparations: list[FleetProfileAssignmentPreparation] | Unset = UNSET
+        if _preparations is not UNSET:
+            preparations = []
+            for preparations_item_data in _preparations:
+                preparations_item = FleetProfileAssignmentPreparation.from_dict(preparations_item_data)
 
 
 
-            preparations.append(preparations_item)
+                preparations.append(preparations_item)
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from sqlalchemy.orm import sessionmaker
 from vonk_control.model_cache import (
@@ -19,13 +19,13 @@ def _service(
     handler,
     *,
     token: str | None = None,
-) -> tuple[ModelCacheService, httpx.Client]:
+) -> tuple[ModelCacheService, httpx2.Client]:
     token_path = None
     if token is not None:
         token_path = tmp_path / "hf-token"
         token_path.write_text(token + "\n")
-    client = httpx.Client(
-        transport=httpx.MockTransport(handler),
+    client = httpx2.Client(
+        transport=httpx2.MockTransport(handler),
         follow_redirects=False,
     )
     return (
@@ -43,11 +43,11 @@ def _service(
 def test_configured_huggingface_token_is_used_on_canonical_request(
     tmp_path: Path,
 ) -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, content=b"public model")
+        return httpx2.Response(200, content=b"public model")
 
     service, client = _service(tmp_path, handler, token="hf_should_not_be_used")
     try:
@@ -65,11 +65,11 @@ def test_configured_huggingface_token_is_used_on_canonical_request(
 def test_public_huggingface_download_is_anonymous_without_token_file(
     tmp_path: Path, optional_secret: str
 ) -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, content=b"public model")
+        return httpx2.Response(200, content=b"public model")
 
     service, client = _service(tmp_path, handler)
     if optional_secret != "unset":
@@ -116,7 +116,7 @@ def test_invalid_huggingface_secret_does_not_downgrade_to_anonymous(
 def test_streamed_huggingface_response_is_consumed_before_cleanup(
     tmp_path: Path,
 ) -> None:
-    class TrackingStream(httpx.SyncByteStream):
+    class TrackingStream(httpx2.SyncByteStream):
         closed = False
 
         def __iter__(self):
@@ -127,8 +127,8 @@ def test_streamed_huggingface_response_is_consumed_before_cleanup(
 
     stream = TrackingStream()
 
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, stream=stream)
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, stream=stream)
 
     service, client = _service(tmp_path, handler)
     spec = ArtifactSpec(
@@ -155,12 +155,12 @@ def test_streamed_huggingface_response_is_consumed_before_cleanup(
 
 
 def test_gated_huggingface_download_retries_with_bearer_token(tmp_path: Path) -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         assert request.headers.get("authorization") == "Bearer hf_gated_secret"
-        return httpx.Response(200, content=b"gated model")
+        return httpx2.Response(200, content=b"gated model")
 
     service, client = _service(tmp_path, handler, token="hf_gated_secret")
     try:
@@ -177,8 +177,8 @@ def test_gated_huggingface_download_retries_with_bearer_token(tmp_path: Path) ->
 def test_gated_huggingface_download_reports_missing_credentials_without_secret(
     tmp_path: Path,
 ) -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(403)
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(403)
 
     service, client = _service(tmp_path, handler)
     try:
@@ -194,8 +194,8 @@ def test_gated_huggingface_download_reports_missing_credentials_without_secret(
 def test_rejected_huggingface_token_is_typed_and_redacted(tmp_path: Path) -> None:
     secret = "hf_rejected_secret"
 
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(403)
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(403)
 
     service, client = _service(tmp_path, handler, token=secret)
     try:
@@ -211,15 +211,15 @@ def test_rejected_huggingface_token_is_typed_and_redacted(tmp_path: Path) -> Non
 def test_huggingface_cdn_redirect_is_allowed_and_bearer_is_stripped(
     tmp_path: Path,
 ) -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
     cdn = "https://cdn-lfs-us-1.hf.co/signed/weights?x=1"
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         if len(requests) == 1:
             assert request.headers["authorization"] == "Bearer hf_cdn_secret"
-            return httpx.Response(302, headers={"location": cdn})
-        return httpx.Response(
+            return httpx2.Response(302, headers={"location": cdn})
+        return httpx2.Response(
             206,
             content=b"gated model",
             headers={"content-range": "bytes 0-11/12"},
@@ -239,8 +239,8 @@ def test_huggingface_cdn_redirect_is_allowed_and_bearer_is_stripped(
 
 
 def test_huggingface_redirect_to_arbitrary_host_is_rejected(tmp_path: Path) -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
             302,
             headers={"location": "https://attacker.example/steal"},
         )
@@ -256,11 +256,11 @@ def test_huggingface_redirect_to_arbitrary_host_is_rejected(tmp_path: Path) -> N
 
 
 def test_huggingface_range_resume_preserves_requested_offset(tmp_path: Path) -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(
+        return httpx2.Response(
             206,
             content=b"payload",
             headers={"content-range": "bytes 7-13/14"},

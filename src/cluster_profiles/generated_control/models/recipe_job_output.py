@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -26,19 +28,19 @@ class RecipeJobOutput:
         Attributes:
             max_total_bytes (int):
             path (Literal['/outputs']):
-            slots (list['RecipeOutputSlot']):
+            slots (list[RecipeOutputSlot]):
      """
 
     max_total_bytes: int
     path: Literal['/outputs']
-    slots: list['RecipeOutputSlot']
+    slots: list[RecipeOutputSlot]
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_output_slot import RecipeOutputSlot
+        from ..models.recipe_output_slot import RecipeOutputSlot # noqa: PLC0415
         max_total_bytes = self.max_total_bytes
 
         path = self.path
@@ -65,7 +67,7 @@ class RecipeJobOutput:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_output_slot import RecipeOutputSlot
+        from ..models.recipe_output_slot import RecipeOutputSlot # noqa: PLC0415
         d = dict(src_dict)
         max_total_bytes = d.pop("max_total_bytes")
 

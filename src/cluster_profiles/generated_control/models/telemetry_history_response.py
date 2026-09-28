@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,10 +11,8 @@ from ..types import UNSET, Unset
 from ..models.telemetry_history_response_resolution import check_telemetry_history_response_resolution
 from ..models.telemetry_history_response_resolution import TelemetryHistoryResponseResolution
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -36,29 +36,29 @@ class TelemetryHistoryResponse:
             maximum_points (int):
             metadata (TelemetryHistoryMetadata): Coverage and downsampling facts for a history/export response.
             node_id (str):
-            points (list[Union['TelemetryPoint', 'TelemetryRollupPoint']]):
+            points (list[TelemetryPoint | TelemetryRollupPoint]):
             resolution (TelemetryHistoryResponseResolution):
             start (datetime.datetime):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     end: datetime.datetime
     maximum_points: int
-    metadata: 'TelemetryHistoryMetadata'
+    metadata: TelemetryHistoryMetadata
     node_id: str
-    points: list[Union['TelemetryPoint', 'TelemetryRollupPoint']]
+    points: list[TelemetryPoint | TelemetryRollupPoint]
     resolution: TelemetryHistoryResponseResolution
     start: datetime.datetime
-    schema_version: Union[Literal[1], Unset] = 1
+    schema_version: Literal[1] | Unset = 1
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.telemetry_history_metadata import TelemetryHistoryMetadata
-        from ..models.telemetry_point import TelemetryPoint
-        from ..models.telemetry_rollup_point import TelemetryRollupPoint
+        from ..models.telemetry_history_metadata import TelemetryHistoryMetadata # noqa: PLC0415
+        from ..models.telemetry_point import TelemetryPoint # noqa: PLC0415
+        from ..models.telemetry_rollup_point import TelemetryRollupPoint # noqa: PLC0415
         end = self.end.isoformat()
 
         maximum_points = self.maximum_points
@@ -106,11 +106,11 @@ class TelemetryHistoryResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.telemetry_history_metadata import TelemetryHistoryMetadata
-        from ..models.telemetry_point import TelemetryPoint
-        from ..models.telemetry_rollup_point import TelemetryRollupPoint
+        from ..models.telemetry_history_metadata import TelemetryHistoryMetadata # noqa: PLC0415
+        from ..models.telemetry_point import TelemetryPoint # noqa: PLC0415
+        from ..models.telemetry_rollup_point import TelemetryRollupPoint # noqa: PLC0415
         d = dict(src_dict)
-        end = isoparse(d.pop("end"))
+        end = datetime.datetime.fromisoformat(d.pop("end"))
 
 
 
@@ -127,7 +127,7 @@ class TelemetryHistoryResponse:
         points = []
         _points = d.pop("points")
         for points_item_data in (_points):
-            def _parse_points_item(data: object) -> Union['TelemetryPoint', 'TelemetryRollupPoint']:
+            def _parse_points_item(data: object) -> TelemetryPoint | TelemetryRollupPoint:
                 try:
                     if not isinstance(data, dict):
                         raise TypeError()
@@ -136,7 +136,7 @@ class TelemetryHistoryResponse:
 
 
                     return points_item_type_0
-                except: # noqa: E722
+                except (TypeError, ValueError, AttributeError, KeyError):
                     pass
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -156,12 +156,12 @@ class TelemetryHistoryResponse:
 
 
 
-        start = isoparse(d.pop("start"))
+        start = datetime.datetime.fromisoformat(d.pop("start"))
 
 
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 

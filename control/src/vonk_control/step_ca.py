@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
-import httpx
+import httpx2
 import jwt
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -57,7 +57,7 @@ class StepCertificateAuthority(CertificateAuthority):
         max_response_bytes: int = 64 * 1024,
         certificate_lifetime_seconds: int = _DEFAULT_CERTIFICATE_LIFETIME_SECONDS,
         clock_skew_seconds: int = 30,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx2.BaseTransport | None = None,
     ) -> None:
         parsed = urlsplit(ca_url)
         if (
@@ -156,8 +156,8 @@ class StepCertificateAuthority(CertificateAuthority):
         self._credential = credential
         self._max_response_bytes = max_response_bytes
         self._clock_skew = timedelta(seconds=clock_skew_seconds)
-        timeout = httpx.Timeout(timeout_seconds, connect=timeout_seconds)
-        self._client = httpx.Client(
+        timeout = httpx2.Timeout(timeout_seconds, connect=timeout_seconds)
+        self._client = httpx2.Client(
             verify=context,
             timeout=timeout,
             follow_redirects=False,
@@ -488,7 +488,7 @@ class StepCertificateAuthority(CertificateAuthority):
                 return bytes(output)
         except StepCAError:
             raise
-        except (httpx.HTTPError, OSError) as error:
+        except (httpx2.HTTPError, OSError) as error:
             raise StepCAError("step-ca request failed") from error
 
 

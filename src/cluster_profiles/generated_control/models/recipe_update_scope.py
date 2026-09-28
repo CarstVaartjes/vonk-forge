@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Union
 
 
 
@@ -23,12 +24,12 @@ T = TypeVar("T", bound="RecipeUpdateScope")
 class RecipeUpdateScope:
     """
         Attributes:
-            all_ (Union[Unset, bool]):  Default: False.
-            selectors (Union[Unset, list[str]]):
+            all_ (bool | Unset):  Default: False.
+            selectors (list[str] | Unset):
      """
 
-    all_: Union[Unset, bool] = False
-    selectors: Union[Unset, list[str]] = UNSET
+    all_: bool | Unset = False
+    selectors: list[str] | Unset = UNSET
 
 
 
@@ -37,7 +38,7 @@ class RecipeUpdateScope:
     def to_dict(self) -> dict[str, Any]:
         all_ = self.all_
 
-        selectors: Union[Unset, list[str]] = UNSET
+        selectors: list[str] | Unset = UNSET
         if not isinstance(self.selectors, Unset):
             selectors = self.selectors
 

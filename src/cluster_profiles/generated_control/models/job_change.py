@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,10 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
 from typing import Literal, cast
-from typing import Union
 import datetime
 
 if TYPE_CHECKING:
@@ -32,21 +32,21 @@ class JobChange:
             entity_kind (Literal['job']):
             fields (JobPayload):
             occurred_at (datetime.datetime):
-            node_id (Union[Unset, None]):
+            node_id (None | Unset):
      """
 
     entity_id: str
     entity_kind: Literal['job']
-    fields: 'JobPayload'
+    fields: JobPayload
     occurred_at: datetime.datetime
-    node_id: Union[Unset, None] = UNSET
+    node_id: None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.job_payload import JobPayload
+        from ..models.job_payload import JobPayload # noqa: PLC0415
         entity_id = self.entity_id
 
         entity_kind = self.entity_kind
@@ -75,7 +75,7 @@ class JobChange:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.job_payload import JobPayload
+        from ..models.job_payload import JobPayload # noqa: PLC0415
         d = dict(src_dict)
         entity_id = d.pop("entity_id")
 
@@ -88,7 +88,7 @@ class JobChange:
 
 
 
-        occurred_at = isoparse(d.pop("occurred_at"))
+        occurred_at = datetime.datetime.fromisoformat(d.pop("occurred_at"))
 
 
 

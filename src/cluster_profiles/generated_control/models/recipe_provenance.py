@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.recipe_provenance_source_kind import check_recipe_provenance_sourc
 from ..models.recipe_provenance_source_kind import RecipeProvenanceSourceKind
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -28,12 +28,12 @@ class RecipeProvenance:
         Attributes:
             attribution (list[str]):
             source_kind (RecipeProvenanceSourceKind):
-            source_reference (Union[None, Unset, str]):
+            source_reference (None | str | Unset):
      """
 
     attribution: list[str]
     source_kind: RecipeProvenanceSourceKind
-    source_reference: Union[None, Unset, str] = UNSET
+    source_reference: None | str | Unset = UNSET
 
 
 
@@ -46,7 +46,7 @@ class RecipeProvenance:
 
         source_kind: str = self.source_kind
 
-        source_reference: Union[None, Unset, str]
+        source_reference: None | str | Unset
         if isinstance(self.source_reference, Unset):
             source_reference = UNSET
         else:
@@ -77,12 +77,12 @@ class RecipeProvenance:
 
 
 
-        def _parse_source_reference(data: object) -> Union[None, Unset, str]:
+        def _parse_source_reference(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         source_reference = _parse_source_reference(d.pop("source_reference", UNSET))
 

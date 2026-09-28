@@ -24,7 +24,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from httpx import ASGITransport, AsyncClient, Response
+from httpx2 import ASGITransport, AsyncClient, Response
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.types import Message
@@ -609,7 +609,10 @@ def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
     )
     response = client.post(
         "/agent/telemetry",
-        headers=agent_headers(NODE_A, "serial-a"),
+        headers={
+            **agent_headers(NODE_A, "serial-a"),
+            "content-type": "application/json",
+        },
         content=encoded,
     )
     assert response.status_code == 204, response.text

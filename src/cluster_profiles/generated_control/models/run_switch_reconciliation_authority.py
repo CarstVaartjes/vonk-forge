@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,8 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.run_switch_reconciliation_target import RunSwitchReconciliationTarget
@@ -36,35 +37,35 @@ class RunSwitchReconciliationAuthority:
             installation_id (str):
             mapping_generation (int):
             mapping_id (str):
-            model_content_sha256 (Union[None, str]):
+            model_content_sha256 (None | str):
             original_plan_digest (str):
-            recipe_build_id (Union[None, str]):
+            recipe_build_id (None | str):
             recipe_content_sha256 (str):
             recipe_revision_id (str):
             stored_plan_canonical_sha256 (str):
-            targets (list['RunSwitchReconciliationTarget']):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            targets (list[RunSwitchReconciliationTarget]):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     image_digest: str
     installation_id: str
     mapping_generation: int
     mapping_id: str
-    model_content_sha256: Union[None, str]
+    model_content_sha256: None | str
     original_plan_digest: str
-    recipe_build_id: Union[None, str]
+    recipe_build_id: None | str
     recipe_content_sha256: str
     recipe_revision_id: str
     stored_plan_canonical_sha256: str
-    targets: list['RunSwitchReconciliationTarget']
-    schema_version: Union[Literal[2], Unset] = 2
+    targets: list[RunSwitchReconciliationTarget]
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_reconciliation_target import RunSwitchReconciliationTarget
+        from ..models.run_switch_reconciliation_target import RunSwitchReconciliationTarget # noqa: PLC0415
         image_digest = self.image_digest
 
         installation_id = self.installation_id
@@ -73,12 +74,12 @@ class RunSwitchReconciliationAuthority:
 
         mapping_id = self.mapping_id
 
-        model_content_sha256: Union[None, str]
+        model_content_sha256: None | str
         model_content_sha256 = self.model_content_sha256
 
         original_plan_digest = self.original_plan_digest
 
-        recipe_build_id: Union[None, str]
+        recipe_build_id: None | str
         recipe_build_id = self.recipe_build_id
 
         recipe_content_sha256 = self.recipe_content_sha256
@@ -121,7 +122,7 @@ class RunSwitchReconciliationAuthority:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_reconciliation_target import RunSwitchReconciliationTarget
+        from ..models.run_switch_reconciliation_target import RunSwitchReconciliationTarget # noqa: PLC0415
         d = dict(src_dict)
         image_digest = d.pop("image_digest")
 
@@ -131,20 +132,20 @@ class RunSwitchReconciliationAuthority:
 
         mapping_id = d.pop("mapping_id")
 
-        def _parse_model_content_sha256(data: object) -> Union[None, str]:
+        def _parse_model_content_sha256(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256"))
 
 
         original_plan_digest = d.pop("original_plan_digest")
 
-        def _parse_recipe_build_id(data: object) -> Union[None, str]:
+        def _parse_recipe_build_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         recipe_build_id = _parse_recipe_build_id(d.pop("recipe_build_id"))
 
@@ -165,7 +166,7 @@ class RunSwitchReconciliationAuthority:
             targets.append(targets_item)
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

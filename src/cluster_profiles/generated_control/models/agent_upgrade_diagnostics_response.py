@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,12 +10,10 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
   from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse
+  from ..models.agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
 
 
 
@@ -29,24 +29,24 @@ class AgentUpgradeDiagnosticsResponse:
         Attributes:
             expected_identity (AgentUpgradeIdentityResponse):
             failure_details_unavailable (bool):
-            targets (list['AgentUpgradeTargetDiagnosticsResponse']):
-            next_action (Union[None, Unset, str]):
-            operator_summary (Union[None, Unset, str]):
+            targets (list[AgentUpgradeTargetDiagnosticsResponse]):
+            next_action (None | str | Unset):
+            operator_summary (None | str | Unset):
      """
 
-    expected_identity: 'AgentUpgradeIdentityResponse'
+    expected_identity: AgentUpgradeIdentityResponse
     failure_details_unavailable: bool
-    targets: list['AgentUpgradeTargetDiagnosticsResponse']
-    next_action: Union[None, Unset, str] = UNSET
-    operator_summary: Union[None, Unset, str] = UNSET
+    targets: list[AgentUpgradeTargetDiagnosticsResponse]
+    next_action: None | str | Unset = UNSET
+    operator_summary: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
-        from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse
+        from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse # noqa: PLC0415
+        from ..models.agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse # noqa: PLC0415
         expected_identity = self.expected_identity.to_dict()
 
         failure_details_unavailable = self.failure_details_unavailable
@@ -58,13 +58,13 @@ class AgentUpgradeDiagnosticsResponse:
 
 
 
-        next_action: Union[None, Unset, str]
+        next_action: None | str | Unset
         if isinstance(self.next_action, Unset):
             next_action = UNSET
         else:
             next_action = self.next_action
 
-        operator_summary: Union[None, Unset, str]
+        operator_summary: None | str | Unset
         if isinstance(self.operator_summary, Unset):
             operator_summary = UNSET
         else:
@@ -89,8 +89,8 @@ class AgentUpgradeDiagnosticsResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
-        from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse
+        from ..models.agent_upgrade_identity_response import AgentUpgradeIdentityResponse # noqa: PLC0415
+        from ..models.agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse # noqa: PLC0415
         d = dict(src_dict)
         expected_identity = AgentUpgradeIdentityResponse.from_dict(d.pop("expected_identity"))
 
@@ -109,22 +109,22 @@ class AgentUpgradeDiagnosticsResponse:
             targets.append(targets_item)
 
 
-        def _parse_next_action(data: object) -> Union[None, Unset, str]:
+        def _parse_next_action(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         next_action = _parse_next_action(d.pop("next_action", UNSET))
 
 
-        def _parse_operator_summary(data: object) -> Union[None, Unset, str]:
+        def _parse_operator_summary(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         operator_summary = _parse_operator_summary(d.pop("operator_summary", UNSET))
 

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -23,17 +25,17 @@ T = TypeVar("T", bound="IdentityHistoryResponse")
 class IdentityHistoryResponse:
     """
         Attributes:
-            identities (list['IdentityHistoryItem']):
+            identities (list[IdentityHistoryItem]):
      """
 
-    identities: list['IdentityHistoryItem']
+    identities: list[IdentityHistoryItem]
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.identity_history_item import IdentityHistoryItem
+        from ..models.identity_history_item import IdentityHistoryItem # noqa: PLC0415
         identities = []
         for identities_item_data in self.identities:
             identities_item = identities_item_data.to_dict()
@@ -54,7 +56,7 @@ class IdentityHistoryResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.identity_history_item import IdentityHistoryItem
+        from ..models.identity_history_item import IdentityHistoryItem # noqa: PLC0415
         d = dict(src_dict)
         identities = []
         _identities = d.pop("identities")

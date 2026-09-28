@@ -11,7 +11,7 @@ from importlib.resources import files
 from types import SimpleNamespace
 from typing import Any, cast
 
-import httpx
+import httpx2
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -1283,11 +1283,11 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
         source_bundle_sha256="c" * 64,
     ).id
 
-    def model_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, request=request, content=model_bytes)
+    def model_handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, request=request, content=model_bytes)
 
-    model_http = httpx.Client(
-        transport=httpx.MockTransport(model_handler),
+    model_http = httpx2.Client(
+        transport=httpx2.MockTransport(model_handler),
         follow_redirects=False,
     )
     model_cache = ModelCacheService(

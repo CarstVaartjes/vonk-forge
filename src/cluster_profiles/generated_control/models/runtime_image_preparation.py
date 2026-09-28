@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.controller_asset_state import ControllerAssetState
@@ -35,26 +35,26 @@ class RuntimeImagePreparation:
             image_digest (str):
             oci_layout_sha256 (str):
             runtime_interface (str):
-            targets (list['TargetAssetState']):
-            build_id (Union[None, Unset, str]):
+            targets (list[TargetAssetState]):
+            build_id (None | str | Unset):
      """
 
     architecture: Literal['linux-arm64']
-    controller: 'ControllerAssetState'
+    controller: ControllerAssetState
     image_bytes: int
     image_digest: str
     oci_layout_sha256: str
     runtime_interface: str
-    targets: list['TargetAssetState']
-    build_id: Union[None, Unset, str] = UNSET
+    targets: list[TargetAssetState]
+    build_id: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.controller_asset_state import ControllerAssetState
-        from ..models.target_asset_state import TargetAssetState
+        from ..models.controller_asset_state import ControllerAssetState # noqa: PLC0415
+        from ..models.target_asset_state import TargetAssetState # noqa: PLC0415
         architecture = self.architecture
 
         controller = self.controller.to_dict()
@@ -74,7 +74,7 @@ class RuntimeImagePreparation:
 
 
 
-        build_id: Union[None, Unset, str]
+        build_id: None | str | Unset
         if isinstance(self.build_id, Unset):
             build_id = UNSET
         else:
@@ -101,8 +101,8 @@ class RuntimeImagePreparation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.controller_asset_state import ControllerAssetState
-        from ..models.target_asset_state import TargetAssetState
+        from ..models.controller_asset_state import ControllerAssetState # noqa: PLC0415
+        from ..models.target_asset_state import TargetAssetState # noqa: PLC0415
         d = dict(src_dict)
         architecture = cast(Literal['linux-arm64'] , d.pop("architecture"))
         if architecture != 'linux-arm64':
@@ -131,12 +131,12 @@ class RuntimeImagePreparation:
             targets.append(targets_item)
 
 
-        def _parse_build_id(data: object) -> Union[None, Unset, str]:
+        def _parse_build_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         build_id = _parse_build_id(d.pop("build_id", UNSET))
 

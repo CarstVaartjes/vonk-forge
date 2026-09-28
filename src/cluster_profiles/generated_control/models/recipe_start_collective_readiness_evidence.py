@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,9 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
+from typing import cast
 from typing import Literal, cast
-from typing import Union
 from uuid import UUID
 
 
@@ -29,8 +30,8 @@ class RecipeStartCollectiveReadinessEvidence:
             endpoint (str):
             evidence_digest (str):
             image_digest (str):
-            local_address (Union[None, str]):
-            master_address (Union[None, str]):
+            local_address (None | str):
+            master_address (None | str):
             memory_reservation_bytes (int):
             phase (Literal['collective-readiness']):
             rank (int):
@@ -42,16 +43,16 @@ class RecipeStartCollectiveReadinessEvidence:
             run_id (UUID):
             runtime_arguments_sha256 (str):
             world_size (int):
-            master_port (Union[None, Unset, int]):
-            model_identity (Union[None, Unset, str]):
+            master_port (int | None | Unset):
+            model_identity (None | str | Unset):
      """
 
     artifact_set_digest: str
     endpoint: str
     evidence_digest: str
     image_digest: str
-    local_address: Union[None, str]
-    master_address: Union[None, str]
+    local_address: None | str
+    master_address: None | str
     memory_reservation_bytes: int
     phase: Literal['collective-readiness']
     rank: int
@@ -63,8 +64,8 @@ class RecipeStartCollectiveReadinessEvidence:
     run_id: UUID
     runtime_arguments_sha256: str
     world_size: int
-    master_port: Union[None, Unset, int] = UNSET
-    model_identity: Union[None, Unset, str] = UNSET
+    master_port: int | None | Unset = UNSET
+    model_identity: None | str | Unset = UNSET
 
 
 
@@ -79,10 +80,10 @@ class RecipeStartCollectiveReadinessEvidence:
 
         image_digest = self.image_digest
 
-        local_address: Union[None, str]
+        local_address: None | str
         local_address = self.local_address
 
-        master_address: Union[None, str]
+        master_address: None | str
         master_address = self.master_address
 
         memory_reservation_bytes = self.memory_reservation_bytes
@@ -107,13 +108,13 @@ class RecipeStartCollectiveReadinessEvidence:
 
         world_size = self.world_size
 
-        master_port: Union[None, Unset, int]
+        master_port: int | None | Unset
         if isinstance(self.master_port, Unset):
             master_port = UNSET
         else:
             master_port = self.master_port
 
-        model_identity: Union[None, Unset, str]
+        model_identity: None | str | Unset
         if isinstance(self.model_identity, Unset):
             model_identity = UNSET
         else:
@@ -161,18 +162,18 @@ class RecipeStartCollectiveReadinessEvidence:
 
         image_digest = d.pop("image_digest")
 
-        def _parse_local_address(data: object) -> Union[None, str]:
+        def _parse_local_address(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         local_address = _parse_local_address(d.pop("local_address"))
 
 
-        def _parse_master_address(data: object) -> Union[None, str]:
+        def _parse_master_address(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         master_address = _parse_master_address(d.pop("master_address"))
 
@@ -207,22 +208,22 @@ class RecipeStartCollectiveReadinessEvidence:
 
         world_size = d.pop("world_size")
 
-        def _parse_master_port(data: object) -> Union[None, Unset, int]:
+        def _parse_master_port(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         master_port = _parse_master_port(d.pop("master_port", UNSET))
 
 
-        def _parse_model_identity(data: object) -> Union[None, Unset, str]:
+        def _parse_model_identity(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_identity = _parse_model_identity(d.pop("model_identity", UNSET))
 

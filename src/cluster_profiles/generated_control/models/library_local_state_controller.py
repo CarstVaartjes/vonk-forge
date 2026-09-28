@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 LibraryLocalStateController = Literal['cached', 'failed', 'not_cached', 'preparing', 'unknown']
 
@@ -6,5 +6,5 @@ LIBRARY_LOCAL_STATE_CONTROLLER_VALUES: set[LibraryLocalStateController] = { 'cac
 
 def check_library_local_state_controller(value: str) -> LibraryLocalStateController:
     if value in LIBRARY_LOCAL_STATE_CONTROLLER_VALUES:
-        return cast(LibraryLocalStateController, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {LIBRARY_LOCAL_STATE_CONTROLLER_VALUES!r}")

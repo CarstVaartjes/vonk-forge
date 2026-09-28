@@ -1325,7 +1325,7 @@ def _persist_issued_enrollment(
         session.add(node)
         # There is no ORM relationship between these operational rows. Flush
         # the FK parent explicitly for PostgreSQL.
-        session.flush([node])
+        session.flush()
         session.add(
             AgentNodeProfile(
                 node_id=enrollment.node_id,

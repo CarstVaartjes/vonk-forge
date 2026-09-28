@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,8 +14,6 @@ from ..models.run_switch_member_progress_state import check_run_switch_member_pr
 from ..models.run_switch_member_progress_state import RunSwitchMemberProgressState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -30,18 +30,18 @@ class RunSwitchMemberProgress:
         Attributes:
             node_id (str):
             state (RunSwitchMemberProgressState):
-            completed_bytes (Union[Unset, int]):  Default: 0.
-            error (Union[None, Unset, str]):
-            phase (Union[None, RunSwitchMemberProgressPhaseType0, Unset]):
-            total_bytes (Union[None, Unset, int]):
+            completed_bytes (int | Unset):  Default: 0.
+            error (None | str | Unset):
+            phase (None | RunSwitchMemberProgressPhaseType0 | Unset):
+            total_bytes (int | None | Unset):
      """
 
     node_id: str
     state: RunSwitchMemberProgressState
-    completed_bytes: Union[Unset, int] = 0
-    error: Union[None, Unset, str] = UNSET
-    phase: Union[None, RunSwitchMemberProgressPhaseType0, Unset] = UNSET
-    total_bytes: Union[None, Unset, int] = UNSET
+    completed_bytes: int | Unset = 0
+    error: None | str | Unset = UNSET
+    phase: None | RunSwitchMemberProgressPhaseType0 | Unset = UNSET
+    total_bytes: int | None | Unset = UNSET
 
 
 
@@ -54,13 +54,13 @@ class RunSwitchMemberProgress:
 
         completed_bytes = self.completed_bytes
 
-        error: Union[None, Unset, str]
+        error: None | str | Unset
         if isinstance(self.error, Unset):
             error = UNSET
         else:
             error = self.error
 
-        phase: Union[None, Unset, str]
+        phase: None | str | Unset
         if isinstance(self.phase, Unset):
             phase = UNSET
         elif isinstance(self.phase, str):
@@ -68,7 +68,7 @@ class RunSwitchMemberProgress:
         else:
             phase = self.phase
 
-        total_bytes: Union[None, Unset, int]
+        total_bytes: int | None | Unset
         if isinstance(self.total_bytes, Unset):
             total_bytes = UNSET
         else:
@@ -106,17 +106,17 @@ class RunSwitchMemberProgress:
 
         completed_bytes = d.pop("completed_bytes", UNSET)
 
-        def _parse_error(data: object) -> Union[None, Unset, str]:
+        def _parse_error(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         error = _parse_error(d.pop("error", UNSET))
 
 
-        def _parse_phase(data: object) -> Union[None, RunSwitchMemberProgressPhaseType0, Unset]:
+        def _parse_phase(data: object) -> None | RunSwitchMemberProgressPhaseType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -129,19 +129,19 @@ class RunSwitchMemberProgress:
 
 
                 return phase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchMemberProgressPhaseType0, Unset], data)
+            return cast(None | RunSwitchMemberProgressPhaseType0 | Unset, data)
 
         phase = _parse_phase(d.pop("phase", UNSET))
 
 
-        def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_total_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         total_bytes = _parse_total_bytes(d.pop("total_bytes", UNSET))
 

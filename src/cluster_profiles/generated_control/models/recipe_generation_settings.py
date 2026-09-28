@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_generation_settings_knobs import RecipeGenerationSettingsKnobs
@@ -30,29 +30,29 @@ class RecipeGenerationSettings:
         Attributes:
             context_tokens (RecipeIntegerSetting):
             kind (Literal['generation']):
-            concurrency (Union['RecipeIntegerSetting', None, Unset]):
-            knobs (Union[Unset, RecipeGenerationSettingsKnobs]):
-            max_batch_tokens (Union['RecipeIntegerSetting', None, Unset]):
+            concurrency (None | RecipeIntegerSetting | Unset):
+            knobs (RecipeGenerationSettingsKnobs | Unset):
+            max_batch_tokens (None | RecipeIntegerSetting | Unset):
      """
 
-    context_tokens: 'RecipeIntegerSetting'
+    context_tokens: RecipeIntegerSetting
     kind: Literal['generation']
-    concurrency: Union['RecipeIntegerSetting', None, Unset] = UNSET
-    knobs: Union[Unset, 'RecipeGenerationSettingsKnobs'] = UNSET
-    max_batch_tokens: Union['RecipeIntegerSetting', None, Unset] = UNSET
+    concurrency: None | RecipeIntegerSetting | Unset = UNSET
+    knobs: RecipeGenerationSettingsKnobs | Unset = UNSET
+    max_batch_tokens: None | RecipeIntegerSetting | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_generation_settings_knobs import RecipeGenerationSettingsKnobs
-        from ..models.recipe_integer_setting import RecipeIntegerSetting
+        from ..models.recipe_generation_settings_knobs import RecipeGenerationSettingsKnobs # noqa: PLC0415
+        from ..models.recipe_integer_setting import RecipeIntegerSetting # noqa: PLC0415
         context_tokens = self.context_tokens.to_dict()
 
         kind = self.kind
 
-        concurrency: Union[None, Unset, dict[str, Any]]
+        concurrency: dict[str, Any] | None | Unset
         if isinstance(self.concurrency, Unset):
             concurrency = UNSET
         elif isinstance(self.concurrency, RecipeIntegerSetting):
@@ -60,11 +60,11 @@ class RecipeGenerationSettings:
         else:
             concurrency = self.concurrency
 
-        knobs: Union[Unset, dict[str, Any]] = UNSET
+        knobs: dict[str, Any] | Unset = UNSET
         if not isinstance(self.knobs, Unset):
             knobs = self.knobs.to_dict()
 
-        max_batch_tokens: Union[None, Unset, dict[str, Any]]
+        max_batch_tokens: dict[str, Any] | None | Unset
         if isinstance(self.max_batch_tokens, Unset):
             max_batch_tokens = UNSET
         elif isinstance(self.max_batch_tokens, RecipeIntegerSetting):
@@ -92,8 +92,8 @@ class RecipeGenerationSettings:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_generation_settings_knobs import RecipeGenerationSettingsKnobs
-        from ..models.recipe_integer_setting import RecipeIntegerSetting
+        from ..models.recipe_generation_settings_knobs import RecipeGenerationSettingsKnobs # noqa: PLC0415
+        from ..models.recipe_integer_setting import RecipeIntegerSetting # noqa: PLC0415
         d = dict(src_dict)
         context_tokens = RecipeIntegerSetting.from_dict(d.pop("context_tokens"))
 
@@ -104,7 +104,7 @@ class RecipeGenerationSettings:
         if kind != 'generation':
             raise ValueError(f"kind must match const 'generation', got '{kind}'")
 
-        def _parse_concurrency(data: object) -> Union['RecipeIntegerSetting', None, Unset]:
+        def _parse_concurrency(data: object) -> None | RecipeIntegerSetting | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -117,15 +117,15 @@ class RecipeGenerationSettings:
 
 
                 return concurrency_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeIntegerSetting', None, Unset], data)
+            return cast(None | RecipeIntegerSetting | Unset, data)
 
         concurrency = _parse_concurrency(d.pop("concurrency", UNSET))
 
 
         _knobs = d.pop("knobs", UNSET)
-        knobs: Union[Unset, RecipeGenerationSettingsKnobs]
+        knobs: RecipeGenerationSettingsKnobs | Unset
         if isinstance(_knobs,  Unset):
             knobs = UNSET
         else:
@@ -134,7 +134,7 @@ class RecipeGenerationSettings:
 
 
 
-        def _parse_max_batch_tokens(data: object) -> Union['RecipeIntegerSetting', None, Unset]:
+        def _parse_max_batch_tokens(data: object) -> None | RecipeIntegerSetting | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -147,9 +147,9 @@ class RecipeGenerationSettings:
 
 
                 return max_batch_tokens_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeIntegerSetting', None, Unset], data)
+            return cast(None | RecipeIntegerSetting | Unset, data)
 
         max_batch_tokens = _parse_max_batch_tokens(d.pop("max_batch_tokens", UNSET))
 

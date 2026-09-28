@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,16 +9,13 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.recipe_operation_cancellation_result_node_evidence_type_0 import RecipeOperationCancellationResultNodeEvidenceType0
   from ..models.recipe_operation_cancellation_result_launch_evidence_type_0 import RecipeOperationCancellationResultLaunchEvidenceType0
+  from ..models.recipe_operation_cancellation_result_node_evidence_type_0 import RecipeOperationCancellationResultNodeEvidenceType0
 
 
 
@@ -35,30 +34,30 @@ class RecipeOperationCancellationResult:
             cancel_request_id (str):
             cancel_requested (bool):
             reason (str):
-            cancel_requested_at (Union[None, Unset, datetime.datetime]):
-            cancelled (Union[None, Unset, bool]):
-            launch_evidence (Union['RecipeOperationCancellationResultLaunchEvidenceType0', None, Unset]):
-            node_evidence (Union['RecipeOperationCancellationResultNodeEvidenceType0', None, Unset]):
-            recovery (Union[Literal['retry creates a new operation'], None, Unset]):
+            cancel_requested_at (datetime.datetime | None | Unset):
+            cancelled (bool | None | Unset):
+            launch_evidence (None | RecipeOperationCancellationResultLaunchEvidenceType0 | Unset):
+            node_evidence (None | RecipeOperationCancellationResultNodeEvidenceType0 | Unset):
+            recovery (Literal['retry creates a new operation'] | None | Unset):
      """
 
     cancel_actor: str
     cancel_request_id: str
     cancel_requested: bool
     reason: str
-    cancel_requested_at: Union[None, Unset, datetime.datetime] = UNSET
-    cancelled: Union[None, Unset, bool] = UNSET
-    launch_evidence: Union['RecipeOperationCancellationResultLaunchEvidenceType0', None, Unset] = UNSET
-    node_evidence: Union['RecipeOperationCancellationResultNodeEvidenceType0', None, Unset] = UNSET
-    recovery: Union[Literal['retry creates a new operation'], None, Unset] = UNSET
+    cancel_requested_at: datetime.datetime | None | Unset = UNSET
+    cancelled: bool | None | Unset = UNSET
+    launch_evidence: None | RecipeOperationCancellationResultLaunchEvidenceType0 | Unset = UNSET
+    node_evidence: None | RecipeOperationCancellationResultNodeEvidenceType0 | Unset = UNSET
+    recovery: Literal['retry creates a new operation'] | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_operation_cancellation_result_node_evidence_type_0 import RecipeOperationCancellationResultNodeEvidenceType0
-        from ..models.recipe_operation_cancellation_result_launch_evidence_type_0 import RecipeOperationCancellationResultLaunchEvidenceType0
+        from ..models.recipe_operation_cancellation_result_launch_evidence_type_0 import RecipeOperationCancellationResultLaunchEvidenceType0 # noqa: PLC0415
+        from ..models.recipe_operation_cancellation_result_node_evidence_type_0 import RecipeOperationCancellationResultNodeEvidenceType0 # noqa: PLC0415
         cancel_actor = self.cancel_actor
 
         cancel_request_id = self.cancel_request_id
@@ -67,7 +66,7 @@ class RecipeOperationCancellationResult:
 
         reason = self.reason
 
-        cancel_requested_at: Union[None, Unset, str]
+        cancel_requested_at: None | str | Unset
         if isinstance(self.cancel_requested_at, Unset):
             cancel_requested_at = UNSET
         elif isinstance(self.cancel_requested_at, datetime.datetime):
@@ -75,13 +74,13 @@ class RecipeOperationCancellationResult:
         else:
             cancel_requested_at = self.cancel_requested_at
 
-        cancelled: Union[None, Unset, bool]
+        cancelled: bool | None | Unset
         if isinstance(self.cancelled, Unset):
             cancelled = UNSET
         else:
             cancelled = self.cancelled
 
-        launch_evidence: Union[None, Unset, dict[str, Any]]
+        launch_evidence: dict[str, Any] | None | Unset
         if isinstance(self.launch_evidence, Unset):
             launch_evidence = UNSET
         elif isinstance(self.launch_evidence, RecipeOperationCancellationResultLaunchEvidenceType0):
@@ -89,7 +88,7 @@ class RecipeOperationCancellationResult:
         else:
             launch_evidence = self.launch_evidence
 
-        node_evidence: Union[None, Unset, dict[str, Any]]
+        node_evidence: dict[str, Any] | None | Unset
         if isinstance(self.node_evidence, Unset):
             node_evidence = UNSET
         elif isinstance(self.node_evidence, RecipeOperationCancellationResultNodeEvidenceType0):
@@ -97,7 +96,7 @@ class RecipeOperationCancellationResult:
         else:
             node_evidence = self.node_evidence
 
-        recovery: Union[Literal['retry creates a new operation'], None, Unset]
+        recovery: Literal['retry creates a new operation'] | None | Unset
         if isinstance(self.recovery, Unset):
             recovery = UNSET
         else:
@@ -129,8 +128,8 @@ class RecipeOperationCancellationResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_operation_cancellation_result_node_evidence_type_0 import RecipeOperationCancellationResultNodeEvidenceType0
-        from ..models.recipe_operation_cancellation_result_launch_evidence_type_0 import RecipeOperationCancellationResultLaunchEvidenceType0
+        from ..models.recipe_operation_cancellation_result_launch_evidence_type_0 import RecipeOperationCancellationResultLaunchEvidenceType0 # noqa: PLC0415
+        from ..models.recipe_operation_cancellation_result_node_evidence_type_0 import RecipeOperationCancellationResultNodeEvidenceType0 # noqa: PLC0415
         d = dict(src_dict)
         cancel_actor = d.pop("cancel_actor")
 
@@ -140,7 +139,7 @@ class RecipeOperationCancellationResult:
 
         reason = d.pop("reason")
 
-        def _parse_cancel_requested_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_cancel_requested_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -148,29 +147,29 @@ class RecipeOperationCancellationResult:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                cancel_requested_at_type_0 = isoparse(data)
+                cancel_requested_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return cancel_requested_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         cancel_requested_at = _parse_cancel_requested_at(d.pop("cancel_requested_at", UNSET))
 
 
-        def _parse_cancelled(data: object) -> Union[None, Unset, bool]:
+        def _parse_cancelled(data: object) -> bool | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, bool], data)
+            return cast(bool | None | Unset, data)
 
         cancelled = _parse_cancelled(d.pop("cancelled", UNSET))
 
 
-        def _parse_launch_evidence(data: object) -> Union['RecipeOperationCancellationResultLaunchEvidenceType0', None, Unset]:
+        def _parse_launch_evidence(data: object) -> None | RecipeOperationCancellationResultLaunchEvidenceType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -183,14 +182,14 @@ class RecipeOperationCancellationResult:
 
 
                 return launch_evidence_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeOperationCancellationResultLaunchEvidenceType0', None, Unset], data)
+            return cast(None | RecipeOperationCancellationResultLaunchEvidenceType0 | Unset, data)
 
         launch_evidence = _parse_launch_evidence(d.pop("launch_evidence", UNSET))
 
 
-        def _parse_node_evidence(data: object) -> Union['RecipeOperationCancellationResultNodeEvidenceType0', None, Unset]:
+        def _parse_node_evidence(data: object) -> None | RecipeOperationCancellationResultNodeEvidenceType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -203,14 +202,14 @@ class RecipeOperationCancellationResult:
 
 
                 return node_evidence_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeOperationCancellationResultNodeEvidenceType0', None, Unset], data)
+            return cast(None | RecipeOperationCancellationResultNodeEvidenceType0 | Unset, data)
 
         node_evidence = _parse_node_evidence(d.pop("node_evidence", UNSET))
 
 
-        def _parse_recovery(data: object) -> Union[Literal['retry creates a new operation'], None, Unset]:
+        def _parse_recovery(data: object) -> Literal['retry creates a new operation'] | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -219,7 +218,7 @@ class RecipeOperationCancellationResult:
             if recovery_type_0 != 'retry creates a new operation':
                 raise ValueError(f"recovery_type_0 must match const 'retry creates a new operation', got '{recovery_type_0}'")
             return recovery_type_0
-            return cast(Union[Literal['retry creates a new operation'], None, Unset], data)
+            return cast(Literal['retry creates a new operation'] | None | Unset, data)
 
         recovery = _parse_recovery(d.pop("recovery", UNSET))
 

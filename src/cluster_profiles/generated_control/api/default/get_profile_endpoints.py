@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -12,15 +13,13 @@ from ...models.fleet_profile_endpoints_view import FleetProfileEndpointsView
 from ...models.request_validation_problem import RequestValidationProblem
 from ...types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
 def _get_kwargs(
     number: int,
     *,
-    alias: Union[None, Unset, str] = UNSET,
+    alias: None | str | Unset = UNSET,
 
 ) -> dict[str, Any]:
 
@@ -29,7 +28,7 @@ def _get_kwargs(
 
     params: dict[str, Any] = {}
 
-    json_alias: Union[None, Unset, str]
+    json_alias: None | str | Unset
     if isinstance(alias, Unset):
         json_alias = UNSET
     else:
@@ -42,7 +41,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/profile/{number}/endpoints".format(number=number,),
+        "url": "/api/profile/{number}/endpoints".format(number=quote(str(number), safe=""),),
         "params": params,
     }
 
@@ -51,7 +50,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = FleetProfileEndpointsView.from_dict(response.json())
 
@@ -93,7 +92,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -106,21 +105,21 @@ def sync_detailed(
     number: int,
     *,
     client: AuthenticatedClient,
-    alias: Union[None, Unset, str] = UNSET,
+    alias: None | str | Unset = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem]:
     """ Profile Endpoints
 
     Args:
         number (int):
-        alias (Union[None, Unset, str]):
+        alias (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]]
+        Response[BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem]
      """
 
 
@@ -140,21 +139,21 @@ def sync(
     number: int,
     *,
     client: AuthenticatedClient,
-    alias: Union[None, Unset, str] = UNSET,
+    alias: None | str | Unset = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]]:
+) -> BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem | None:
     """ Profile Endpoints
 
     Args:
         number (int):
-        alias (Union[None, Unset, str]):
+        alias (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]
+        BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem
      """
 
 
@@ -169,21 +168,21 @@ async def asyncio_detailed(
     number: int,
     *,
     client: AuthenticatedClient,
-    alias: Union[None, Unset, str] = UNSET,
+    alias: None | str | Unset = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem]:
     """ Profile Endpoints
 
     Args:
         number (int):
-        alias (Union[None, Unset, str]):
+        alias (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]]
+        Response[BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem]
      """
 
 
@@ -203,21 +202,21 @@ async def asyncio(
     number: int,
     *,
     client: AuthenticatedClient,
-    alias: Union[None, Unset, str] = UNSET,
+    alias: None | str | Unset = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]]:
+) -> BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem | None:
     """ Profile Endpoints
 
     Args:
         number (int):
-        alias (Union[None, Unset, str]):
+        alias (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetProfileEndpointsView, RequestValidationProblem]
+        BoundedErrorResponse | FleetProfileEndpointsView | RequestValidationProblem
      """
 
 

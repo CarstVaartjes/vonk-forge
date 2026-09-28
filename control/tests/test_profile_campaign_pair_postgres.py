@@ -7,7 +7,7 @@ from threading import Barrier
 from uuid import uuid4
 
 import pytest
-from httpx import Response
+from httpx2 import Response
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message

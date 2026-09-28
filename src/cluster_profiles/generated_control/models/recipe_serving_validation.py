@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -25,11 +27,11 @@ T = TypeVar("T", bound="RecipeServingValidation")
 class RecipeServingValidation:
     """
         Attributes:
-            checks (list['RecipeValidationCheck']):
+            checks (list[RecipeValidationCheck]):
             interface (RecipeServingValidationInterface):
      """
 
-    checks: list['RecipeValidationCheck']
+    checks: list[RecipeValidationCheck]
     interface: RecipeServingValidationInterface
 
 
@@ -37,7 +39,7 @@ class RecipeServingValidation:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_validation_check import RecipeValidationCheck
+        from ..models.recipe_validation_check import RecipeValidationCheck # noqa: PLC0415
         checks = []
         for checks_item_data in self.checks:
             checks_item = checks_item_data.to_dict()
@@ -61,7 +63,7 @@ class RecipeServingValidation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_validation_check import RecipeValidationCheck
+        from ..models.recipe_validation_check import RecipeValidationCheck # noqa: PLC0415
         d = dict(src_dict)
         checks = []
         _checks = d.pop("checks")

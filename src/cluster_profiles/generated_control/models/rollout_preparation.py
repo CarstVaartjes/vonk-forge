@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,14 +10,13 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.runtime_image_preparation import RuntimeImagePreparation
-  from ..models.model_artifact_preparation import ModelArtifactPreparation
   from ..models.compatibility_preparation import CompatibilityPreparation
+  from ..models.model_artifact_preparation import ModelArtifactPreparation
   from ..models.preparation_reason import PreparationReason
+  from ..models.runtime_image_preparation import RuntimeImagePreparation
 
 
 
@@ -36,30 +37,30 @@ class RolloutPreparation:
             runtime_image (RuntimeImagePreparation): Exact executable OCI image kept separate from model payloads.
             target_node_ids (list[str]):
             targets_ready (bool):
-            exceptions (Union[Unset, list['CompatibilityPreparation']]):
-            reasons (Union[Unset, list['PreparationReason']]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            exceptions (list[CompatibilityPreparation] | Unset):
+            reasons (list[PreparationReason] | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     controller_ready: bool
-    model: 'ModelArtifactPreparation'
+    model: ModelArtifactPreparation
     ready: bool
-    runtime_image: 'RuntimeImagePreparation'
+    runtime_image: RuntimeImagePreparation
     target_node_ids: list[str]
     targets_ready: bool
-    exceptions: Union[Unset, list['CompatibilityPreparation']] = UNSET
-    reasons: Union[Unset, list['PreparationReason']] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    exceptions: list[CompatibilityPreparation] | Unset = UNSET
+    reasons: list[PreparationReason] | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.runtime_image_preparation import RuntimeImagePreparation
-        from ..models.model_artifact_preparation import ModelArtifactPreparation
-        from ..models.compatibility_preparation import CompatibilityPreparation
-        from ..models.preparation_reason import PreparationReason
+        from ..models.compatibility_preparation import CompatibilityPreparation # noqa: PLC0415
+        from ..models.model_artifact_preparation import ModelArtifactPreparation # noqa: PLC0415
+        from ..models.preparation_reason import PreparationReason # noqa: PLC0415
+        from ..models.runtime_image_preparation import RuntimeImagePreparation # noqa: PLC0415
         controller_ready = self.controller_ready
 
         model = self.model.to_dict()
@@ -74,7 +75,7 @@ class RolloutPreparation:
 
         targets_ready = self.targets_ready
 
-        exceptions: Union[Unset, list[dict[str, Any]]] = UNSET
+        exceptions: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.exceptions, Unset):
             exceptions = []
             for exceptions_item_data in self.exceptions:
@@ -83,7 +84,7 @@ class RolloutPreparation:
 
 
 
-        reasons: Union[Unset, list[dict[str, Any]]] = UNSET
+        reasons: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.reasons, Unset):
             reasons = []
             for reasons_item_data in self.reasons:
@@ -118,10 +119,10 @@ class RolloutPreparation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.runtime_image_preparation import RuntimeImagePreparation
-        from ..models.model_artifact_preparation import ModelArtifactPreparation
-        from ..models.compatibility_preparation import CompatibilityPreparation
-        from ..models.preparation_reason import PreparationReason
+        from ..models.compatibility_preparation import CompatibilityPreparation # noqa: PLC0415
+        from ..models.model_artifact_preparation import ModelArtifactPreparation # noqa: PLC0415
+        from ..models.preparation_reason import PreparationReason # noqa: PLC0415
+        from ..models.runtime_image_preparation import RuntimeImagePreparation # noqa: PLC0415
         d = dict(src_dict)
         controller_ready = d.pop("controller_ready")
 
@@ -142,27 +143,31 @@ class RolloutPreparation:
 
         targets_ready = d.pop("targets_ready")
 
-        exceptions = []
         _exceptions = d.pop("exceptions", UNSET)
-        for exceptions_item_data in (_exceptions or []):
-            exceptions_item = CompatibilityPreparation.from_dict(exceptions_item_data)
+        exceptions: list[CompatibilityPreparation] | Unset = UNSET
+        if _exceptions is not UNSET:
+            exceptions = []
+            for exceptions_item_data in _exceptions:
+                exceptions_item = CompatibilityPreparation.from_dict(exceptions_item_data)
 
 
 
-            exceptions.append(exceptions_item)
+                exceptions.append(exceptions_item)
 
 
-        reasons = []
         _reasons = d.pop("reasons", UNSET)
-        for reasons_item_data in (_reasons or []):
-            reasons_item = PreparationReason.from_dict(reasons_item_data)
+        reasons: list[PreparationReason] | Unset = UNSET
+        if _reasons is not UNSET:
+            reasons = []
+            for reasons_item_data in _reasons:
+                reasons_item = PreparationReason.from_dict(reasons_item_data)
 
 
 
-            reasons.append(reasons_item)
+                reasons.append(reasons_item)
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

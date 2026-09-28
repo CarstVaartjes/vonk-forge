@@ -272,8 +272,7 @@ def _dirty_candidate_statement(
 
 
 def _claim_dirty_identities_statement(
-    identities: Sequence[Row[tuple[int, str, datetime]]]
-    | Sequence[tuple[int, str, datetime]],
+    identities: Sequence[Row[int, str, datetime]] | Sequence[tuple[int, str, datetime]],
 ):
     columns = (
         NodeTelemetryRollupDirty.resolution_seconds,
@@ -884,7 +883,7 @@ class TelemetryMaintenance:
         cutoff: datetime,
         limit: int,
         events: FleetEventRepository,
-        candidates: Sequence[Row[tuple[str, str, datetime]]],
+        candidates: Sequence[Row[str, str, datetime]],
     ) -> None:
         sample_ids = [sample_id for sample_id, _node_id, _observed_at in candidates]
         _lock_nodes(
@@ -963,7 +962,7 @@ class TelemetryMaintenance:
         resolution_seconds: RollupResolution,
         cutoff: datetime,
         limit: int,
-        candidates: Sequence[Row[tuple[int, str, datetime]]],
+        candidates: Sequence[Row[int, str, datetime]],
     ) -> None:
         identities = [
             (resolution, node_id, _database_utc(start))

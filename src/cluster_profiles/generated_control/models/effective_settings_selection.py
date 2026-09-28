@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,13 +12,11 @@ from ..models.effective_settings_selection_kind import check_effective_settings_
 from ..models.effective_settings_selection_kind import EffectiveSettingsSelectionKind
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.effective_parallelism import EffectiveParallelism
-  from ..models.effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs
   from ..models.effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
+  from ..models.effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs
 
 
 
@@ -35,29 +35,29 @@ class EffectiveSettingsSelection:
             identity_sha256 (str):
             kind (EffectiveSettingsSelectionKind):
             parallelism (EffectiveParallelism): Derived from topology; never an editable settings field.
-            concurrency (Union[None, Unset, int]):
-            context_tokens (Union[None, Unset, int]):
-            knobs (Union[Unset, EffectiveSettingsSelectionKnobs]):
-            max_batch_tokens (Union[None, Unset, int]):
+            concurrency (int | None | Unset):
+            context_tokens (int | None | Unset):
+            knobs (EffectiveSettingsSelectionKnobs | Unset):
+            max_batch_tokens (int | None | Unset):
      """
 
-    change_effects: 'EffectiveSettingsSelectionChangeEffects'
+    change_effects: EffectiveSettingsSelectionChangeEffects
     identity_sha256: str
     kind: EffectiveSettingsSelectionKind
-    parallelism: 'EffectiveParallelism'
-    concurrency: Union[None, Unset, int] = UNSET
-    context_tokens: Union[None, Unset, int] = UNSET
-    knobs: Union[Unset, 'EffectiveSettingsSelectionKnobs'] = UNSET
-    max_batch_tokens: Union[None, Unset, int] = UNSET
+    parallelism: EffectiveParallelism
+    concurrency: int | None | Unset = UNSET
+    context_tokens: int | None | Unset = UNSET
+    knobs: EffectiveSettingsSelectionKnobs | Unset = UNSET
+    max_batch_tokens: int | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.effective_parallelism import EffectiveParallelism
-        from ..models.effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs
-        from ..models.effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
+        from ..models.effective_parallelism import EffectiveParallelism # noqa: PLC0415
+        from ..models.effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects # noqa: PLC0415
+        from ..models.effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs # noqa: PLC0415
         change_effects = self.change_effects.to_dict()
 
         identity_sha256 = self.identity_sha256
@@ -66,23 +66,23 @@ class EffectiveSettingsSelection:
 
         parallelism = self.parallelism.to_dict()
 
-        concurrency: Union[None, Unset, int]
+        concurrency: int | None | Unset
         if isinstance(self.concurrency, Unset):
             concurrency = UNSET
         else:
             concurrency = self.concurrency
 
-        context_tokens: Union[None, Unset, int]
+        context_tokens: int | None | Unset
         if isinstance(self.context_tokens, Unset):
             context_tokens = UNSET
         else:
             context_tokens = self.context_tokens
 
-        knobs: Union[Unset, dict[str, Any]] = UNSET
+        knobs: dict[str, Any] | Unset = UNSET
         if not isinstance(self.knobs, Unset):
             knobs = self.knobs.to_dict()
 
-        max_batch_tokens: Union[None, Unset, int]
+        max_batch_tokens: int | None | Unset
         if isinstance(self.max_batch_tokens, Unset):
             max_batch_tokens = UNSET
         else:
@@ -112,9 +112,9 @@ class EffectiveSettingsSelection:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.effective_parallelism import EffectiveParallelism
-        from ..models.effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs
-        from ..models.effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
+        from ..models.effective_parallelism import EffectiveParallelism # noqa: PLC0415
+        from ..models.effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects # noqa: PLC0415
+        from ..models.effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs # noqa: PLC0415
         d = dict(src_dict)
         change_effects = EffectiveSettingsSelectionChangeEffects.from_dict(d.pop("change_effects"))
 
@@ -133,28 +133,28 @@ class EffectiveSettingsSelection:
 
 
 
-        def _parse_concurrency(data: object) -> Union[None, Unset, int]:
+        def _parse_concurrency(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         concurrency = _parse_concurrency(d.pop("concurrency", UNSET))
 
 
-        def _parse_context_tokens(data: object) -> Union[None, Unset, int]:
+        def _parse_context_tokens(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         context_tokens = _parse_context_tokens(d.pop("context_tokens", UNSET))
 
 
         _knobs = d.pop("knobs", UNSET)
-        knobs: Union[Unset, EffectiveSettingsSelectionKnobs]
+        knobs: EffectiveSettingsSelectionKnobs | Unset
         if isinstance(_knobs,  Unset):
             knobs = UNSET
         else:
@@ -163,12 +163,12 @@ class EffectiveSettingsSelection:
 
 
 
-        def _parse_max_batch_tokens(data: object) -> Union[None, Unset, int]:
+        def _parse_max_batch_tokens(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         max_batch_tokens = _parse_max_batch_tokens(d.pop("max_batch_tokens", UNSET))
 

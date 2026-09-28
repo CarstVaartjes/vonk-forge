@@ -10,22 +10,22 @@ controller_image=$1
 source_reference=$2
 architecture=$3
 case "$architecture" in
-  linux/amd64) expected_child=sha256:0e392474a4383b733038b85eff26ade929d2ff10e8deead25a6add3ed79fb362 ;;
-  linux/arm64) expected_child=sha256:807f42a95c0f05f397eb505b577b6de49048b865c4e29146d1231324c27e1e59 ;;
+  linux/amd64) expected_child=sha256:ab4c269c9e2bd11affe2666b860fb651a15afec121c15986b052b02e09d86239 ;;
+  linux/arm64) expected_child=sha256:916612c4c9bcf1dd633137ec4ce88987e368c16b3d611642006ca5996fe28c98 ;;
   *) echo "unsupported architecture: $architecture" >&2; exit 2 ;;
 esac
 if [[ "$source_reference" != *@sha256:* ]]; then
   echo "source must be digest pinned" >&2
   exit 2
 fi
-test "$source_reference" = "quay.io/skopeo/stable:v1.22.2-immutable@sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810"
+test "$source_reference" = "quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5"
 # skopeo rejects a reference that carries both a tag and a digest, so resolve
 # the pin by its bare repository plus index digest before invoking skopeo.
 skopeo_source="quay.io/skopeo/stable@${source_reference##*@}"
 
 labels=$(docker image inspect --format '{{index .Config.Labels "io.vonk.skopeo.index-digest"}} {{index .Config.Labels "io.vonk.skopeo.'"${architecture#linux/}"'-digest"}}' "$controller_image")
 read -r index_label child_label <<<"$labels"
-test "$index_label" = sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810
+test "$index_label" = sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
 test "$child_label" = "$expected_child"
 test "$(docker image inspect --format '{{.Architecture}}' "$controller_image")" = "${architecture#linux/}"
 # inspect's Digest identifies the index even when an architecture is selected.

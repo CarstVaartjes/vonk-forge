@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+import httpx2
 import pytest
 
 from cluster_profiles.generated_control.models.model_definition import ModelDefinition
@@ -162,12 +162,12 @@ def _fetch_publication_index(
     package_index_url: str,
     timeout: float,
     *,
-    transport: httpx.BaseTransport | None = None,
-) -> httpx.Response:
+    transport: httpx2.BaseTransport | None = None,
+) -> httpx2.Response:
     client_options: dict[str, Any] = {"timeout": timeout, "trust_env": False}
     if transport is not None:
         client_options["transport"] = transport
-    with httpx.Client(**client_options) as client:
+    with httpx2.Client(**client_options) as client:
         return client.get(package_index_url)
 
 
@@ -201,21 +201,21 @@ def test_candidate_package_is_exact_self_contained_and_producer_bound() -> None:
 
 
 def test_publication_fetch_does_not_forward_controller_authorization() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handle(request: httpx.Request) -> httpx.Response:
+    def handle(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         if request.url.path.endswith("catalog-index.json"):
-            return httpx.Response(200, json={"schema_version": 2}, request=request)
-        return httpx.Response(204, request=request)
+            return httpx2.Response(200, json={"schema_version": 2}, request=request)
+        return httpx2.Response(204, request=request)
 
-    transport = httpx.MockTransport(handle)
+    transport = httpx2.MockTransport(handle)
     publication = _fetch_publication_index(
         "https://raw.example.invalid/immutable/catalog-index.json",
         timeout=1,
         transport=transport,
     )
-    with httpx.Client(
+    with httpx2.Client(
         base_url="https://controller.example.invalid",
         headers={"Authorization": "Bearer controller-token"},
         timeout=1,
@@ -282,7 +282,7 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         and row["document"].get("kind") == "model"
     }
 
-    with httpx.Client(
+    with httpx2.Client(
         base_url=base_url.rstrip("/"),
         headers=headers,
         timeout=timeout,

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,8 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_failure_policy import RecipeFailurePolicy
@@ -29,20 +29,20 @@ class RecipeLifecycle:
             post_stop (list[list[str]]):
             pre_start (list[list[str]]):
             stop_timeout_seconds (int):
-            failure (Union['RecipeFailurePolicy', None, Unset]):
+            failure (None | RecipeFailurePolicy | Unset):
      """
 
     post_stop: list[list[str]]
     pre_start: list[list[str]]
     stop_timeout_seconds: int
-    failure: Union['RecipeFailurePolicy', None, Unset] = UNSET
+    failure: None | RecipeFailurePolicy | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_failure_policy import RecipeFailurePolicy
+        from ..models.recipe_failure_policy import RecipeFailurePolicy # noqa: PLC0415
         post_stop = []
         for post_stop_item_data in self.post_stop:
             post_stop_item = post_stop_item_data
@@ -63,7 +63,7 @@ class RecipeLifecycle:
 
         stop_timeout_seconds = self.stop_timeout_seconds
 
-        failure: Union[None, Unset, dict[str, Any]]
+        failure: dict[str, Any] | None | Unset
         if isinstance(self.failure, Unset):
             failure = UNSET
         elif isinstance(self.failure, RecipeFailurePolicy):
@@ -88,7 +88,7 @@ class RecipeLifecycle:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_failure_policy import RecipeFailurePolicy
+        from ..models.recipe_failure_policy import RecipeFailurePolicy # noqa: PLC0415
         d = dict(src_dict)
         post_stop = []
         _post_stop = d.pop("post_stop")
@@ -108,7 +108,7 @@ class RecipeLifecycle:
 
         stop_timeout_seconds = d.pop("stop_timeout_seconds")
 
-        def _parse_failure(data: object) -> Union['RecipeFailurePolicy', None, Unset]:
+        def _parse_failure(data: object) -> None | RecipeFailurePolicy | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -121,9 +121,9 @@ class RecipeLifecycle:
 
 
                 return failure_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeFailurePolicy', None, Unset], data)
+            return cast(None | RecipeFailurePolicy | Unset, data)
 
         failure = _parse_failure(d.pop("failure", UNSET))
 

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -14,8 +16,6 @@ from ..models.compatibility_preparation_state import check_compatibility_prepara
 from ..models.compatibility_preparation_state import CompatibilityPreparationState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.compatibility_identity import CompatibilityIdentity
@@ -39,27 +39,27 @@ class CompatibilityPreparation:
             reusable (bool):
             stage (CompatibilityPreparationStage):
             state (CompatibilityPreparationState):
-            artifact_sha256 (Union[None, Unset, str]):
-            node_ids (Union[Unset, list[str]]):
-            reason (Union[None, Unset, str]):
+            artifact_sha256 (None | str | Unset):
+            node_ids (list[str] | Unset):
+            reason (None | str | Unset):
      """
 
-    compatibility: 'CompatibilityIdentity'
+    compatibility: CompatibilityIdentity
     compatibility_key_sha256: str
     kind: CompatibilityPreparationKind
     reusable: bool
     stage: CompatibilityPreparationStage
     state: CompatibilityPreparationState
-    artifact_sha256: Union[None, Unset, str] = UNSET
-    node_ids: Union[Unset, list[str]] = UNSET
-    reason: Union[None, Unset, str] = UNSET
+    artifact_sha256: None | str | Unset = UNSET
+    node_ids: list[str] | Unset = UNSET
+    reason: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.compatibility_identity import CompatibilityIdentity
+        from ..models.compatibility_identity import CompatibilityIdentity # noqa: PLC0415
         compatibility = self.compatibility.to_dict()
 
         compatibility_key_sha256 = self.compatibility_key_sha256
@@ -72,19 +72,19 @@ class CompatibilityPreparation:
 
         state: str = self.state
 
-        artifact_sha256: Union[None, Unset, str]
+        artifact_sha256: None | str | Unset
         if isinstance(self.artifact_sha256, Unset):
             artifact_sha256 = UNSET
         else:
             artifact_sha256 = self.artifact_sha256
 
-        node_ids: Union[Unset, list[str]] = UNSET
+        node_ids: list[str] | Unset = UNSET
         if not isinstance(self.node_ids, Unset):
             node_ids = self.node_ids
 
 
 
-        reason: Union[None, Unset, str]
+        reason: None | str | Unset
         if isinstance(self.reason, Unset):
             reason = UNSET
         else:
@@ -114,7 +114,7 @@ class CompatibilityPreparation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.compatibility_identity import CompatibilityIdentity
+        from ..models.compatibility_identity import CompatibilityIdentity # noqa: PLC0415
         d = dict(src_dict)
         compatibility = CompatibilityIdentity.from_dict(d.pop("compatibility"))
 
@@ -140,12 +140,12 @@ class CompatibilityPreparation:
 
 
 
-        def _parse_artifact_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_artifact_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         artifact_sha256 = _parse_artifact_sha256(d.pop("artifact_sha256", UNSET))
 
@@ -153,12 +153,12 @@ class CompatibilityPreparation:
         node_ids = cast(list[str], d.pop("node_ids", UNSET))
 
 
-        def _parse_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         reason = _parse_reason(d.pop("reason", UNSET))
 

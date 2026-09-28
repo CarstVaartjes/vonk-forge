@@ -27,29 +27,29 @@ jobs:
       matrix:
         include:
           # Binary hashes are for the extracted `sccache` executable in Mozilla's
-          # v0.16.0 release archives. Each archive was independently matched to
+          # v0.18.0 release archives. Each archive was independently matched to
           # the SHA-256 digest in GitHub's release asset metadata before extraction:
-          # https://github.com/mozilla/sccache/releases/tag/v0.16.0
+          # https://github.com/mozilla/sccache/releases/tag/v0.18.0
           - platform: linux-amd64
             runner: ubuntu-24.04
             binaries: vonk-nas-setup
-            # Archive: aec995a83ad3dff3d14b6314e08858b7b73d35ca85a5bcf3d3a9ec07dee35588
-            sccache_sha256: 91544c5e9e3440aa0b75e0299cd3e880ac0be91ac537333adee69b507b3495c6
+            # Archive: 45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89
+            sccache_sha256: 973cb15f6a986d84ca334bbed3bbe2eb8f1ee8fd81bf9e115b8539a293bf8d59
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
             binaries: vonk-nas-setup vonk-spark-setup
-            # Archive: f73a5c39f96bb6ebb89cc7915cf182260d4cbf30765322c5e793d0fe8bd80784
-            sccache_sha256: 42998f3f9740df2a53d824cc1008f93337a85002a8801d4f4dc1d739b18aa787
+            # Archive: 2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a
+            sccache_sha256: 0fd82ece4469b791e30fffdd43d58d2e6cae303950c0d6c8faad932d93e35cf4
           - platform: darwin-amd64
             runner: macos-15-intel
             binaries: vonk-nas-setup
-            # Archive: f7dbd055db75a938ab1539f5316c5d08e73a1b94c40ab170ddcc617f5bf18343
-            sccache_sha256: b3a564635eddda9119eeaffe3ada7400188e205907e6b68838c7400ec6f9103b
+            # Archive: 1dade83cc49eeb42337565eccd534b05982820a8e44b851bd7937467a18c7aef
+            sccache_sha256: a3db5e701a33717c37d0071e437206a622b8c4b65eea8d87204bfa420e96fe5b
           - platform: darwin-arm64
             runner: macos-15
             binaries: vonk-nas-setup
-            # Archive: ded590cae2c72042c61178632906bef62d635fa20d45f8b22110a2241f430960
-            sccache_sha256: 1e1da56216f82f4968a705ee19991ad1bcf474ab994cc440fd5cdfd045f7c4e8
+            # Archive: 308184519b646f5125289e8515b36f6ca65a13a041923994aebe702348674e8e
+            sccache_sha256: ecb9522010419996ff703b929cf000119928cfd3ee4a6ca8346ecc52ddcc8c13
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -75,7 +75,7 @@ jobs:
       - name: Run Rust compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
-          version: v0.16.0
+          version: v0.18.0
 
       - name: Verify pinned Rust compiler cache binary
         shell: bash

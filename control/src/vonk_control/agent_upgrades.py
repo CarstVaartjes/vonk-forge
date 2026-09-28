@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-import httpx
+import httpx2
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -136,7 +136,7 @@ class AgentUpgradeService:
         current_revision: Callable[[], str],
         channel: str = "dev",
         release_api_url: str = "https://install.vonkforge.ai",
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx2.BaseTransport | None = None,
     ) -> None:
         self._sessions = sessions
         self._operations = operations
@@ -146,10 +146,10 @@ class AgentUpgradeService:
         if channel not in {"dev", "stable"}:
             raise ValueError("agent upgrade channel is invalid")
         self._channel = channel
-        self._http = httpx.Client(
+        self._http = httpx2.Client(
             base_url=release_api_url,
             follow_redirects=False,
-            timeout=httpx.Timeout(15.0, connect=5.0),
+            timeout=httpx2.Timeout(15.0, connect=5.0),
             trust_env=False,
             transport=transport,
         )
@@ -189,7 +189,7 @@ class AgentUpgradeService:
             signature_response = self._http.get(f"/{signature_record['path']}")
             signature_response.raise_for_status()
             signature = signature_response.text.strip()
-        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        except (httpx2.HTTPError, KeyError, TypeError, ValueError) as error:
             raise AgentUpgradeConflict(
                 "current agent release is unavailable"
             ) from error
@@ -283,7 +283,7 @@ class AgentUpgradeService:
                 source = load_package_source(
                     self._http, self._channel, build_digest, binary_digest
                 )
-            except (httpx.HTTPError, ValueError):
+            except (httpx2.HTTPError, ValueError):
                 skipped[node_id] = "has no published signed rollback package"
                 continue
             sources[node_id] = source.model_dump(mode="json")

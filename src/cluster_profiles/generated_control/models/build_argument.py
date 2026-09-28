@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from typing import cast, Union
+from typing import cast
 
 
 
@@ -22,11 +24,11 @@ class BuildArgument:
     """
         Attributes:
             name (str):
-            value (Union[bool, float, int, str]):
+            value (bool | float | int | str):
      """
 
     name: str
-    value: Union[bool, float, int, str]
+    value: bool | float | int | str
 
 
 
@@ -35,7 +37,7 @@ class BuildArgument:
     def to_dict(self) -> dict[str, Any]:
         name = self.name
 
-        value: Union[bool, float, int, str]
+        value: bool | float | int | str
         value = self.value
 
 
@@ -55,8 +57,8 @@ class BuildArgument:
         d = dict(src_dict)
         name = d.pop("name")
 
-        def _parse_value(data: object) -> Union[bool, float, int, str]:
-            return cast(Union[bool, float, int, str], data)
+        def _parse_value(data: object) -> bool | float | int | str:
+            return cast(bool | float | int | str, data)
 
         value = _parse_value(d.pop("value"))
 

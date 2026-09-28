@@ -9,10 +9,10 @@
 # digest is asserted against scripts/dev_agent_wire_linux.py. Refresh with
 # `docker buildx imagetools inspect ubuntu:24.04` and a reviewed edit here, in
 # the module, and in docs/local-linux-lane.md.
-FROM ubuntu:24.04@sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
 
 ARG RUST_TOOLCHAIN=1.98.1
-ARG UV_VERSION=0.12.1
+ARG UV_VERSION=0.12.19
 ARG PYTHON_VERSION=3.14
 
 ENV DEBIAN_FRONTEND=noninteractive \

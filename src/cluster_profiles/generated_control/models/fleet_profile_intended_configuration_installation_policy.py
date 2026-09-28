@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FleetProfileIntendedConfigurationInstallationPolicy = Literal['exact', 'keep-cached']
 
@@ -6,5 +6,5 @@ FLEET_PROFILE_INTENDED_CONFIGURATION_INSTALLATION_POLICY_VALUES: set[FleetProfil
 
 def check_fleet_profile_intended_configuration_installation_policy(value: str) -> FleetProfileIntendedConfigurationInstallationPolicy:
     if value in FLEET_PROFILE_INTENDED_CONFIGURATION_INSTALLATION_POLICY_VALUES:
-        return cast(FleetProfileIntendedConfigurationInstallationPolicy, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FLEET_PROFILE_INTENDED_CONFIGURATION_INSTALLATION_POLICY_VALUES!r}")

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,10 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Literal, Union, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.run_switch_child_progress import RunSwitchChildProgress
@@ -33,26 +32,26 @@ class RunSwitchModelDownloadPendingResult:
             phase (Literal['transfer']):
             progress (RunSwitchChildProgress): Progress nested in a durable child receipt.
             subphase (Literal['model-download']):
-            reason (Union[None, Unset, str]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
-            total_bytes (Union[None, Unset, int]):
+            reason (None | str | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
+            total_bytes (int | None | Unset):
      """
 
     artifact_set_sha256: str
     downloaded_bytes: int
     phase: Literal['transfer']
-    progress: 'RunSwitchChildProgress'
+    progress: RunSwitchChildProgress
     subphase: Literal['model-download']
-    reason: Union[None, Unset, str] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
-    total_bytes: Union[None, Unset, int] = UNSET
+    reason: None | str | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
+    total_bytes: int | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_child_progress import RunSwitchChildProgress
+        from ..models.run_switch_child_progress import RunSwitchChildProgress # noqa: PLC0415
         artifact_set_sha256 = self.artifact_set_sha256
 
         downloaded_bytes = self.downloaded_bytes
@@ -63,7 +62,7 @@ class RunSwitchModelDownloadPendingResult:
 
         subphase = self.subphase
 
-        reason: Union[None, Unset, str]
+        reason: None | str | Unset
         if isinstance(self.reason, Unset):
             reason = UNSET
         else:
@@ -71,7 +70,7 @@ class RunSwitchModelDownloadPendingResult:
 
         schema_version = self.schema_version
 
-        total_bytes: Union[None, Unset, int]
+        total_bytes: int | None | Unset
         if isinstance(self.total_bytes, Unset):
             total_bytes = UNSET
         else:
@@ -100,7 +99,7 @@ class RunSwitchModelDownloadPendingResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_child_progress import RunSwitchChildProgress
+        from ..models.run_switch_child_progress import RunSwitchChildProgress # noqa: PLC0415
         d = dict(src_dict)
         artifact_set_sha256 = d.pop("artifact_set_sha256")
 
@@ -119,26 +118,26 @@ class RunSwitchModelDownloadPendingResult:
         if subphase != 'model-download':
             raise ValueError(f"subphase must match const 'model-download', got '{subphase}'")
 
-        def _parse_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         reason = _parse_reason(d.pop("reason", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
-        def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_total_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         total_bytes = _parse_total_bytes(d.pop("total_bytes", UNSET))
 

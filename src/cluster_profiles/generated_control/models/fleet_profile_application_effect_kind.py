@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FleetProfileApplicationEffectKind = Literal['agent-operation', 'cleanup', 'install', 'profile-step', 'run', 'stop']
 
@@ -6,5 +6,5 @@ FLEET_PROFILE_APPLICATION_EFFECT_KIND_VALUES: set[FleetProfileApplicationEffectK
 
 def check_fleet_profile_application_effect_kind(value: str) -> FleetProfileApplicationEffectKind:
     if value in FLEET_PROFILE_APPLICATION_EFFECT_KIND_VALUES:
-        return cast(FleetProfileApplicationEffectKind, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FLEET_PROFILE_APPLICATION_EFFECT_KIND_VALUES!r}")

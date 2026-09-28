@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,9 +11,9 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.recipe_runtime_environment import RecipeRuntimeEnvironment
-  from ..models.recipe_runtime_argument import RecipeRuntimeArgument
   from ..models.recipe_lifecycle import RecipeLifecycle
+  from ..models.recipe_runtime_argument import RecipeRuntimeArgument
+  from ..models.recipe_runtime_environment import RecipeRuntimeEnvironment
 
 
 
@@ -25,27 +27,27 @@ T = TypeVar("T", bound="RecipeRuntime")
 class RecipeRuntime:
     """
         Attributes:
-            arguments (list['RecipeRuntimeArgument']):
+            arguments (list[RecipeRuntimeArgument]):
             engine (str):
             entrypoint (list[str]):
-            environment (list['RecipeRuntimeEnvironment']):
+            environment (list[RecipeRuntimeEnvironment]):
             lifecycle (RecipeLifecycle):
      """
 
-    arguments: list['RecipeRuntimeArgument']
+    arguments: list[RecipeRuntimeArgument]
     engine: str
     entrypoint: list[str]
-    environment: list['RecipeRuntimeEnvironment']
-    lifecycle: 'RecipeLifecycle'
+    environment: list[RecipeRuntimeEnvironment]
+    lifecycle: RecipeLifecycle
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_runtime_environment import RecipeRuntimeEnvironment
-        from ..models.recipe_runtime_argument import RecipeRuntimeArgument
-        from ..models.recipe_lifecycle import RecipeLifecycle
+        from ..models.recipe_lifecycle import RecipeLifecycle # noqa: PLC0415
+        from ..models.recipe_runtime_argument import RecipeRuntimeArgument # noqa: PLC0415
+        from ..models.recipe_runtime_environment import RecipeRuntimeEnvironment # noqa: PLC0415
         arguments = []
         for arguments_item_data in self.arguments:
             arguments_item = arguments_item_data.to_dict()
@@ -85,9 +87,9 @@ class RecipeRuntime:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_runtime_environment import RecipeRuntimeEnvironment
-        from ..models.recipe_runtime_argument import RecipeRuntimeArgument
-        from ..models.recipe_lifecycle import RecipeLifecycle
+        from ..models.recipe_lifecycle import RecipeLifecycle # noqa: PLC0415
+        from ..models.recipe_runtime_argument import RecipeRuntimeArgument # noqa: PLC0415
+        from ..models.recipe_runtime_environment import RecipeRuntimeEnvironment # noqa: PLC0415
         d = dict(src_dict)
         arguments = []
         _arguments = d.pop("arguments")

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 
 
@@ -24,13 +25,13 @@ class RecipeSelectorIntent:
     """
         Attributes:
             selector (str):
-            force (Union[Unset, bool]):  Default: False.
-            kind (Union[Literal['selector'], Unset]):  Default: 'selector'.
+            force (bool | Unset):  Default: False.
+            kind (Literal['selector'] | Unset):  Default: 'selector'.
      """
 
     selector: str
-    force: Union[Unset, bool] = False
-    kind: Union[Literal['selector'], Unset] = 'selector'
+    force: bool | Unset = False
+    kind: Literal['selector'] | Unset = 'selector'
 
 
 
@@ -65,7 +66,7 @@ class RecipeSelectorIntent:
 
         force = d.pop("force", UNSET)
 
-        kind = cast(Union[Literal['selector'], Unset] , d.pop("kind", UNSET))
+        kind = cast(Literal['selector'] | Unset , d.pop("kind", UNSET))
         if kind != 'selector' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'selector', got '{kind}'")
 

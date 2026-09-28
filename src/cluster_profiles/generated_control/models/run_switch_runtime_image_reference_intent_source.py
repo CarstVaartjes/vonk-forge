@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RunSwitchRuntimeImageReferenceIntentSource = Literal['controller-build', 'published']
 
@@ -6,5 +6,5 @@ RUN_SWITCH_RUNTIME_IMAGE_REFERENCE_INTENT_SOURCE_VALUES: set[RunSwitchRuntimeIma
 
 def check_run_switch_runtime_image_reference_intent_source(value: str) -> RunSwitchRuntimeImageReferenceIntentSource:
     if value in RUN_SWITCH_RUNTIME_IMAGE_REFERENCE_INTENT_SOURCE_VALUES:
-        return cast(RunSwitchRuntimeImageReferenceIntentSource, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RUN_SWITCH_RUNTIME_IMAGE_REFERENCE_INTENT_SOURCE_VALUES!r}")

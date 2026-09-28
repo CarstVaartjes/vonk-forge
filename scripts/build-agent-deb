@@ -24,7 +24,7 @@ PACKAGE = "vonk-forge-agent"
 BINARIES = ("vonk-agent", "vonk-monitor", "vonk-agent-helper", "oras")
 EGRESS_BINARY = "vonk-build-egress"
 RUNTIME_PROBE_BINARY = "vonk-runtime-probe"
-ORAS_VERSION = "1.3.2"
+ORAS_VERSION = "1.3.4"
 ARCHITECTURES = {
     "linux-arm64": {
         "debian": "arm64",

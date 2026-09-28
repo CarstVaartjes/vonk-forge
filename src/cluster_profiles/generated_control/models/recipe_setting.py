@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,7 +11,6 @@ from ..types import UNSET, Unset
 from ..models.recipe_setting_change_effect import check_recipe_setting_change_effect
 from ..models.recipe_setting_change_effect import RecipeSettingChangeEffect
 from typing import cast
-from typing import cast, Union
 
 
 
@@ -25,11 +26,11 @@ class RecipeSetting:
     """
         Attributes:
             change_effect (RecipeSettingChangeEffect):
-            value (Union[bool, float, int, str]):
+            value (bool | float | int | str):
      """
 
     change_effect: RecipeSettingChangeEffect
-    value: Union[bool, float, int, str]
+    value: bool | float | int | str
 
 
 
@@ -38,7 +39,7 @@ class RecipeSetting:
     def to_dict(self) -> dict[str, Any]:
         change_effect: str = self.change_effect
 
-        value: Union[bool, float, int, str]
+        value: bool | float | int | str
         value = self.value
 
 
@@ -61,8 +62,8 @@ class RecipeSetting:
 
 
 
-        def _parse_value(data: object) -> Union[bool, float, int, str]:
-            return cast(Union[bool, float, int, str], data)
+        def _parse_value(data: object) -> bool | float | int | str:
+            return cast(bool | float | int | str, data)
 
         value = _parse_value(d.pop("value"))
 

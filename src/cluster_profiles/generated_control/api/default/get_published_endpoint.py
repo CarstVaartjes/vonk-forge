@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -26,7 +27,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/endpoints/{alias}".format(alias=alias,),
+        "url": "/api/endpoints/{alias}".format(alias=quote(str(alias), safe=""),),
     }
 
 
@@ -34,7 +35,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | EndpointResponse | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = EndpointResponse.from_dict(response.json())
 
@@ -76,7 +77,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | EndpointResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -90,7 +91,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | EndpointResponse | RequestValidationProblem]:
     """ Endpoint View
 
     Args:
@@ -98,10 +99,10 @@ def sync_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | EndpointResponse | RequestValidationProblem]
      """
 
 
@@ -121,7 +122,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | EndpointResponse | RequestValidationProblem | None:
     """ Endpoint View
 
     Args:
@@ -129,10 +130,10 @@ def sync(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]
+        BoundedErrorResponse | EndpointResponse | RequestValidationProblem
      """
 
 
@@ -147,7 +148,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | EndpointResponse | RequestValidationProblem]:
     """ Endpoint View
 
     Args:
@@ -155,10 +156,10 @@ async def asyncio_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | EndpointResponse | RequestValidationProblem]
      """
 
 
@@ -178,7 +179,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | EndpointResponse | RequestValidationProblem | None:
     """ Endpoint View
 
     Args:
@@ -186,10 +187,10 @@ async def asyncio(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]
+        BoundedErrorResponse | EndpointResponse | RequestValidationProblem
      """
 
 

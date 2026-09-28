@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,17 +11,14 @@ from ..types import UNSET, Unset
 from ..models.fleet_profile_application_view_state import check_fleet_profile_application_view_state
 from ..models.fleet_profile_application_view_state import FleetProfileApplicationViewState
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
+  from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
   from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
   from ..models.fleet_profile_application_result import FleetProfileApplicationResult
-  from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
 
 
 
@@ -34,7 +33,7 @@ class FleetProfileApplicationView:
     """
         Attributes:
             created_at (datetime.datetime):
-            current_operation_id (Union[None, str]):
+            current_operation_id (None | str):
             current_step (int):
             id (str):
             plan_digest (str):
@@ -42,47 +41,47 @@ class FleetProfileApplicationView:
             profile_id (str):
             progress (FleetProfileApplicationProgress): Typed progress tree persisted with every profile application.
             request_key (str):
-            result (Union['FleetProfileApplicationResult', None]):
+            result (FleetProfileApplicationResult | None):
             state (FleetProfileApplicationViewState):
-            status_reason (Union[None, str]):
+            status_reason (None | str):
             total_steps (int):
             updated_at (datetime.datetime):
-            attempt (Union[Unset, int]):  Default: 1.
-            cancellation (Union['FleetProfileApplicationCancellationView', None, Unset]):
-            retry_of_application_id (Union[None, Unset, str]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            attempt (int | Unset):  Default: 1.
+            cancellation (FleetProfileApplicationCancellationView | None | Unset):
+            retry_of_application_id (None | str | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     created_at: datetime.datetime
-    current_operation_id: Union[None, str]
+    current_operation_id: None | str
     current_step: int
     id: str
     plan_digest: str
     profile_digest: str
     profile_id: str
-    progress: 'FleetProfileApplicationProgress'
+    progress: FleetProfileApplicationProgress
     request_key: str
-    result: Union['FleetProfileApplicationResult', None]
+    result: FleetProfileApplicationResult | None
     state: FleetProfileApplicationViewState
-    status_reason: Union[None, str]
+    status_reason: None | str
     total_steps: int
     updated_at: datetime.datetime
-    attempt: Union[Unset, int] = 1
-    cancellation: Union['FleetProfileApplicationCancellationView', None, Unset] = UNSET
-    retry_of_application_id: Union[None, Unset, str] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    attempt: int | Unset = 1
+    cancellation: FleetProfileApplicationCancellationView | None | Unset = UNSET
+    retry_of_application_id: None | str | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
-        from ..models.fleet_profile_application_result import FleetProfileApplicationResult
-        from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
+        from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
+        from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress # noqa: PLC0415
+        from ..models.fleet_profile_application_result import FleetProfileApplicationResult # noqa: PLC0415
         created_at = self.created_at.isoformat()
 
-        current_operation_id: Union[None, str]
+        current_operation_id: None | str
         current_operation_id = self.current_operation_id
 
         current_step = self.current_step
@@ -99,7 +98,7 @@ class FleetProfileApplicationView:
 
         request_key = self.request_key
 
-        result: Union[None, dict[str, Any]]
+        result: dict[str, Any] | None
         if isinstance(self.result, FleetProfileApplicationResult):
             result = self.result.to_dict()
         else:
@@ -107,7 +106,7 @@ class FleetProfileApplicationView:
 
         state: str = self.state
 
-        status_reason: Union[None, str]
+        status_reason: None | str
         status_reason = self.status_reason
 
         total_steps = self.total_steps
@@ -116,7 +115,7 @@ class FleetProfileApplicationView:
 
         attempt = self.attempt
 
-        cancellation: Union[None, Unset, dict[str, Any]]
+        cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
             cancellation = UNSET
         elif isinstance(self.cancellation, FleetProfileApplicationCancellationView):
@@ -124,7 +123,7 @@ class FleetProfileApplicationView:
         else:
             cancellation = self.cancellation
 
-        retry_of_application_id: Union[None, Unset, str]
+        retry_of_application_id: None | str | Unset
         if isinstance(self.retry_of_application_id, Unset):
             retry_of_application_id = UNSET
         else:
@@ -166,19 +165,19 @@ class FleetProfileApplicationView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
-        from ..models.fleet_profile_application_result import FleetProfileApplicationResult
-        from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
+        from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
+        from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress # noqa: PLC0415
+        from ..models.fleet_profile_application_result import FleetProfileApplicationResult # noqa: PLC0415
         d = dict(src_dict)
-        created_at = isoparse(d.pop("created_at"))
+        created_at = datetime.datetime.fromisoformat(d.pop("created_at"))
 
 
 
 
-        def _parse_current_operation_id(data: object) -> Union[None, str]:
+        def _parse_current_operation_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         current_operation_id = _parse_current_operation_id(d.pop("current_operation_id"))
 
@@ -200,7 +199,7 @@ class FleetProfileApplicationView:
 
         request_key = d.pop("request_key")
 
-        def _parse_result(data: object) -> Union['FleetProfileApplicationResult', None]:
+        def _parse_result(data: object) -> FleetProfileApplicationResult | None:
             if data is None:
                 return data
             try:
@@ -211,9 +210,9 @@ class FleetProfileApplicationView:
 
 
                 return result_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileApplicationResult', None], data)
+            return cast(FleetProfileApplicationResult | None, data)
 
         result = _parse_result(d.pop("result"))
 
@@ -223,24 +222,24 @@ class FleetProfileApplicationView:
 
 
 
-        def _parse_status_reason(data: object) -> Union[None, str]:
+        def _parse_status_reason(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         status_reason = _parse_status_reason(d.pop("status_reason"))
 
 
         total_steps = d.pop("total_steps")
 
-        updated_at = isoparse(d.pop("updated_at"))
+        updated_at = datetime.datetime.fromisoformat(d.pop("updated_at"))
 
 
 
 
         attempt = d.pop("attempt", UNSET)
 
-        def _parse_cancellation(data: object) -> Union['FleetProfileApplicationCancellationView', None, Unset]:
+        def _parse_cancellation(data: object) -> FleetProfileApplicationCancellationView | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -253,24 +252,24 @@ class FleetProfileApplicationView:
 
 
                 return cancellation_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileApplicationCancellationView', None, Unset], data)
+            return cast(FleetProfileApplicationCancellationView | None | Unset, data)
 
         cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
 
 
-        def _parse_retry_of_application_id(data: object) -> Union[None, Unset, str]:
+        def _parse_retry_of_application_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         retry_of_application_id = _parse_retry_of_application_id(d.pop("retry_of_application_id", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
