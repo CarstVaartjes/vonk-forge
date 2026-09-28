@@ -3120,10 +3120,6 @@ mod tests {
     }
 
     fn compiled_plan() -> Value {
-        let canonical: Value = serde_json::from_str(include_str!(
-            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
-        ))
-        .unwrap();
         let primary = digest(b"primary");
         let secondary = digest(b"secondary");
         json!({
@@ -3132,7 +3128,6 @@ mod tests {
                 "model_artifact_set_sha256": "d".repeat(64)
             },
             "runtime": {
-                "telemetry": canonical["runtime"]["telemetry"],
                 "executable": "/opt/vonk/bin/vllm",
                 "argv": ["serve", "/models"],
                 "env": [],

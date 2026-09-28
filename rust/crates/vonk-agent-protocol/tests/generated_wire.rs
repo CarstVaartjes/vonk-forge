@@ -127,8 +127,8 @@ fn optional_nulls_normalize_without_erasing_required_nulls_or_empty_defaults() {
         extension
     );
     assert_eq!(
-        output["runtime"]["telemetry"]["engine_version"],
-        Value::Null
+        output["runtime"]["executable"],
+        engine["runtime"]["executable"]
     );
 }
 
