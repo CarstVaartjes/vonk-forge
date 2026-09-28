@@ -175,10 +175,23 @@ def test_selected_profile_reconciles_a_newly_enrolled_spark(tmp_path: Path) -> N
         assert _node_id(99) in intended.scope.node_ids
 
 
+def test_cache_recovery_redownloads_bytes_that_failed_their_digest(
+    tmp_path: Path,
+) -> None:
+    """A digest mismatch discards the bytes; recovery downloads them again."""
+
+    sessions, _lifecycle, service, _profile, _desired, first, child_id, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    _typed_cache_failure(sessions, first.id, child_id, "runtime_image.archive_mismatch")
+    assert service.tick() is True
+    with sessions() as session:
+        assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 2
+
+
 def test_cache_recovery_refuses_access_and_integrity_failures(tmp_path: Path) -> None:
     for code in (
         "runtime_image.archive_unavailable",
-        "runtime_image.archive_mismatch",
         "runtime_image.receipt_invalid",
     ):
         case = tmp_path / code.rsplit(".", 1)[-1]
@@ -334,9 +347,13 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         recovery_review = service.preview(profile.id, allow_pending_cache_rebuild=True)
         assert not recovery_review.allowed
         assert recovery_review.assessments[0].assessment.blockers
-        assert service.tick() is False
+        # A blocked recovery admits no replacement intent and changes no build;
+        # the accepted intent keeps retrying with a visible next attempt.
+        service.tick()
         with sessions() as session:
-            assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
+            applications = tuple(session.scalars(select(FleetProfileApplication)))
+            assert len(applications) == 1
+            assert "next attempt" in (applications[0].status_reason or "")
             build = session.get(RecipeBuild, build_plan.build_id)
             assert build is not None and build.state == before[0]
         return

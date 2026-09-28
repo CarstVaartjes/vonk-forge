@@ -2818,6 +2818,8 @@ export interface components {
             intended_profile?: components["schemas"]["FleetProfileIntendedConfiguration"] | null;
             /** Operation Kind */
             operation_kind?: "fleet-profile.apply" | null;
+            /** Retry Due At */
+            retry_due_at?: string | null;
             /** Retry Of Application Id */
             retry_of_application_id?: string | null;
             /** Step Results */
@@ -2924,6 +2926,20 @@ export interface components {
             assessment: components["schemas"]["RunSwitchAssessment"];
             /** Assignment Id */
             assignment_id: string;
+        };
+        /** FleetProfileAssignmentFailure */
+        FleetProfileAssignmentFailure: {
+            /** Assignment Id */
+            assignment_id?: string | null;
+            /** Operation Id */
+            operation_id?: string | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Terminal
+             * @default false
+             */
+            terminal: boolean;
         };
         /**
          * FleetProfileAssignmentInput
@@ -3501,6 +3517,8 @@ export interface components {
             active_operation_id?: string | null;
             /** Actor */
             actor: string;
+            /** Assignment Failures */
+            assignment_failures?: components["schemas"]["FleetProfileAssignmentFailure"][];
             /** Assignment Ids */
             assignment_ids: string[];
             /** Assignments */
@@ -3542,6 +3560,11 @@ export interface components {
             state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled";
             /** Status Reason */
             status_reason?: string | null;
+            /**
+             * Stop Reissue Attempt
+             * @default 0
+             */
+            stop_reissue_attempt: number;
         };
         /**
          * FleetProfileSwitchChildResult
@@ -7670,6 +7693,11 @@ export interface components {
             /** Final Verify Started At */
             final_verify_started_at?: number | null;
             /**
+             * Force Replan
+             * @default false
+             */
+            force_replan: boolean;
+            /**
              * Item Index
              * @default 0
              */
@@ -7692,6 +7720,11 @@ export interface components {
             phase_index: number;
             /** Phase Results */
             phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"])[];
+            /**
+             * Phase Retry Generation
+             * @default 0
+             */
+            phase_retry_generation: number;
             preflight?: components["schemas"]["LifecyclePreflightCheckpoint"] | null;
             /** Profile Application Id */
             profile_application_id?: string | null;

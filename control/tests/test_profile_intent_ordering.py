@@ -263,7 +263,7 @@ def test_older_unbound_admission_cannot_overtake_newer_bound_deferred_intent(
     newer_after_contention = _application(sessions, newer.id)
     assert newer_after_contention.progress["admission_pending"] is True
     assert newer_after_contention.progress["workload_intent_ordinal"] == 1
-    assert newer_after_contention.state == "waiting-for-operator"
+    assert newer_after_contention.state == "queued"
     with sessions() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None and node.workload_intent_ordinal == 1
@@ -287,7 +287,7 @@ def test_older_unbound_admission_cannot_overtake_newer_bound_deferred_intent(
     assert newer_after_retry.state != "cancelled"
     assert newer_after_retry.progress["workload_intent_ordinal"] == 1
     if newer_after_retry.progress["admission_pending"]:
-        assert newer_after_retry.state == "waiting-for-operator"
+        assert newer_after_retry.state == "queued"
     else:
         assert newer_after_retry.state == "queued"
     assert older_after_retry.progress["workload_intent_ordinal"] is None
@@ -368,7 +368,7 @@ def test_equal_persisted_acceptance_time_uses_deterministic_uuid4_order(
     assert higher_after_retry.state != "cancelled"
     assert higher_after_retry.progress["workload_intent_ordinal"] == 1
     if higher_after_retry.progress["admission_pending"]:
-        assert higher_after_retry.state == "waiting-for-operator"
+        assert higher_after_retry.state == "queued"
     else:
         assert higher_after_retry.state == "queued"
 

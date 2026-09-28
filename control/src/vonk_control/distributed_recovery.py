@@ -720,6 +720,8 @@ def _singleton_recovery_authority(
         or accepted_start.mapping_generation != run.mapping_generation
         or accepted_start.run_generation != run.run_generation
         or accepted_start.image_digest != installation.image_digest
+        # The Job-level binding selects the Start; the exact per-node payload
+        # that recovery replays must name the same run plan.
         or accepted_start.plan_digest != run.plan_digest
         or accepted_start.alias != run.alias
         or accepted_start.rank != run_node.rank
@@ -809,23 +811,24 @@ def _accepted_start_authority(
             .order_by(Job.created_at, Job.id)
         )
     )
-    accepted = tuple(job for job in starts if job.payload.get("recovery") is None)
-    original = accepted[0] if len(accepted) == 1 else None
+    accepted = tuple(
+        job
+        for job in starts
+        if job.payload.get("recovery") is None
+        and job.state == "succeeded"
+        and _start_binds_current_run_plan(session, job, run)
+    )
+    original = accepted[-1] if accepted else None
     targets = sorted(
         session.scalars(select(RunNode.node_id).where(RunNode.run_id == run.id))
     )
     ordinal = original.payload.get("workload_intent_ordinal") if original else None
     if (
         original is None
-        or original.state != "succeeded"
-        or original.authority_revision != recipe_digest
         or original.payload.get("schema_version") != 1
         or original.payload.get("owner_kind") != "run"
         or original.payload.get("owner_id") != run.id
-        or original.payload.get("plan_digest") != run.plan_digest
         or original.targets != targets
-        or original.payload_digest
-        != hashlib.sha256(canonical_message(original.payload)).hexdigest()
         or type(ordinal) is not int
         or ordinal < 1
     ):
@@ -839,9 +842,11 @@ def _accepted_start_authority(
             job
             for job in starts
             if isinstance(job.payload.get("recovery"), Mapping)
+            and job.state == "succeeded"
+            and _start_binds_current_run_plan(session, job, run)
             and _launch_generation(job, node_id) == run.run_generation
         )
-        start = current[0] if len(current) == 1 else None
+        start = current[-1] if current else None
         if start is None:
             raise DistributedLifecycleError(
                 "singleton recovery lacks current-generation Start authority"
@@ -869,16 +874,11 @@ def _accepted_start_authority(
                 workload_intent_ordinal=ordinal,
             )
     if (
-        start.state != "succeeded"
-        or start.authority_revision != recipe_digest
-        or start.payload.get("schema_version") != 1
+        start.payload.get("schema_version") != 1
         or start.payload.get("owner_kind") != "run"
         or start.payload.get("owner_id") != run.id
-        or start.payload.get("plan_digest") != run.plan_digest
         or start.targets != targets
         or start.payload.get("workload_intent_ordinal") != ordinal
-        or start.payload_digest
-        != hashlib.sha256(canonical_message(start.payload)).hexdigest()
         or (
             isinstance(start.result, Mapping)
             and start.result.get("cancel_requested") is True
@@ -1077,6 +1077,30 @@ def _validate_distributed_recovery_start_origin(
         raise DistributedLifecycleError(
             "distributed recovery Start differs from its exact Stop continuation"
         )
+
+
+def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) -> bool:
+    """Only completed Start receipts for the run's current exact plan can seed recovery."""
+
+    try:
+        plan = run_plan_document(run.plan)
+    except RecipeExecutionContractError:
+        return False
+    installation = session.get(RecipeInstallation, run.installation_id)
+    revision = (
+        session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        if installation is not None
+        else None
+    )
+    return (
+        start.state == "succeeded"
+        and revision is not None
+        and start.authority_revision == revision.content_digest
+        and start.payload.get("plan_digest") == run.plan_digest
+        and plan.get("plan_digest") == run.plan_digest
+        and start.payload_digest
+        == hashlib.sha256(canonical_message(start.payload)).hexdigest()
+    )
 
 
 def _project_start_phases(value: object) -> list[list[dict[str, object]]] | None:
@@ -1788,25 +1812,27 @@ def _original_start_authority(
                 Job.payload["recovery"].as_string().is_(None),
             )
             .order_by(Job.created_at, Job.id)
-            .limit(2)
         )
     )
-    if len(starts) != 1:
+    starts = tuple(
+        start
+        for start in starts
+        if start.state == "succeeded"
+        and _start_binds_current_run_plan(session, start, run)
+    )
+    if not starts:
         raise DistributedLifecycleError(
             "distributed recovery lacks its start authority"
         )
-    start = starts[0]
+    start = starts[-1]
     deadline_value = start.payload.get("start_deadline")
     ordinal = start.payload.get("workload_intent_ordinal")
     targets = sorted(
         session.scalars(select(RunNode.node_id).where(RunNode.run_id == run.id))
     )
     if (
-        start.state != "succeeded"
-        or start.authority_revision != recipe_digest
-        or type(ordinal) is not int
+        type(ordinal) is not int
         or ordinal < 1
-        or start.payload.get("plan_digest") != run.plan_digest
         or start.targets != targets
         or not isinstance(deadline_value, str)
     ):

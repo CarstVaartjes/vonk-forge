@@ -992,7 +992,10 @@ class DurableDistributionPhaseExecutor:
                         authorization.oci_archive_sha256,
                         authorization.image_bytes,
                     ):
-                        raise RuntimeError("OCI build receipt authority changed")
+                        raise RuntimeError(
+                            "runtime_image.authorization_invalid: "
+                            "OCI build receipt authority changed"
+                        )
             else:
                 if plan.recipe_revision_id is not None:
                     authorization = session.scalar(
@@ -1016,12 +1019,14 @@ class DurableDistributionPhaseExecutor:
                         authorization.image_bytes,
                     ):
                         raise RuntimeError(
+                            "runtime_image.authorization_invalid: "
                             "published runtime image receipt authority changed"
                         )
                 elif not self._archive_is_published(
                     image_digest, layout_digest, image_bytes
                 ):
                     raise RuntimeError(
+                        "runtime_image.authorization_invalid: "
                         "published runtime image receipt authority changed"
                     )
         return DistributionObject(
