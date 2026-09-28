@@ -81,6 +81,16 @@ def build_recipe_start_payload(
         RecipeStartPayload.model_validate(payload)
     except (KeyError, TypeError, ValueError) as error:
         raise RecipeStartPayloadError("recipe start payload is invalid") from error
+    security = payload.get("security")
+    if isinstance(security, dict):
+        native_fabric = world_size > 1 and master_port is not None
+        security["network_mode"] = (
+            "host"
+            if native_fabric
+            else "bridge"
+            if endpoint_address is not None
+            else "none"
+        )
     return payload
 
 
@@ -100,10 +110,6 @@ def _bind_compiled_execution_plan(
     )
     if not isinstance(runtime, dict) or not isinstance(compiled_placement, dict):
         raise RecipeStartPayloadError("compiled execution plan placement is invalid")
-    if compiled_placement.get("memory_kind") != placement.memory_kind:
-        raise RecipeStartPayloadError(
-            "compiled execution plan memory kind differs from accepted placement"
-        )
     compiled_placement.update(
         {
             "endpoint_address": endpoint_address,
@@ -116,23 +122,16 @@ def _bind_compiled_execution_plan(
             "port": placement.port,
             "reserved_memory_bytes": placement.reserved_memory_bytes,
             "memory_floor_bytes": placement.memory_floor_bytes,
-            "memory_kind": placement.memory_kind,
         }
     )
     security = payload.get("security")
     if isinstance(security, dict):
         native_fabric = world_size > 1 and master_port is not None
-        security["host_network"] = native_fabric
         security["network_mode"] = (
             "host"
             if native_fabric
             else "bridge"
             if endpoint_address is not None
             else "none"
-        )
-    topology = payload.get("topology")
-    if isinstance(topology, dict):
-        topology.update(
-            {"rank": placement.rank, "role": placement.role, "world_size": world_size}
         )
     return payload
