@@ -5059,7 +5059,7 @@ def test_scoped_cleanup_retries_when_uninstall_capacity_writer_is_busy(
     parked = service.get(operation.operation_id)
     assert parked.state == "running"
     assert parked.status_reason is not None
-    assert "admission retry" in parked.status_reason
+    assert "admission retry 1 in 5s" in parked.status_reason
     assert parked.result is not None
     assert parked.result.retry_reason == RunAdmissionBusy.code
     assert parked.result.phase_index == 0

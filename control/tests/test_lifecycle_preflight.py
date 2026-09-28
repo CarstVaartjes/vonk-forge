@@ -133,43 +133,7 @@ def test_failed_probe_is_reissued_after_backoff(tmp_path):
     assert retried.pending_job_id != checkpoint.pending_job_id
 
 
-@pytest.mark.parametrize(
-    "code",
-    [
-        "controller.authentication_required",
-        "controller.request_rejected",
-        "controller.fleet.enrollment_denied",
-        "helper.authorization_invalid",
-        "helper.message_invalid",
-        "helper.operation_invalid",
-        "helper.artifact_invalid",
-        "helper.runtime_image_identity_invalid",
-        "helper.peer_invalid",
-        "helper_grant_node_mismatch",
-        "helper_grant_unauthorized",
-        "helper_request_replayed",
-        "grant_node_mismatch",
-        "grant_unauthorized",
-        "request_replayed",
-        "runtime_preflight.node_revoked",
-        "agent.enrollment.submit.rejected",
-        "enrollment.token_invalid",
-        "enrollment.token_expired",
-        "enrollment.token_revoked",
-        "helper_authority.denied",
-        "helper_authority.invalid",
-        "tombstone_fenced",
-        "tombstone.fenced",
-        "http.401",
-        "http.403",
-        "local.identity_expired",
-        "agent.certificate.rotation.conflict",
-    ],
-)
-def test_security_probe_failures_are_returned_without_reprobe(tmp_path, code: str):
-    sessions, _queue, _clock, _node, service, arguments = _setup(tmp_path)
-    pending, error = service.ensure(**arguments, previous=None)
-    assert error is None and pending.pending_job_id is not None
+def _fail_child(sessions, pending, now, *, reason, result):
     with sessions.begin() as session:
         child = session.get(Job, pending.pending_job_id)
         operation = session.scalar(
@@ -179,14 +143,117 @@ def test_security_probe_failures_are_returned_without_reprobe(tmp_path, code: st
         )
         assert child is not None and operation is not None
         child.state = "failed"
-        child.status_reason = f"{code}: security boundary refused"
+        child.status_reason = reason
         operation.state = "failed"
+        operation.current_attempt = 1
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation.id,
+                attempt=1,
+                fence=str(uuid.uuid4()),
+                lease_deadline=now + timedelta(seconds=60),
+                agent_certificate_serial="serial-0",
+                state="failed",
+                result=result,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        # Agent `preflight_code()` helper refusals.
+        "helper_grant_invalid",
+        "helper_grant_unauthorized",
+        "helper_grant_node_mismatch",
+        "helper_peer_identity_invalid",
+        "helper_request_replayed",
+        "helper_request_installation_identity_invalid",
+        "helper_request_plan_binding_invalid",
+        "helper_inspection_receipt_invalid",
+        "helper_observation_receipt_invalid",
+        "helper_operation_invalid_artifact",
+        "helper_runtime_image_identity_invalid",
+        # Helper wire rejection codes carried verbatim.
+        "grant_invalid",
+        "grant_unauthorized",
+        "grant_node_mismatch",
+        "peer_identity_invalid",
+        "request_replayed",
+        "operation_invalid_artifact",
+        "runtime_image_identity_invalid",
+        "runtime_helper_inspection_receipt_invalid",
+        "runtime_helper_observation_receipt_invalid",
+        # Controller/agent authentication, enrollment and identity codes.
+        "controller.authentication_required",
+        "controller.request_rejected",
+        "controller.fleet.enrollment_denied",
+        "agent.enrollment.submit.rejected",
+        "agent.certificate.rotation.conflict",
+        "local.identity_expired",
+    ],
+)
+def test_security_probe_failures_are_returned_without_reprobe(tmp_path, code: str):
+    sessions, _queue, clock, _node, service, arguments = _setup(tmp_path)
+    pending, error = service.ensure(**arguments, previous=None)
+    assert error is None and pending.pending_job_id is not None
+    _fail_child(
+        sessions,
+        pending,
+        clock.now,
+        reason="helper refused the runtime preflight",
+        result={"error_code": code, "reason": "refused", "status": "failed"},
+    )
 
     checkpoint, blocker = service.ensure(**arguments, previous=pending)
 
-    assert blocker == f"{code}: security boundary refused"
+    assert blocker == "helper refused the runtime preflight"
     assert checkpoint.pending_job_id is None
     assert checkpoint.next_check_at is None
+
+
+def test_security_helper_error_code_is_recognized_beside_generic_code(tmp_path):
+    sessions, _queue, clock, _node, service, arguments = _setup(tmp_path)
+    pending, _ = service.ensure(**arguments, previous=None)
+    _fail_child(
+        sessions,
+        pending,
+        clock.now,
+        reason="runtime preflight failed",
+        result={
+            "error_code": "operation_failed",
+            "helper_error_code": "helper_grant_unauthorized",
+        },
+    )
+    _checkpoint, blocker = service.ensure(**arguments, previous=pending)
+    assert blocker == "runtime preflight failed"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "helper_grant_unauthorized: text only",
+        "permission_denied",
+        "tombstone_fenced",
+        "http.403",
+    ],
+)
+def test_security_words_in_free_text_reason_do_not_park_the_probe(
+    tmp_path, reason: str
+):
+    sessions, _queue, clock, _node, service, arguments = _setup(tmp_path)
+    pending, _ = service.ensure(**arguments, previous=None)
+    _fail_child(
+        sessions,
+        pending,
+        clock.now,
+        reason=reason,
+        result={"error_code": "operation_failed", "reason": reason},
+    )
+    checkpoint, blocker = service.ensure(**arguments, previous=pending)
+    assert blocker is None
+    assert checkpoint.pending_job_id is None
+    assert checkpoint.next_check_at is not None
 
 
 def test_ordinary_stale_preflight_cause_is_preserved_for_retry(tmp_path) -> None:
@@ -439,21 +506,6 @@ def test_disconnected_probe_keeps_exact_child_until_recovery_after_restart(
     assert node_id in completed.receipts
     with sessions() as session:
         assert len(list(session.scalars(select(AgentOperation)))) == 1
-
-
-def test_permission_denied_probe_failure_remains_an_explicit_blocker(tmp_path):
-    sessions, _, clock, _, service, arguments = _setup(tmp_path)
-    checkpoint, _ = service.ensure(**arguments, previous=None)
-    with sessions.begin() as session:
-        child = session.get(Job, checkpoint.pending_job_id)
-        assert child is not None
-        child.state = "failed"
-        child.status_reason = "permission_denied"
-    clock.now += timedelta(days=1)
-    blocked, error = service.ensure(**arguments, previous=checkpoint)
-    assert error == "permission_denied"
-    assert blocked.pending_job_id is None
-    assert blocked.attempts == checkpoint.attempts
 
 
 def test_successful_probe_without_receipt_is_reissued(tmp_path):

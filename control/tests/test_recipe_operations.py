@@ -1581,6 +1581,40 @@ def _wait_for_postgres_block(engine, *, blocked_pid: int, blocker_pid: int) -> N
     pytest.fail("recipe operation never became database-lock blocked")
 
 
+def test_install_replay_is_bound_to_mapping_and_build_identity(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(tmp_path)
+    plan = service.preview_install(mapping_id, build_id)
+    operation = service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="7" * 36
+    )
+    assert (
+        service.install(
+            plan, plan_digest=plan.plan_digest, actor="admin", request_id="7" * 36
+        )
+        == operation
+    )
+    for other in (
+        replace(plan, mapping_id=str(uuid.uuid4())),
+        replace(plan, recipe_build_id=str(uuid.uuid4())),
+    ):
+        with pytest.raises(
+            RecipeOperationConflict, match="request key was already used differently"
+        ):
+            service.install(
+                other,
+                plan_digest=plan.plan_digest,
+                actor="admin",
+                request_id="7" * 36,
+            )
+    with sessions() as session:
+        assert (
+            len(list(session.scalars(select(Job).where(Job.kind == "recipe.install"))))
+            == 1
+        )
+
+
 def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) -> None:
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2

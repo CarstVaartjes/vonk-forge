@@ -1571,7 +1571,10 @@ class RecipeOperationService:
         workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
         now = self._clock()
-        existing = self._idempotent(request_id, "recipe.install", None)
+        install_identity = (plan.mapping_id, plan.recipe_build_id)
+        existing = self._idempotent(
+            request_id, "recipe.install", None, install_identity=install_identity
+        )
         if existing is not None:
             return existing
         plan = self._install_admission.plan_install(
@@ -1599,7 +1602,11 @@ class RecipeOperationService:
             except AdmissionLockBusy as error:
                 raise InstallAdmissionBusy("install.capacity_busy") from error
             replay = self._idempotent_in_session(
-                session, request_id, "recipe.install", None
+                session,
+                request_id,
+                "recipe.install",
+                None,
+                install_identity=install_identity,
             )
             if replay is not None:
                 return replay
@@ -6992,6 +6999,7 @@ class RecipeOperationService:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         installation_id: str | None = None,
+        install_identity: tuple[str, str | None] | None = None,
     ) -> RecipeOperationView | None:
         with self._sessions() as session:
             return self._idempotent_in_session(
@@ -7002,6 +7010,7 @@ class RecipeOperationService:
                 owner_kind=owner_kind,
                 owner_id=owner_id,
                 installation_id=installation_id,
+                install_identity=install_identity,
             )
 
     def _idempotent_in_session(
@@ -7014,6 +7023,7 @@ class RecipeOperationService:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         installation_id: str | None = None,
+        install_identity: tuple[str, str | None] | None = None,
     ) -> RecipeOperationView | None:
         existing = self._idempotent_job_in_session(
             session,
@@ -7023,6 +7033,7 @@ class RecipeOperationService:
             owner_kind=owner_kind,
             owner_id=owner_id,
             installation_id=installation_id,
+            install_identity=install_identity,
         )
         return self._view(existing) if existing is not None else None
 
@@ -7036,6 +7047,7 @@ class RecipeOperationService:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         installation_id: str | None = None,
+        install_identity: tuple[str, str | None] | None = None,
     ) -> Job | None:
         existing = session.scalar(select(Job).where(Job.request_id == request_id))
         if existing is None:
@@ -7061,6 +7073,22 @@ class RecipeOperationService:
                 )
             run = session.get(RecipeRun, existing.payload.get("owner_id"))
             if run is None or run.installation_id != installation_id:
+                raise RecipeOperationConflict(
+                    "request key was already used differently"
+                )
+        if install_identity is not None:
+            # An install replay returns the old job only for the same mapping
+            # and build; a reused key for another mapping is a conflict.
+            installation = (
+                session.get(RecipeInstallation, existing.payload.get("owner_id"))
+                if existing.payload.get("owner_kind") == "installation"
+                else None
+            )
+            if (
+                installation is None
+                or (installation.mapping_id, installation.recipe_build_id)
+                != install_identity
+            ):
                 raise RecipeOperationConflict(
                     "request key was already used differently"
                 )

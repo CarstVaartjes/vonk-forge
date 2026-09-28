@@ -7797,7 +7797,7 @@ class RunSwitchOperationService:
                 job.status_reason = (
                     detail or "Admission is waiting for the Controller capacity writer"
                 ) + (
-                    f"; admission retry {attempt + 1} in {delay_seconds}s "
+                    f"; admission retry {attempt} in {delay_seconds}s "
                     f"at {due.isoformat()}."
                 )
                 job.result = _persisted_result(progress)
