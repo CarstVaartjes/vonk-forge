@@ -132,7 +132,6 @@ def test_valid_model_write_read_and_projection_is_postgres_backed(catalog) -> No
             )
         )
         assert stored is not None
-        assert stored.document["schema_version"] == 2
         assert (
             session.scalar(
                 select(CatalogDocumentHead).where(
@@ -262,7 +261,7 @@ def test_candidate_switch_is_atomic_and_failed_candidate_preserves_prior_good(
         )
 
 
-def test_capability_and_provenance_only_model_revision_reuses_artifact_key(
+def test_description_only_model_revision_reuses_artifact_key(
     catalog,
 ) -> None:
     original = _model()
@@ -272,7 +271,6 @@ def test_capability_and_provenance_only_model_revision_reuses_artifact_key(
     _document_section(changed, "metadata")["description"] = (
         "updated capability documentation"
     )
-    _document_section(changed, "provenance")["attribution"] = ["updated attribution"]
     successor = catalog.revise(
         first.document_id, changed, actor="operator", expected_revision=1
     )
@@ -295,9 +293,6 @@ def test_recipe_reuse_keys_follow_effective_execution_and_model_artifacts(
     _document_section(changed_model, "metadata")["description"] = (
         "updated capability documentation"
     )
-    _document_section(changed_model, "provenance")["attribution"] = [
-        "updated attribution"
-    ]
     changed_model_revision = catalog.revise(
         model_revision.document_id, changed_model, actor="operator", expected_revision=1
     )

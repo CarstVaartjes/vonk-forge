@@ -83,15 +83,18 @@ class _PreparedArtifactExecutor(RecordingArtifactExecutor):
         if phase.subphase == "target-copy" and phase.kind in {"transfer", "verify"}:
             evidence = _target_copy_evidence(plan, phase, kwargs["progress"])
             if phase.kind == "verify":
+                image = (
+                    plan.preparation.runtime_image
+                    if plan.preparation is not None
+                    else plan.build
+                )
                 return PhaseExecution(
                     result={
                         "verified": True,
-                        "verified_digests": evidence["verified_digests"],
+                        "verified_digests": list(plan.storage.artifact_digests),
                         "verified_build_id": plan.recipe_build_id,
-                        "verified_image_digest": evidence["verified_image_digest"],
-                        "verified_oci_layout_sha256": evidence[
-                            "verified_oci_layout_sha256"
-                        ],
+                        "verified_image_digest": image.image_digest,
+                        "verified_oci_layout_sha256": image.oci_layout_sha256,
                     }
                 )
             return PhaseExecution(result=evidence)
