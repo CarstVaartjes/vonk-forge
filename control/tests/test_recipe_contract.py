@@ -36,7 +36,7 @@ def model() -> ModelDefinition:
     return ModelDefinition.model_validate(_example("model-definition.json"))
 
 
-def _recipe(name: str = "recipe-image.json") -> RecipeDefinition:
+def _recipe(name: str = "recipe-source-build.json") -> RecipeDefinition:
     return RecipeDefinition.model_validate(_example(name))
 
 
@@ -79,7 +79,7 @@ def test_canonical_recipe_compiles_a_shell_free_read_only_projection(
 def test_canonical_recipe_preserves_unknown_engine_arguments(
     model: ModelDefinition,
 ) -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     _json_object(raw["runtime"])["arguments"] = [
         {"name": "future_option", "value": '{"mode":"first"}'},
         {"name": "future_toggle", "value": True},
@@ -93,7 +93,7 @@ def test_canonical_recipe_preserves_unknown_engine_arguments(
 
 
 def test_canonical_recipe_rejects_unsafe_entrypoints(model: ModelDefinition) -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     _json_object(raw["runtime"])["entrypoint"] = ["bash", "-c", "vllm serve /models"]
 
     with pytest.raises((ValidationError, RecipeRuntimeSpecError)):
@@ -112,7 +112,7 @@ def test_canonical_recipe_rejects_invalid_cross_field_values(
     path: tuple[str, ...],
     value: object,
 ) -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     target: object = raw
     for part in path[:-1]:
         assert isinstance(target, dict)
@@ -206,7 +206,7 @@ def test_source_build_requires_an_exact_image_receipt(
 
 
 def test_canonical_recipe_rejects_unknown_root_fields() -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     raw["unexpected_root"] = []
 
     with pytest.raises(ValidationError):

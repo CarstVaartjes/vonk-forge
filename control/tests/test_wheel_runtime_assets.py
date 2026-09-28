@@ -53,7 +53,7 @@ def test_control_wheel_packages_current_runtime_assets(tmp_path: Path) -> None:
     fixture = tmp_path / "synthetic-canonical-recipe.json"
     fixture.write_bytes(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_bytes()
     )
     smoke = subprocess.run(

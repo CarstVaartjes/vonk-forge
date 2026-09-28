@@ -40,13 +40,9 @@ class RecipeRuntimeSpecError(ValueError):
     """The canonical recipe cannot produce a secure runtime projection."""
 
 
-def recipe_topology(value: object) -> Mapping[str, object]:
-    """Return the topology projection from a validated canonical recipe."""
-    return _recipe(value).topology.model_dump(mode="json")
-
-
-def recipe_fabric(value: object) -> RecipeTopology:
-    """Return the validated topology, whose fabric properties are derived."""
+def recipe_topology(value: object) -> RecipeTopology:
+    """Return the validated topology; mode, world size, fabric and stop
+    order are derived properties of it."""
     return _recipe(value).topology
 
 
@@ -228,12 +224,11 @@ def compile_runtime_spec(
             "metrics_path": telemetry.path,
         },
         "image": projection.image,
-        "architecture": projection.architecture,
+        "architecture": "linux/arm64",
         "entrypoint": list(projection.command),
         "arguments": compiled_arguments,
         "environment": [
-            {"name": name, "value": value, "secret": None}
-            for name, value in projection.environment
+            {"name": name, "value": value} for name, value in projection.environment
         ],
         "writable_paths": environment,
     }
@@ -255,46 +250,28 @@ def compile_runtime_spec(
                 "artifact_key": artifact_inputs.get(selection.id),
             }
         )
+    # Model and input mounts are read-only; the output mount is writable.
     mounts = [
-        {
-            "source": mount.source,
-            "target": mount.target,
-            "read_only": mount.read_only,
-        }
+        {"source": mount.source, "target": mount.target}
         for mount in projection.model_mounts
     ]
-    mounts.append(
-        {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False}
-    )
+    mounts.append({"source": "/run/vonk/outputs", "target": "/outputs"})
     if projection.input_mount is not None:
-        mounts.append(
-            {"source": "/run/vonk/inputs", "target": "/inputs", "read_only": True}
-        )
-    lifecycle = parsed.runtime.lifecycle
+        mounts.append({"source": "/run/vonk/inputs", "target": "/inputs"})
     security = {
-        "devices": list(projection.devices) if hasattr(projection, "devices") else [],
+        "gpu": projection.gpu,
         "user": projection.user,
-        "capabilities": list(projection.capabilities),
-        "privileged": False,
-        "host_network": projection.network_mode == "host",
         "network_mode": projection.network_mode,
         "mounts": mounts,
-        "read_only_root": projection.read_only_root,
-        "no_new_privileges": projection.no_new_privileges,
     }
     lifecycle_spec = {
-        "pre_start": copy.deepcopy(parsed.runtime.lifecycle.pre_start),
-        "post_stop": copy.deepcopy(parsed.runtime.lifecycle.post_stop),
-        "stop_timeout_seconds": lifecycle.stop_timeout_seconds,
+        "stop_timeout_seconds": parsed.runtime.lifecycle.stop_timeout_seconds,
     }
     topology_spec = {
         "name": parsed.topology.name,
-        "mode": parsed.topology.mode,
         "node_count": parsed.topology.node_count,
-        "world_size": parsed.topology.parallelism.world_size,
         "rank": rank,
         "role": role,
-        "backend": parsed.topology.parallelism.backend,
     }
     identity: dict[str, object] = {
         "recipe_revision_sha256": recipe_digest,
@@ -316,7 +293,6 @@ def compile_runtime_spec(
     }
     if interface.adapter == "openai":
         spec["endpoint"] = {
-            "protocol": "openai",
             "port": interface.port,
             "model_aliases": list(interface.model_aliases),
             "health_path": interface.health_path,
@@ -329,7 +305,6 @@ def compile_runtime_spec(
                 if interface.input is None
                 else interface.input.model_dump(mode="json")
             ),
-            "output_path": interface.output.path,
             "timeout_seconds": MAX_TIMEOUT_SECONDS,
         }
     identity["execution_sha256"] = _execution_digest(

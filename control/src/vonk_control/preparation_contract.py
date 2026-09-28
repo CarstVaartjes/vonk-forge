@@ -41,7 +41,7 @@ class ControllerAssetState(_StrictModel):
     missing_bytes: int | None = Field(default=None, ge=0)
     verified_sha256: Digest | None = None
     verified_at: datetime | None = None
-    source: Literal["published", "controller-build", "nas-cache", "unknown"]
+    source: Literal["controller-build", "nas-cache", "unknown"]
     reason: str | None = Field(default=None, min_length=1, max_length=256)
 
     @model_validator(mode="after")

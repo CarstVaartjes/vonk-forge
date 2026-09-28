@@ -1790,7 +1790,7 @@ class RecipeOperationService:
             distributed_readiness = _canonical_distributed_readiness(revision.document)
             two_phase_start = (
                 world_size > 1
-                and topology.get("mode") == "distributed"
+                and topology.distributed
                 and distributed_readiness is not None
             )
             start_deadline = (
@@ -4356,22 +4356,18 @@ class RecipeOperationService:
         owner_id = _required_string(job.payload, "owner_id")
         if job.kind == "recipe.build.cleanup.v1":
             if succeeded:
-                receipt = RecipeBuildCleanupEvidence.model_validate_json(
+                RecipeBuildCleanupEvidence.model_validate_json(
                     canonical_message(evidence)
                 )
                 expected = RecipeBuildCleanupRequest.model_validate_json(
                     canonical_message(operation.payload)
                 )
-                if (
-                    receipt.build_id != owner_id
-                    or receipt.build_id != expected.build_id
-                    or receipt.operation_id != expected.operation_id
-                ):
+                if expected.build_id != owner_id:
                     raise RecipeOperationConflict(
-                        "recipe build cleanup evidence does not match its authority"
+                        "recipe build cleanup does not match its authority"
                     )
                 original = session.get(
-                    AgentOperation, receipt.operation_id, with_for_update=True
+                    AgentOperation, expected.operation_id, with_for_update=True
                 )
                 original_job = (
                     None
@@ -5648,7 +5644,7 @@ class RecipeOperationService:
             if "recipe.build.cleanup.v1" not in (node.capabilities or []):
                 return False
             payload = RecipeBuildCleanupRequest(
-                schema_version=1, build_id=build.id, operation_id=child.id
+                build_id=build.id, operation_id=child.id
             )
             self._queue_in_session(
                 session,
@@ -7484,15 +7480,14 @@ def _recipe_model_identities(
     return tuple(result)
 
 
-def _topology_order(document: Mapping[str, object], key: str) -> tuple[str, ...]:
+def _topology_order(
+    document: Mapping[str, object], key: Literal["start_order", "stop_order"]
+) -> tuple[str, ...]:
     try:
         topology = recipe_topology(document)
     except Exception as error:
         raise RecipeOperationConflict("recipe topology is invalid") from error
-    order = topology.get(key)
-    if not isinstance(order, list) or not all(isinstance(role, str) for role in order):
-        raise RecipeOperationConflict(f"recipe topology {key} is invalid")
-    return tuple(order)
+    return tuple(topology.start_order if key == "start_order" else topology.stop_order)
 
 
 def _distributed_start_deadline(
@@ -7509,16 +7504,13 @@ def _distributed_start_deadline(
 def _canonical_distributed_readiness(
     document: Mapping[str, object],
 ) -> dict[str, object] | None:
-    runtime = document.get("runtime")
-    lifecycle = runtime.get("lifecycle") if isinstance(runtime, Mapping) else None
     interfaces = document.get("interfaces")
-    if not isinstance(lifecycle, Mapping) or not isinstance(interfaces, Sequence):
-        raise RecipeOperationConflict("distributed readiness timeout is invalid")
+    if not isinstance(interfaces, Sequence):
+        raise RecipeOperationConflict("distributed readiness interface is invalid")
     try:
         readiness = canonical_distributed_readiness(
             topology=recipe_topology(document),
             interfaces=interfaces,
-            lifecycle=lifecycle,
         )
     except DistributedLifecycleError as error:
         raise RecipeOperationConflict(str(error)) from error
@@ -7616,8 +7608,6 @@ def _current_phase_index(
 
 def _valid_image_import_payload(value: object, expected_build_id: str) -> bool:
     expected_fields = {
-        "schema_version",
-        "kind",
         "build_id",
         "mapping_id",
         "mapping_generation",
@@ -7631,9 +7621,7 @@ def _valid_image_import_payload(value: object, expected_build_id: str) -> bool:
     image_digest = value.get("image_digest")
     layout_digest = value.get("oci_layout_sha256")
     return (
-        value.get("schema_version") == 1
-        and value.get("kind") == "recipe.image.import.v1"
-        and value.get("build_id") == expected_build_id
+        value.get("build_id") == expected_build_id
         and isinstance(value.get("mapping_id"), str)
         and isinstance(value.get("mapping_generation"), int)
         and value["mapping_generation"] >= 1
@@ -7663,20 +7651,12 @@ def _record_build_evidence(
     # terminal evidence is compared with the upload transaction that just
     # completed, not with stale in-memory values.
     session.refresh(build, with_for_update=True)
-    expected = {
-        "build_input_sha256",
-        "image_bytes",
-        "image_digest",
-        "oci_layout_sha256",
-        "policy",
-    }
-    policy = evidence.get("policy")
-    findings = policy.get("findings") if isinstance(policy, Mapping) else None
+    expected = {"image_bytes", "image_digest", "oci_layout_sha256"}
     image_digest = evidence.get("image_digest")
     layout_digest = evidence.get("oci_layout_sha256")
     image_bytes = evidence.get("image_bytes")
     try:
-        stored_build_plan = parse_stored_build_plan(build.plan)
+        parse_stored_build_plan(build.plan)
         parse_stored_build_policy(build.policy_report)
     except RecipeExecutionContractError as error:
         raise RecipeOperationConflict(
@@ -7684,7 +7664,6 @@ def _record_build_evidence(
         ) from error
     if (
         set(evidence) != expected
-        or evidence.get("build_input_sha256") != build.build_input_sha256
         or not isinstance(image_digest, str)
         or len(image_digest) != 71
         or not image_digest.startswith("sha256:")
@@ -7695,11 +7674,6 @@ def _record_build_evidence(
         or not isinstance(image_bytes, int)
         or isinstance(image_bytes, bool)
         or not 1 <= image_bytes <= 16 * 1024**4
-        or not isinstance(policy, Mapping)
-        or policy.get("passed") is not True
-        or not isinstance(findings, (list, tuple))
-        or bool(findings)
-        or policy.get("dockerfile") != stored_build_plan.dockerfile
         or (not replace_existing and build.image_digest not in {None, image_digest})
         or (
             not replace_existing
@@ -7725,17 +7699,12 @@ def _record_image_import_evidence(
 ) -> None:
     if not succeeded:
         return
-    expected = {"build_id", "image_bytes", "image_digest", "oci_layout_sha256"}
     build_id = operation.payload.get("build_id")
     build = session.get(RecipeBuild, build_id) if isinstance(build_id, str) else None
     if (
-        set(evidence) != expected
+        evidence
         or build is None
         or build.state != "succeeded"
-        or evidence.get("build_id") != build.id
-        or evidence.get("image_digest") != build.image_digest
-        or evidence.get("oci_layout_sha256") != build.oci_layout_sha256
-        or evidence.get("image_bytes") != build.image_bytes
         or operation.payload.get("image_digest") != build.image_digest
         or operation.payload.get("oci_layout_sha256") != build.oci_layout_sha256
         or operation.payload.get("image_bytes") != build.image_bytes

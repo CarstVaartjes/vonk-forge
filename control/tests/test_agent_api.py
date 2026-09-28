@@ -163,11 +163,8 @@ PACKAGED_RUNTIME_IDENTITY = {
 def _canonical_recipe_fixture(
     slug: str, *, source: str = "published"
 ) -> tuple[dict[str, object], str]:
-    example = (
-        "recipe-source-build.json"
-        if source == "controller-build"
-        else "recipe-image.json"
-    )
+    del source
+    example = "recipe-source-build.json"
     raw = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", example)
@@ -2983,11 +2980,9 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision_id,
-                source=source,
                 original_content_digest=digest,
                 effective_execution_key=plan.identity.execution_sha256,
-                registry_manifest_digest=image.registry_manifest_digest,
-                platform_manifest_digest=image.platform_manifest_digest,
+                image_digest=image.image_digest,
                 local_image_config_id=image.local_image_config_id,
                 oci_archive_sha256=image.oci_layout_sha256,
                 image_bytes=image.image_bytes,

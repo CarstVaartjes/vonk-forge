@@ -55,7 +55,7 @@ def _seed(sessions: sessionmaker) -> None:
     )
     recipe_document = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     model = ModelDefinition.model_validate(model_document)
@@ -160,7 +160,7 @@ def test_profile_uses_canonical_recipe_and_model_revisions() -> None:
                 "name": "Canonical idle",
                 "assignments": [
                     {
-                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
                         "spark_ids": [NODE_1],
                         "desired_state": "running",
                         "assignment_name": "canonical",
@@ -174,7 +174,7 @@ def test_profile_uses_canonical_recipe_and_model_revisions() -> None:
     assert profile.number == 1
     assert profile.revision == 1
     assert profile.assignments[0].recipe_id == RECIPE_DOCUMENT_ID
-    assert profile.assignments[0].recipe_selector == "vonk-forge/synthetic-tiny-image"
+    assert profile.assignments[0].recipe_selector == "vonk-forge/synthetic-tiny-build"
     assert profile.assignments[0].spark_ids == [NODE_1]
     preview = service.preview(profile.id)
     assert preview.scope.node_ids == [NODE_1, NODE_2]
@@ -194,7 +194,7 @@ def test_definition_preserves_authoring_fields_without_consulting_cache() -> Non
         installation_policy="exact",
         assignments=[
             FleetProfileAssignmentInput(
-                recipe_selector="vonk-forge/synthetic-tiny-image",
+                recipe_selector="vonk-forge/synthetic-tiny-build",
                 spark_ids=[NODE_1],
                 assignment_name="draft",
                 model_variant="precise-variant",
@@ -268,7 +268,7 @@ def test_profile_accepts_the_library_publisher_slug_selector() -> None:
                 "name": "Library selector",
                 "assignments": [
                     {
-                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
                         "spark_ids": [NODE_1],
                         "desired_state": "running",
                         "assignment_name": "library-selector",
@@ -279,7 +279,7 @@ def test_profile_accepts_the_library_publisher_slug_selector() -> None:
         actor="test",
     )
 
-    assert profile.assignments[0].recipe_selector == "vonk-forge/synthetic-tiny-image"
+    assert profile.assignments[0].recipe_selector == "vonk-forge/synthetic-tiny-build"
     assert profile.assignments[0].recipe_id == RECIPE_DOCUMENT_ID
 
 
@@ -290,7 +290,7 @@ def test_profile_contract_rejects_a_bare_recipe_slug() -> None:
                 "name": "Bare slug",
                 "assignments": [
                     {
-                        "recipe_selector": "synthetic-tiny-image",
+                        "recipe_selector": "synthetic-tiny-build",
                         "spark_ids": [NODE_1],
                     }
                 ],
@@ -433,7 +433,7 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
             name="Cached",
             assignments=[
                 FleetProfileAssignmentInput(
-                    recipe_selector="vonk-forge/synthetic-tiny-image",
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
                     spark_ids=[NODE_1],
                     model_variant="fp16",
                 )
@@ -516,7 +516,7 @@ def test_profile_read_refuses_a_resolver_that_substitutes_an_older_revision() ->
                 name="Substituted",
                 assignments=[
                     FleetProfileAssignmentInput(
-                        recipe_selector="vonk-forge/synthetic-tiny-image",
+                        recipe_selector="vonk-forge/synthetic-tiny-build",
                         spark_ids=[NODE_1],
                         model_variant="fp16",
                     )
@@ -582,7 +582,7 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
             name="Uncached",
             assignments=[
                 FleetProfileAssignmentInput(
-                    recipe_selector="vonk-forge/synthetic-tiny-image",
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
                     spark_ids=[NODE_1],
                     model_variant="fp16",
                 )

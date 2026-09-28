@@ -89,8 +89,6 @@ def lock_run_switch_build_dependency(
 def lock_availability_build_dependency(
     session: Session, payload: Mapping[str, object]
 ) -> None:
-    if payload.get("execution_mode") != "build":
-        return
     runtime = payload.get("runtime")
     if not isinstance(runtime, Mapping):
         raise BuildConsumerError(
@@ -420,11 +418,10 @@ def _availability_consumer(parent: Job, build: RecipeBuild) -> bool:
     if payload.get("removed") is True or payload.get("removal_fence") is not None:
         return False
     read_availability_intent(payload["request"])
-    recipe = read_recipe(payload["recipe"])
+    read_recipe(payload["recipe"])
     runtime = payload["runtime"]
     if (
         payload["recipe_revision_id"] != build.recipe_revision_id
-        or recipe.execution.mode != "build"
         or not isinstance(runtime, Mapping)
         or runtime.get("build_input_sha256") != build.build_input_sha256
     ):

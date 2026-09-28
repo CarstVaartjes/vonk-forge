@@ -434,7 +434,6 @@ class RecipeImageAvailabilityClaim:
 
     operation_id: str
     recipe_revision_id: str
-    image_identity: str | None
     build_input_sha256: str | None
     claim_owner: str
     execution_attempt: int
@@ -514,12 +513,6 @@ def _canonical_recipe(value: object) -> RecipeDefinition:
             "recipe_image.recipe_invalid",
             "selected recipe is not a canonical RecipeDefinition",
         ) from error
-
-
-def _image_identity(recipe: RecipeDefinition) -> str | None:
-    if recipe.execution.mode != "image" or recipe.execution.image is None:
-        return None
-    return f"sha256:{recipe.execution.image.digest}"
 
 
 def _known_total(runtime: Mapping[str, object]) -> int | None:
@@ -635,20 +628,12 @@ def _recovery_actions(
 ) -> list[str]:
     """Map stable failure classes to UI action identifiers."""
 
-    mode = payload.get("execution_mode")
     if code in _CAPACITY_FAILURE_CODES:
         return ["free_space"]
-    if code in _INTEGRITY_FAILURE_CODES:
-        return ["download_again"] if mode == "image" else ["force_rebuild"]
-    if code in _RECOVERABLE_MISS_CODES:
-        return ["download_again"] if mode == "image" else ["force_rebuild"]
+    if code in _INTEGRITY_FAILURE_CODES or code in _RECOVERABLE_MISS_CODES:
+        return ["force_rebuild"]
     if retryable:
-        resumable = mode == "image" and (
-            code.startswith(("registry.", "runtime_image.transport"))
-            or code
-            in {"recipe_image.download_interrupted", "recipe_image.network_error"}
-        )
-        return ["resume", "retry"] if resumable else ["retry"]
+        return ["retry"]
     return ["inspect"]
 
 
@@ -657,8 +642,8 @@ class RecipeImageAvailabilityService:
 
     ``authority`` must perform the latest metadata refresh and return the
     selected revision's canonical recipe plus its compiled runtime projection.
-    ``builder`` is called only for source-build recipes; direct-image recipes
-    use :func:`prepare_runtime_image` and the existing OCI transport.
+    ``builder`` builds the recipe image; :func:`prepare_runtime_image` then
+    verifies the stored archive with the OCI ``transport``.
     """
 
     def __init__(
@@ -3130,14 +3115,10 @@ class RecipeImageAvailabilityService:
             recipe_revision_id = operation.authority_revision
             if not isinstance(recipe_revision_id, str):
                 return child_changed
-            image_identity = payload.get("image_identity")
             build_input_sha256 = payload.get("build_input_sha256")
             claim = RecipeImageAvailabilityClaim(
                 operation_id=operation_id,
                 recipe_revision_id=recipe_revision_id,
-                image_identity=(
-                    image_identity if isinstance(image_identity, str) else None
-                ),
                 build_input_sha256=(
                     build_input_sha256 if isinstance(build_input_sha256, str) else None
                 ),
@@ -3201,7 +3182,6 @@ class RecipeImageAvailabilityService:
         build_input_sha256: str | None = None,
         effective_execution_key: str | None = None,
         force: bool = False,
-        force_download: bool = False,
         force_rebuild: bool = False,
     ) -> RecipeImageAvailabilityView:
         """Refresh metadata and queue one exact selected Recipe operation."""
@@ -3210,15 +3190,10 @@ class RecipeImageAvailabilityService:
             raise RecipeImageAvailabilityError(
                 "recipe_image.recipe_invalid", "recipe revision is required"
             )
-        if force and (force_download or force_rebuild):
+        if force and force_rebuild:
             raise RecipeImageAvailabilityError(
                 "recipe_image.action_invalid",
                 "force cannot be combined with an explicit image action",
-            )
-        if force_download and force_rebuild:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.action_invalid",
-                "download again and rebuild are mutually exclusive",
             )
         model_digest = _optional_digest(model_digest, field="model_digest")
         build_input_sha256 = _optional_digest(
@@ -3230,7 +3205,6 @@ class RecipeImageAvailabilityService:
         intent = RecipeRevisionIntent(
             recipe_revision_id=recipe_revision_id,
             force=force,
-            force_download=force_download,
             force_rebuild=force_rebuild,
             model_digest=model_digest,
             build_input_sha256=build_input_sha256,
@@ -3269,13 +3243,12 @@ class RecipeImageAvailabilityService:
         if isinstance(intent, RecipeSelectorIntent):
             recipe_revision_id = self._resolve_recipe_selector(intent.selector)
             model_digest = build_input_sha256 = effective_execution_key = None
-            force_download = force_rebuild = False
+            force_rebuild = False
         else:
             recipe_revision_id = intent.recipe_revision_id
             model_digest = intent.model_digest
             build_input_sha256 = intent.build_input_sha256
             effective_execution_key = intent.effective_execution_key
-            force_download = intent.force_download
             force_rebuild = intent.force_rebuild
         force = intent.force
         if self._authority is None:
@@ -3293,7 +3266,7 @@ class RecipeImageAvailabilityService:
                 raw_recipe, runtime = self._refresh_authority(
                     recipe_revision_id, force=force
                 )
-        recipe = _canonical_recipe(raw_recipe)
+        _canonical_recipe(raw_recipe)
         if not isinstance(runtime, Mapping):
             raise RecipeImageAvailabilityError(
                 "recipe_image.runtime_invalid",
@@ -3327,46 +3300,29 @@ class RecipeImageAvailabilityService:
                         "recipe_image.identity_conflict",
                         "selected recipe execution identity changed",
                     )
-                if recipe.execution.mode == "image" and force_rebuild:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.action_invalid",
-                        "rebuild is supported only for source-build recipes",
-                    )
-                if recipe.execution.mode == "build" and force_download:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.action_invalid",
-                        "download again is supported only for published images",
-                    )
                 if force:
-                    if recipe.execution.mode == "image":
-                        force_download = True
-                    else:
-                        force_rebuild = True
+                    force_rebuild = True
                 runtime_build_input = runtime.get("build_input_sha256")
-                if recipe.execution.mode == "build":
-                    provisional_intent = runtime.get("input_intent_sha256")
-                    if not isinstance(runtime_build_input, str) and not isinstance(
-                        provisional_intent, str
-                    ):
+                provisional_intent = runtime.get("input_intent_sha256")
+                if not isinstance(runtime_build_input, str) and not isinstance(
+                    provisional_intent, str
+                ):
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.build_input_missing",
+                        "authoritative runtime projection lacks the exact build input digest",
+                    )
+                if isinstance(runtime_build_input, str):
+                    runtime_build_input = _digest(
+                        runtime_build_input, field="build_input_sha256"
+                    )
+                    if build_input_sha256 is None:
+                        build_input_sha256 = runtime_build_input
+                    elif build_input_sha256 != runtime_build_input:
                         raise RecipeImageAvailabilityError(
-                            "recipe_image.build_input_missing",
-                            "authoritative runtime projection lacks the exact build input digest",
+                            "recipe_image.identity_conflict",
+                            "submitted build input does not match authoritative runtime metadata",
                         )
-                    if isinstance(runtime_build_input, str):
-                        runtime_build_input = _digest(
-                            runtime_build_input, field="build_input_sha256"
-                        )
-                        if build_input_sha256 is None:
-                            build_input_sha256 = runtime_build_input
-                        elif build_input_sha256 != runtime_build_input:
-                            raise RecipeImageAvailabilityError(
-                                "recipe_image.identity_conflict",
-                                "submitted build input does not match authoritative runtime metadata",
-                            )
-                else:
-                    build_input_sha256 = None
-                image_identity = _image_identity(recipe)
-                identity_key = image_identity or build_input_sha256
+                identity_key = build_input_sha256
                 payload: dict[str, object] = {
                     "schema_version": SCHEMA_VERSION,
                     "kind": OPERATION_KIND,
@@ -3376,12 +3332,9 @@ class RecipeImageAvailabilityService:
                     "effective_execution_key": effective_execution_key,
                     "model_digest": model_digest,
                     "build_input_sha256": build_input_sha256,
-                    "image_identity": image_identity,
                     "identity_key": identity_key,
-                    "execution_mode": recipe.execution.mode,
                     "recipe": dict(revision.document),
                     "runtime": dict(runtime),
-                    "force_download": force_download,
                     "force_rebuild": force_rebuild,
                     "progress": _progress("prepare", total_bytes=_known_total(runtime)),
                     "retry": {"automatic_attempts": 0, "operator_retries": 0},
@@ -4011,7 +3964,6 @@ class RecipeImageAvailabilityService:
                 )
             )
             active_builds = 0
-            active_pulls = 0
             for active in active_rows:
                 active_payload = (
                     active.payload if isinstance(active.payload, Mapping) else {}
@@ -4033,10 +3985,7 @@ class RecipeImageAvailabilityService:
                             continue
                     except ValueError:
                         pass
-                if active_payload.get("execution_mode") == "build":
-                    active_builds += 1
-                else:
-                    active_pulls += 1
+                active_builds += 1
             for operation_id in candidate_ids:
                 operation = session.scalar(
                     select(Job)
@@ -4068,19 +4017,8 @@ class RecipeImageAvailabilityService:
                                 continue
                         except ValueError:
                             pass
-                mode = payload.get("execution_mode")
                 coordination_only = isinstance(payload.get("image_result"), Mapping)
-                if (
-                    not coordination_only
-                    and mode == "build"
-                    and active_builds >= self._max_parallel_builds
-                ):
-                    continue
-                if (
-                    not coordination_only
-                    and mode != "build"
-                    and active_pulls >= self._max_parallel
-                ):
+                if not coordination_only and active_builds >= self._max_parallel_builds:
                     continue
                 operation.state = "running"
                 operation.current_attempt = int(operation.current_attempt) + 1
@@ -4093,11 +4031,6 @@ class RecipeImageAvailabilityService:
                     RecipeImageAvailabilityClaim(
                         operation_id=operation.id,
                         recipe_revision_id=str(payload.get("recipe_revision_id", "")),
-                        image_identity=(
-                            str(payload.get("image_identity"))
-                            if payload.get("image_identity") is not None
-                            else None
-                        ),
                         build_input_sha256=(
                             str(payload.get("build_input_sha256"))
                             if payload.get("build_input_sha256") is not None
@@ -4107,10 +4040,8 @@ class RecipeImageAvailabilityService:
                         execution_attempt=operation.current_attempt,
                     )
                 )
-                if not coordination_only and mode == "build":
+                if not coordination_only:
                     active_builds += 1
-                elif not coordination_only:
-                    active_pulls += 1
                 if len(claims) >= limit:
                     break
         return tuple(claims)
@@ -4460,14 +4391,8 @@ class RecipeImageAvailabilityService:
                 if receipt is None or not self._storage.build_archive_available(
                     receipt.oci_archive_sha256, receipt.image_bytes
                 ):
-                    repair_payload = (
-                        dict(payload) | {"force_download": True}
-                        if isinstance(stored_image, Mapping)
-                        and recipe.execution.mode == "image"
-                        else payload
-                    )
                     receipt = self._prepare_claimed_image(
-                        claim, repair_payload, recipe, runtime
+                        claim, payload, recipe, runtime
                     )
                     # Removal holds the same lock and commits a durable fence
                     # before deleting Controller image bytes. Late verified
@@ -4536,9 +4461,6 @@ class RecipeImageAvailabilityService:
                 "recipe_content_sha256": payload["recipe_content_sha256"],
                 "model_digest": payload.get("model_digest"),
                 "build_input_sha256": payload.get("build_input_sha256"),
-                "source": receipt.source,
-                "registry_manifest_digest": receipt.registry_manifest_digest,
-                "platform_manifest_digest": receipt.platform_manifest_digest,
                 "image_digest": receipt.image_digest,
                 "local_image_config_id": receipt.local_image_config_id,
                 "oci_archive_sha256": receipt.oci_archive_sha256,
@@ -4754,7 +4676,6 @@ class RecipeImageAvailabilityService:
         recipe: RecipeDefinition,
         runtime: Mapping[str, object],
     ) -> RuntimeImageReceipt:
-        force_download = payload.get("force_download") is True
         force_rebuild = payload.get("force_rebuild") is True
 
         def persist_provisional_reference(
@@ -4765,101 +4686,75 @@ class RecipeImageAvailabilityService:
                 receipt=receipt,
             )
 
-        if recipe.execution.mode == "build":
-            if self._builder is None:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_unavailable",
-                    "no canonical recipe build executor is configured",
-                )
-            build_input_sha256 = payload.get("build_input_sha256")
-            dispatch_identity_missing = not isinstance(build_input_sha256, str)
-            if dispatch_identity_missing:
-                build_input_sha256 = ""
-            if self._builder_admission is not None:
-                self._builder_admission(recipe, runtime)
-            self._update_progress(claim, "build", total_bytes=None)
-
-            def report(value: Mapping[str, object]) -> None:
-                phase = value.get("phase", "build")
-                self._update_progress(claim, str(phase), detail=value)
-
-            # The builder re-resolves the exact executable identity and reuses
-            # a verified filesystem receipt itself, so queue-time and
-            # dispatch-time cache hits take the same path.
-            build_receipt = self._builder(
-                recipe,
-                runtime,
-                claim=claim,
-                build_input_sha256=build_input_sha256,
-                force=force_rebuild,
-                progress=report,
+        if self._builder is None:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.build_unavailable",
+                "no canonical recipe build executor is configured",
             )
-            if not isinstance(build_receipt, Mapping):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_invalid", "builder returned no receipt"
-                )
-            if dispatch_identity_missing:
-                resolved_input = build_receipt.get("build_input_sha256")
-                if not isinstance(resolved_input, str):
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.build_input_missing",
-                        "dispatch did not bind an exact build input identity",
-                        retryable=True,
-                        recovery_actions=("retry",),
-                    )
-                with self._sessions.begin() as session:
-                    operation = self._require_claim(session, claim)
-                    assigned_runtime = dict(
-                        require_mapping(operation.payload["runtime"], "runtime")
-                    )
-                    if isinstance(build_receipt.get("builder_node_id"), str):
-                        assigned_runtime["builder_node_id"] = build_receipt[
-                            "builder_node_id"
-                        ]
-                    if isinstance(build_receipt.get("build_input_sha256"), str):
-                        assigned_runtime["build_input_sha256"] = build_receipt[
-                            "build_input_sha256"
-                        ]
-                    operation.payload = dict(operation.payload) | {
-                        "build_input_sha256": resolved_input,
-                        "identity_key": resolved_input,
-                        "runtime": assigned_runtime,
-                    }
-            self._update_progress(claim, "verify")
-            return prepare_runtime_image(
-                payload["recipe"],
-                runtime=runtime,
-                storage=self._storage,
-                transport=self._transport,
-                build_receipt=build_receipt,
-                now=self._clock(),
-                force=False,
-                before_publish=persist_provisional_reference,
+        build_input_sha256 = payload.get("build_input_sha256")
+        dispatch_identity_missing = not isinstance(build_input_sha256, str)
+        if dispatch_identity_missing:
+            build_input_sha256 = ""
+        if self._builder_admission is not None:
+            self._builder_admission(recipe, runtime)
+        self._update_progress(claim, "build", total_bytes=None)
+
+        def report(value: Mapping[str, object]) -> None:
+            phase = value.get("phase", "build")
+            self._update_progress(claim, str(phase), detail=value)
+
+        # The builder re-resolves the exact executable identity and reuses
+        # a verified filesystem receipt itself, so queue-time and
+        # dispatch-time cache hits take the same path.
+        build_receipt = self._builder(
+            recipe,
+            runtime,
+            claim=claim,
+            build_input_sha256=build_input_sha256,
+            force=force_rebuild,
+            progress=report,
+        )
+        if not isinstance(build_receipt, Mapping):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.build_invalid", "builder returned no receipt"
             )
-        total = _known_total(runtime)
-        self._update_progress(claim, "download", total_bytes=total)
-        receipt = prepare_runtime_image(
+        if dispatch_identity_missing:
+            resolved_input = build_receipt.get("build_input_sha256")
+            if not isinstance(resolved_input, str):
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.build_input_missing",
+                    "dispatch did not bind an exact build input identity",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                )
+            with self._sessions.begin() as session:
+                operation = self._require_claim(session, claim)
+                assigned_runtime = dict(
+                    require_mapping(operation.payload["runtime"], "runtime")
+                )
+                if isinstance(build_receipt.get("builder_node_id"), str):
+                    assigned_runtime["builder_node_id"] = build_receipt[
+                        "builder_node_id"
+                    ]
+                if isinstance(build_receipt.get("build_input_sha256"), str):
+                    assigned_runtime["build_input_sha256"] = build_receipt[
+                        "build_input_sha256"
+                    ]
+                operation.payload = dict(operation.payload) | {
+                    "build_input_sha256": resolved_input,
+                    "identity_key": resolved_input,
+                    "runtime": assigned_runtime,
+                }
+        self._update_progress(claim, "verify")
+        return prepare_runtime_image(
             payload["recipe"],
             runtime=runtime,
             storage=self._storage,
             transport=self._transport,
+            build_receipt=build_receipt,
             now=self._clock(),
-            force=force_download,
-            progress=lambda phase, completed, total: self._update_progress(
-                claim,
-                phase,
-                completed_bytes=completed,
-                total_bytes=total,
-            ),
             before_publish=persist_provisional_reference,
         )
-        self._update_progress(
-            claim,
-            "verify",
-            total_bytes=receipt.image_bytes,
-            completed_bytes=receipt.image_bytes,
-        )
-        return receipt
 
     def _renew_claim_loop(
         self, claim: RecipeImageAvailabilityClaim, stop: threading.Event
@@ -5188,10 +5083,7 @@ class RecipeImageAvailabilityService:
             ):
                 # Never reuse bytes that failed verification: the automatic
                 # retry downloads or builds them again.
-                if payload.get("execution_mode") == "build":
-                    payload["force_rebuild"] = True
-                else:
-                    payload["force_download"] = True
+                payload["force_rebuild"] = True
             dependency = payload.get("build_dependency")
             settled_build_id = getattr(error, "settled_build_operation_id", None)
             exact_build_settled = (

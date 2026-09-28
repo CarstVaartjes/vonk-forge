@@ -936,11 +936,9 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     authorization = RuntimeImageAuthorization(
         id="00000000-0000-0000-0000-000000000108",
         recipe_revision_id=old_revision.id,
-        source="controller-build",
         original_content_digest=old_digest,
         effective_execution_key=old_revision.execution_key,
-        registry_manifest_digest=None,
-        platform_manifest_digest="sha256:" + "6" * 64,
+        image_digest="sha256:" + "6" * 64,
         local_image_config_id="sha256:" + "7" * 64,
         oci_archive_sha256="8" * 64,
         image_bytes=17,
@@ -1026,7 +1024,6 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )
     assert resolved["recipe"]["recipe_revision_id"] == old_revision.id
-    assert resolved["recipe"]["source"] == "controller-build"
     assert resolved["recipe"]["update_available"] is True
     assert resolved["model"]["content_sha256"] == model_digest
     assert resolved["resources"] == {

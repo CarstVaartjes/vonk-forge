@@ -462,9 +462,6 @@ class BuildCompatibilityEvidence(_StrictModel):
 class RuntimeImageStorageImpact(_StrictModel):
     build_id: UuidId | None
     preparation_required: bool
-    registry_manifest_digest: (
-        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
-    ) = None
     image_digest: (
         Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
     )
@@ -860,9 +857,6 @@ class ArtifactVerificationResult(_StrictModel):
     verified_image_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
     ]
-    verified_registry_manifest_digest: (
-        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
-    ) = None
     verified_oci_layout_sha256: Digest
     cached_nodes: list[NodeId] = Field(default_factory=list, max_length=32)
     cached_target_totals: dict[NodeId, int] = Field(default_factory=dict)
@@ -1190,16 +1184,10 @@ class RunSwitchRuntimeImageReferenceIntent(_StrictModel):
     recipe_revision_id: UuidId
     profile_application_id: UuidId | None = None
     execution_keys: list[Digest] = Field(min_length=1, max_length=32)
-    source: Literal["published", "controller-build"]
-    registry_manifest_digest: (
-        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
-    ) = None
     image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
     archive_sha256: Digest
     image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
-    build_id: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = (
-        None
-    )
+    build_id: Annotated[str, StringConstraints(min_length=1, max_length=128)]
     build_input_sha256: Digest | None = None
 
     @model_validator(mode="after")
@@ -1208,16 +1196,6 @@ class RunSwitchRuntimeImageReferenceIntent(_StrictModel):
     ) -> RunSwitchRuntimeImageReferenceIntent:
         if self.execution_keys != sorted(set(self.execution_keys)):
             raise ValueError("RunSwitch runtime execution keys are not canonical")
-        if self.source == "published" and (
-            self.registry_manifest_digest is None
-            or self.build_id is not None
-            or self.build_input_sha256 is not None
-        ):
-            raise ValueError("published RunSwitch image reference is inconsistent")
-        if self.source == "controller-build" and (
-            self.registry_manifest_digest is not None or self.build_id is None
-        ):
-            raise ValueError("built RunSwitch image reference is inconsistent")
         return self
 
 

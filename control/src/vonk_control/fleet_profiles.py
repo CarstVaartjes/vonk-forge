@@ -19,6 +19,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_forge_contracts.recipe import RecipeTopology
 
 from .admission_locking import (
     AdmissionLockBusy,
@@ -2461,27 +2462,12 @@ def _choice_id(value: FleetProfileAssignmentInput) -> str:
 _assignment_id = _choice_id
 
 
-def _expanded_roles(topology: Mapping[str, object]) -> tuple[tuple[str, bool], ...]:
-    raw_roles = topology.get("roles")
-    if not isinstance(raw_roles, Sequence) or isinstance(raw_roles, (str, bytes)):
-        raise FleetProfileConflict("recipe topology roles are unavailable")
-    expanded: list[tuple[str, bool]] = []
-    for raw_role in raw_roles:
-        if not isinstance(raw_role, Mapping):
-            raise FleetProfileConflict("recipe topology role is invalid")
-        name = raw_role.get("name")
-        count = raw_role.get("count")
-        endpoint_owner = raw_role.get("endpoint_owner", False)
-        if (
-            not isinstance(name, str)
-            or not name
-            or type(count) is not int
-            or not 1 <= count <= 32
-            or not isinstance(endpoint_owner, bool)
-        ):
-            raise FleetProfileConflict("recipe topology role is invalid")
-        expanded.extend((name, endpoint_owner) for _ in range(count))
-    return tuple(expanded)
+def _expanded_roles(topology: RecipeTopology) -> tuple[tuple[str, bool], ...]:
+    return tuple(
+        (role.name, role.endpoint_owner)
+        for role in topology.roles
+        for _ in range(role.count)
+    )
 
 
 def _profile_document(row: FleetProfile) -> dict[str, object]:
@@ -2944,7 +2930,7 @@ class FleetProfileService:
                 FleetProfileAssignment(
                     id=_choice_id(choice),
                     recipe_revision_id=revision.id,
-                    topology_name=str(topology.get("name", "unresolved")),
+                    topology_name=topology.name,
                     desired_state=choice.desired_state,
                     alias=alias,
                     nodes=nodes,
@@ -3456,9 +3442,7 @@ class FleetProfileService:
                 )
                 required_count = None
                 if revision is not None:
-                    topology = recipe_topology(revision.document)
-                    value = topology.get("node_count")
-                    required_count = value if type(value) is int else None
+                    required_count = recipe_topology(revision.document).node_count
                 if unknown_nodes:
                     item_reasons.append(
                         FleetProfileReason(
@@ -7258,9 +7242,7 @@ class FleetProfileService:
         )
         for choice in choices:
             recipe, revision, cache = self._resolve_choice(session, choice)
-            topology = recipe_topology(revision.document)
-            required_sparks = topology.get("node_count")
-            required = required_sparks if type(required_sparks) is int else None
+            required = recipe_topology(revision.document).node_count
             if self._cache_resolver is None:
                 warnings.append(
                     "Cache resolution is unavailable until the cache service is configured"

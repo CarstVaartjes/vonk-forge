@@ -33,7 +33,7 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
         "installation_policy": "exact",
         "assignments": [
             {
-                "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                "recipe_selector": "vonk-forge/synthetic-tiny-build",
                 "spark_ids": [NODE_1],
                 "assignment_name": "installed-draft",
                 "model_variant": "precise-variant",

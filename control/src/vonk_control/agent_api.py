@@ -215,17 +215,11 @@ def _runtime_image_authorization_matches(
         getattr(authorization, "state", None) != "authorized"
         or identity.get("recipe_revision_sha256") != revision_digest
         or getattr(authorization, "recipe_revision_id", None) != revision_id
-        or getattr(authorization, "effective_execution_key", None)
-        != identity.get("execution_sha256")
         or runtime_image.get("image_digest") != installation_image_digest
         # The compiled plan and the durable authorization spell image digests
         # differently; compare them in one spelling.
         or _prefixed_text(runtime_image.get("image_digest"))
-        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
-        or _prefixed_text(runtime_image.get("platform_manifest_digest"))
-        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
-        or runtime_image.get("registry_manifest_digest")
-        != getattr(authorization, "registry_manifest_digest", None)
+        != _prefixed_text(getattr(authorization, "image_digest", None))
         or runtime_image.get("local_image_config_id")
         != getattr(authorization, "local_image_config_id", None)
         or runtime_image.get("oci_layout_sha256")
@@ -234,26 +228,10 @@ def _runtime_image_authorization_matches(
         != getattr(authorization, "image_bytes", None)
         # Architecture and runtime-interface labels are compiled launch facts,
         # not authorization columns; the plan's own validation owns them.
-        or runtime_image.get("source") != getattr(authorization, "source", None)
         or runtime_image.get("build_id") != getattr(authorization, "build_id", None)
     ):
         return False
-    source = runtime_image.get("source")
-    if source == "published":
-        return (
-            runtime_image.get("registry_manifest_digest") is not None
-            and getattr(authorization, "registry_manifest_digest", None) is not None
-            and runtime_image.get("build_id") is None
-            and getattr(authorization, "build_id", None) is None
-            and installation_recipe_build_id is None
-        )
-    if source == "controller-build":
-        return (
-            runtime_image.get("build_id") is not None
-            and getattr(authorization, "build_id", None) is not None
-            and getattr(authorization, "registry_manifest_digest", None) is None
-        )
-    return False
+    return runtime_image.get("build_id") is not None
 
 
 @dataclass(frozen=True)
@@ -1635,32 +1613,15 @@ def install_agent_routes(
                     detail="recipe specification compiled execution plan is unavailable",
                 )
             candidate = candidate_model.model_dump(mode="json")
-            candidate_identity = candidate.get("identity")
             candidate_runtime_image = candidate.get("runtime_image")
-            effective_execution_key = (
-                candidate_identity.get("execution_sha256")
-                if isinstance(candidate_identity, Mapping)
-                else None
-            )
-            authorizations = (
-                session.scalars(
-                    select(RuntimeImageAuthorization).where(
-                        RuntimeImageAuthorization.recipe_revision_id
-                        == installation.recipe_revision_id,
-                        RuntimeImageAuthorization.effective_execution_key
-                        == effective_execution_key,
-                        RuntimeImageAuthorization.state == "authorized",
-                    )
-                ).all()
-                if isinstance(effective_execution_key, str)
-                else []
-            )
+            authorizations = session.scalars(
+                select(RuntimeImageAuthorization).where(
+                    RuntimeImageAuthorization.recipe_revision_id
+                    == installation.recipe_revision_id,
+                    RuntimeImageAuthorization.state == "authorized",
+                )
+            ).all()
             candidate_authorizations = list(authorizations)
-            candidate_source = (
-                candidate_runtime_image.get("source")
-                if isinstance(candidate_runtime_image, Mapping)
-                else None
-            )
             candidate_build_id = (
                 candidate_runtime_image.get("build_id")
                 if isinstance(candidate_runtime_image, Mapping)
@@ -1668,8 +1629,7 @@ def install_agent_routes(
             )
             build = (
                 session.get(RecipeBuild, candidate_build_id)
-                if candidate_source == "controller-build"
-                and isinstance(candidate_build_id, str)
+                if isinstance(candidate_build_id, str)
                 else None
             )
             build_id = build.id if build is not None else None
@@ -1682,7 +1642,6 @@ def install_agent_routes(
                 build.oci_layout_sha256 if build is not None else None
             )
             build_image_bytes = build.image_bytes if build is not None else None
-            build_input_sha256 = build.build_input_sha256 if build is not None else None
             installation_recipe_build_id = installation.recipe_build_id
             revision_id = revision.id
             revision_content_digest = revision.content_digest
@@ -1698,10 +1657,13 @@ def install_agent_routes(
                 status_code=409,
                 detail="recipe specification compiled execution plan is invalid",
             ) from None
-        topology = spec.get("topology")
-        if not isinstance(topology, Mapping) or (
-            topology.get("rank") != placement.rank
-            or topology.get("role") != placement.role
+        runtime = spec.get("runtime")
+        compiled_placement = (
+            runtime.get("placement") if isinstance(runtime, Mapping) else None
+        )
+        if not isinstance(compiled_placement, Mapping) or (
+            compiled_placement.get("rank") != placement.rank
+            or compiled_placement.get("role") != placement.role
         ):
             raise HTTPException(
                 status_code=409,
@@ -1734,33 +1696,25 @@ def install_agent_routes(
                 installation_recipe_build_id=installation_recipe_build_id,
             )
         ]
-        if len(matching_authorizations) != 1:
+        if not matching_authorizations:
             raise HTTPException(
                 status_code=409,
                 detail="recipe specification execution receipts are stale",
             )
         receipt = matching_authorizations[0]
-        if runtime_image.get("source") == "controller-build":
-            if (
-                build_id != getattr(receipt, "build_id", None)
-                or build_id != installation_recipe_build_id
-                or build_state != "succeeded"
-                or build_recipe_revision_id != revision_id
-                or build_image_digest != installation_image_digest
-                or build_oci_layout_sha256
-                != getattr(receipt, "oci_archive_sha256", None)
-                or build_image_bytes != getattr(receipt, "image_bytes", None)
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification execution receipts are stale",
-                )
-            build_input = identity_document.get("build_input_sha256")
-            if build_input is not None and build_input != build_input_sha256:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification execution receipts are stale",
-                )
+        if (
+            build_id != getattr(receipt, "build_id", None)
+            or build_id != installation_recipe_build_id
+            or build_state != "succeeded"
+            or build_recipe_revision_id != revision_id
+            or build_image_digest != installation_image_digest
+            or build_oci_layout_sha256 != getattr(receipt, "oci_archive_sha256", None)
+            or build_image_bytes != getattr(receipt, "image_bytes", None)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
         encoded_spec = canonical_message(typed_spec)
         if len(encoded_spec) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
             raise HTTPException(

@@ -56,7 +56,7 @@ def _start() -> dict[str, object]:
         "recipe_content_sha256": PLAN["identity"]["recipe_revision_sha256"],
         "mapping_id": MAPPING_ID,
         "mapping_generation": 1,
-        "image_digest": PLAN["runtime"]["image_digest"],
+        "image_digest": PLAN["runtime_image"]["image_digest"],
         "plan_digest": "c" * 64,
         "alias": "test-model",
         "rank": 0,
@@ -64,7 +64,7 @@ def _start() -> dict[str, object]:
         "port": 8000,
         "reserved_memory_bytes": 67108864,
         "memory_floor_bytes": plan["runtime"]["placement"]["memory_floor_bytes"],
-        "memory_kind": plan["runtime"]["placement"]["memory_kind"],
+        "memory_kind": "unified",
         "endpoint_address": "100.100.20.30",
         "world_size": 1,
         "compiled_execution_plan": plan,
@@ -77,9 +77,7 @@ def _start() -> dict[str, object]:
 
 def _distributed_start() -> dict[str, object]:
     plan = copy.deepcopy(PLAN)
-    plan["topology"].update(
-        world_size=2, node_count=2, rank=1, role="worker", mode="distributed"
-    )
+    plan["topology"].update(node_count=2)
     plan["runtime"]["placement"].update(
         world_size=2,
         rank=1,
@@ -89,7 +87,7 @@ def _distributed_start() -> dict[str, object]:
         master_address="100.100.20.30",
         master_port=29500,
     )
-    plan["security"].update(network_mode="host", host_network=True)
+    plan["security"].update(network_mode="host", gpu=True)
     return {
         **_start(),
         "phase": "rank-launch",
@@ -118,7 +116,7 @@ def test_tensor_parallel_start_result_requires_exact_run_identity_fields() -> No
     evidence = {
         "recipe_revision_id": REVISION_ID,
         "recipe_content_sha256": PLAN["identity"]["recipe_revision_sha256"],
-        "image_digest": PLAN["runtime"]["image_digest"],
+        "image_digest": PLAN["runtime_image"]["image_digest"],
         "artifact_set_digest": "d" * 64,
         "model_identity": "vonk-forge/synthetic-tiny-fp16@" + "e" * 64,
         "rank": 1,
@@ -151,33 +149,9 @@ def test_tensor_parallel_start_result_requires_exact_run_identity_fields() -> No
             )
 
 
-@pytest.mark.parametrize(
-    "mode",
-    [
-        "single",
-        "distributed",
-        "tensor_parallel",
-        "pipeline_parallel",
-        "data_parallel",
-        "hybrid",
-        "ray",
-        "mpi",
-    ],
-)
-@pytest.mark.parametrize("backend", ["tcp", "ucx", "future-engine-Δ"])
-def test_recipe_topology_vocabulary_survives_the_wire(mode, backend) -> None:
-    plan = copy.deepcopy(PLAN)
-    plan["topology"].update(mode=mode, backend=backend)
-    result = CompiledExecutionPlan.parse(plan)
-    assert result.topology.mode == mode
-    assert result.topology.backend == backend
-
-
 def test_install_accepts_deferred_distributed_rendezvous() -> None:
     plan = copy.deepcopy(PLAN)
-    plan["topology"].update(
-        world_size=2, node_count=2, mode="distributed", backend="nccl"
-    )
+    plan["topology"].update(node_count=2)
     plan["runtime"]["placement"].update(
         world_size=2,
         local_address=None,
@@ -243,7 +217,6 @@ def test_plan_rejects_unsafe_paths() -> None:
 def test_plan_accepts_canonical_unicode_space_and_max_length_paths(path: str) -> None:
     value = copy.deepcopy(PLAN)
     value["artifacts"][0]["path"] = path
-    value["artifacts"][0]["distribution_object"]["name"] = path
     publisher = "发布者 " + "_" * 124
     value["artifacts"][0]["model"]["publisher"] = publisher
 
@@ -269,7 +242,6 @@ def test_plan_accepts_canonical_unicode_space_and_max_length_paths(path: str) ->
 def test_plan_rejects_unsafe_or_oversized_model_paths(path: str) -> None:
     value = copy.deepcopy(PLAN)
     value["artifacts"][0]["path"] = path
-    value["artifacts"][0]["distribution_object"]["name"] = path
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
 
@@ -345,7 +317,6 @@ def test_python_compiled_plan_producer_crosses_rust_parser(
     for path in ("模型 weights_file.safetensors", "模型 file_" * 64):
         value = copy.deepcopy(PLAN)
         value["artifacts"][0]["path"] = path
-        value["artifacts"][0]["distribution_object"]["name"] = path
         value["artifacts"][0]["model"]["publisher"] = "发布者 " + "_" * 124
         authored = CompiledExecutionPlan.parse(value).model_dump(mode="json")
         assert _rust_compiled_plan_accepts(compiled_plan_wire_probe, authored)
@@ -353,7 +324,6 @@ def test_python_compiled_plan_producer_crosses_rust_parser(
     for path in ("../escape", "nested//file", "bad\\name", "bad\x00name", "x" * 513):
         value = copy.deepcopy(PLAN)
         value["artifacts"][0]["path"] = path
-        value["artifacts"][0]["distribution_object"]["name"] = path
         assert not _rust_compiled_plan_accepts(compiled_plan_wire_probe, value)
 
     value = copy.deepcopy(PLAN)
@@ -365,7 +335,6 @@ def test_compiled_job_input_is_typed_and_round_trips_both_wire_directions(
     compiled_plan_wire_probe: Path,
 ) -> None:
     input_value = {
-        "path": "/inputs",
         "required": True,
         "media_types": ["application/json"],
         "max_bytes": 1024,
@@ -390,7 +359,6 @@ def test_compiled_job_input_is_typed_and_round_trips_both_wire_directions(
     value["job"] = {
         "interface": "artifact-job",
         "input": input_value,
-        "output_path": "/outputs",
         "timeout_seconds": 60,
     }
     authored = CompiledExecutionPlan.parse(value).to_mapping()
@@ -414,7 +382,7 @@ def test_compiled_job_input_is_typed_and_round_trips_both_wire_directions(
 
 def test_plan_rejects_non_boolean_security_values() -> None:
     value = copy.deepcopy(PLAN)
-    value["security"]["privileged"] = 1
+    value["security"]["gpu"] = 1
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
 
@@ -422,11 +390,11 @@ def test_plan_rejects_non_boolean_security_values() -> None:
 def test_plan_accepts_canonical_multi_model_mount_projection() -> None:
     value = copy.deepcopy(PLAN)
     value["security"]["mounts"] = [
-        {"source": "model", "target": "/models/target", "read_only": True},
-        {"source": "model", "target": "/models/text-encoder", "read_only": True},
-        {"source": "model", "target": "/models/vae", "read_only": True},
-        {"source": "inputs", "target": "/inputs", "read_only": True},
-        {"source": "outputs", "target": "/outputs", "read_only": False},
+        {"source": "model", "target": "/models/target"},
+        {"source": "model", "target": "/models/text-encoder"},
+        {"source": "model", "target": "/models/vae"},
+        {"source": "inputs", "target": "/inputs"},
+        {"source": "outputs", "target": "/outputs"},
     ]
 
     plan = CompiledExecutionPlan.parse(value)
@@ -446,27 +414,20 @@ def test_mount_source_and_target_policy_accepts_canonical_matrix(
     source: str, target: str, read_only: bool
 ) -> None:
     value = copy.deepcopy(PLAN)
-    value["security"]["mounts"] = [
-        {"source": source, "target": target, "read_only": read_only}
-    ]
-    CompiledExecutionPlan.parse(value)
+    value["security"]["mounts"] = [{"source": source, "target": target}]
+    plan = CompiledExecutionPlan.parse(value)
+    assert plan.security.mounts[0].read_only is read_only
 
 
 @pytest.mark.parametrize(
-    ("source", "target", "read_only"),
-    [
-        ("model", "/inputs", True),
-        ("inputs", "/models", True),
-        ("outputs", "/models", False),
-    ],
+    ("source", "target"),
+    [("model", "/inputs"), ("inputs", "/models"), ("outputs", "/models")],
 )
 def test_mount_source_and_target_policy_rejects_swapped_matrix(
-    source: str, target: str, read_only: bool
+    source: str, target: str
 ) -> None:
     value = copy.deepcopy(PLAN)
-    value["security"]["mounts"] = [
-        {"source": source, "target": target, "read_only": read_only}
-    ]
+    value["security"]["mounts"] = [{"source": source, "target": target}]
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
 
@@ -477,11 +438,7 @@ def test_plan_rejects_over_duplicate_or_unsafe_mounts(kind: str) -> None:
     mounts = value["security"]["mounts"]
     if kind == "over":
         mounts.extend(
-            {
-                "source": "model",
-                "target": f"/models/extra-{index}",
-                "read_only": True,
-            }
+            {"source": "model", "target": f"/models/extra-{index}"}
             for index in range(MAX_COMPILED_EXECUTION_PLAN_MOUNTS - len(mounts) + 1)
         )
     elif kind == "duplicate":
@@ -518,13 +475,6 @@ def test_plan_rejects_duplicate_final_projection_target() -> None:
     value = copy.deepcopy(PLAN)
     projection = copy.deepcopy(value["artifacts"][0])
     value["artifacts"].append(projection)
-    with pytest.raises(AgentProtocolError):
-        CompiledExecutionPlan.parse(value)
-
-
-def test_schema_version_is_an_integer_discriminator() -> None:
-    value = copy.deepcopy(PLAN)
-    value["schema_version"] = 2.0
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
 

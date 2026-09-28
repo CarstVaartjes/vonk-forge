@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import subprocess
-import sys
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -27,13 +26,11 @@ from vonk_control.models import (
     RecipeBuild,
     RuntimeImageAuthorization,
 )
-from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     RuntimeImagePreparationError,
-    RuntimeImagePublishedStageCheckpoint,
     RuntimeImageReceipt,
     SkopeoOCIImageTransport,
     _parse_runtime_image_receipt,
@@ -42,14 +39,12 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
     resolve_persisted_runtime_image_receipt,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
-from vonk_forge_contracts.recipe import RecipeImage
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-IMAGE_DIGEST = "sha256:" + "d" * 64
-PLATFORM_IMAGE_DIGEST = "sha256:" + "e" * 64
 BUILT_IMAGE_DIGEST = "sha256:" + "f" * 64
 ARCHIVE = b"tiny verified OCI archive fixture"
 ARCHIVE_DIGEST = hashlib.sha256(ARCHIVE).hexdigest()
+BUILD_ID = "5b0a8f6e-3c1d-4e2a-9b7c-1d2e3f4a5b6c"
 
 
 def _recipe(name: str) -> RecipeDefinition:
@@ -57,6 +52,12 @@ def _recipe(name: str) -> RecipeDefinition:
         files("vonk_forge_contracts").joinpath("examples", name).read_text()
     )
     return RecipeDefinition.model_validate(raw)
+
+
+def _document(name: str) -> dict[str, object]:
+    return json.loads(
+        files("vonk_forge_contracts").joinpath("examples", name).read_text()
+    )
 
 
 def _runtime() -> dict[str, str]:
@@ -75,6 +76,26 @@ def _projection(recipe: RecipeDefinition) -> dict[str, object]:
     return value
 
 
+def _add_build(session: Session, revision_id: str, *, build_id: str = BUILD_ID) -> None:
+    session.add(
+        RecipeBuild(
+            id=build_id,
+            recipe_revision_id=revision_id,
+            builder_node_id="builder",
+            source_bundle_sha256="c" * 64,
+            build_input_sha256="d" * 64,
+            state="succeeded",
+            policy_report={},
+            plan={},
+            image_digest=BUILT_IMAGE_DIGEST,
+            oci_layout_sha256=ARCHIVE_DIGEST,
+            image_bytes=len(ARCHIVE),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+
+
 def _add_revision(
     session: Session,
     revision_id: str,
@@ -84,8 +105,7 @@ def _add_revision(
     state: str = "active",
 ) -> None:
     projected = _projection(recipe)
-    if recipe.execution.mode == "build":
-        projected["source_bundle_sha256"] = "c" * 64
+    projected["source_bundle_sha256"] = "c" * 64
     session.add(
         CatalogDocumentRevision(
             id=revision_id,
@@ -110,29 +130,7 @@ def _add_revision(
 class TinyTransport:
     def __init__(self, payload: bytes = ARCHIVE) -> None:
         self.payload = payload
-        self.calls: list[tuple[str, Path]] = []
-
-    def pull_and_export(
-        self,
-        reference: str,
-        destination: Path,
-        *,
-        expected_architecture: str,
-        expected_runtime_interface: str,
-        progress=None,
-    ) -> PulledImageEvidence:
-        self.calls.append((reference, destination))
-        destination.write_bytes(self.payload)
-        return PulledImageEvidence(
-            manifest_digest=PLATFORM_IMAGE_DIGEST,
-            requested_manifest_digest=IMAGE_DIGEST,
-            config_id="sha256:" + "c" * 64,
-            local_reference="localhost/vonk/tiny@" + PLATFORM_IMAGE_DIGEST,
-            architecture="linux/arm64",
-            runtime_interface="v1",
-            archive_sha256=ARCHIVE_DIGEST,
-            archive_bytes=len(ARCHIVE),
-        )
+        self.calls: list[Path] = []
 
     def inspect_archive(
         self,
@@ -143,10 +141,10 @@ class TinyTransport:
         expected_archive_sha256: str,
         expected_archive_bytes: int,
     ) -> PulledImageEvidence:
-        assert archive.read_bytes() == ARCHIVE
+        self.calls.append(archive)
+        assert archive.read_bytes() == self.payload
         return PulledImageEvidence(
             manifest_digest=BUILT_IMAGE_DIGEST,
-            requested_manifest_digest=None,
             config_id="sha256:" + "d" * 64,
             local_reference="docker-archive:" + str(archive),
             architecture=expected_architecture,
@@ -156,118 +154,40 @@ class TinyTransport:
         )
 
 
-def _fake_skopeo_run(
-    command: list[str],
+def _build_receipt(build_id: str = BUILD_ID) -> dict[str, object]:
+    return {
+        "state": "succeeded",
+        "build_id": build_id,
+        "image_digest": BUILT_IMAGE_DIGEST,
+        "oci_layout_sha256": ARCHIVE_DIGEST,
+        "image_bytes": len(ARCHIVE),
+    }
+
+
+def _prepare(
     *,
-    state: dict[str, int] | None = None,
-    counter_path: Path | None = None,
-    **_: object,
-) -> SimpleNamespace:
-    layer_digest = "sha256:" + "1" * 64
-    if command[1] == "inspect":
-        source = command[-1]
-        if "--format" in command:
-            digest = (
-                PLATFORM_IMAGE_DIGEST
-                if source.startswith("docker-archive:")
-                else IMAGE_DIGEST
-            )
-            return SimpleNamespace(stdout=digest + "\n")
-        if "--raw" in command:
-            return SimpleNamespace(
-                stdout=json.dumps({"config": {"digest": "sha256:" + "c" * 64}})
-            )
-        if "--config" in command:
-            return SimpleNamespace(
-                stdout=json.dumps(
-                    {
-                        "os": "linux",
-                        "architecture": "arm64",
-                        "config": {"Labels": {"ai.vonkforge.runtime-interface": "v1"}},
-                    }
-                )
-            )
-        return SimpleNamespace(
-            stdout=json.dumps(
-                {"LayersData": [{"Digest": layer_digest, "Size": len(ARCHIVE)}]}
-            )
-        )
-    if "--dest-shared-blob-dir" in command:
-        blob_root = Path(command[command.index("--dest-shared-blob-dir") + 1])
-        blob = blob_root / layer_digest.replace(":", "/", 1)
-        blob.parent.mkdir(parents=True, exist_ok=True)
-        if not blob.exists():
-            blob.write_bytes(b"completed registry layer")
-            if state is not None:
-                state["blob_fetches"] = state.get("blob_fetches", 0) + 1
-    else:
-        destination = Path(command[-1].removeprefix("docker-archive:"))
-        destination.write_bytes(ARCHIVE)
-        if state is not None:
-            state["exports"] = state.get("exports", 0) + 1
-        if counter_path is not None:
-            previous = (
-                int(counter_path.read_text() or "0") if counter_path.exists() else 0
-            )
-            counter_path.write_text(str(previous + 1), encoding="utf-8")
-    return SimpleNamespace(stdout="")
+    storage: FilesystemRuntimeImageStorage,
+    transport: object | None = None,
+    recipe: RecipeDefinition | None = None,
+    runtime: object | None = None,
+    **kwargs: object,
+) -> RuntimeImageReceipt:
+    """Prepare the stored build archive the way a finished build leaves it."""
+
+    archive = storage.root / ARCHIVE_DIGEST
+    if not archive.exists():
+        archive.write_bytes(ARCHIVE)
+    return prepare_runtime_image(
+        (recipe or _recipe("recipe-source-build.json")).model_dump(mode="json"),
+        runtime=runtime or _runtime(),
+        storage=storage,
+        transport=transport or TinyTransport(),  # type: ignore[arg-type]
+        build_receipt=_build_receipt(),
+        **kwargs,  # type: ignore[arg-type]
+    )
 
 
-def _die_after_published_checkpoint(root: str, counter: str) -> None:
-    """Subprocess target that exits after the storage checkpoint, before commit."""
-
-    from unittest.mock import patch
-
-    with patch(
-        "vonk_control.runtime_image_preparation.subprocess.run",
-        side_effect=lambda command, **kwargs: _fake_skopeo_run(
-            command, counter_path=Path(counter), **kwargs
-        ),
-    ):
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=_runtime(),
-            storage=FilesystemRuntimeImageStorage(Path(root)),
-            transport=SkopeoOCIImageTransport(),
-            before_publish=lambda _receipt: os._exit(79),
-        )
-
-
-def _die_after_receiptless_final(root: str, counter: str) -> None:
-    """Subprocess target that exits after final-link publication, before receipt."""
-
-    from unittest.mock import patch
-
-    from vonk_control import runtime_image_preparation
-
-    atomic_replace = runtime_image_preparation._atomic_json_replace
-
-    def die_before_receipt(path: Path, value: dict[str, object]) -> None:
-        if path.name.endswith(".receipt.json"):
-            os._exit(80)
-        atomic_replace(path, value)
-
-    with (
-        patch(
-            "vonk_control.runtime_image_preparation.subprocess.run",
-            side_effect=lambda command, **kwargs: _fake_skopeo_run(
-                command, counter_path=Path(counter), **kwargs
-            ),
-        ),
-        patch(
-            "vonk_control.runtime_image_preparation._atomic_json_replace",
-            side_effect=die_before_receipt,
-        ),
-    ):
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=_runtime(),
-            storage=FilesystemRuntimeImageStorage(Path(root)),
-            transport=SkopeoOCIImageTransport(),
-        )
-
-
-def test_prebuilt_pull_export_is_verified_and_receipt_is_immediately_readable(
+def test_build_archive_receipt_is_verified_and_immediately_readable(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
@@ -279,79 +199,38 @@ def test_prebuilt_pull_export_is_verified_and_receipt_is_immediately_readable(
         assert storage.read_receipt(value.oci_archive_sha256) == value
         written.append(value)
 
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
-        storage=storage,
-        transport=transport,
-        receipt_writer=writer,
-    )
+    receipt = _prepare(storage=storage, transport=transport, receipt_writer=writer)
 
-    assert receipt.source == "published"
-    assert receipt.registry_manifest_digest == IMAGE_DIGEST
-    assert receipt.platform_manifest_digest == PLATFORM_IMAGE_DIGEST
+    assert receipt.build_id == BUILD_ID
     assert receipt.oci_archive_sha256 == ARCHIVE_DIGEST
-    assert receipt.image_digest == PLATFORM_IMAGE_DIGEST
-    assert receipt.local_image_config_id == "sha256:" + "c" * 64
-    assert receipt.local_image_reference is None
+    assert receipt.image_digest == BUILT_IMAGE_DIGEST
+    assert receipt.local_image_config_id == "sha256:" + "d" * 64
     assert receipt.runtime_interface == "vonk.runtime.v1"
     assert receipt.runtime_interface_label == "v1"
     assert storage.root == tmp_path / "objects" / "image-cache"
     assert Path(receipt.archive_path).parent == storage.root
     assert Path(receipt.archive_path).read_bytes() == ARCHIVE
     assert storage.read_receipt(ARCHIVE_DIGEST) == receipt
-    assert transport.calls[0][0].endswith(IMAGE_DIGEST)
     assert written == [receipt]
 
     resolved = storage.find_verified(
-        IMAGE_DIGEST,
+        BUILT_IMAGE_DIGEST,
         expected_architecture="linux/arm64",
         expected_runtime_interface="vonk.runtime.v1",
     )
     assert resolved == receipt
     assert len(transport.calls) == 1
 
-    reused = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
-        storage=storage,
-        transport=transport,
-        receipt_writer=writer,
-    )
+    reused = _prepare(storage=storage, transport=transport, receipt_writer=writer)
     assert reused == receipt
     assert written == [receipt, receipt]
     assert len(transport.calls) == 1
 
 
-def test_prebuilt_cache_reuse_ignores_editorial_recipe_digest(
+def test_unparseable_receipt_is_replaced_from_verified_bytes(
     tmp_path: Path,
 ) -> None:
-    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    transport = TinyTransport()
-    original = _recipe("recipe-image.json")
-    first = prepare_runtime_image(
-        original,
-        runtime=_runtime(),
-        storage=storage,
-        transport=transport,
-    )
-    raw = original.model_dump(mode="json")
-    raw["metadata"]["description"] = "Editorially revised description"
-    revised = RecipeDefinition.model_validate(raw)
-    second = prepare_runtime_image(
-        revised,
-        runtime=_runtime(),
-        storage=storage,
-        transport=transport,
-    )
-    assert second == first
-    assert len(transport.calls) == 1
-
-
-def test_unparseable_prebuilt_receipt_is_replaced_from_verified_bytes(
-    tmp_path: Path,
-) -> None:
-    """A published receipt the contract cannot parse is stale metadata.
+    """A receipt the contract cannot parse is stale metadata.
 
     The archive is content-addressed and the transport re-verifies its bytes,
     so the receipt beside it is replaced from that verified evidence instead of
@@ -360,33 +239,27 @@ def test_unparseable_prebuilt_receipt_is_replaced_from_verified_bytes(
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     transport = TinyTransport()
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=storage,
         transport=transport,
     )
     receipt_path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
     value = json.loads(receipt_path.read_text(encoding="utf-8"))
-    value["image_digest"] = "sha256:" + "f" * 64
+    value["image_digest"] = "not a digest"
     receipt_path.write_text(json.dumps(value), encoding="utf-8")
-    repaired = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    repaired = _prepare(
         storage=storage,
         transport=transport,
     )
     assert storage.read_receipt(receipt.oci_archive_sha256) == repaired
-    assert repaired.image_digest == PLATFORM_IMAGE_DIGEST
+    assert repaired.image_digest == BUILT_IMAGE_DIGEST
 
 
 def test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=storage,
         transport=TinyTransport(),
     )
@@ -397,16 +270,8 @@ def test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived(
     # A scan cannot match a document the current contract rejects, and one
     # archive's unusable receipt must not poison unrelated lookups.
     assert (
-        storage.find_published(
-            IMAGE_DIGEST,
-            expected_architecture="linux/arm64",
-            expected_runtime_interface="vonk.runtime.v1",
-        )
-        is None
-    )
-    assert (
         storage.find_verified(
-            IMAGE_DIGEST,
+            BUILT_IMAGE_DIGEST,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
         )
@@ -414,9 +279,7 @@ def test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived(
     )
     # The scan discarded our own unusable receipt; preparation re-derives it.
     assert not receipt_path.exists()
-    restored = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    restored = _prepare(
         storage=storage,
         transport=TinyTransport(),
     )
@@ -437,9 +300,7 @@ def test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten(
     """A mixed deploy must not delete a newer Controller's valid receipt."""
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=storage,
         transport=TinyTransport(),
     )
@@ -449,8 +310,8 @@ def test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten(
     receipt_path.write_text(newer, encoding="utf-8")
 
     assert (
-        storage.find_published(
-            IMAGE_DIGEST,
+        storage.find_verified(
+            BUILT_IMAGE_DIGEST,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
         )
@@ -458,9 +319,7 @@ def test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten(
     )
     assert receipt_path.read_text(encoding="utf-8") == newer
     with pytest.raises(RuntimeImagePreparationError) as raised:
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=_runtime(),
+        _prepare(
             storage=storage,
             transport=TinyTransport(),
         )
@@ -482,9 +341,7 @@ def test_current_receipt_parser_rejects_noncanonical_shape(
     tmp_path: Path, mutation, message: str
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=storage,
         transport=TinyTransport(),
     )
@@ -500,24 +357,7 @@ def test_current_producer_parser_and_compiled_plan_consumer_preserve_archive_ide
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    raw_recipe = _recipe("recipe-image.json").model_dump(mode="json")
-    raw_recipe["runtime"]["engine"] = "vllm"
-    raw_recipe["runtime"]["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
-    recipe = RecipeDefinition.model_validate(raw_recipe)
-    model = ModelDefinition.model_validate_json(
-        files("vonk_forge_contracts")
-        .joinpath("examples", "model-definition.json")
-        .read_bytes()
-    )
-    runtime = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)[
-        "runtime"
-    ]
-    produced = prepare_runtime_image(
-        recipe,
-        runtime=runtime,
-        storage=storage,
-        transport=TinyTransport(),
-    )
+    produced = _prepare(storage=storage)
     parsed = storage.read_receipt(produced.oci_archive_sha256)
     compiled = CompiledRuntimeImage.model_validate(_runtime_receipt_mapping(parsed))
     assert parsed.oci_archive_sha256 == produced.oci_archive_sha256
@@ -530,9 +370,7 @@ def test_receipt_reader_requires_every_declared_field(
     tmp_path: Path, field: str
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=storage,
         transport=TinyTransport(),
     )
@@ -542,86 +380,6 @@ def test_receipt_reader_requires_every_declared_field(
     path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(RuntimeImagePreparationError):
         storage.read_receipt(receipt.oci_archive_sha256)
-
-
-def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    destination = tmp_path / "export.docker.tar"
-    calls: list[list[str]] = []
-
-    def fake_run(command: list[str], **_: object) -> SimpleNamespace:
-        calls.append(command)
-        if "--format" in command:
-            digest = (
-                PLATFORM_IMAGE_DIGEST
-                if command[-1].startswith("docker-archive:")
-                else IMAGE_DIGEST
-            )
-            return SimpleNamespace(stdout=digest + "\n")
-        if "--raw" in command:
-            return SimpleNamespace(
-                stdout=json.dumps({"config": {"digest": "sha256:" + "c" * 64}})
-            )
-        if "--config" in command:
-            return SimpleNamespace(
-                stdout=json.dumps(
-                    {
-                        "os": "linux",
-                        "architecture": "arm64",
-                        "config": {"Labels": {"ai.vonkforge.runtime-interface": "v1"}},
-                    }
-                )
-            )
-        if command[1] == "inspect":
-            return SimpleNamespace(stdout=json.dumps({"LayersData": []}))
-        destination.write_bytes(ARCHIVE)
-        return SimpleNamespace(stdout="")
-
-    monkeypatch.setattr(
-        "vonk_control.runtime_image_preparation.subprocess.run", fake_run
-    )
-    evidence = SkopeoOCIImageTransport().pull_and_export(
-        "registry.example/vonk/tiny@" + IMAGE_DIGEST,
-        destination,
-        expected_architecture="linux/arm64",
-        expected_runtime_interface="vonk.runtime.v1",
-    )
-
-    registry_copy = next(
-        command for command in calls if "--dest-shared-blob-dir" in command
-    )
-    archive_copy = next(
-        command for command in calls if "--src-shared-blob-dir" in command
-    )
-    assert registry_copy[-1].startswith(f"oci:{tmp_path}/registry-layers/")
-    assert registry_copy[registry_copy.index("--retry-times") + 1] == "3"
-    assert registry_copy[registry_copy.index("--image-parallel-copies") + 1] == "6"
-    assert archive_copy[-2] == registry_copy[-1]
-    assert evidence.manifest_digest == PLATFORM_IMAGE_DIGEST
-    assert evidence.requested_manifest_digest == IMAGE_DIGEST
-    assert evidence.config_id == "sha256:" + "c" * 64
-    assert evidence.archive_sha256 == ARCHIVE_DIGEST
-    assert any(
-        command[-1] == f"docker-archive:{destination}" and command[1] == "copy"
-        for command in calls
-    )
-    assert any(
-        command[-1] == f"docker-archive:{destination}" and command[1] == "inspect"
-        for command in calls
-    )
-    assert not any(
-        "--raw" in command and command[-1].startswith("docker://") for command in calls
-    )
-    assert any(command[1:3] == ["copy", "--override-os"] for command in calls)
-    assert all(
-        command[1:5]
-        in (
-            ["inspect", "--override-os", "linux", "--override-arch"],
-            ["copy", "--override-os", "linux", "--override-arch"],
-        )
-        for command in calls
-    )
 
 
 def test_docker_export_keeps_build_provenance_separate_from_reconstructed_manifest(
@@ -647,10 +405,10 @@ def test_docker_export_keeps_build_provenance_separate_from_reconstructed_manife
                 expected_archive_sha256=expected_archive_sha256,
                 expected_archive_bytes=expected_archive_bytes,
             )
-            return replace(evidence, manifest_digest=IMAGE_DIGEST)
+            return replace(evidence, manifest_digest="sha256:" + "d" * 64)
 
     receipt = prepare_runtime_image(
-        _recipe("recipe-source-build.json"),
+        _document("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=DifferentArchive(),
@@ -662,7 +420,6 @@ def test_docker_export_keeps_build_provenance_separate_from_reconstructed_manife
             "image_bytes": len(ARCHIVE),
         },
     )
-    assert receipt.platform_manifest_digest == BUILT_IMAGE_DIGEST
     assert receipt.image_digest == BUILT_IMAGE_DIGEST
     assert receipt.oci_archive_sha256 == ARCHIVE_DIGEST
     assert receipt.local_image_config_id == "sha256:" + "d" * 64
@@ -672,11 +429,12 @@ def test_docker_export_keeps_build_provenance_separate_from_reconstructed_manife
 def test_packaged_skopeo_transport_rejects_unlabeled_image(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    destination = tmp_path / "export.oci.tar"
+    archive = tmp_path / "export.docker.tar"
+    archive.write_bytes(ARCHIVE)
 
     def fake_run(command: list[str], **_: object) -> SimpleNamespace:
         if "--format" in command:
-            return SimpleNamespace(stdout=IMAGE_DIGEST + "\n")
+            return SimpleNamespace(stdout=BUILT_IMAGE_DIGEST + "\n")
         if "--raw" in command:
             return SimpleNamespace(
                 stdout=json.dumps({"config": {"digest": "sha256:" + "c" * 64}})
@@ -695,11 +453,12 @@ def test_packaged_skopeo_transport_rejects_unlabeled_image(
         "vonk_control.runtime_image_preparation.subprocess.run", fake_run
     )
     with pytest.raises(RuntimeImagePreparationError, match="runtime interface label"):
-        SkopeoOCIImageTransport().pull_and_export(
-            "registry.example/vonk/tiny@" + IMAGE_DIGEST,
-            destination,
+        SkopeoOCIImageTransport().inspect_archive(
+            archive,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
+            expected_archive_sha256=ARCHIVE_DIGEST,
+            expected_archive_bytes=len(ARCHIVE),
         )
 
 
@@ -710,7 +469,7 @@ def test_source_build_uses_same_normalized_receipt_and_preserves_provenance(
     archive = storage.root / ARCHIVE_DIGEST
     archive.write_bytes(ARCHIVE)
     receipt = prepare_runtime_image(
-        _recipe("recipe-source-build.json"),
+        _document("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -723,14 +482,10 @@ def test_source_build_uses_same_normalized_receipt_and_preserves_provenance(
         },
     )
 
-    assert receipt.source == "controller-build"
     assert receipt.build_id == "build-7"
-    assert receipt.registry_manifest_digest is None
-    assert receipt.platform_manifest_digest == BUILT_IMAGE_DIGEST
     assert receipt.image_digest == BUILT_IMAGE_DIGEST
     assert receipt.oci_archive_sha256 == ARCHIVE_DIGEST
     assert receipt.local_image_config_id == "sha256:" + "d" * 64
-    assert receipt.local_image_reference is None
     assert receipt.runtime_interface == "vonk.runtime.v1"
     assert receipt.runtime_interface_label == "v1"
     assert storage.read_receipt(ARCHIVE_DIGEST) == receipt
@@ -766,48 +521,8 @@ def test_source_build_uses_same_normalized_receipt_and_preserves_provenance(
             verified_at=datetime.now(UTC),
         )
         session.commit()
-        assert row.source == "controller-build"
         assert row.build_id == "build-7"
-        assert row.registry_manifest_digest is None
-
-
-def test_transport_digest_mismatch_does_not_publish_archive_or_receipt(
-    tmp_path: Path,
-) -> None:
-    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-
-    class WrongDigest(TinyTransport):
-        def pull_and_export(
-            self,
-            reference: str,
-            destination: Path,
-            *,
-            expected_architecture: str,
-            expected_runtime_interface: str,
-            progress=None,
-        ) -> PulledImageEvidence:
-            destination.write_bytes(ARCHIVE)
-            return PulledImageEvidence(
-                manifest_digest="sha256:" + "b" * 64,
-                requested_manifest_digest="sha256:" + "a" * 64,
-                config_id="sha256:" + "c" * 64,
-                local_reference=reference,
-                architecture="linux/arm64",
-                runtime_interface="v1",
-                archive_sha256=ARCHIVE_DIGEST,
-                archive_bytes=len(ARCHIVE),
-            )
-
-    with pytest.raises(
-        RuntimeImagePreparationError, match="different recipe image digest"
-    ):
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=_runtime(),
-            storage=storage,
-            transport=WrongDigest(),
-        )
-    assert list(storage.root.iterdir()) == []
+        assert row.image_digest == BUILT_IMAGE_DIGEST
 
 
 def test_publication_callback_and_commit_share_the_exact_archive_lock(
@@ -831,9 +546,7 @@ def test_publication_callback_and_commit_share_the_exact_archive_lock(
         callbacks.append(receipt)
 
     monkeypatch.setattr(storage, "commit", commit_while_locked)
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=storage,
         transport=TinyTransport(),
         before_publish=callback_while_locked,
@@ -842,8 +555,7 @@ def test_publication_callback_and_commit_share_the_exact_archive_lock(
     assert len(callbacks) == 1
     assert callbacks[0].oci_archive_sha256 == receipt.oci_archive_sha256
     assert callbacks[0].image_digest == receipt.image_digest
-    assert callbacks[0].registry_manifest_digest == receipt.registry_manifest_digest
-    assert receipt.registry_manifest_digest == IMAGE_DIGEST
+    assert callbacks[0].build_id == receipt.build_id
     with storage.publication_lock(receipt.oci_archive_sha256):
         pass
 
@@ -866,447 +578,6 @@ def test_image_publication_lock_refuses_symlinked_lock_directory(
     assert not (outside / f"{ARCHIVE_DIGEST}.lock").exists()
 
 
-def test_publication_contention_keeps_skopeo_blob_checkpoint_for_retry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    state: dict[str, int] = {}
-    monkeypatch.setattr(
-        "vonk_control.runtime_image_preparation.subprocess.run",
-        lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
-    )
-    transport = SkopeoOCIImageTransport()
-    with (
-        storage.publication_lock(ARCHIVE_DIGEST),
-        pytest.raises(RuntimeImagePreparationError) as contended,
-    ):
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=_runtime(),
-            storage=storage,
-            transport=transport,
-        )
-    assert contended.value.code == "runtime_image.publication_contended"
-    assert list(storage.root.glob(".runtime-image-*.part")) == []
-
-    # The verified export and typed checkpoint survive publication contention.
-    # The source lock then makes a retry reuse both the tar and completed blobs.
-    assert state == {"blob_fetches": 1, "exports": 1}
-    checkpoints = list(storage.root.glob(".published-image-*.checkpoint.json"))
-    assert len(checkpoints) == 1
-    checkpoint = RuntimeImagePublishedStageCheckpoint.model_validate_json(
-        checkpoints[0].read_bytes()
-    )
-    stage = storage.published_stage_path(checkpoint.oci_archive_sha256)
-    assert stage.read_bytes() == ARCHIVE
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
-        storage=storage,
-        transport=transport,
-    )
-    assert receipt.oci_archive_sha256 == ARCHIVE_DIGEST
-    assert state == {"blob_fetches": 1, "exports": 1}
-
-
-@pytest.mark.needs_recipe_library
-def test_process_death_after_checkpoint_reuses_export_after_restart(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = tmp_path / "objects"
-    counter = tmp_path / "exports.txt"
-    test_dir = str(Path(__file__).parent)
-    from tests.subprocess_environment import isolated_environment
-
-    environment = isolated_environment(
-        tmp_path / "child-home",
-        extra={
-            "PYTHONPATH": test_dir,
-            "VONK_RECIPE_LIBRARY_ROOT": os.environ["VONK_RECIPE_LIBRARY_ROOT"],
-        },
-    )
-    script = (
-        "import sys\n"
-        "sys.path.insert(0, sys.argv[3])\n"
-        "from test_runtime_image_preparation import _die_after_published_checkpoint\n"
-        "_die_after_published_checkpoint(sys.argv[1], sys.argv[2])\n"
-    )
-    killed = subprocess.run(
-        [sys.executable, "-c", script, str(root), str(counter), test_dir],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
-        timeout=60,
-    )
-    assert killed.returncode == 79, killed.stderr
-    assert counter.read_text(encoding="utf-8") == "1"
-
-    storage = FilesystemRuntimeImageStorage(root)
-    checkpoints = list(storage.root.glob(".published-image-*.checkpoint.json"))
-    assert len(checkpoints) == 1
-    checkpoint = RuntimeImagePublishedStageCheckpoint.model_validate_json(
-        checkpoints[0].read_bytes(), strict=True
-    )
-    stage = storage.published_stage_path(checkpoint.oci_archive_sha256)
-    assert stage.read_bytes() == ARCHIVE
-    assert not (storage.root / ARCHIVE_DIGEST).exists()
-    assert not (storage.root / f"{ARCHIVE_DIGEST}.receipt.json").exists()
-
-    state: dict[str, int] = {}
-    monkeypatch.setattr(
-        "vonk_control.runtime_image_preparation.subprocess.run",
-        lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
-    )
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
-        storage=storage,
-        transport=SkopeoOCIImageTransport(),
-    )
-
-    assert receipt.oci_archive_sha256 == ARCHIVE_DIGEST
-    assert counter.read_text(encoding="utf-8") == "1"
-    assert state == {}
-    assert Path(receipt.archive_path).read_bytes() == ARCHIVE
-    assert os.path.samefile(stage, Path(receipt.archive_path))
-
-
-@pytest.mark.needs_recipe_library
-def test_process_death_after_final_link_repairs_receipt_from_checkpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = tmp_path / "objects"
-    counter = tmp_path / "exports.txt"
-    test_dir = str(Path(__file__).parent)
-    from tests.subprocess_environment import isolated_environment
-
-    environment = isolated_environment(
-        tmp_path / "child-home",
-        extra={
-            "PYTHONPATH": test_dir,
-            "VONK_RECIPE_LIBRARY_ROOT": os.environ["VONK_RECIPE_LIBRARY_ROOT"],
-        },
-    )
-    script = (
-        "import sys\n"
-        "sys.path.insert(0, sys.argv[3])\n"
-        "from test_runtime_image_preparation import _die_after_receiptless_final\n"
-        "_die_after_receiptless_final(sys.argv[1], sys.argv[2])\n"
-    )
-    killed = subprocess.run(
-        [sys.executable, "-c", script, str(root), str(counter), test_dir],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
-        timeout=60,
-    )
-    assert killed.returncode == 80, killed.stderr
-    assert counter.read_text(encoding="utf-8") == "1"
-
-    storage = FilesystemRuntimeImageStorage(root)
-    checkpoints = list(storage.root.glob(".published-image-*.checkpoint.json"))
-    assert len(checkpoints) == 1
-    checkpoint = RuntimeImagePublishedStageCheckpoint.model_validate_json(
-        checkpoints[0].read_bytes(), strict=True
-    )
-    stage = storage.published_stage_path(checkpoint.oci_archive_sha256)
-    final = storage.root / ARCHIVE_DIGEST
-    assert os.path.samefile(stage, final)
-    assert final.read_bytes() == ARCHIVE
-    assert not (storage.root / f"{ARCHIVE_DIGEST}.receipt.json").exists()
-
-    state: dict[str, int] = {}
-    monkeypatch.setattr(
-        "vonk_control.runtime_image_preparation.subprocess.run",
-        lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
-    )
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
-        storage=storage,
-        transport=SkopeoOCIImageTransport(),
-    )
-
-    assert receipt.oci_archive_sha256 == ARCHIVE_DIGEST
-    assert state == {}
-    assert (storage.root / f"{ARCHIVE_DIGEST}.receipt.json").is_file()
-    assert Path(receipt.archive_path).read_bytes() == ARCHIVE
-
-
-def test_cancelled_owner_and_source_lock_loser_preserve_verified_stage(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    state: dict[str, int] = {}
-    monkeypatch.setattr(
-        "vonk_control.runtime_image_preparation.subprocess.run",
-        lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
-    )
-    recipe = _recipe("recipe-image.json")
-    reference = (
-        f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
-    )
-    denied: list[RuntimeImageReceipt] = []
-
-    def cancelled(receipt: RuntimeImageReceipt) -> None:
-        denied.append(receipt)
-        raise RuntimeImagePreparationError(
-            "runtime_image.owner_cancelled",
-            "current operation intent no longer authorizes publication",
-        )
-
-    with pytest.raises(RuntimeImagePreparationError) as refusal:
-        prepare_runtime_image(
-            recipe,
-            runtime=_runtime(),
-            storage=storage,
-            transport=SkopeoOCIImageTransport(),
-            before_publish=cancelled,
-        )
-    assert refusal.value.code == "runtime_image.owner_cancelled"
-    assert len(denied) == 1
-    assert state == {"blob_fetches": 1, "exports": 1}
-
-    checkpoints = list(storage.root.glob(".published-image-*.checkpoint.json"))
-    assert len(checkpoints) == 1
-    checkpoint = RuntimeImagePublishedStageCheckpoint.model_validate_json(
-        checkpoints[0].read_bytes(), strict=True
-    )
-    stage = storage.published_stage_path(checkpoint.oci_archive_sha256)
-    assert stage.read_bytes() == ARCHIVE
-    assert not (storage.root / ARCHIVE_DIGEST).exists()
-
-    source_key = hashlib.sha256(f"{reference}\nlinux/arm64".encode()).hexdigest()
-    source_lock = storage.root / "registry-layers" / f"{source_key}.lock"
-    with source_lock.open("a+b") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        with pytest.raises(RuntimeImagePreparationError) as contended:
-            prepare_runtime_image(
-                recipe,
-                runtime=_runtime(),
-                storage=storage,
-                transport=SkopeoOCIImageTransport(),
-            )
-        assert contended.value.code == "runtime_image.transfer_contended"
-        assert stage.read_bytes() == ARCHIVE
-        assert checkpoints[0].is_file()
-        assert state == {"blob_fetches": 1, "exports": 1}
-        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-
-    receipt = prepare_runtime_image(
-        recipe,
-        runtime=_runtime(),
-        storage=storage,
-        transport=SkopeoOCIImageTransport(),
-    )
-    assert receipt.oci_archive_sha256 == ARCHIVE_DIGEST
-    assert state == {"blob_fetches": 1, "exports": 1}
-    assert stage.read_bytes() == ARCHIVE
-
-
-def test_oversized_published_stage_checkpoint_is_discarded_and_pulled_again(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    recipe = _recipe("recipe-image.json")
-    reference = (
-        f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
-    )
-    checkpoint = storage.published_stage_checkpoint_path(
-        reference,
-        expected_architecture="linux/arm64",
-        expected_runtime_interface="vonk.runtime.v1",
-    )
-    checkpoint.write_bytes(b" " * (16 * 1024))
-    state: dict[str, int] = {}
-    monkeypatch.setattr(
-        "vonk_control.runtime_image_preparation.subprocess.run",
-        lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
-    )
-
-    prepared = prepare_runtime_image(
-        recipe,
-        runtime=_runtime(),
-        storage=storage,
-        transport=SkopeoOCIImageTransport(),
-    )
-
-    # The malformed checkpoint was discarded and the image pulled again.
-    assert state.get("exports") == 1
-    assert storage.read_receipt(prepared.oci_archive_sha256) == prepared
-    assert checkpoint.stat().st_size < 16 * 1024
-
-
-def test_nonregular_published_stage_checkpoint_is_discarded(
-    tmp_path: Path,
-) -> None:
-    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    recipe = _recipe("recipe-image.json")
-    reference = (
-        f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
-    )
-    checkpoint_path = storage.published_stage_checkpoint_path(
-        reference,
-        expected_architecture="linux/arm64",
-        expected_runtime_interface="vonk.runtime.v1",
-    )
-    checkpoint_path.mkdir()
-
-    assert (
-        storage.find_published_stage(
-            reference,
-            expected_architecture="linux/arm64",
-            expected_runtime_interface="vonk.runtime.v1",
-        )
-        is None
-    )
-    assert not checkpoint_path.exists()
-
-
-@pytest.mark.needs_recipe_library
-def test_fifo_published_stage_checkpoint_is_discarded_without_blocking(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "objects"
-    storage = FilesystemRuntimeImageStorage(root)
-    recipe = _recipe("recipe-image.json")
-    reference = (
-        f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
-    )
-    checkpoint_path = storage.published_stage_checkpoint_path(
-        reference,
-        expected_architecture="linux/arm64",
-        expected_runtime_interface="vonk.runtime.v1",
-    )
-    os.mkfifo(checkpoint_path)
-
-    test_dir = Path(__file__).resolve().parent
-    from tests.subprocess_environment import isolated_environment
-
-    environment = isolated_environment(
-        tmp_path / "child-home",
-        extra={
-            "VONK_RECIPE_LIBRARY_ROOT": os.environ["VONK_RECIPE_LIBRARY_ROOT"],
-        },
-    )
-    source_paths = (
-        test_dir,
-        test_dir.parent / "src",
-        test_dir.parent.parent / "src",
-        Path(environment["VONK_RECIPE_LIBRARY_ROOT"]) / "contracts" / "src",
-    )
-    environment["PYTHONPATH"] = os.pathsep.join(str(path) for path in source_paths)
-    script = (
-        "import sys\n"
-        "from pathlib import Path\n"
-        "from vonk_control.runtime_image_preparation import "
-        "FilesystemRuntimeImageStorage, RuntimeImagePreparationError\n"
-        "found = FilesystemRuntimeImageStorage(Path(sys.argv[1])).find_published_stage(\n"
-        "    sys.argv[2], expected_architecture='linux/arm64',\n"
-        "    expected_runtime_interface='vonk.runtime.v1'\n"
-        ")\n"
-        "assert found is None, 'FIFO checkpoint was accepted'\n"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", script, str(root), reference],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
-        timeout=20,
-    )
-
-    assert result.returncode == 0, result.stderr
-    # The unusable checkpoint was discarded so the next preparation pulls again.
-    assert not checkpoint_path.exists()
-
-
-def test_published_checkpoint_accepts_maximum_canonical_recipe_image_reference() -> (
-    None
-):
-    image = RecipeImage(
-        repository="a" + "b" * 511,
-        digest="a" * 64,
-        platform="linux/arm64",
-    )
-    reference = f"{image.repository}@sha256:{image.digest}"
-    checkpoint = RuntimeImagePublishedStageCheckpoint(
-        schema_version=2,
-        registry_reference=reference,
-        registry_manifest_digest="sha256:" + "a" * 64,
-        platform_manifest_digest=PLATFORM_IMAGE_DIGEST,
-        image_digest=PLATFORM_IMAGE_DIGEST,
-        local_image_config_id="sha256:" + "c" * 64,
-        architecture="linux-arm64",
-        runtime_interface="vonk.runtime.v1",
-        runtime_interface_label="v1",
-        oci_archive_sha256="d" * 64,
-        image_bytes=16 * 1024**4,
-        runtime_adapter=None,
-        runtime_adapter_sha256=None,
-    )
-
-    encoded = checkpoint.model_dump_json().encode("utf-8")
-    assert len(reference) == 584
-    assert len(encoded) == 1285
-    assert len(encoded) <= 4 * 1024
-
-
-def test_receiptless_final_with_wrong_bytes_is_discarded_and_re_exported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from vonk_control import runtime_image_preparation
-
-    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    state: dict[str, int] = {}
-    monkeypatch.setattr(
-        "vonk_control.runtime_image_preparation.subprocess.run",
-        lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
-    )
-    atomic_replace = runtime_image_preparation._atomic_json_replace
-
-    def fail_receipt(path: Path, value: dict[str, object]) -> None:
-        if path.name.endswith(".receipt.json"):
-            raise RuntimeImagePreparationError(
-                "runtime_image.receipt_write_failed",
-                "injected interruption after archive publication",
-            )
-        atomic_replace(path, value)
-
-    monkeypatch.setattr(
-        "vonk_control.runtime_image_preparation._atomic_json_replace", fail_receipt
-    )
-    with pytest.raises(RuntimeImagePreparationError) as interrupted:
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=_runtime(),
-            storage=storage,
-            transport=SkopeoOCIImageTransport(),
-        )
-    assert interrupted.value.code == "runtime_image.receipt_write_failed"
-    final = storage.root / ARCHIVE_DIGEST
-    stage = storage.published_stage_path(ARCHIVE_DIGEST)
-    assert os.path.samefile(final, stage)
-    assert not (storage.root / f"{ARCHIVE_DIGEST}.receipt.json").exists()
-
-    final.write_bytes(b"X" * len(ARCHIVE))
-    monkeypatch.setattr(
-        "vonk_control.runtime_image_preparation._atomic_json_replace", atomic_replace
-    )
-    repaired = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
-        storage=storage,
-        transport=SkopeoOCIImageTransport(),
-    )
-    # Bytes that disagree with their content address are never accepted:
-    # they are discarded and replaced by freshly verified bytes.
-    assert final.read_bytes() == ARCHIVE
-    assert storage.read_receipt(ARCHIVE_DIGEST) == repaired
-
-
 def test_build_receipt_requires_the_exact_stored_archive(tmp_path: Path) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     archive = storage.root / ARCHIVE_DIGEST
@@ -1314,7 +585,7 @@ def test_build_receipt_requires_the_exact_stored_archive(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeImagePreparationError, match="not present"):
         prepare_runtime_image(
-            _recipe("recipe-source-build.json"),
+            _document("recipe-source-build.json"),
             runtime=_runtime(),
             storage=storage,
             build_receipt={
@@ -1356,7 +627,7 @@ def test_find_build_matches_the_recorded_input_identity_only(
     (storage.root / ARCHIVE_DIGEST).write_bytes(ARCHIVE)
     build_input = "a" * 64
     receipt = prepare_runtime_image(
-        _recipe("recipe-source-build.json"),
+        _document("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -1412,7 +683,7 @@ def test_find_build_does_not_reuse_a_receipt_without_an_input_identity(
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     (storage.root / ARCHIVE_DIGEST).write_bytes(ARCHIVE)
     receipt = prepare_runtime_image(
-        _recipe("recipe-source-build.json"),
+        _document("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -1445,7 +716,7 @@ def test_preparation_backfills_a_missing_build_input_identity(
     (storage.root / ARCHIVE_DIGEST).write_bytes(ARCHIVE)
     build_input = "a" * 64
     legacy = prepare_runtime_image(
-        _recipe("recipe-source-build.json"),
+        _document("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -1460,7 +731,7 @@ def test_preparation_backfills_a_missing_build_input_identity(
     assert legacy.build_input_sha256 is None
 
     repaired = prepare_runtime_image(
-        _recipe("recipe-source-build.json"),
+        _document("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -1489,7 +760,7 @@ def test_preparation_backfills_a_missing_build_input_identity(
     # identity conflict: it is refused, never swapped under existing owners.
     with pytest.raises(RuntimeImagePreparationError) as conflict:
         prepare_runtime_image(
-            _recipe("recipe-source-build.json"),
+            _document("recipe-source-build.json"),
             runtime=_runtime(),
             storage=storage,
             transport=TinyTransport(),
@@ -1508,25 +779,15 @@ def test_preparation_backfills_a_missing_build_input_identity(
 
 def test_verified_lookup_treats_a_vanished_archive_as_a_miss(tmp_path: Path) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=storage,
         transport=TinyTransport(),
     )
     Path(receipt.archive_path).unlink()
 
     assert (
-        storage.find_published(
-            IMAGE_DIGEST,
-            expected_architecture="linux/arm64",
-            expected_runtime_interface="vonk.runtime.v1",
-        )
-        is None
-    )
-    assert (
         storage.find_verified(
-            IMAGE_DIGEST,
+            BUILT_IMAGE_DIGEST,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
         )
@@ -1551,16 +812,15 @@ def test_runtime_distribution_document_is_not_a_recipe_authority(
             runtime=_runtime(),
             storage=FilesystemRuntimeImageStorage(tmp_path / "objects"),
             transport=TinyTransport(),
+            build_receipt=_build_receipt(),
         )
 
 
-def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
+def test_receipt_persists_idempotently_and_conflicts_fail_closed(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=storage,
         transport=TinyTransport(),
     )
@@ -1571,7 +831,8 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
     execution_key = "f" * 64
     first_at = datetime.now(UTC)
     with Session(engine) as session:
-        _add_revision(session, revision_id, _recipe("recipe-image.json"))
+        _add_revision(session, revision_id, _recipe("recipe-source-build.json"))
+        _add_build(session, revision_id)
         row = persist_runtime_image_receipt(
             session,
             recipe_revision_id=revision_id,
@@ -1581,12 +842,9 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
             verified_at=first_at,
         )
         session.commit()
-        assert row.source == "published"
-        assert prefixed_image_digest(row.registry_manifest_digest) == IMAGE_DIGEST
-        assert (
-            prefixed_image_digest(row.platform_manifest_digest) == PLATFORM_IMAGE_DIGEST
-        )
-        assert prefixed_image_digest(row.local_image_config_id) == "sha256:" + "c" * 64
+        assert row.build_id == BUILD_ID
+        assert prefixed_image_digest(row.image_digest) == BUILT_IMAGE_DIGEST
+        assert prefixed_image_digest(row.local_image_config_id) == "sha256:" + "d" * 64
         assert row.oci_archive_sha256 == ARCHIVE_DIGEST
         assert row.image_bytes == len(ARCHIVE)
     second_at = first_at + timedelta(seconds=1)
@@ -1605,10 +863,7 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
         # were verified, so a second authorization does not rewrite it.
         assert same.recorded_at == receipt.recorded_at
     conflicting = receipt.model_copy(
-        update={
-            "platform_manifest_digest": BUILT_IMAGE_DIGEST,
-            "image_digest": BUILT_IMAGE_DIGEST,
-        }
+        update={"local_image_config_id": "sha256:" + "9" * 64}
     )
     with (
         Session(engine) as session,
@@ -1631,9 +886,7 @@ def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=storage,
         transport=TinyTransport(),
     )
@@ -1652,7 +905,8 @@ def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
         "receipt": receipt,
     }
     session = Session(engine)
-    _add_revision(session, "revision-direct", _recipe("recipe-image.json"))
+    _add_revision(session, "revision-direct", _recipe("recipe-source-build.json"))
+    _add_build(session, "revision-direct")
     session.flush()
     with pytest.raises(ValueError, match="not authorized"):
         resolve_persisted_runtime_image_receipt(session, **resolve_kwargs)
@@ -1665,8 +919,8 @@ def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
     session.close()
     with Session(engine) as session:
         assert (
-            resolve_persisted_runtime_image_receipt(session, **resolve_kwargs).source
-            == "published"
+            resolve_persisted_runtime_image_receipt(session, **resolve_kwargs)
+            == receipt
         )
         session.query(RuntimeImageAuthorization).update(
             {"oci_archive_sha256": "e" * 64}
@@ -1691,13 +945,8 @@ def test_one_verified_archive_serves_availability_and_launch_identities(
     """
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    recipe = _recipe("recipe-image.json")
-    receipt = prepare_runtime_image(
-        recipe,
-        runtime=_runtime(),
-        storage=storage,
-        transport=TinyTransport(),
-    )
+    recipe = _recipe("recipe-source-build.json")
+    receipt = _prepare(storage=storage, recipe=recipe)
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     availability_key = "a" * 64
@@ -1705,6 +954,7 @@ def test_one_verified_archive_serves_availability_and_launch_identities(
     now = datetime.now(UTC)
     with Session(engine) as session:
         _add_revision(session, "revision-direct", recipe)
+        _add_build(session, "revision-direct")
         session.flush()
         availability_row = persist_runtime_image_receipt(
             session,
@@ -1774,14 +1024,9 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
     new_build_id = "833ac675-ec54-46b4-b490-81916d9d6b0e"
     old_receipt = RuntimeImageReceipt(
         schema_version=2,
-        source="controller-build",
         distribution_publisher=recipe.identity.publisher,
         distribution_slug=recipe.identity.slug,
         distribution_content_sha256=recipe_digest,
-        registry_manifest_digest=None,
-        platform_manifest_digest=(
-            "sha256:a511438d08c3e9761e6f91ce10561cb50dcdd8ff33b898015910c7c6d6bf87cf"
-        ),
         image_digest=(
             "sha256:a511438d08c3e9761e6f91ce10561cb50dcdd8ff33b898015910c7c6d6bf87cf"
         ),
@@ -1790,7 +1035,6 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
         ),
         image_bytes=21_017_472_512,
         local_image_config_id="sha256:" + "7b37b97a71c439d0" + "0" * 48,
-        local_image_reference=None,
         architecture="linux-arm64",
         runtime_interface="vonk.runtime.v1",
         runtime_interface_label="v1",
@@ -1802,9 +1046,6 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
     )
     new_receipt = old_receipt.model_copy(
         update={
-            "platform_manifest_digest": (
-                "sha256:c27772a442473d151a312c46add350a6f35f1cc9713017f2f06a377b8ca01b5e"
-            ),
             "image_digest": (
                 "sha256:c27772a442473d151a312c46add350a6f35f1cc9713017f2f06a377b8ca01b5e"
             ),
@@ -1944,13 +1185,11 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    original = _recipe("recipe-image.json")
+    original = _recipe("recipe-source-build.json")
     revised_raw = original.model_dump(mode="json")
     revised_raw["metadata"]["description"] = "Editorial notes only"
     revised = RecipeDefinition.model_validate(revised_raw)
-    receipt = prepare_runtime_image(
-        original, runtime=_runtime(), storage=storage, transport=TinyTransport()
-    )
+    receipt = _prepare(storage=storage, recipe=original)
     old_digest = document_sha256(original.model_dump(mode="json"))
     new_digest = document_sha256(revised.model_dump(mode="json"))
     old_id, new_id, document_id = "old-revision", "new-revision", "recipe-document"
@@ -2010,6 +1249,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
                 ),
             ]
         )
+        _add_build(session, old_id)
         session.flush()
         persist_runtime_image_receipt(
             session,
@@ -2099,20 +1339,19 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
 def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     digest = document_sha256(recipe.model_dump(mode="json"))
     revision_id = "authority-revision"
     now = datetime.now(UTC)
-    receipt = prepare_runtime_image(
-        recipe,
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=FilesystemRuntimeImageStorage(tmp_path / "authority-receipt"),
-        transport=TinyTransport(),
+        recipe=recipe,
     )
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         _add_revision(session, revision_id, recipe)
+        _add_build(session, revision_id)
         with pytest.raises(
             RuntimeImagePreparationError, match="authority is unavailable"
         ):
@@ -2165,16 +1404,14 @@ def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(
 def test_runtime_image_authority_rejects_changed_current_execution_identity(
     tmp_path: Path,
 ) -> None:
-    original = _recipe("recipe-image.json")
+    original = _recipe("recipe-source-build.json")
     revised_raw = original.model_dump(mode="json")
     revised_raw["metadata"]["description"] = "Changed execution"
     revised = RecipeDefinition.model_validate(revised_raw)
     now = datetime.now(UTC)
-    receipt = prepare_runtime_image(
-        original,
-        runtime=_runtime(),
+    receipt = _prepare(
         storage=FilesystemRuntimeImageStorage(tmp_path / "authority-execution"),
-        transport=TinyTransport(),
+        recipe=original,
     )
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -2222,22 +1459,14 @@ def test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state
             raise RuntimeError("database unavailable")
 
     with pytest.raises(RuntimeImagePreparationError, match="could not be persisted"):
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=_runtime(),
-            storage=storage,
-            transport=transport,
-            receipt_writer=fail_once,
-        )
+        _prepare(storage=storage, transport=transport, receipt_writer=fail_once)
     assert len(transport.calls) == 1
-    retry = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    retry = _prepare(
         storage=storage,
         transport=transport,
         receipt_writer=fail_once,
     )
-    assert retry.registry_manifest_digest == IMAGE_DIGEST
+    assert retry.build_id == BUILD_ID
     assert attempts == 2
     assert len(transport.calls) == 1
 
@@ -2252,55 +1481,17 @@ def test_image_preparation_rejects_retired_runtime_interface_before_transport(
         runtime.pop("interface")
     transport = TinyTransport()
     with pytest.raises(RuntimeImagePreparationError, match="retired runtime_interface"):
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=runtime,
+        _prepare(
             storage=FilesystemRuntimeImageStorage(tmp_path / "objects"),
             transport=transport,
+            runtime=runtime,
         )
     assert transport.calls == []
-
-
-def test_native_transfer_continues_while_progress_observer_is_busy(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import threading
-
-    from vonk_control.runtime_image_preparation import _run_with_progress
-
-    observer_entered = threading.Event()
-    transfer_finished = threading.Event()
-    destination = tmp_path / "transfer"
-
-    def transfer(command: list[str]) -> str:
-        assert observer_entered.wait(5)
-        destination.write_bytes(b"completed while observer was busy")
-        transfer_finished.set()
-        return ""
-
-    reports = []
-
-    def progress(phase: str, received: int, total: int | None) -> None:
-        observer_entered.set()
-        assert transfer_finished.wait(5)
-        reports.append((phase, received, total))
-
-    monkeypatch.setattr("vonk_control.runtime_image_preparation._run_text", transfer)
-    _run_with_progress(
-        ["skopeo", "copy"],
-        lambda: destination.stat().st_size if destination.exists() else 0,
-        progress,
-        "download",
-        None,
-    )
-    assert reports[-1] == ("download", len(destination.read_bytes()), None)
 
 
 def test_runtime_subprocess_retries_with_timeout_and_surfaces_redacted_stderr(
     monkeypatch: pytest.MonkeyPatch, caplog
 ) -> None:
-    import subprocess
 
     from vonk_control.runtime_image_preparation import (
         _SUBPROCESS_ATTEMPTS,
@@ -2366,56 +1557,33 @@ def test_runtime_image_storage_types_only_clean_absence_as_cache_missing(
 
 
 def test_controller_build_receipt_requires_its_adapter_identity() -> None:
-    adapter = resolve_runtime_adapter("vllm", {"mode": "single"})
+    adapter = resolve_runtime_adapter("vllm", {"node_count": 1})
     shared = {
         "schema_version": 2,
         "distribution_publisher": "vonk",
         "distribution_slug": "cached",
         "distribution_content_sha256": "a" * 64,
-        "registry_manifest_digest": None,
-        "platform_manifest_digest": PLATFORM_IMAGE_DIGEST,
-        "image_digest": PLATFORM_IMAGE_DIGEST,
+        "image_digest": BUILT_IMAGE_DIGEST,
         "oci_archive_sha256": "b" * 64,
         "image_bytes": 1,
         "local_image_config_id": "sha256:" + "c" * 64,
-        "local_image_reference": None,
         "architecture": "linux-arm64",
         "runtime_interface": "vonk.runtime.v1",
         "runtime_interface_label": "v1",
         "archive_path": "/state/runtime-images/" + "b" * 64,
         "recorded_at": "2026-09-15T00:00:00Z",
+        "build_id": "build",
     }
     # A receipt that records no adapter cannot prove which reviewed adaptation
     # produced the bytes, so the identity binding is unverifiable.
-    with pytest.raises(ValueError, match="lacks its adapter"):
-        RuntimeImageReceipt(**shared, source="controller-build", build_id="build")
-    with pytest.raises(ValueError, match="incomplete"):
-        RuntimeImageReceipt(
-            **shared,
-            source="controller-build",
-            build_id="build",
-            runtime_adapter=adapter.adapter_id,
-        )
+    with pytest.raises(ValueError, match="runtime_adapter"):
+        RuntimeImageReceipt(**shared, runtime_adapter=adapter.adapter_id)
     accepted = RuntimeImageReceipt(
         **shared,
-        source="controller-build",
-        build_id="build",
         runtime_adapter=adapter.adapter_id,
         runtime_adapter_sha256=adapter.digest,
     )
     assert accepted.runtime_adapter_sha256 == adapter.digest
-
-    with pytest.raises(ValueError, match="carries an adapter"):
-        RuntimeImageReceipt(
-            **{
-                **shared,
-                "registry_manifest_digest": "sha256:" + "d" * 64,
-                "build_id": None,
-            },
-            source="published",
-            runtime_adapter=adapter.adapter_id,
-            runtime_adapter_sha256=adapter.digest,
-        )
 
 
 def test_an_unreadable_stored_receipt_names_the_rule_that_rejected_it() -> None:
@@ -2429,18 +1597,14 @@ def test_an_unreadable_stored_receipt_names_the_rule_that_rejected_it() -> None:
 
     malformed = {
         "schema_version": 2,
-        "source": "controller-build",
         "build_id": "build",
         "distribution_publisher": "vonk",
         "distribution_slug": "cached",
         "distribution_content_sha256": "a" * 64,
-        "registry_manifest_digest": None,
-        "platform_manifest_digest": PLATFORM_IMAGE_DIGEST,
-        "image_digest": PLATFORM_IMAGE_DIGEST,
+        "image_digest": BUILT_IMAGE_DIGEST,
         "oci_archive_sha256": "b" * 64,
         "image_bytes": 1,
         "local_image_config_id": "sha256:" + "c" * 64,
-        "local_image_reference": None,
         "architecture": "linux-arm64",
         "runtime_interface": "vonk.runtime.v1",
         "runtime_interface_label": "v1",
@@ -2455,7 +1619,7 @@ def test_an_unreadable_stored_receipt_names_the_rule_that_rejected_it() -> None:
 
     message = str(raised.value)
     assert "runtime image receipt identity" in message
-    assert "lacks its adapter" in message, message
+    assert "runtime_adapter" in message, message
 
 
 def test_stale_receipt_is_discarded_once_by_scan(
@@ -2464,9 +1628,7 @@ def test_stale_receipt_is_discarded_once_by_scan(
     """One archive's stale receipt must not poison, or spam, every scan."""
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    published = prepare_runtime_image(
-        _recipe("recipe-image.json"),
-        runtime=_runtime(),
+    published = _prepare(
         storage=storage,
         transport=TinyTransport(),
     )
@@ -2477,17 +1639,13 @@ def test_stale_receipt_is_discarded_once_by_scan(
         json.dumps(
             {
                 "schema_version": 2,
-                "source": "controller-build",
                 "distribution_publisher": "vonk",
                 "distribution_slug": "cached",
                 "distribution_content_sha256": "a" * 64,
-                "registry_manifest_digest": None,
-                "platform_manifest_digest": BUILT_IMAGE_DIGEST,
-                "image_digest": BUILT_IMAGE_DIGEST,
+                "image_digest": "sha256:" + "9" * 64,
                 "oci_archive_sha256": legacy_digest,
                 "image_bytes": len(legacy_archive),
                 "local_image_config_id": "sha256:" + "c" * 64,
-                "local_image_reference": None,
                 "architecture": "linux-arm64",
                 "runtime_interface": "vonk.runtime.v1",
                 "runtime_interface_label": "v1",
@@ -2503,8 +1661,8 @@ def test_stale_receipt_is_discarded_once_by_scan(
     )
 
     with caplog.at_level("WARNING", logger="vonk_control.runtime_image_preparation"):
-        found = storage.find_published(
-            IMAGE_DIGEST,
+        found = storage.find_verified(
+            BUILT_IMAGE_DIGEST,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
         )
@@ -2540,22 +1698,18 @@ def test_parseable_receipt_with_a_different_identity_stays_a_conflict(
 ) -> None:
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    adapter = resolve_runtime_adapter("vllm", {"mode": "single"})
+    adapter = resolve_runtime_adapter("vllm", {"node_count": 1})
     archive = b"content addressed controller build archive"
     digest = hashlib.sha256(archive).hexdigest()
     existing = RuntimeImageReceipt(
         schema_version=2,
-        source="controller-build",
         distribution_publisher="vonk",
         distribution_slug="cached",
         distribution_content_sha256="a" * 64,
-        registry_manifest_digest=None,
-        platform_manifest_digest=BUILT_IMAGE_DIGEST,
         image_digest=BUILT_IMAGE_DIGEST,
         oci_archive_sha256=digest,
         image_bytes=len(archive),
         local_image_config_id="sha256:" + "c" * 64,
-        local_image_reference=None,
         architecture="linux-arm64",
         runtime_interface="vonk.runtime.v1",
         runtime_interface_label="v1",
@@ -2566,12 +1720,12 @@ def test_parseable_receipt_with_a_different_identity_stays_a_conflict(
         runtime_adapter=adapter.adapter_id,
         runtime_adapter_sha256=adapter.digest,
     )
-    first = storage.prepare_path()
+    first = storage.root / "first.part"
     first.write_bytes(archive)
     storage.commit(first, receipt=existing)
 
     disagreeing = existing.model_copy(update={"build_id": "build-two"})
-    second = storage.prepare_path()
+    second = storage.root / "second.part"
     second.write_bytes(archive)
     with pytest.raises(RuntimeImagePreparationError) as raised:
         storage.commit(second, receipt=disagreeing)

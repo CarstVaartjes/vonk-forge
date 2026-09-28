@@ -1446,8 +1446,8 @@ class RuntimeImageAuthorization(Base):
             name="ck_runtime_image_authorizations_execution_key",
         ),
         CheckConstraint(
-            _prefixed_digest("platform_manifest_digest"),
-            name="ck_runtime_image_authorizations_platform_digest",
+            _prefixed_digest("image_digest"),
+            name="ck_runtime_image_authorizations_image_digest",
         ),
         CheckConstraint(
             _prefixed_digest("local_image_config_id"),
@@ -1460,10 +1460,6 @@ class RuntimeImageAuthorization(Base):
         CheckConstraint(
             "image_bytes > 0",
             name="ck_runtime_image_authorizations_image_bytes",
-        ),
-        CheckConstraint(
-            "source IN ('published','controller-build')",
-            name="ck_runtime_image_authorizations_source",
         ),
         CheckConstraint(
             "state IN ('authorized','revoked')",
@@ -1484,7 +1480,7 @@ class RuntimeImageAuthorization(Base):
         Index(
             "ix_runtime_image_authorizations_effective_identity",
             "effective_execution_key",
-            "platform_manifest_digest",
+            "image_digest",
             "local_image_config_id",
             "oci_archive_sha256",
         ),
@@ -1495,17 +1491,13 @@ class RuntimeImageAuthorization(Base):
     recipe_revision_id: Mapped[str] = mapped_column(
         String(36), nullable=False, index=True
     )
-    source: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     original_content_digest: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True
     )
     effective_execution_key: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True
     )
-    registry_manifest_digest: Mapped[str | None] = mapped_column(String(71), index=True)
-    platform_manifest_digest: Mapped[str] = mapped_column(
-        String(71), nullable=False, index=True
-    )
+    image_digest: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
     local_image_config_id: Mapped[str] = mapped_column(
         String(71), nullable=False, index=True
     )
@@ -1513,7 +1505,7 @@ class RuntimeImageAuthorization(Base):
         String(64), nullable=False, index=True
     )
     image_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    build_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    build_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     authorized_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

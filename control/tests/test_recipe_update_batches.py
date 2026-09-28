@@ -46,7 +46,7 @@ def test_update_commits_parent_and_exact_scope_before_any_child_admission(tmp_pa
     engine = create_engine(f"sqlite:///{tmp_path / 'controller.db'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
         _add_head(session, _add_revision(session, revision_id, recipe))
@@ -91,7 +91,7 @@ def update_env(tmp_path):
     now = [datetime.now(UTC)]
     recipes = {}
     for index in range(2):
-        base = _recipe("recipe-image.json")
+        base = _recipe("recipe-source-build.json")
         recipe = base.model_copy(
             update={
                 "identity": base.identity.model_copy(update={"slug": f"batch-{index}"})
@@ -583,7 +583,7 @@ def test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_pare
 def postgres_update_env(postgres_engine, tmp_path):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
@@ -612,7 +612,7 @@ def postgres_multi_update_env(postgres_engine, tmp_path):
     recipes: dict[str, RecipeDefinition] = {}
     with sessions.begin() as session:
         for index in range(2):
-            base = _recipe("recipe-image.json")
+            base = _recipe("recipe-source-build.json")
             recipe = base.model_copy(
                 update={
                     "identity": base.identity.model_copy(
@@ -733,7 +733,7 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     from typing import Any
 
     sessions, revisions, now, _fresh = postgres_multi_update_env
-    base_recipe = _recipe("recipe-image.json")
+    base_recipe = _recipe("recipe-source-build.json")
     recipes = {
         revision_id: base_recipe.model_copy(
             update={

@@ -82,7 +82,7 @@ def _model() -> dict[str, object]:
 
 
 def _recipe(model: dict[str, object]) -> dict[str, object]:
-    recipe = _example("recipe-image.json")
+    recipe = _example("recipe-source-build.json")
     _selected_model_reference(recipe)["content_sha256"] = document_sha256(
         ModelDefinition.model_validate(model).model_dump(mode="json")
     )

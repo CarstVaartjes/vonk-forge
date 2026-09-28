@@ -423,14 +423,9 @@ class RunAdmissionService:
             ordered = tuple(sorted(placements, key=lambda item: item.rank))
             topology_reason = AdmissionReason(error.code, str(error))
         topology = recipe_topology(revision.document)
-        topology_roles = topology.get("roles")
-        if not isinstance(topology_roles, list):
-            raise TypeError("recipe runtime topology is invalid")
-        role_by_name = {
-            str(role["name"]): role for role in topology_roles if isinstance(role, dict)
-        }
+        role_by_name = {role.name: role for role in topology.roles}
         multi_node = len(ordered) > 1
-        two_phase_start = multi_node and topology.get("mode") == "distributed"
+        two_phase_start = multi_node and topology.distributed
         endpoint_owner = next(
             (item for item in mapping_nodes if item.endpoint_owner), None
         )
@@ -515,13 +510,11 @@ class RunAdmissionService:
                     )
                 )
             role = role_by_name.get(placement.role)
-            resources = role.get("resources") if isinstance(role, dict) else None
-            memory = resources.get("memory") if isinstance(resources, dict) else None
-            if not isinstance(memory, dict):
+            if role is None:
                 raise TypeError("topology role memory is invalid")
             memory_need = memory_requirement(
                 revision.document,
-                memory,
+                role.resources.memory,
                 placement.role,
                 model_documents,
                 platform_floor_bytes=self._floor,

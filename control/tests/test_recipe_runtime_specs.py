@@ -48,7 +48,7 @@ def _model() -> ModelDefinition:
 
 
 def _recipe(
-    name: str = "recipe-image.json",
+    name: str = "recipe-source-build.json",
     *,
     engine: str = "vllm",
     entrypoint: list[str] | None = None,
@@ -69,7 +69,7 @@ def _source_package(digest: str = "d" * 64) -> dict[str, object]:
 
 
 def _distributed_sglang_recipe() -> RecipeDefinition:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     runtime = _json_object(raw["runtime"])
     runtime["engine"] = "sglang"
     runtime["entrypoint"] = ["/opt/vonk/bin/sglang-serve"]
@@ -108,7 +108,7 @@ def _distributed_sglang_recipe() -> RecipeDefinition:
 
 
 def _multi_artifact_inputs() -> tuple[RecipeDefinition, ModelDefinition]:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     model_raw = _example("model-definition.json")
     draft = copy.deepcopy(_json_object(_json_array(model_raw["files"])[0]))
     draft.update({"id": "draft", "path": "draft.safetensors", "sha256": "b" * 64})
@@ -168,7 +168,7 @@ def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
 
 
 def test_runtime_spec_writable_paths_ignore_recipe_metadata_identity() -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     raw["identity"] = {"publisher": "anemll", "slug": "anemll-vllm-mia"}
     recipe = RecipeDefinition.model_validate(raw)
     spec = compile_runtime_spec(recipe, models=[_model()], role="entrypoint", rank=0)
@@ -240,7 +240,7 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
 
 
 def test_runtime_spec_projects_deepseek_r1_parser_into_agent_argv() -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     _json_array(_json_object(raw["runtime"])["arguments"]).append(
         {"name": "reasoning-parser", "value": "deepseek_r1"}
     )
@@ -360,7 +360,7 @@ def test_runtime_spec_preserves_exact_multi_artifact_targets_and_vllm_primary() 
 
 
 def test_runtime_spec_rejects_recipe_authored_shell_authority() -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     _json_object(raw["runtime"])["entrypoint"] = ["/bin/sh", "-c", "touch /tmp/owned"]
     recipe = RecipeDefinition.model_validate(raw)
 

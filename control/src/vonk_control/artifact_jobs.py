@@ -1187,7 +1187,6 @@ class ArtifactJobService:
                 parameters=parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
                 memory_floor_bytes=planned_node.memory_floor_bytes,
-                memory_kind=planned_node.memory_kind,
             )
             raw_files = _input_manifest(artifact_job).model_dump(mode="json")["files"]
             payload = {

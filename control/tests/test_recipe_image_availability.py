@@ -68,7 +68,6 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
-    prepare_runtime_image,
     read_runtime_image_reference_intent,
     resolve_persisted_runtime_image_receipt,
 )
@@ -77,7 +76,6 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 from .recipe_removal_review_support import remove_after_review
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
-PLATFORM_DIGEST = "sha256:" + "e" * 64
 CONFIG_DIGEST = "sha256:" + "c" * 64
 ARCHIVE = b"availability image archive"
 ARCHIVE_SHA = hashlib.sha256(ARCHIVE).hexdigest()
@@ -95,33 +93,74 @@ def _runtime() -> dict[str, object]:
         "architecture": "linux/arm64",
         "interface": "vonk.runtime.v1",
         "image_bytes": len(ARCHIVE),
+        "build_input_sha256": "f" * 64,
     }
 
 
-def _build_runtime() -> dict[str, object]:
-    return _runtime() | {"build_input_sha256": "f" * 64}
+_build_runtime = _runtime
+
+
+def _build_id(revision_id: str) -> str:
+    """The succeeded build ``_add_revision`` records for one revision."""
+
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"vonk-test-build:{revision_id}"))
+
+
+def _builder(
+    storage: FilesystemRuntimeImageStorage,
+    *,
+    payload: bytes = ARCHIVE,
+    calls: list[bool] | None = None,
+):
+    """A builder that leaves the revision's recorded build archive in storage."""
+
+    def build(*_args: object, claim: object, force: bool = False, **_: object):
+        if calls is not None:
+            calls.append(force)
+        digest = hashlib.sha256(payload).hexdigest()
+        (storage.root / digest).write_bytes(payload)
+        return {
+            "state": "succeeded",
+            "build_id": _build_id(str(claim.recipe_revision_id)),
+            "build_input_sha256": "f" * 64,
+            "image_digest": IMAGE_DIGEST,
+            "oci_layout_sha256": digest,
+            "image_bytes": len(payload),
+        }
+
+    return build
+
+
+def _service(*args: object, **kwargs: object) -> RecipeImageAvailabilityService:
+    """The availability service with the test builder unless one is given."""
+
+    storage = kwargs["storage"]
+    assert isinstance(storage, FilesystemRuntimeImageStorage)
+    kwargs.setdefault("builder", _builder(storage))
+    kwargs.setdefault("transport", Transport())
+    # Every preparation is a build; let the tests' parallel claims run.
+    kwargs.setdefault("max_parallel_builds", kwargs.get("max_parallel", 4))
+    return RecipeImageAvailabilityService(*args, **kwargs)  # type: ignore[arg-type]
 
 
 def _reference_receipt() -> RuntimeImageReceipt:
     return RuntimeImageReceipt(
         schema_version=2,
-        source="published",
         distribution_publisher="test-publisher",
         distribution_slug="test-image",
         distribution_content_sha256="a" * 64,
-        registry_manifest_digest=IMAGE_DIGEST,
-        platform_manifest_digest=PLATFORM_DIGEST,
-        image_digest=PLATFORM_DIGEST,
+        image_digest=IMAGE_DIGEST,
         oci_archive_sha256=ARCHIVE_SHA,
         image_bytes=len(ARCHIVE),
         local_image_config_id=CONFIG_DIGEST,
-        local_image_reference=None,
         architecture="linux-arm64",
         runtime_interface="vonk.runtime.v1",
         runtime_interface_label="v1",
         archive_path="/managed/image-cache/" + ARCHIVE_SHA,
         recorded_at=datetime.now(UTC).isoformat(),
-        build_id=None,
+        build_id="00000000-0000-4000-8000-000000000999",
+        runtime_adapter="vllm",
+        runtime_adapter_sha256="a" * 64,
     )
 
 
@@ -183,28 +222,31 @@ def test_api_treats_unspecified_retryability_like_terminal_default(
 
 
 class Transport:
-    def __init__(self, payload: bytes = ARCHIVE) -> None:
-        self.calls = 0
-        self.payload = payload
+    """Inspects a stored build archive the way skopeo reports it."""
 
-    def pull_and_export(
-        self, reference: str, destination: Path, **_: object
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def inspect_archive(
+        self,
+        archive: Path,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+        expected_archive_sha256: str,
+        expected_archive_bytes: int,
     ) -> PulledImageEvidence:
         self.calls += 1
-        destination.write_bytes(self.payload)
+        assert archive.is_file()
         return PulledImageEvidence(
-            manifest_digest=PLATFORM_DIGEST,
-            requested_manifest_digest=IMAGE_DIGEST,
+            manifest_digest=IMAGE_DIGEST,
             config_id=CONFIG_DIGEST,
-            local_reference=reference,
-            architecture="linux/arm64",
-            runtime_interface="v1",
-            archive_sha256=hashlib.sha256(self.payload).hexdigest(),
-            archive_bytes=len(self.payload),
+            local_reference="docker-archive:" + str(archive),
+            architecture=expected_architecture,
+            runtime_interface=expected_runtime_interface,
+            archive_sha256=expected_archive_sha256,
+            archive_bytes=expected_archive_bytes,
         )
-
-    def inspect_archive(self, archive: Path, **_: object) -> PulledImageEvidence:
-        raise AssertionError(archive)
 
 
 class _ExitAfterImageUnlinkStorage(FilesystemRuntimeImageStorage):
@@ -216,10 +258,13 @@ class _ExitAfterImageUnlinkStorage(FilesystemRuntimeImageStorage):
 def _exit_after_recipe_image_unlink(database_url: str, artifact_root: str) -> None:
     engine = create_engine(database_url)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=_ExitAfterImageUnlinkStorage(Path(artifact_root)),
-        authority=lambda *_args, **_kwargs: (_recipe("recipe-image.json"), _runtime()),
+        authority=lambda *_args, **_kwargs: (
+            _recipe("recipe-source-build.json"),
+            _runtime(),
+        ),
         clock=lambda: datetime.now(UTC),
     )
     service.advance_removals(limit=1)
@@ -227,8 +272,15 @@ def _exit_after_recipe_image_unlink(database_url: str, artifact_root: str) -> No
 
 
 def _add_revision(
-    session: Session, revision_id: str, recipe: RecipeDefinition
+    session: Session,
+    revision_id: str,
+    recipe: RecipeDefinition,
+    *,
+    built: bool = True,
+    archive: bytes = ARCHIVE,
 ) -> CatalogDocumentRevision:
+    """One active recipe revision and, unless ``built`` is false, its build."""
+
     projected = {
         "title": recipe.metadata.title,
         "description": recipe.metadata.description,
@@ -237,6 +289,7 @@ def _add_revision(
         "topology": recipe.topology.model_dump(mode="json"),
     }
     projected.update(_build_projection(recipe))
+    projected["source_bundle_sha256"] = "b" * 64
     revision = CatalogDocumentRevision(
         id=revision_id,
         document_id="document-" + revision_id,
@@ -255,6 +308,25 @@ def _add_revision(
         created_at=datetime.now(UTC),
     )
     session.add(revision)
+    if built:
+        session.add(
+            RecipeBuild(
+                id=_build_id(revision_id),
+                recipe_revision_id=revision_id,
+                builder_node_id="spark-builder",
+                source_bundle_sha256="b" * 64,
+                build_input_sha256="f" * 64,
+                state="succeeded",
+                policy_report={},
+                plan={},
+                image_digest=IMAGE_DIGEST,
+                oci_layout_sha256=hashlib.sha256(archive).hexdigest(),
+                image_bytes=len(archive),
+                error=None,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
     return revision
 
 
@@ -440,7 +512,7 @@ def _successor(recipe: RecipeDefinition, title: str) -> RecipeDefinition:
 def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions(
     tmp_path,
 ):
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     old_recipe = recipe.model_copy(
         update={
             "metadata": recipe.metadata.model_copy(
@@ -460,7 +532,7 @@ def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions
         old.document_id = current.document_id = document_id
         current.revision_number = 2
         _add_head(session, current)
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         transport=Transport(),
@@ -513,7 +585,7 @@ def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions
 
 
 def test_selector_replay_keeps_original_revision_and_issuer(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     newer = recipe.model_copy(
         update={
             "metadata": recipe.metadata.model_copy(update={"description": "New head"})
@@ -531,7 +603,7 @@ def test_selector_replay_keeps_original_revision_and_issuer(tmp_path: Path) -> N
         calls.append(recipe_revision_id)
         return (recipe if recipe_revision_id == "original-head" else newer), _runtime()
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         transport=Transport(),
@@ -562,22 +634,20 @@ def test_selector_replay_keeps_original_revision_and_issuer(tmp_path: Path) -> N
 
 
 def test_replay_does_not_collapse_different_image_actions(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
         _add_revision(session, "image-actions", recipe)
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         transport=Transport(),
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
         clock=lambda: datetime.now(UTC),
     )
-    service.start(
-        "image-actions", actor="operator", request_id="action", force_download=True
-    )
+    service.start("image-actions", actor="operator", request_id="action", force=True)
     with pytest.raises(RecipeImageAvailabilityError) as refused:
         service.start(
             "image-actions", actor="operator", request_id="action", force_rebuild=True
@@ -585,32 +655,11 @@ def test_replay_does_not_collapse_different_image_actions(tmp_path: Path) -> Non
     assert refused.value.code == "recipe_image.request_key_reused"
 
 
-def test_force_download_skips_verified_cache_but_preserves_archive(
-    tmp_path: Path,
-) -> None:
-    recipe = _recipe("recipe-image.json")
-    storage = FilesystemRuntimeImageStorage(tmp_path)
-    transport = Transport()
-    first = prepare_runtime_image(
-        recipe, runtime=_runtime(), storage=storage, transport=transport
-    )
-    second = prepare_runtime_image(
-        recipe, runtime=_runtime(), storage=storage, transport=transport
-    )
-    forced = prepare_runtime_image(
-        recipe, runtime=_runtime(), storage=storage, transport=transport, force=True
-    )
-
-    assert first == second == forced
-    assert transport.calls == 2
-    assert Path(first.archive_path).read_bytes() == ARCHIVE
-
-
 @pytest.mark.parametrize("revoked", [None, "receipt", "authorization"])
 def test_download_after_cache_removal_restores_only_unrevoked_authority(
     tmp_path, revoked
 ):
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -618,7 +667,7 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
         _add_head(session, _add_revision(session, "revision-restore", recipe))
     storage = FilesystemRuntimeImageStorage(tmp_path)
     transport = Transport()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         transport=transport,
@@ -660,7 +709,7 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
     assert not (storage.root / ARCHIVE_SHA).exists()
     assert not (storage.root / f"{ARCHIVE_SHA}.receipt.json").exists()
     # Restart and use the real download path, including SQL receipt persistence.
-    restarted = RecipeImageAvailabilityService(
+    restarted = _service(
         sessions,
         storage=storage,
         transport=transport,
@@ -692,37 +741,6 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
         assert result.failure["code"] == ("runtime_image.authorization_revoked")
 
 
-def test_forced_digest_failure_does_not_replace_valid_archive(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
-    storage = FilesystemRuntimeImageStorage(tmp_path)
-    transport = Transport()
-    first = prepare_runtime_image(
-        recipe, runtime=_runtime(), storage=storage, transport=transport
-    )
-
-    class Wrong(Transport):
-        def pull_and_export(
-            self, reference: str, destination: Path, **_: object
-        ) -> PulledImageEvidence:
-            destination.write_bytes(b"wrong")
-            return PulledImageEvidence(
-                manifest_digest="sha256:" + "f" * 64,
-                requested_manifest_digest="sha256:" + "a" * 64,
-                config_id=CONFIG_DIGEST,
-                local_reference=reference,
-                architecture="linux/arm64",
-                runtime_interface="v1",
-                archive_sha256=hashlib.sha256(b"wrong").hexdigest(),
-                archive_bytes=5,
-            )
-
-    with pytest.raises(RuntimeImagePreparationError):
-        prepare_runtime_image(
-            recipe, runtime=_runtime(), storage=storage, transport=Wrong(), force=True
-        )
-    assert Path(first.archive_path).read_bytes() == ARCHIVE
-
-
 def test_build_failure_waits_for_retry_and_exposes_step_contract(
     tmp_path: Path,
 ) -> None:
@@ -748,7 +766,7 @@ def test_build_failure_waits_for_retry_and_exposes_step_contract(
             step="Step 4",
         )
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=authority,
@@ -798,7 +816,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
     sessions = sessionmaker(engine)
     build_id = "00000000-0000-4000-8000-000000000903"
     with sessions.begin() as session:
-        _add_revision(session, "revision-integrity-failure", recipe)
+        _add_revision(session, "revision-integrity-failure", recipe, built=False)
         session.add(AgentNode(node_id="spark-builder", state="active"))
         session.add(
             RecipeBuild(
@@ -843,7 +861,6 @@ def test_database_integrity_failure_names_the_violated_constraint(
         ) -> PulledImageEvidence:
             return PulledImageEvidence(
                 manifest_digest=IMAGE_DIGEST,
-                requested_manifest_digest=None,
                 config_id=CONFIG_DIGEST,
                 local_reference="docker-archive:" + str(archive),
                 architecture=expected_architecture,
@@ -868,7 +885,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
         assert error.detail == []
         raise error
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda recipe_revision_id, *, force=False: (
@@ -930,7 +947,7 @@ def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
     sessions = sessionmaker(engine)
     build_id = "00000000-0000-4000-8000-000000000902"
     with sessions.begin() as session:
-        _add_revision(session, "revision-missing-build-archive", recipe)
+        _add_revision(session, "revision-missing-build-archive", recipe, built=False)
         session.add(AgentNode(node_id="spark-builder", state="active"))
         session.add(
             RecipeBuild(
@@ -978,7 +995,6 @@ def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
             assert archive.read_bytes() == ARCHIVE
             return PulledImageEvidence(
                 manifest_digest=IMAGE_DIGEST,
-                requested_manifest_digest=None,
                 config_id=CONFIG_DIGEST,
                 local_reference="docker-archive:" + str(archive),
                 architecture=expected_architecture,
@@ -987,7 +1003,7 @@ def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
                 archive_bytes=expected_archive_bytes,
             )
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda recipe_revision_id, *, force=False: (
@@ -1022,9 +1038,12 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
-        _add_head(session, _add_revision(session, "revision-remove-build", recipe))
+        _add_head(
+            session,
+            _add_revision(session, "revision-remove-build", recipe, built=False),
+        )
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _build_runtime()),
@@ -1134,7 +1153,7 @@ def test_recipe_removal_reference_scan_enforces_accumulated_owner_budget(
 def test_recipe_removal_fails_closed_on_symlinked_archive(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'symlink-removal.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -1146,15 +1165,13 @@ def test_recipe_removal_fails_closed_on_symlinked_archive(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=now,
             )
         )
@@ -1167,7 +1184,7 @@ def test_recipe_removal_fails_closed_on_symlinked_archive(
     receipt_path.write_text(
         json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
     )
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
@@ -1201,7 +1218,7 @@ def test_recipe_removal_fails_closed_on_symlinked_archive(
 def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'retry-removal.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -1213,15 +1230,13 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=now[0],
             )
         )
@@ -1272,7 +1287,7 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
             return original_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
 
         monkeypatch.setattr(runtime_image_preparation.os, "stat", stat_with_one_failure)
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
@@ -1345,7 +1360,7 @@ def _empty_recipe_removal_owner(
     RecipeImageAvailabilityService,
     str,
 ]:
-    image_recipe = _recipe("recipe-image.json")
+    image_recipe = _recipe("recipe-source-build.json")
     job_recipe = _recipe("recipe-job.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -1354,7 +1369,7 @@ def _empty_recipe_removal_owner(
         _add_head(session, _add_revision(session, "revision-image", image_recipe))
         _add_head(session, _add_revision(session, "revision-job", job_recipe))
     storage = FilesystemRuntimeImageStorage(tmp_path / "cache")
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda *_args, **_kwargs: (image_recipe, _runtime()),
@@ -1364,7 +1379,7 @@ def _empty_recipe_removal_owner(
         sessions,
         storage,
         service,
-        "vonk-forge/synthetic-tiny-image",
+        "vonk-forge/synthetic-tiny-build",
     )
 
 
@@ -1372,8 +1387,8 @@ def _empty_recipe_removal_owner(
     ("replay_selector", "replay_actor", "replay_with_model"),
     [
         ("vonk-forge/synthetic-image-job", "operator", False),
-        ("vonk-forge/synthetic-tiny-image", "different-operator", False),
-        ("vonk-forge/synthetic-tiny-image", "operator", True),
+        ("vonk-forge/synthetic-tiny-build", "different-operator", False),
+        ("vonk-forge/synthetic-tiny-build", "operator", True),
     ],
     ids=["selector", "actor", "with-model"],
 )
@@ -1437,7 +1452,7 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
     with sessions.begin() as session:
         head = session.scalar(
             select(CatalogDocumentHead).where(
-                CatalogDocumentHead.slug == "synthetic-tiny-image"
+                CatalogDocumentHead.slug == "synthetic-tiny-build"
             )
         )
         assert head is not None
@@ -1460,7 +1475,7 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
 ) -> None:
     """An existing deletion fence is visible, while its accepted key still recovers."""
 
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'active-review.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1472,15 +1487,13 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=now,
             )
         )
@@ -1490,7 +1503,7 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
     (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(
         json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
     )
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
@@ -1554,7 +1567,7 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     receipt = _reference_receipt()
     now = datetime.now(UTC)
     with sessions.begin() as session:
@@ -1563,15 +1576,13 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=now,
             )
         )
@@ -1584,7 +1595,7 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
     receipt_file.write_text(receipt_document)
     request_id = str(uuid.uuid4())
     actor = "operator"
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
@@ -1644,7 +1655,7 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     receipt = _reference_receipt()
     now = datetime.now(UTC)
     with sessions.begin() as session:
@@ -1653,15 +1664,13 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=now,
             )
         )
@@ -1674,7 +1683,7 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
         json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
     )
     request_id = str(uuid.uuid4())
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
@@ -1719,7 +1728,7 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
         assert owner.checkpoint.image_pending_bytes == len(ARCHIVE)
         assert owner.checkpoint.image_reclaimed_bytes == 0
 
-    restarted = RecipeImageAvailabilityService(
+    restarted = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(storage.root.parent),
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
@@ -1740,7 +1749,7 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     receipt = _reference_receipt()
     now = [datetime.now(UTC)]
     with sessions.begin() as session:
@@ -1749,15 +1758,13 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=now[0],
             )
         )
@@ -1767,7 +1774,7 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
     (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(
         json.dumps(receipt.model_dump(mode="json")), encoding="utf-8"
     )
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
@@ -1935,7 +1942,7 @@ def test_builder_dependency_wait_remains_durable_queue_after_automatic_limit(
             recovery_actions=("resume", "retry"),
         )
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _build_runtime()),
@@ -1993,7 +2000,7 @@ def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> N
             log_excerpt="HF denied",
         )
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _build_runtime()),
@@ -2010,14 +2017,14 @@ def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> N
 
 
 def test_expired_claim_is_reclaimable_after_restart(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
         _add_revision(session, "revision-image", recipe)
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -2039,14 +2046,14 @@ def test_expired_claim_is_reclaimable_after_restart(tmp_path: Path) -> None:
 
 
 def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
         _add_revision(session, "revision-backoff", recipe)
     now = datetime.now(UTC)
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -2084,13 +2091,13 @@ def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
 def test_claim_identity_uses_authoritative_image_and_running_claim_is_not_repeated(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
         _add_revision(session, "revision-identity", recipe)
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -2099,14 +2106,14 @@ def test_claim_identity_uses_authoritative_image_and_running_claim_is_not_repeat
     )
     service.start("revision-identity", actor="operator", request_id="4" * 36)
     claim = service.claim_pending(owner_id="worker-a")
-    assert claim and claim[0].image_identity == IMAGE_DIGEST
+    assert claim and claim[0].build_input_sha256 == "f" * 64
     assert service.claim_pending(owner_id="worker-b") == ()
 
 
 def test_publication_contention_reschedules_without_spending_transfer_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2132,7 +2139,7 @@ def test_publication_contention_reschedules_without_spending_transfer_retry(
 
     monkeypatch.setattr(storage, "publication_lock", contend_once)
     transport = Transport()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
@@ -2167,7 +2174,7 @@ def test_postgres_claims_are_fenced_and_respect_build_capacity(
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    image_recipe = _recipe("recipe-image.json")
+    image_recipe = _recipe("recipe-source-build.json")
     build_recipe = _recipe("recipe-source-build.json")
     now = datetime.now(UTC)
     with sessions.begin() as session:
@@ -2208,7 +2215,7 @@ def test_postgres_claims_are_fenced_and_respect_build_capacity(
         return build_recipe, _build_runtime()
 
     def new_service(root: Path) -> RecipeImageAvailabilityService:
-        return RecipeImageAvailabilityService(
+        return _service(
             sessions,
             storage=FilesystemRuntimeImageStorage(root),
             authority=authority,
@@ -2276,7 +2283,7 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     now = [datetime.now(UTC)]
     with sessions.begin() as session:
         revision = _add_revision(session, "revision-pg-model-lock", recipe)
@@ -2343,7 +2350,7 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
             return child
 
     model_cache = ModelCache()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -2452,46 +2459,10 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         assert stored_recovered.current_attempt == 2
 
 
-def test_same_immutable_image_reuses_preparation_across_recipe_revisions(
-    tmp_path: Path,
-) -> None:
-    recipe = _recipe("recipe-image.json")
-    recipe_b_raw = recipe.model_dump(mode="json")
-    recipe_b_raw["metadata"]["title"] = "Synthetic Tiny Image (notes update)"
-    recipe_b = RecipeDefinition.model_validate(recipe_b_raw)
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine)
-    with sessions.begin() as session:
-        _add_revision(session, "revision-image-a", recipe)
-        _add_revision(session, "revision-image-b", recipe_b)
-    transport = Transport()
-    service = RecipeImageAvailabilityService(
-        sessions,
-        storage=FilesystemRuntimeImageStorage(tmp_path),
-        authority=lambda recipe_revision_id, *, force=False: (
-            recipe if recipe_revision_id.endswith("-a") else recipe_b,
-            _runtime(),
-        ),
-        transport=transport,
-        clock=lambda: datetime.now(UTC),
-        max_parallel=2,
-    )
-    first = service.start("revision-image-a", actor="operator", request_id="5" * 36)
-    second = service.start("revision-image-b", actor="operator", request_id="6" * 36)
-    claims = service.claim_pending(limit=2, owner_id="worker-a")
-    assert {claim.operation_id for claim in claims} == {first.id, second.id}
-    for claim in claims:
-        service.run_claim(claim)
-    assert service.get(first.id).state == "succeeded"
-    assert service.get(second.id).state == "succeeded"
-    assert transport.calls == 1
-
-
 def test_newer_preparation_intent_cancels_the_older_queued_preparation(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     successor = _successor(recipe, "Successor recipe revision")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -2504,7 +2475,7 @@ def test_newer_preparation_intent_cancels_the_older_queued_preparation(
             newer_id="revision-current",
             newer=successor,
         )
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (
@@ -2549,7 +2520,7 @@ def test_newer_preparation_intent_cancels_the_older_queued_preparation(
 def test_active_head_advance_cancels_a_queued_older_preparation_at_dispatch(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     successor = _successor(recipe, "Successor recipe revision")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -2562,7 +2533,7 @@ def test_active_head_advance_cancels_a_queued_older_preparation_at_dispatch(
             newer_id="revision-current",
             newer=successor,
         )
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (
@@ -2603,7 +2574,7 @@ def test_running_preparation_for_an_older_revision_is_not_cancelled(
             newer_id="revision-current",
             newer=successor,
         )
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (
@@ -2639,7 +2610,7 @@ def test_running_preparation_for_an_older_revision_is_not_cancelled(
 def test_request_replay_returns_original_before_metadata_refresh(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2654,7 +2625,7 @@ def test_request_replay_returns_original_before_metadata_refresh(
         calls += 1
         return recipe, _runtime()
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=authority,
@@ -2670,14 +2641,14 @@ def test_request_replay_returns_original_before_metadata_refresh(
 def test_same_work_identity_keeps_distinct_authorization_operations(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
         _add_revision(session, "revision-auth", recipe)
     transport = Transport()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -2698,7 +2669,7 @@ def test_same_work_identity_keeps_distinct_authorization_operations(
 def test_model_child_and_image_complete_through_one_sql_operation(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2764,7 +2735,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(
             return child
 
     model_cache = ModelCache()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -2810,7 +2781,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(
 def test_model_and_image_children_advance_independently_and_reuse_image(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2869,7 +2840,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
             return child
 
     transport = Transport()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -2904,9 +2875,11 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
         row.payload = dict(row.payload) | {
             "retry_after_at": "2000-01-01T00:00:00+00:00"
         }
-    restarted = RecipeImageAvailabilityService(
+    builds: list[bool] = []
+    restarted = _service(
         sessions,
         storage=service._storage,
+        builder=_builder(service._storage, calls=builds),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
         transport=transport,
         model_cache=ModelCache(),
@@ -2915,7 +2888,8 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
     assert restarted.run_pending() == 1
     completed = restarted.get(queued.id)
     assert completed.state == "succeeded", completed.failure
-    assert transport.calls == 2
+    # The removed archive is built again rather than reused.
+    assert builds == [False]
 
 
 def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
@@ -2972,11 +2946,11 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
             return ()
 
     cache = ModelCache()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             _runtime(),
         ),
         model_cache=cache,
@@ -2995,7 +2969,7 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
 def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3114,7 +3088,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
 
     model_cache = ModelCache()
     transport = Transport()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -3164,7 +3138,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
 def test_accepted_cancellation_is_idempotent_and_prevents_queued_dispatch(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite:///{tmp_path / 'cancel-queued.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3172,7 +3146,7 @@ def test_accepted_cancellation_is_idempotent_and_prevents_queued_dispatch(
         _add_revision(session, "cancel-queued-revision", recipe)
         session.add(User(subject="operator", role="operator"))
     transport = Transport()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
         authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
@@ -3217,7 +3191,7 @@ def test_accepted_cancellation_is_idempotent_and_prevents_queued_dispatch(
 def test_late_verified_image_result_cannot_publish_after_cancellation(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(
         f"sqlite+pysqlite:///{tmp_path / 'cancel-late.sqlite'}",
         connect_args={"check_same_thread": False},
@@ -3232,15 +3206,15 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
     release = threading.Event()
 
     class BlockingTransport(Transport):
-        def pull_and_export(self, reference: str, destination: Path, **kwargs):
+        def inspect_archive(self, archive: Path, **kwargs):
             entered.set()
             if not release.wait(timeout=10):
                 raise TimeoutError("test transport was not released")
-            return super().pull_and_export(reference, destination, **kwargs)
+            return super().inspect_archive(archive, **kwargs)
 
     transport = BlockingTransport()
     storage = FilesystemRuntimeImageStorage(tmp_path / "image-cache")
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
@@ -3285,7 +3259,7 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
 def test_cancelling_image_reference_intent_is_counted_until_claim_release(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'cancel-reference.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3294,7 +3268,7 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
         revision_id = revision.id
         session.add(User(subject="operator", role="operator"))
     now = datetime.now(UTC)
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
         authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
@@ -3330,7 +3304,7 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
             attempt=claim.execution_attempt,
             claim_owner=claim.claim_owner,
             oci_archive_sha256=ARCHIVE_SHA,
-            image_digest=PLATFORM_DIGEST,
+            image_digest=IMAGE_DIGEST,
             image_bytes=len(ARCHIVE),
         )
         assert runtime_image_reference_reasons(session, [ARCHIVE_SHA]) == {
@@ -3403,7 +3377,7 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
 def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
     tmp_path: Path, mutation: str
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(
         f"sqlite+pysqlite:///{tmp_path / f'cancel-reference-{mutation}.sqlite'}"
     )
@@ -3413,7 +3387,7 @@ def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
         revision = _add_revision(session, f"cancel-reference-{mutation}", recipe)
         revision_id = revision.id
         session.add(User(subject="operator", role="operator"))
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
         authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
@@ -3460,7 +3434,7 @@ def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
 def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(
         f"sqlite+pysqlite:///{tmp_path / 'cancel-shared-model.sqlite'}",
         connect_args={"check_same_thread": False},
@@ -3511,7 +3485,7 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     assert child.state == "partial"
     before_bytes = child.progress["downloaded_bytes"]
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
         authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
@@ -3551,19 +3525,22 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     engine.dispose()
 
 
-def test_force_download_is_a_distinct_operation_for_same_revision(
+def test_forced_rebuild_is_a_distinct_operation_for_same_revision(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     with sessions.begin() as session:
         _add_revision(session, "revision-force", recipe)
     transport = Transport()
-    service = RecipeImageAvailabilityService(
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    builds: list[bool] = []
+    service = _service(
         sessions,
-        storage=FilesystemRuntimeImageStorage(tmp_path),
+        storage=storage,
+        builder=_builder(storage, calls=builds),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
         transport=transport,
         clock=lambda: datetime.now(UTC),
@@ -3577,19 +3554,19 @@ def test_force_download_is_a_distinct_operation_for_same_revision(
         service.run_claim(claim)
     assert service.get(cached.id).state == "succeeded"
     assert service.get(forced.id).state == "succeeded"
-    assert transport.calls == 2
+    assert sorted(builds) == [False, True]
 
 
 @pytest.mark.parametrize("model_state", ["running", "failed"])
 def test_parent_progress_retains_ready_image_while_model_is_incomplete(
     tmp_path: Path, model_state: str
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     now = datetime.now(UTC)
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -3673,7 +3650,7 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
 def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3683,14 +3660,14 @@ def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
     failures = 12
 
     class FlakyTransport(Transport):
-        def pull_and_export(self, reference, destination, **kwargs):
+        def inspect_archive(self, archive, **kwargs):
             if self.calls < failures:
                 self.calls += 1
                 raise RuntimeError("registry says permission denied, digest unknown")
-            return super().pull_and_export(reference, destination, **kwargs)
+            return super().inspect_archive(archive, **kwargs)
 
     transport = FlakyTransport()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         transport=transport,
@@ -3714,8 +3691,8 @@ def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
     assert service.get(accepted.id).state == "succeeded"
 
 
-def test_archive_integrity_failure_downloads_the_image_again(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+def test_archive_integrity_failure_builds_the_image_again(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3735,9 +3712,11 @@ def test_archive_integrity_failure_downloads_the_image_again(tmp_path: Path) -> 
             )
         return original(archive_sha256, expected_bytes)
 
-    service = RecipeImageAvailabilityService(
+    builds: list[bool] = []
+    service = _service(
         sessions,
         storage=storage,
+        builder=_builder(storage, calls=builds),
         transport=transport,
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
         clock=lambda: now[0],
@@ -3757,7 +3736,7 @@ def test_archive_integrity_failure_downloads_the_image_again(tmp_path: Path) -> 
         service.run_pending()
         now[0] += timedelta(hours=1)
     assert service.get(again.id).state == "succeeded"
-    # The mismatch was observed and the image was pulled again, not reused.
+    # The mismatch was observed and the image was built again, not reused.
     assert corrupt == [False]
-    assert transport.calls == 2
+    assert builds[-1] is True
     assert storage.read_receipt(ARCHIVE_SHA).oci_archive_sha256 == ARCHIVE_SHA

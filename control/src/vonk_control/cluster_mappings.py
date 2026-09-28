@@ -13,6 +13,7 @@ from datetime import datetime
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts.recipe import RecipeTopology
 
 from .models import (
     AgentNode,
@@ -89,31 +90,19 @@ class ClusterMappingPlan:
 
 
 def candidate_placements(
-    topology: Mapping[str, object], node_ids: tuple[str, ...]
+    topology: RecipeTopology, node_ids: tuple[str, ...]
 ) -> tuple[ClusterMappingPlacement, ...]:
     """Use the mapping authority's deterministic rank and role assignment."""
-    if topology.get("node_count") != len(node_ids) or len(set(node_ids)) != len(
-        node_ids
-    ):
+    if topology.node_count != len(node_ids) or len(set(node_ids)) != len(node_ids):
         raise ClusterMappingError(
             "mapping.node_count",
             "selected GPU node count does not match the exact topology",
         )
-    roles = topology.get("roles")
-    if not isinstance(roles, list):
-        raise ClusterMappingError(
-            "mapping.topology_invalid", "topology roles are invalid"
-        )
-    expanded: list[tuple[str, bool]] = []
-    for role in roles:
-        if not isinstance(role, Mapping):
-            raise ClusterMappingError(
-                "mapping.topology_invalid", "topology role is invalid"
-            )
-        expanded.extend(
-            (str(role["name"]), bool(role["endpoint_owner"]))
-            for _ in range(int(role["count"]))
-        )
+    expanded = [
+        (role.name, role.endpoint_owner)
+        for role in topology.roles
+        for _ in range(role.count)
+    ]
     return tuple(
         ClusterMappingPlacement(node_id, rank, role, endpoint_owner)
         for rank, (node_id, (role, endpoint_owner)) in enumerate(
@@ -172,7 +161,7 @@ class ClusterMappingService:
         identity = _plan_identity(
             revision.id,
             revision.content_digest,
-            str(topology["name"]),
+            topology.name,
             1,
             effective,
             placements,
@@ -180,7 +169,7 @@ class ClusterMappingService:
         return ClusterMappingPlan(
             recipe_revision_id=revision.id,
             recipe_content_sha256=revision.content_digest,
-            topology_name=str(topology["name"]),
+            topology_name=topology.name,
             generation=1,
             parameters=effective,
             nodes=placements,
@@ -225,9 +214,7 @@ class ClusterMappingService:
             except TopologyError as error:
                 raise ClusterMappingError(error.code, str(error)) from error
             topology = recipe_topology(document)
-            if plan.topology_name != str(
-                topology["name"]
-            ) or plan.placement_digest != _digest(
+            if plan.topology_name != topology.name or plan.placement_digest != _digest(
                 _plan_identity(
                     plan.recipe_revision_id,
                     plan.recipe_content_sha256,

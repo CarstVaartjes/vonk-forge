@@ -105,7 +105,7 @@ class RecipeStartPayload(_StrictPayload):
             placement.world_size,
         ):
             raise ValueError("start placement does not match compiled plan")
-        if self.image_digest != self.compiled_execution_plan.runtime.image_digest:
+        if self.image_digest != self.compiled_execution_plan.runtime_image.image_digest:
             raise ValueError("start image does not match compiled plan")
         if (
             self.recipe_content_sha256
@@ -121,7 +121,6 @@ class RecipeStartPayload(_StrictPayload):
             or self.port != placement.port
             or self.reserved_memory_bytes != placement.reserved_memory_bytes
             or self.memory_floor_bytes != placement.memory_floor_bytes
-            or self.memory_kind != placement.memory_kind
             or self.local_address != placement.local_address
             or self.master_address != placement.master_address
             or self.master_port != placement.master_port

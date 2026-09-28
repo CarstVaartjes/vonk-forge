@@ -1751,10 +1751,7 @@ class ModelCacheService:
                         return {
                             "archive_sha256": archive,
                             "image_bytes": size,
-                            "platform_manifest_digest": (
-                                authorization.platform_manifest_digest
-                            ),
-                            "source": authorization.source,
+                            "image_digest": authorization.image_digest,
                         }
                 return None
 
@@ -1819,9 +1816,7 @@ class ModelCacheService:
 
             recipe_cached = receipt is not None
             image_bytes = receipt["image_bytes"] if receipt is not None else None
-            image_digest = (
-                receipt["platform_manifest_digest"] if receipt is not None else None
-            )
+            image_digest = receipt["image_digest"] if receipt is not None else None
             latest = next(
                 (
                     item
@@ -1856,7 +1851,6 @@ class ModelCacheService:
                     else None,
                     "expected_bytes": image_bytes,
                     "verified_bytes": image_bytes,
-                    "source": receipt["source"] if receipt else None,
                     "image_digest": image_digest,
                     "update_available": latest is not None,
                 },

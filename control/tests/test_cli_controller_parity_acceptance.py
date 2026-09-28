@@ -51,7 +51,7 @@ OPERATION_ID = "00000000-0000-4000-8000-000000000100"
 PROFILE_ID = "00000000-0000-4000-8000-000000000101"
 NOW = "2026-09-10T10:00:00+00:00"
 SPARK = "spk_" + "1" * 32
-RECIPE_SELECTOR = "vonk-forge/synthetic-tiny-image"
+RECIPE_SELECTOR = "vonk-forge/synthetic-tiny-build"
 
 
 class ModelRequest(BaseModel):

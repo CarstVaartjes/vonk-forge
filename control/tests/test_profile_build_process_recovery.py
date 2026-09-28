@@ -124,7 +124,7 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                 build = session.get(RecipeBuild, job.payload["owner_id"])
                 assert build is not None
             storage = FilesystemRuntimeImageStorage(root / "runtime-images")
-            staged = storage.prepare_path()
+            staged = storage.root / "staged-build.part"
             staged.write_bytes((root / "expected-build.archive").read_bytes())
             expected = RuntimeImageReceipt.model_validate_json(
                 (root / "expected-build.receipt.json").read_text()
@@ -409,7 +409,6 @@ def test_profile_recovers_after_worker_process_death(
         changed = original.model_copy(
             update={
                 "image_digest": "sha256:" + "b" * 64,
-                "platform_manifest_digest": "sha256:" + "b" * 64,
             }
         )
         (tmp_path / "expected-build.receipt.json").write_text(changed.model_dump_json())

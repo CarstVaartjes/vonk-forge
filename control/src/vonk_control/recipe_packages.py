@@ -153,25 +153,24 @@ def _validate_package_paths(
     recipe: RecipeDefinition, package_paths: set[str], build_inputs: object
 ) -> None:
     """Validate source and fixture closure using BuildContext as a prefix."""
-    if recipe.execution.mode == "build":
-        build = recipe.execution.build
-        context = build.context.path.rstrip("/")
-        if not any(
-            path == context or path.startswith(f"{context}/") for path in package_paths
-        ):
-            raise ValueError("build context is missing from package")
-        required = {build.dockerfile, *(patch.path for patch in build.patches)}
-        missing = sorted(required - package_paths)
-        if missing:
-            raise ValueError(f"build package files are missing: {', '.join(missing)}")
-        if not isinstance(build_inputs, list) or not any(
-            isinstance(value, Mapping)
-            and value.get("kind") == "oci-image"
-            and isinstance(value.get("reference"), str)
-            and value["reference"].endswith(f"@sha256:{build.base_image.digest}")
-            for value in build_inputs
-        ):
-            raise ValueError("build base image digest is not in package inputs")
+    build = recipe.execution.build
+    context = build.context.path.rstrip("/")
+    if not any(
+        path == context or path.startswith(f"{context}/") for path in package_paths
+    ):
+        raise ValueError("build context is missing from package")
+    required = {build.dockerfile, *(patch.path for patch in build.patches)}
+    missing = sorted(required - package_paths)
+    if missing:
+        raise ValueError(f"build package files are missing: {', '.join(missing)}")
+    if not isinstance(build_inputs, list) or not any(
+        isinstance(value, Mapping)
+        and value.get("kind") == "oci-image"
+        and isinstance(value.get("reference"), str)
+        and value["reference"].endswith(f"@sha256:{build.base_image.digest}")
+        for value in build_inputs
+    ):
+        raise ValueError("build base image digest is not in package inputs")
     for check in recipe.validation.serving.checks:
         request = check.request
         fixture = getattr(request, "fixture", None)
@@ -1051,21 +1050,20 @@ class RecipePackageClient:
         closure_path = self._materialize_closure(files, package_digest, archive_path)
         source_bundle: bytes | None = None
         source_bundle_sha256: str | None = None
-        if recipe.execution.mode == "build":
-            context = recipe.execution.build.context.path.rstrip("/")
-            context_files = {
-                path.removeprefix(f"{context}/"): content
-                for path, content in files.items()
-                if path.startswith(f"{context}/")
-            }
-            try:
-                bundle = generate_source_bundle(context_files)
-            except (SourceBundleError, ValueError) as error:
-                raise RecipePackageError(
-                    "recipe_package.package_invalid",
-                    "recipe build source closure is invalid",
-                ) from error
-            source_bundle, source_bundle_sha256 = bundle.archive, bundle.sha256
+        context = recipe.execution.build.context.path.rstrip("/")
+        context_files = {
+            path.removeprefix(f"{context}/"): content
+            for path, content in files.items()
+            if path.startswith(f"{context}/")
+        }
+        try:
+            bundle = generate_source_bundle(context_files)
+        except (SourceBundleError, ValueError) as error:
+            raise RecipePackageError(
+                "recipe_package.package_invalid",
+                "recipe build source closure is invalid",
+            ) from error
+        source_bundle, source_bundle_sha256 = bundle.archive, bundle.sha256
         handle = RecipePackageHandle(
             publication_commit=publication_commit,
             source_commit=item.library_commit,

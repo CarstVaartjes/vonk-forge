@@ -45,7 +45,7 @@ def start_plan(*, large_environment: bool = False) -> RecipeStartPayload:
             "recipe_content_sha256": plan["identity"]["recipe_revision_sha256"],
             "mapping_id": "00000000-0000-4000-8000-000000000007",
             "mapping_generation": 1,
-            "image_digest": plan["runtime"]["image_digest"],
+            "image_digest": plan["runtime_image"]["image_digest"],
             "plan_digest": "c" * 64,
             "alias": "test-model",
             "rank": placement["rank"],
@@ -53,7 +53,7 @@ def start_plan(*, large_environment: bool = False) -> RecipeStartPayload:
             "port": 8000,
             "reserved_memory_bytes": placement["reserved_memory_bytes"],
             "memory_floor_bytes": placement["memory_floor_bytes"],
-            "memory_kind": placement["memory_kind"],
+            "memory_kind": "unified",
             "endpoint_address": "100.100.20.30",
             "world_size": placement["world_size"],
             "compiled_execution_plan": plan,
@@ -277,7 +277,16 @@ def test_runtime_request_rejects_a_typed_plan_above_its_document_ceiling() -> No
         {"name": f"PROFILE_STOP_TEST_{index:03}", "value": "x" * 65000}
         for index in range(extra_environment_count)
     )
-    plan["lifecycle"]["pre_start"] = [["x" * 64000] * 16 for _ in range(10)]
+    template = plan["artifacts"][0]
+    plan["artifacts"] = [
+        {
+            **template,
+            "file_id": f"file-{index}",
+            "path": f"{index:04}" + "模" * 508,
+            "model": {**template["model"], "publisher": "发" * 128},
+        }
+        for index in range(4096)
+    ]
     oversized = start.model_dump(mode="json")
     oversized["compiled_execution_plan"] = plan
     document = {

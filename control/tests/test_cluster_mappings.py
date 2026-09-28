@@ -43,7 +43,7 @@ def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
     )
     raw_recipe = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     raw_recipe["identity"]["slug"] = "glm-5-2-triple"

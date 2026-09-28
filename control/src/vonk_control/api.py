@@ -1438,7 +1438,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
         build_archive_available=runtime_image_storage.build_archive_available,
-        published_image_receipt=runtime_image_storage.find_published,
         artifact_phase_executor=CompositeDistributionPhaseExecutor(
             sessions,
             agent_services.operations,

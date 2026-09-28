@@ -406,11 +406,10 @@ def test_recipe_build_claim_accepts_only_typed_slash_bearing_fields() -> None:
     vectors = recipe_build_vectors()
     payload = deepcopy(vectors["base_payload"])
     assert isinstance(payload, dict)
-    payload["arguments"] = [{"name": "runtime-source", "value": "vendor/runtime"}]
 
     claim = AgentClaim.parse(claim_for_operation("recipe.build.v1", payload))
 
-    assert claim.payload["platform"] == "linux/arm64"
+    assert claim.payload["dockerfile"] == "containers/runtime/Dockerfile"
     assert claim.payload["base_images"][0]["reference"].startswith("ghcr.io/")
 
 
@@ -447,13 +446,11 @@ def test_recipe_build_claim_rejects_every_sys_capability(capability: str) -> Non
 @pytest.mark.parametrize(
     "payload",
     [
-        {"platform": "linux/amd64"},
         {"dockerfile": "/etc/passwd"},
         {"dockerfile": "../Dockerfile"},
         {"dockerfile": "containers//Dockerfile"},
         {"base_images": [{"reference": "ghcr.io/vonkforge/runtime:latest"}]},
         {"evidence": "host/path"},
-        {"arguments": [{"name": "safe", "nested": {"value": "host/path"}}]},
     ],
 )
 def test_recipe_build_claim_rejects_untyped_filesystem_values(
@@ -828,7 +825,9 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             "plan_digest": "b" * 64,
             "rank": placement["rank"],
             "role": placement["role"],
-            "expected_bytes": compiled_plan["identity"]["model_artifact_bytes"],
+            "expected_bytes": sum(
+                artifact["size_bytes"] for artifact in compiled_plan["artifacts"]
+            ),
             "compiled_execution_plan": compiled_plan,
         }
     else:
@@ -847,7 +846,7 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             "mapping_id": "00000000-0000-4000-8000-000000000007",
             "mapping_generation": 1,
             "run_generation": 1,
-            "image_digest": compiled_plan["runtime"]["image_digest"],
+            "image_digest": compiled_plan["runtime_image"]["image_digest"],
             "plan_digest": "b" * 64,
             "alias": "synthetic-tiny",
             "rank": placement["rank"],
@@ -855,7 +854,7 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             "port": placement["port"],
             "reserved_memory_bytes": placement["reserved_memory_bytes"],
             "memory_floor_bytes": placement["memory_floor_bytes"],
-            "memory_kind": placement["memory_kind"],
+            "memory_kind": "unified",
             "endpoint_address": placement["endpoint_address"],
             "world_size": placement["world_size"],
             "compiled_execution_plan": compiled_plan,

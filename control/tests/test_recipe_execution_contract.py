@@ -21,7 +21,7 @@ from vonk_control.recipe_execution_contract import (
 )
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 
-_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
+_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
 
 def _run_plan() -> dict[str, object]:

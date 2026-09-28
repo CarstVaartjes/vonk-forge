@@ -110,7 +110,7 @@ from vonk_control.runtime_preflight import latest_result
 
 from .preflight_fixtures import record_passing_preflight
 
-_FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
+_FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import (
     NOW,

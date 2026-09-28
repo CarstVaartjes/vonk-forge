@@ -539,8 +539,7 @@ def _singleton_recovery_authority(
             "singleton recovery installation authority is missing"
         )
     revision, recipe = resolved
-    topology = recipe.topology.model_dump(mode="json")
-    if topology.get("mode") != "single" or topology.get("node_count") != 1:
+    if recipe.topology.distributed:
         return None
     nodes = tuple(
         session.scalars(
@@ -615,29 +614,7 @@ def _singleton_recovery_authority(
         or mapping.endpoint_owner_node_id != run_node.node_id
     ):
         raise DistributedLifecycleError("singleton recovery mapping is stale")
-    lifecycle = recipe.runtime.model_dump(mode="json").get("lifecycle")
-    if not isinstance(lifecycle, Mapping):
-        raise DistributedLifecycleError(
-            "singleton recovery lifecycle authority is invalid"
-        )
-    for hook_name in ("pre_start", "post_stop"):
-        hooks = lifecycle.get(hook_name, [])
-        if not isinstance(hooks, list):
-            raise DistributedLifecycleError(
-                "singleton recovery lifecycle authority is invalid"
-            )
-        if hooks:
-            raise DistributedLifecycleError(
-                f"singleton recovery does not replay the recipe {hook_name} hook; "
-                "reconcile its effects and submit a new authorized run"
-            )
-    stop_timeout = (
-        lifecycle.get("stop_timeout_seconds")
-        if isinstance(lifecycle, Mapping)
-        else None
-    )
-    if type(stop_timeout) is not int or not 1 <= stop_timeout <= 600:
-        raise DistributedLifecycleError("singleton recovery stop timeout is invalid")
+    stop_timeout = recipe.runtime.lifecycle.stop_timeout_seconds
     start_timeout = validate_distributed_start_timeout_seconds(start_timeout_seconds)
     deadline = _aware(now) + timedelta(seconds=start_timeout + stop_timeout)
     agent_node = session.get(AgentNode, run_node.node_id)
@@ -687,11 +664,7 @@ def _singleton_recovery_authority(
     compiled_plan = accepted_start_payload.get("compiled_execution_plan")
     if not isinstance(compiled_plan, Mapping):
         raise DistributedLifecycleError("accepted Start plan is invalid")
-    expected_lifecycle = {
-        "pre_start": lifecycle.get("pre_start", []),
-        "post_stop": lifecycle.get("post_stop", []),
-        "stop_timeout_seconds": stop_timeout,
-    }
+    expected_lifecycle = {"stop_timeout_seconds": stop_timeout}
     for label, plan in (
         ("installed", install_compiled_plan),
         ("accepted Start", compiled_plan),
@@ -1427,42 +1400,18 @@ def _recovery_authority(
     if installation is None or resolved is None or installation.image_digest is None:
         raise DistributedLifecycleError("distributed recovery authority is missing")
     revision, recipe = resolved
-    topology = recipe.topology.model_dump(mode="json")
-    runtime = recipe.runtime.model_dump(mode="json")
-    lifecycle = runtime.get("lifecycle")
-    if topology.get("mode") != "distributed" or not isinstance(lifecycle, Mapping):
-        return None
+    topology = recipe.topology
+    # A distributed topology withdraws its endpoint on rank loss and recovers
+    # by restarting the workers and then the entrypoint.
     readiness = canonical_distributed_readiness(
         topology=topology,
         interfaces=[
             interface.model_dump(mode="json") for interface in recipe.interfaces
         ],
-        lifecycle=lifecycle,
     )
     if readiness is None:
         return None
-    for hook_name in ("pre_start", "post_stop"):
-        hooks = lifecycle.get(hook_name, [])
-        if not isinstance(hooks, list):
-            raise DistributedLifecycleError(
-                "distributed recovery lifecycle authority is invalid"
-            )
-        if hooks:
-            raise DistributedLifecycleError(
-                f"distributed recovery does not replay the recipe {hook_name} "
-                "hook; reconcile its effects and submit a new authorized run"
-            )
-    failure = lifecycle.get("failure")
-    if (
-        not isinstance(failure, Mapping)
-        or failure.get("rank_loss") != "withdraw-endpoint"
-        or failure.get("recovery") != "restart-worker-then-entrypoint"
-        or readiness.get("strategy") != "endpoint-owner-after-all-ranks"
-    ):
-        return None
-    stop_timeout = lifecycle.get("stop_timeout_seconds")
-    if type(stop_timeout) is not int or not 1 <= stop_timeout <= 600:
-        raise DistributedLifecycleError("distributed recovery timeout is invalid")
+    stop_timeout = recipe.runtime.lifecycle.stop_timeout_seconds
     nodes = tuple(
         session.scalars(
             select(RunNode).where(RunNode.run_id == run.id).order_by(RunNode.rank)
@@ -1470,7 +1419,7 @@ def _recovery_authority(
     )
     if (
         tuple(node.rank for node in nodes) != tuple(range(len(nodes)))
-        or len(nodes) != topology.get("node_count")
+        or len(nodes) != topology.node_count
         or failed_rank not in {node.rank for node in nodes}
     ):
         raise DistributedLifecycleError("distributed recovery rank set is invalid")
@@ -1540,9 +1489,7 @@ def _recovery_authority(
     # probe timeout. Ordered stops have their own per-role execution budget.
     # Persist the total once: phase advances, retries and route publication all
     # retain this exact deadline instead of granting time again after each stop.
-    stop_order = topology.get("stop_order")
-    if not isinstance(stop_order, list) or not stop_order:
-        raise DistributedLifecycleError("distributed recovery order is invalid")
+    stop_order = topology.stop_order
     start_deadline = (
         now + startup_budget + timedelta(seconds=stop_timeout * len(stop_order))
     ).isoformat()
@@ -1628,13 +1575,10 @@ def _recovery_authority(
                 "distributed recovery start payload is invalid"
             ) from error
         start_payloads[node.role] = (node.node_id, payload)
-    start_order = topology.get("start_order")
-    stop_order = topology.get("stop_order")
+    start_order = topology.start_order
     roles = {node.role for node in nodes}
     if (
-        not isinstance(start_order, list)
-        or not isinstance(stop_order, list)
-        or set(start_order) != roles
+        set(start_order) != roles
         or set(stop_order) != roles
         or len(start_order) != len(roles)
         or len(stop_order) != len(roles)

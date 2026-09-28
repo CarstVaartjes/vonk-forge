@@ -118,13 +118,3 @@ def test_distribution_rejects_wrong_json_types_and_non_utc_expiry(
     wire[field] = value
     with pytest.raises(AgentProtocolError):
         DistributionAssignment.parse(wire)
-
-
-def test_compiled_distribution_reuses_the_assignment_object_contract() -> None:
-    from vonk_agent_protocol.compiled_execution_plan import CompiledDistributionObject
-
-    assert issubclass(CompiledDistributionObject, DistributionObject)
-    wire = _assignment().objects[0].to_mapping()
-    for name in ["weights/model bin", "__init__.py"]:
-        wire["name"] = name
-        assert CompiledDistributionObject.model_validate(wire).to_mapping() == wire

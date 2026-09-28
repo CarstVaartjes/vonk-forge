@@ -99,9 +99,6 @@ class RecipeImageAvailabilityResult(StrictJSONModel):
     artifact_set_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     model_content_digests: list[Digest]
     build_input_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    source: str = Field(min_length=1, max_length=64)
-    registry_manifest_digest: str | None = None
-    platform_manifest_digest: str = Field(min_length=1, max_length=256)
     image_digest: str = Field(min_length=1, max_length=256)
     local_image_config_id: str | None = None
     oci_archive_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

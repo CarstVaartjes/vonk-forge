@@ -38,60 +38,32 @@ def validate_topology(
         not ordered
         or len(nodes) != len(set(nodes))
         or ranks != list(range(len(ordered)))
-        or len(ordered) != topology["node_count"]
+        or len(ordered) != topology.node_count
     ):
         raise TopologyError(
             "topology.placement_invalid",
             "placement must match the exact topology with unique contiguous ranks",
         )
-    roles = topology.get("roles")
-    if not isinstance(roles, list):
-        raise TopologyError("topology.invalid", "topology roles are invalid")
     expected_placements = [
-        (str(role["name"]), bool(role["endpoint_owner"]))
-        for role in roles
-        if isinstance(role, Mapping)
-        for _ in range(int(role["count"]))
+        (role.name, role.endpoint_owner)
+        for role in topology.roles
+        for _ in range(role.count)
     ]
     if [(item.role, item.endpoint_owner) for item in ordered] != expected_placements:
         raise TopologyError(
             "topology.role_mismatch", "placement roles do not match the topology"
-        )
-    parallelism = topology.get("parallelism")
-    if (
-        topology.get("mode") == "data_parallel"
-        and isinstance(parallelism, Mapping)
-        and int(parallelism.get("tensor", 0)) * int(parallelism.get("pipeline", 0)) > 1
-    ):
-        raise TopologyError(
-            "topology.replica_not_distributed",
-            "replica topology cannot substitute for genuinely distributed ranks",
         )
     if any("runtime.vonk.v1" not in capabilities.get(node, ()) for node in nodes):
         raise TopologyError(
             "topology.runtime_capability_missing",
             "every GPU node must advertise runtime.vonk.v1",
         )
-    fabric = topology.get("fabric")
-    if not isinstance(fabric, Mapping):
-        raise TopologyError("topology.fabric_missing", "topology fabric is missing")
-    connectivity = str(fabric["connectivity"])
-    required = int(fabric["minimum_bandwidth_mbps"])
-    if len(ordered) == 1:
-        if connectivity != "none":
-            raise TopologyError(
-                "topology.fabric_invalid", "single-node topology must use no fabric"
-            )
+    if not topology.distributed:
         return ordered
-    if connectivity == "none":
-        raise TopologyError(
-            "topology.fabric_invalid", "multi-node topology must declare fabric"
-        )
-    accepted = {
-        "connected": {"connected", "full_mesh", "switch"},
-        "full_mesh": {"full_mesh", "switch"},
-        "switch": {"switch"},
-    }.get(connectivity, set())
+    # A distributed topology needs one connected fabric at the platform floor.
+    connectivity = topology.fabric_connectivity
+    required = topology.fabric_minimum_bandwidth_mbps
+    accepted = {"connected", "full_mesh", "switch"}
     for node in nodes:
         speeds = [
             speed

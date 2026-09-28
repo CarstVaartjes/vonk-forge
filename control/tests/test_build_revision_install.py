@@ -119,9 +119,6 @@ def _prepared_successor(tmp_path, *, change="runtime"):
         def build(self, *_args, **_kwargs):
             raise AssertionError("unchanged executable must not be built again")
 
-        def pull_and_export(self, *_args, **_kwargs) -> NoReturn:
-            raise AssertionError("verified archive must not be pulled again")
-
         def inspect_archive(self, *_args, **_kwargs) -> NoReturn:
             raise AssertionError("verified archive must not be rehashed")
 

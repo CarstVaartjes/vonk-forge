@@ -49,7 +49,7 @@ from .test_fleet_profiles_canonical import (
     _seed,
 )
 
-_FIRST_RECIPE = "vonk-forge/synthetic-tiny-image"
+_FIRST_RECIPE = "vonk-forge/synthetic-tiny-build"
 _SECOND_RECIPE = "vonk-forge/synthetic-tiny-solo"
 
 

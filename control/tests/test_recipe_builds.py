@@ -74,7 +74,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_removal_review_support import remove_after_review
 
-_CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
+_CACHED_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
 
 class RecordingQueue:
@@ -440,23 +440,19 @@ def _write_controller_build_receipt(
 ) -> RuntimeImageReceipt:
     """Publish the exact filesystem receipt a completed Controller build leaves."""
 
-    staged = storage.prepare_path()
+    staged = storage.root / "staged-build.part"
     staged.write_bytes(archive)
     return storage.commit(
         staged,
         receipt=RuntimeImageReceipt(
             schema_version=2,
-            source="controller-build",
             distribution_publisher="vonk",
             distribution_slug="cached",
             distribution_content_sha256=distribution_content_sha256,
-            registry_manifest_digest=None,
-            platform_manifest_digest=image_digest,
             image_digest=image_digest,
             oci_archive_sha256=hashlib.sha256(archive).hexdigest(),
             image_bytes=len(archive),
             local_image_config_id="sha256:" + "c" * 64,
-            local_image_reference=None,
             architecture="linux-arm64",
             runtime_interface="vonk.runtime.v1",
             archive_path=str(staged),
@@ -726,17 +722,13 @@ def test_legacy_unreadable_build_receipt_is_replaced_from_verified_bytes(
         json.dumps(
             {
                 "schema_version": 2,
-                "source": "controller-build",
                 "distribution_publisher": "vonk",
                 "distribution_slug": "cached",
                 "distribution_content_sha256": revision.content_digest,
-                "registry_manifest_digest": None,
-                "platform_manifest_digest": image_digest,
                 "image_digest": image_digest,
                 "oci_archive_sha256": archive_digest,
                 "image_bytes": len(archive),
                 "local_image_config_id": "sha256:" + "c" * 64,
-                "local_image_reference": None,
                 "architecture": "linux-arm64",
                 "runtime_interface": "vonk.runtime.v1",
                 "runtime_interface_label": "v1",
@@ -2349,17 +2341,13 @@ def _authorize_distribution_fixture(sessions, plan, revision, now):
         assert build.image_bytes is not None
         receipt = RuntimeImageReceipt(
             schema_version=2,
-            source="controller-build",
             distribution_publisher=revision.publisher,
             distribution_slug=revision.slug,
             distribution_content_sha256=revision.content_digest,
-            registry_manifest_digest=None,
             image_digest=build.image_digest,
-            platform_manifest_digest=build.image_digest,
             oci_archive_sha256=build.oci_layout_sha256,
             image_bytes=build.image_bytes,
             local_image_config_id="sha256:" + "c" * 64,
-            local_image_reference=None,
             architecture="linux-arm64",
             runtime_interface="vonk.runtime.v1",
             runtime_interface_label="v1",

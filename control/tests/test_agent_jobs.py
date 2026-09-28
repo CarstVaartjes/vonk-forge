@@ -65,9 +65,7 @@ from .runtime_identity_support import (
 )
 
 _BUILD_ADAPTER = (
-    resolve_runtime_adapter("vllm", {"mode": "single"})
-    .to_wire()
-    .model_dump(mode="json")
+    resolve_runtime_adapter("vllm", {"node_count": 1}).to_wire().model_dump(mode="json")
 )
 
 NODE_A = "spk_" + "a" * 32

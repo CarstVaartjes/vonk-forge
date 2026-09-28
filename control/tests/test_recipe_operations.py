@@ -124,7 +124,7 @@ from .canonical_recipe_fixtures import canonical_example
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
-_FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"mode": "single"})
+_FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
 
 class RecordingQueue:

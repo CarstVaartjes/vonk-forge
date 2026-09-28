@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Literal, Protocol, TypeGuard, get_args, runtime_checkable
 
 from vonk_agent_protocol.inventory import MemoryPool
+from vonk_forge_contracts.recipe import RecipeDiskResources, RecipeMemoryResources
 
 from .bounded_json import require_integer
 from .run_switch_contract import MemoryKind, RunSwitchChangeEffect
@@ -67,7 +68,7 @@ class InstallationDiskRequirement:
 
 
 def installation_disk_requirement(
-    disk: Mapping[str, object],
+    disk: RecipeDiskResources,
     *,
     required_download_bytes: int,
     minimum_floor_bytes: int,
@@ -78,30 +79,11 @@ def installation_disk_requirement(
     it cannot yet promise reuse. The reserve remains separate from consumed
     bytes so installation does not mistake headroom for downloaded data.
     """
-    staging, cache, rollback, safety = (
-        require_integer(disk.get(name), name)
-        for name in (
-            "staging_bytes",
-            "cache_bytes",
-            "rollback_bytes",
-            "safety_margin_bytes",
-        )
-    )
-    if any(
-        value < 0
-        for value in (
-            staging,
-            cache,
-            rollback,
-            safety,
-            required_download_bytes,
-            minimum_floor_bytes,
-        )
-    ):
+    if required_download_bytes < 0 or minimum_floor_bytes < 0:
         raise ValueError("installation disk envelope contains negative bytes")
     return InstallationDiskRequirement(
-        required_download_bytes + staging + cache + rollback,
-        max(minimum_floor_bytes, safety),
+        required_download_bytes + disk.working_bytes,
+        max(minimum_floor_bytes, disk.safety_margin_bytes),
     )
 
 
@@ -245,34 +227,18 @@ def memory_reservation_kinds(kind: str, pool: MemoryPool) -> tuple[str, ...]:
     return kind, "unified-memory"
 
 
-def _is_memory_kind(value: object) -> TypeGuard[MemoryKind]:
-    return isinstance(value, str) and value in get_args(MemoryKind)
-
-
 def memory_requirement(
     recipe_document: Mapping[str, object],
-    memory: Mapping[str, object],
+    memory: RecipeMemoryResources,
     role_name: str,
     model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
     *,
     settings: object | None = None,
     platform_floor_bytes: int = 0,
 ) -> MemoryRequirement:
-    kind = memory.get("kind")
-    if not _is_memory_kind(kind):
-        raise ValueError("recipe memory kind is invalid")
-    values = [
-        require_integer(memory.get(name), name)
-        for name in (
-            "startup_peak_bytes",
-            "steady_state_bytes",
-            "runtime_growth_bytes",
-            "system_reserve_bytes",
-        )
-    ]
-    if min(*values, platform_floor_bytes) < 0:
+    """DGX Spark memory is unified; one peak and one reserve describe a role."""
+    if platform_floor_bytes < 0:
         raise ValueError("recipe memory envelope is invalid")
-    startup, steady, growth, reserve = values
     selected = settings if settings is not None else recipe_document
     resolution = (
         SettingsResolution(selected)
@@ -283,14 +249,16 @@ def memory_requirement(
         recipe_document,
         role_name,
         model_documents,
-        max(startup, steady + growth),
+        memory.peak_bytes,
         resolution.settings,
     )
     demand = resource_demand(
         resolution.settings if resolution.settings is not None else selected,
         evidence,
     )
-    return MemoryRequirement(kind, max(platform_floor_bytes, reserve), demand)
+    return MemoryRequirement(
+        "unified", max(platform_floor_bytes, memory.reserve_bytes), demand
+    )
 
 
 def memory_capacity_snapshot(
@@ -593,15 +561,8 @@ def resolve_effective_settings(
             )
         )
         node_count = None
-    world_size = parallel.get("world_size")
-    if type(world_size) is not int or world_size < 1:
-        reasons.append(
-            _reason(
-                "resource.parallelism_type",
-                "Canonical topology parallelism world_size is invalid.",
-            )
-        )
-        world_size = None
+    # One rank per node: the world size is the node count.
+    world_size = node_count
     tensor, pipeline, data = (
         dimensions["tensor"],
         dimensions["pipeline"],
@@ -613,18 +574,7 @@ def resolve_effective_settings(
             reasons.append(
                 _reason(
                     "resource.parallelism_inconsistent",
-                    "Topology parallelism product does not equal declared world_size.",
-                )
-            )
-        if (
-            node_count is not None
-            and world_size is not None
-            and world_size != node_count
-        ):
-            reasons.append(
-                _reason(
-                    "resource.parallelism_inconsistent",
-                    "Declared parallelism world_size does not equal node_count.",
+                    "Topology parallelism product does not equal node_count.",
                 )
             )
     backend = parallel.get("backend")
@@ -1399,7 +1349,6 @@ def _as_mapping(value: object) -> Mapping[str, object] | None:
             "topology": {
                 "node_count": parallel.world_size,
                 "parallelism": {
-                    "world_size": parallel.world_size,
                     "tensor": parallel.tensor,
                     "pipeline": parallel.pipeline,
                     "data": parallel.data,

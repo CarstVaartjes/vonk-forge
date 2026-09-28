@@ -408,7 +408,7 @@ def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_inten
             "expected_revision": 0,
             "assignments": [
                 {
-                    "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                    "recipe_selector": "vonk-forge/synthetic-tiny-build",
                     "spark_ids": ["spk_" + "1" * 32],
                     "desired_state": "running",
                 }

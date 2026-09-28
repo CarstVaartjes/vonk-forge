@@ -57,7 +57,7 @@ from .test_recipe_image_availability import (
 def _recipe_using_model(
     model_digest: str, publisher: str, slug: str
 ) -> RecipeDefinition:
-    document = json.loads(_recipe("recipe-image.json").model_dump_json())
+    document = json.loads(_recipe("recipe-source-build.json").model_dump_json())
     assert isinstance(document, dict)
     models = document.get("models")
     assert isinstance(models, list) and len(models) == 1
@@ -130,15 +130,13 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=revision.content_digest,
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=now[0],
                 state="authorized",
             )
@@ -371,7 +369,7 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = "rev-review-savepoint-001"
     receipt = _reference_receipt()
     with sessions.begin() as session:
@@ -380,15 +378,13 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
-                source="published",
                 original_content_digest=revision.content_digest,
                 effective_execution_key=revision.execution_key,
-                registry_manifest_digest=receipt.registry_manifest_digest,
-                platform_manifest_digest=receipt.platform_manifest_digest,
+                image_digest=receipt.image_digest,
                 local_image_config_id=receipt.local_image_config_id,
                 oci_archive_sha256=receipt.oci_archive_sha256,
                 image_bytes=receipt.image_bytes,
-                build_id=None,
+                build_id=receipt.build_id,
                 authorized_at=datetime.now(UTC),
                 state="authorized",
             )

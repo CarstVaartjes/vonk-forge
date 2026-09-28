@@ -290,10 +290,9 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
         session.add(
             RuntimeImageAuthorization(
                 recipe_revision_id=recipe.identity.recipe_revision_id,
-                source="controller-build",
                 original_content_digest=recipe.identity.content_sha256,
                 effective_execution_key=identity["execution_sha256"],
-                platform_manifest_digest=build.image_digest,
+                image_digest=build.image_digest,
                 local_image_config_id="sha256:" + "4" * 64,
                 oci_archive_sha256=build.oci_layout_sha256,
                 image_bytes=build.image_bytes,

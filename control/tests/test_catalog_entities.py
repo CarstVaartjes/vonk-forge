@@ -41,11 +41,11 @@ def _model() -> dict[str, object]:
 
 
 def _recipe(
-    model: dict[str, object], *, slug: str = "synthetic-tiny-image"
+    model: dict[str, object], *, slug: str = "synthetic-tiny-build"
 ) -> dict[str, object]:
     """Return a validated canonical recipe document bound to *model*."""
 
-    recipe = _example("recipe-image.json")
+    recipe = _example("recipe-source-build.json")
     identity = recipe["identity"]
     assert isinstance(identity, dict)
     identity["slug"] = slug

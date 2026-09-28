@@ -148,7 +148,7 @@ def test_final_image_recipe_compiles_with_platform_defaults(
     model: contracts.ModelDefinition,
 ) -> None:
     recipe = _recipe(
-        "recipe-image.json",
+        "recipe-source-build.json",
         engine="vllm",
         entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
     )
@@ -194,7 +194,7 @@ def test_runtime_compiler_rejects_retired_entity_authorities(
     model: contracts.ModelDefinition,
 ) -> None:
     recipe = _recipe(
-        "recipe-image.json",
+        "recipe-source-build.json",
         engine="vllm",
         entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
     )
@@ -213,19 +213,27 @@ def test_runtime_compiler_rejects_retired_entity_authorities(
 @pytest.mark.parametrize(
     ("engine", "entrypoint", "recipe_file"),
     [
-        ("vllm", ["/opt/vonk/bin/vllm", "serve", "/models"], "recipe-image.json"),
+        (
+            "vllm",
+            ["/opt/vonk/bin/vllm", "serve", "/models"],
+            "recipe-source-build.json",
+        ),
         (
             "sglang",
             ["/opt/vonk/bin/sglang-serve", "serve", "/models"],
-            "recipe-image.json",
+            "recipe-source-build.json",
         ),
         (
             "tensorrt-llm",
             ["/opt/vonk/bin/trtllm-serve", "serve", "/models"],
-            "recipe-image.json",
+            "recipe-source-build.json",
         ),
-        ("llama-cpp", ["/opt/vonk/bin/llama-server", "/models"], "recipe-image.json"),
-        ("ds4", ["/opt/vonk/bin/ds4-serve", "/models"], "recipe-image.json"),
+        (
+            "llama-cpp",
+            ["/opt/vonk/bin/llama-server", "/models"],
+            "recipe-source-build.json",
+        ),
+        ("ds4", ["/opt/vonk/bin/ds4-serve", "/models"], "recipe-source-build.json"),
         ("diffusers", ["/opt/vonk/bin/diffusers-job"], "recipe-job.json"),
         ("comfyui", ["/opt/vonk/bin/comfyui-job"], "recipe-job.json"),
         ("pytorch-pipeline", ["/opt/vonk/bin/pytorch-pipeline"], "recipe-job.json"),
@@ -246,7 +254,7 @@ def test_all_builtin_harnesses_compile_final_examples(
 def test_unknown_engine_values_preserve_order_and_reserved_paths_fail(
     model: contracts.ModelDefinition,
 ) -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     runtime = _raw_runtime(raw)
     runtime["arguments"] = [
         {"name": "future_option", "value": '{"mode": "first"}'},
@@ -273,7 +281,7 @@ def test_unknown_engine_values_preserve_order_and_reserved_paths_fail(
 def test_declared_runtime_requirement_resolves_to_platform_owned_paths(
     model: contracts.ModelDefinition,
 ) -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     runtime = _raw_runtime(raw)
     runtime["engine"] = "vllm"
     runtime["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
@@ -304,7 +312,7 @@ def test_declared_runtime_requirement_resolves_to_platform_owned_paths(
 def test_recipe_cannot_restate_or_move_a_platform_owned_path(
     model: contracts.ModelDefinition,
 ) -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     runtime = _raw_runtime(raw)
     runtime["engine"] = "vllm"
     runtime["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
@@ -339,7 +347,7 @@ def test_unknown_or_unsupported_runtime_requirement_is_rejected(
     requirement: str,
     detail: str,
 ) -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     runtime = _raw_runtime(raw)
     runtime["engine"] = engine
     runtime["entrypoint"] = entrypoint
@@ -355,7 +363,7 @@ def test_unknown_or_unsupported_runtime_requirement_is_rejected(
 def test_canonical_argv_preserves_empty_and_repeated_options(
     model: contracts.ModelDefinition,
 ) -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     _raw_runtime(raw)["arguments"] = [
         {"name": "repeated_option", "value": ""},
         {"name": "repeated_option", "value": "second"},
@@ -376,7 +384,7 @@ def test_canonical_argv_preserves_empty_and_repeated_options(
 def test_canonical_argv_preserves_post_executable_platform_shaped_data(
     model: contracts.ModelDefinition,
 ) -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     _raw_runtime(raw)["arguments"] = [
         {"name": "device", "value": "/dev/nvidia0"},
         {"name": "network", "value": "host"},
@@ -530,7 +538,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
 def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(
     model: contracts.ModelDefinition,
 ) -> None:
-    base = _example("recipe-image.json")
+    base = _example("recipe-source-build.json")
     first = contracts.RecipeDefinition.model_validate(base)
 
     notes = deepcopy(base)
@@ -726,7 +734,7 @@ def test_published_distributed_sglang_preserves_authored_launch_and_rank() -> No
 
 
 def test_sglang_wrapper_receives_root_for_target_mount() -> None:
-    raw = _example("recipe-image.json")
+    raw = _example("recipe-source-build.json")
     runtime = _raw_runtime(raw)
     runtime["engine"] = "sglang"
     runtime["entrypoint"] = ["/opt/vonk/bin/sglang-serve"]
@@ -807,7 +815,7 @@ def test_runtime_compiler_rejects_retired_resolver_keys_even_with_current_inputs
     model: contracts.ModelDefinition, retired: str
 ) -> None:
     recipe = _recipe(
-        "recipe-image.json",
+        "recipe-source-build.json",
         engine="vllm",
         entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
     )

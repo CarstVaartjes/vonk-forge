@@ -24,7 +24,6 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution import (
-    ControllerRuntimeImageVerifiedObjectSource,
     DistributionService,
     MemoryVerifiedObjectSource,
     build_distribution_service_from_components,
@@ -1437,110 +1436,6 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     )
 
 
-def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
-    agent_system,  # noqa: F811
-    tmp_path: Path,
-) -> None:
-    _client, services, _tokens, clock = agent_system
-    recipe_document = json.loads(
-        files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
-        .read_text(encoding="utf-8")
-    )
-    recipe_document["identity"]["slug"] = "published-fallback-guard"
-    recipe = RecipeDefinition.model_validate(recipe_document)
-    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
-    registry_digest = "sha256:" + "d" * 64
-    image_digest = "sha256:" + "e" * 64
-    assert registry_digest != image_digest
-    assert recipe_document["execution"]["image"][
-        "digest"
-    ] == registry_digest.removeprefix("sha256:")
-    archive_payload = b"coincident build archive"
-    archive_digest = hashlib.sha256(archive_payload).hexdigest()
-    recipe_id = str(uuid.uuid4())
-    revision_id = str(uuid.uuid4())
-    build_id = str(uuid.uuid4())
-    plan_digest = "f" * 64
-    with services.sessions.begin() as session:
-        session.add(
-            CatalogDocument(
-                id=recipe_id,
-                kind="recipe",
-                publisher=recipe.identity.publisher,
-                slug=recipe.identity.slug,
-                title=recipe.metadata.title,
-                created_by="test",
-                created_at=clock.now,
-                updated_at=clock.now,
-            )
-        )
-        session.flush()
-        session.add_all(
-            [
-                CatalogDocumentRevision(
-                    id=revision_id,
-                    document_id=recipe_id,
-                    kind="recipe",
-                    publisher=recipe.identity.publisher,
-                    slug=recipe.identity.slug,
-                    revision_number=1,
-                    schema_version=2,
-                    state="active",
-                    document=recipe.model_dump(mode="json"),
-                    content_digest=recipe_digest,
-                    projected={},
-                    created_by="test",
-                    created_at=clock.now,
-                ),
-                RecipeBuild(
-                    id=build_id,
-                    recipe_revision_id=revision_id,
-                    builder_node_id=NODE_A,
-                    source_bundle_sha256="c" * 64,
-                    build_input_sha256="e" * 64,
-                    state="succeeded",
-                    policy_report={},
-                    plan={},
-                    image_digest=image_digest,
-                    oci_layout_sha256=archive_digest,
-                    image_bytes=len(archive_payload),
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-                Job(
-                    id=str(uuid.uuid4()),
-                    request_id=str(uuid.uuid4()),
-                    kind="recipe.run-switch.v2",
-                    state="running",
-                    actor="test",
-                    authority_revision=plan_digest,
-                    targets=[NODE_A],
-                    payload_digest="a" * 64,
-                    payload={
-                        "plan_digest": plan_digest,
-                        "plan": {
-                            "recipe_revision_id": revision_id,
-                            "recipe_build_id": None,
-                        },
-                    },
-                    result={},
-                    created_at=clock.now,
-                    updated_at=clock.now,
-                ),
-            ]
-        )
-    source = ControllerRuntimeImageVerifiedObjectSource(
-        services.sessions, services.artifact_root
-    )
-    assignment = DistributionAssignment.model_construct(
-        plan_digest=plan_digest,
-        oci_image_digest=image_digest,
-        oci_archive_sha256=archive_digest,
-    )
-    assert source.verify_runtime_image_assignment(assignment) is False
-
-
 def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
 
     entered = threading.Event()
@@ -1549,8 +1444,6 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
     executor._async_runtime_image_preparation = True
     executor._runtime_image_pool = ThreadPoolExecutor(max_workers=1)
     executor._runtime_image_futures = {}
-    executor._runtime_image_progress = {}
-    executor._runtime_image_progress_lock = threading.Lock()
 
     def prepare(
         _plan,
@@ -1560,17 +1453,14 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         actor,
         request_key,
         progress,
-        transfer_progress=None,
         wait_for_busy_owner=False,
     ) -> None:
         assert item_index == 0
         assert actor == "operator"
         assert request_key
         assert not progress
-        assert transfer_progress is not None
         # Off the tick thread, publication waits for the owner row.
         assert wait_for_busy_owner is True
-        transfer_progress("copy", 23, 100)
         entered.set()
         assert release.wait(5)
 
@@ -1599,10 +1489,7 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
             progress={},
         )
         assert observed.waiting
-        assert (
-            observed.status_reason
-            == "Runtime image copy: 23 bytes transferred of 100 bytes"
-        )
+        assert "still running" in (observed.status_reason or "")
     finally:
         release.set()
         executor.close()

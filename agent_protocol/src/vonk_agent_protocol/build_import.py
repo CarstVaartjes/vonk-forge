@@ -23,13 +23,12 @@ NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 class RecipeBuildCleanupRequest(WireModel):
     """Stop only the transient service belonging to one retained build attempt."""
 
-    schema_version: Literal[1]
     build_id: UuidId
     operation_id: UuidId
 
 
-class RecipeBuildCleanupEvidence(RecipeBuildCleanupRequest):
-    stopped: Literal[True]
+class RecipeBuildCleanupEvidence(WireModel):
+    """The build service is stopped; the fenced attempt is the whole answer."""
 
 
 BuildArgumentName = Annotated[
@@ -149,18 +148,13 @@ def _validate_options(options: RecipeBuildOptions) -> None:
 
 
 # The Rust producer accepts JSON strings, booleans, and integral numbers for
-# build arguments.  Keeping this union strict prevents Pydantic from turning
-# JSON floats/nulls into an accepted build argument.
+# build environment values.  Keeping this union strict prevents Pydantic from
+# turning JSON floats/nulls into an accepted value.
 JsonScalar = (
     Annotated[str, StringConstraints(max_length=1024)]
     | Annotated[int, Field(strict=True, ge=-(2**63), le=2**63 - 1)]
     | bool
 )
-
-
-class RecipeBuildArgument(WireModel):
-    name: BuildArgumentName
-    value: JsonScalar
 
 
 class RecipeBuildEnvironmentArgument(WireModel):
@@ -174,8 +168,9 @@ class RecipeBuildBaseImage(WireModel):
 
 
 class RecipeBuildNetwork(WireModel):
+    """Public hosts the build may reach; an empty list builds offline."""
+
     hosts: list[str] = Field(max_length=64)
-    mode: Literal["none", "public"]
 
 
 class RecipeBuildAdditionalContext(WireModel):
@@ -255,38 +250,34 @@ class RecipeBuildAdapter(WireModel):
 
 
 class RecipeBuildLimits(WireModel):
-    container_socket: bool
+    """Resource limits; builds never get a GPU, privileges, host mounts or a
+    container socket."""
+
     cpu_cores: int = Field(ge=1, le=256)
-    gpu: int = Field(ge=0, le=64)
-    host_mounts: bool
     memory_bytes: int = Field(gt=0, le=16 * 1024**4)
     output_bytes: int = Field(gt=0, le=16 * 1024**4)
-    privileged: bool
     processes: int = Field(ge=1, le=65_535)
     temporary_bytes: int = Field(gt=0, le=16 * 1024**4)
     timeout_seconds: int = Field(ge=1, le=86_400)
 
 
 class RecipeBuildRequest(WireModel):
+    """Build one recipe image for linux/arm64."""
+
     adapter: RecipeBuildAdapter
-    arguments: list[RecipeBuildArgument] = Field(max_length=64)
     base_image_storage_bytes: int = Field(ge=0, le=16 * 1024**4)
     base_images: list[RecipeBuildBaseImage] = Field(max_length=8)
     capabilities: list[str] = Field(max_length=11)
     build_id: UuidId
     build_input_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
     dockerfile: str = Field(min_length=1, max_length=512)
-    kind: Literal["recipe.build.v1"]
     limits: RecipeBuildLimits
     network: RecipeBuildNetwork
     options: RecipeBuildOptions
-    platform: Literal["linux/arm64"]
     recipe_content_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
     recipe_revision_id: UuidId
-    schema_version: Literal[1]
     source_bundle_bytes: int = Field(ge=1, le=64 * 1024**2)
     source_bundle_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
-    target: OsFeature | None = None
 
     @model_validator(mode="after")
     def validate_execution_policy(self) -> RecipeBuildRequest:
@@ -309,65 +300,29 @@ class RecipeBuildRequest(WireModel):
             for item in self.base_images
         ):
             raise ValueError("build base image pinning is invalid")
-        if self.network.mode == "none":
-            if self.network.hosts:
-                raise ValueError("network hosts require public mode")
-        elif not self.network.hosts or any(
+        if len(set(self.network.hosts)) != len(self.network.hosts) or any(
             not _public_host(host) for host in self.network.hosts
         ):
             raise ValueError("public build network hosts are invalid")
-        if (
-            self.limits.gpu != 0
-            or self.limits.privileged
-            or self.limits.host_mounts
-            or self.limits.container_socket
-        ):
-            raise ValueError("build hardening limits are invalid")
         _validate_options(self.options)
         return self
 
 
-class RecipeBuildPolicyFinding(WireModel):
-    code: str = Field(min_length=1, max_length=128)
-    path: str = Field(min_length=1, max_length=512)
-    line: int | None = Field(default=None, ge=1)
-    detail: str = Field(min_length=1, max_length=512)
-
-
-class RecipeBuildPolicy(WireModel):
-    passed: bool
-    dockerfile: str = Field(min_length=1, max_length=512)
-    findings: list[RecipeBuildPolicyFinding] = Field(max_length=128)
-
-
 class RecipeBuildEvidence(WireModel):
-    build_input_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
     image_bytes: int = Field(gt=0, le=16 * 1024**4)
     image_digest: OciDigest = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     oci_layout_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
-    policy: RecipeBuildPolicy
-
-    @model_validator(mode="after")
-    def require_successful_policy(self) -> RecipeBuildEvidence:
-        if self.policy.passed is not True or self.policy.findings:
-            raise ValueError("recipe build evidence policy did not pass")
-        return self
 
 
 class RecipeImageImportRequest(WireModel):
     build_id: UuidId
     image_bytes: int = Field(gt=0, le=16 * 1024**4)
     image_digest: OciDigest = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    kind: Literal["recipe.image.import.v1"]
     mapping_generation: int = Field(ge=1)
     mapping_id: UuidId
     oci_layout_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
-    schema_version: Literal[1]
     source_node_id: NodeId
 
 
 class RecipeImageImportEvidence(WireModel):
-    build_id: UuidId
-    image_bytes: int = Field(gt=0, le=16 * 1024**4)
-    image_digest: OciDigest = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    oci_layout_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
+    """The image is imported; the Controller already holds its identity."""

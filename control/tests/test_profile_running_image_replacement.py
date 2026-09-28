@@ -118,7 +118,7 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
                 )
             )
     replacement_bytes = b"a distinct verified rebuilt image archive"
-    staged = storage.prepare_path()
+    staged = storage.root / "replacement.part"
     staged.write_bytes(replacement_bytes)
     changed = storage.commit(
         staged,
@@ -126,7 +126,6 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
             update={
                 "build_id": replacement_build_id,
                 "image_digest": "sha256:" + "b" * 64,
-                "platform_manifest_digest": "sha256:" + "b" * 64,
                 "oci_archive_sha256": hashlib.sha256(replacement_bytes).hexdigest(),
                 "image_bytes": len(replacement_bytes),
                 "archive_path": str(staged),

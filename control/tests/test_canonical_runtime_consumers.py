@@ -21,7 +21,7 @@ from vonk_forge_contracts import document_sha256
 def _document() -> dict[str, object]:
     return json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
 

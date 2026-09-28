@@ -130,7 +130,6 @@ _EXTERNAL_TAILS = frozenset(
         # Project helpers that read or write managed storage.
         "_succeeded_build_available",
         "_cached_build_receipt",
-        "_published_receipt_authorizes",
         "_commit_recipe_image_upload",
         "_sha256_path",
         "_managed_cached_objects",

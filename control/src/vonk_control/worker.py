@@ -453,11 +453,6 @@ def assemble_production_worker(
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
         build_archive_available=runtime_archive_available,
-        published_image_receipt=(
-            runtime_archive_storage.find_published
-            if runtime_archive_storage is not None
-            else None
-        ),
         artifact_phase_executor=artifact_phase_executor,
     )
     recipe_operations = RecipeOperationWorker(

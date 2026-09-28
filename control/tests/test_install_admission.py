@@ -64,9 +64,7 @@ def _canonical_catalog_documents(
             "notice": "Synthetic test restrictions.",
         }
     model = ModelDefinition.model_validate(raw_model)
-    recipe_filename = (
-        "recipe-source-build.json" if recipe_mode == "build" else "recipe-image.json"
-    )
+    recipe_filename = "recipe-source-build.json"
     raw_recipe = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", recipe_filename)

@@ -29,7 +29,6 @@ from .recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
 )
-from .run_switch_contract import MemoryKind
 from .runtime_image_preparation import RuntimeImageReceipt
 
 
@@ -42,7 +41,6 @@ def compile_job_invocation(
     parameters: Mapping[str, object],
     timeout_seconds: int,
     memory_floor_bytes: int,
-    memory_kind: MemoryKind,
 ) -> dict[str, object]:
     """Compile invocation settings against the installation's exact receipts."""
     from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
@@ -57,31 +55,21 @@ def compile_job_invocation(
         raise ExecutionPlanCompilationError(
             "job recipe differs from the installed workload"
         )
-    canonical_role = next(
-        (
-            item
-            for item in recipe.topology.roles
-            if item.name == plan.runtime.placement.role
-        ),
-        None,
-    )
-    if (
-        canonical_role is None
-        or canonical_role.resources.memory.kind != memory_kind
-        or plan.runtime.placement.memory_kind != memory_kind
+    if not any(
+        item.name == plan.runtime.placement.role for item in recipe.topology.roles
     ):
         raise ExecutionPlanCompilationError(
-            "job memory kind differs from the accepted canonical workload"
+            "job role differs from the accepted canonical workload"
         )
     resolved = resolve_recipe_entities(session, revision.document)
     models = _canonical_models(resolved["models"])
-    if _is_source_build(recipe) and build is None:
+    if build is None:
         raise ExecutionPlanCompilationError("job build receipt is unavailable")
     runtime_spec = compile_runtime_spec(
         recipe,
         recipe_digest=revision.content_digest,
         models=models,
-        package_handle=_build_package(build) if build is not None else None,
+        package_handle=_build_package(build),
         parameters=parameters,
         role=plan.runtime.placement.role,
         rank=plan.runtime.placement.rank,
@@ -105,7 +93,12 @@ def compile_job_invocation(
             "sha256": artifact.sha256,
             "bytes": artifact.size_bytes,
             "roles": artifact.roles,
-            "distribution_object": artifact.distribution_object.model_dump(mode="json"),
+            "distribution_object": {
+                "name": artifact.path,
+                "sha256": artifact.sha256,
+                "bytes": artifact.size_bytes,
+                "kind": "model",
+            },
         }
         for artifact in plan.artifacts
     }
@@ -117,7 +110,6 @@ def compile_job_invocation(
     )
     placement = plan.runtime.placement.model_dump(mode="json")
     placement["memory_floor_bytes"] = memory_floor_bytes
-    placement["memory_kind"] = memory_kind
     return compiled.to_compiled_launch_payload(runtime_spec, placement=placement)
 
 
@@ -226,14 +218,10 @@ class ControllerExecutionPlanService:
         document = revision.document
         world_size = _world_size(recipe)
         result: dict[str, dict[str, object]] = {}
+        if build is None:
+            raise ExecutionPlanCompilationError("recipe build receipt is unavailable")
+        package = _build_package(build)
         for node in sorted(mapping_nodes, key=lambda item: (item.rank, item.node_id)):
-            package: dict[str, object] | None = None
-            if _is_source_build(recipe):
-                if build is None:
-                    raise ExecutionPlanCompilationError(
-                        "job build receipt is unavailable"
-                    )
-                package = _build_package(build)
             try:
                 runtime_spec = compile_runtime_spec(
                     recipe,
@@ -300,8 +288,7 @@ class ControllerExecutionPlanService:
             raise ExecutionPlanCompilationError(
                 "verified runtime image receipt is invalid"
             ) from error
-        expected_digest = image.registry_manifest_digest or image.image_digest
-        if expected_digest != image_digest:
+        if image.image_digest != image_digest:
             raise ExecutionPlanCompilationError(
                 "runtime image receipt does not match the compiled runtime image"
             )
@@ -323,21 +310,9 @@ def _runtime_receipt_mapping(receipt: object) -> dict[str, object]:
         "image_digest": receipt.image_digest,
         "oci_layout_sha256": receipt.oci_archive_sha256,
         "image_bytes": receipt.image_bytes,
-        "architecture": receipt.architecture,
-        "runtime_interface": receipt.runtime_interface,
-        "runtime_interface_label": receipt.runtime_interface_label,
-        "source": receipt.source,
         "build_id": receipt.build_id,
-        "registry_manifest_digest": receipt.registry_manifest_digest,
-        "platform_manifest_digest": receipt.platform_manifest_digest,
         "local_image_config_id": receipt.local_image_config_id,
-        "local_image_reference": receipt.local_image_reference,
-        "distribution_object": {
-            "name": "image.oci.tar",
-            "sha256": receipt.oci_archive_sha256,
-            "bytes": receipt.image_bytes,
-            "kind": "oci-archive",
-        },
+        "runtime_interface_label": receipt.runtime_interface_label,
     }
 
 
@@ -360,10 +335,6 @@ def _canonical_models(value: object) -> dict[str, ModelDefinition]:
     return read_model_set(value)
 
 
-def _is_source_build(recipe: RecipeDefinition) -> bool:
-    return recipe.execution.mode == "build"
-
-
 def _build_package(build: RecipeBuild) -> dict[str, object]:
     if (
         build.state != "succeeded"
@@ -377,7 +348,6 @@ def _build_package(build: RecipeBuild) -> dict[str, object]:
         "image_digest": build.image_digest,
         "image_reference": f"localhost/vonk/recipe-build@{build.image_digest}",
         "build_input_sha256": build.build_input_sha256,
-        "platform": "linux/arm64",
     }
 
 
@@ -393,7 +363,7 @@ def _image_digest(value: object) -> str:
 
 
 def _world_size(recipe: RecipeDefinition) -> int:
-    return recipe.topology.parallelism.world_size
+    return recipe.topology.world_size
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,14 +388,8 @@ def _placement(
         raise ExecutionPlanCompilationError(
             f"mapped role {node.role!r} is absent from the canonical recipe topology"
         )
-    reserved = role.resources.memory.startup_peak_bytes
-    if type(reserved) is not int or reserved <= 0:
-        raise ExecutionPlanCompilationError("canonical recipe role memory is invalid")
-    memory_floor = role.resources.memory.system_reserve_bytes
-    if type(memory_floor) is not int or memory_floor < 0:
-        raise ExecutionPlanCompilationError(
-            "canonical recipe role memory floor is invalid"
-        )
+    reserved = role.resources.memory.peak_bytes
+    memory_floor = role.resources.memory.reserve_bytes
     if recipe.interfaces[0].adapter == "openai":
         if not isinstance(endpoint, Mapping):
             raise ExecutionPlanCompilationError(
@@ -455,7 +419,6 @@ def _placement(
         "port": port,
         "reserved_memory_bytes": reserved,
         "memory_floor_bytes": memory_floor,
-        "memory_kind": role.resources.memory.kind,
     }
 
 
@@ -527,7 +490,6 @@ def _bind_runtime_artifacts(
         item["mount"] = {
             "source": f"/run/vonk/models/{item.get('selection_id')}",
             "target": mount.get("target"),
-            "read_only": mount.get("read_only"),
         }
         bound.append(item)
     result["artifacts"] = bound

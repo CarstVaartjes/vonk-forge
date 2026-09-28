@@ -11,10 +11,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.models import Base, Job, RuntimeImageAuthorization, User
-from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityClaim,
-    RecipeImageAvailabilityService,
-)
+from vonk_control.recipe_image_availability import RecipeImageAvailabilityClaim
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
@@ -28,9 +25,11 @@ from .test_recipe_image_availability import (
     Transport,
     _add_head,
     _add_revision,
+    _builder,
     _recipe,
     _reference_receipt,
     _runtime,
+    _service,
 )
 
 _HOLD_LOCK = (
@@ -55,14 +54,14 @@ def _hold_lock(path: str) -> subprocess.Popen[str]:
 def claimed_image(tmp_path, postgres_engine):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     with sessions.begin() as session:
         revision = _add_revision(session, "claim-image", recipe)
         _add_head(session, revision)
     now = datetime.now(UTC)
     storage = FilesystemRuntimeImageStorage(tmp_path / "images")
     transport = Transport()
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=storage,
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
@@ -102,10 +101,11 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
 
     if boundary in {"success", "model_wait"}:
         receipt = prepare_runtime_image(
-            recipe,
+            recipe.model_dump(mode="json"),
             runtime=_runtime(),
             storage=storage,
             transport=transport,
+            build_receipt=_builder(storage)(recipe, _runtime(), claim=original),
             now=now,
         )
         with sessions.begin() as session:
@@ -115,14 +115,14 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
 
     with monkeypatch.context() as patch:
         if boundary == "progress":
-            pull = transport.pull_and_export
+            inspect = transport.inspect_archive
 
-            def pull_after_takeover(*args, **kwargs):
-                result = pull(*args, **kwargs)
+            def inspect_after_takeover(*args, **kwargs):
+                result = inspect(*args, **kwargs)
                 takeover()
                 return result
 
-            patch.setattr(transport, "pull_and_export", pull_after_takeover)
+            patch.setattr(transport, "inspect_archive", inspect_after_takeover)
         elif boundary == "model_progress":
 
             def observe_after_takeover(*_args, **_kwargs):
@@ -308,21 +308,21 @@ def test_cancelled_image_owner_recovers_after_publication_process_dies(claimed_i
 
 
 def test_contended_progress_releases_the_artifact_worker(claimed_image, monkeypatch):
-    sessions, service, _storage, transport, _recipe, _now, parent, claim = claimed_image
-    pull = transport.pull_and_export
+    sessions, service, storage, _transport, _recipe, _now, parent, claim = claimed_image
+    build = _builder(storage)
     blockers = []
 
-    def pull_while_owner_locked(*args, **kwargs):
-        evidence = pull(*args, **kwargs)
+    def build_while_owner_locked(*args, **kwargs):
+        receipt = build(*args, **kwargs)
         blocker = sessions()
         blockers.append(blocker)
         blocker.begin()
         assert blocker.get(Job, parent.id, with_for_update=True) is not None
-        kwargs["progress"]("download", 1, 1)
-        return evidence
+        kwargs["progress"]({"phase": "build"})
+        return receipt
 
     with monkeypatch.context() as patch:
-        patch.setattr(transport, "pull_and_export", pull_while_owner_locked)
+        patch.setattr(service, "_builder", build_while_owner_locked)
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(service.run_claim, claim)
             try:

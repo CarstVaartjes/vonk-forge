@@ -3,7 +3,7 @@
 This runbook describes implemented workload recovery. The
 [coordination architecture](../architecture-overview.md#coordination-and-deadlock-prevention)
 sets the required lock and scheduling boundaries. Recovery does not make
-arbitrary jobs, hooks, or upgrades safe to replay.
+arbitrary jobs or upgrades safe to replay.
 
 An accepted workload request remains the owner of its preparation, installation,
 runtime and route work until it completes, is cancelled, or is superseded by a
@@ -76,13 +76,10 @@ generation. Missing or stale Controller-observed presence is also a bounded
 wait; refreshed signed absence and presence resume the same run. These waits
 keep the route withdrawn and do not release claims. Singleton reboot recovery
 fails closed when the exact accepted compiled lifecycle plan differs from the
-installed plan or declares `pre_start` or `post_stop` hooks; this release does
-not replay hooks during recovery.
+installed plan.
 
-Hook-bearing plans remain fail-closed because their external effects cannot be
-replayed safely; the run reports which hook blocks recovery. One-shot jobs also
-remain fail-closed after a lost result because the job may already have produced
-external effects. Verify those effects before submitting a new authorized run.
+One-shot jobs remain fail-closed after a lost result because the job may already
+have produced external effects. Verify those effects before submitting a new authorized run.
 Builds and package upgrades do not inherit automatic workload replay. Invalid
 ownership, revoked authorization, malformed contracts, integrity failures and
 denied access remain explicit blockers.

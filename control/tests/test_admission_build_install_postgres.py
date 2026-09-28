@@ -16,8 +16,8 @@ from .test_recipe_operations import setup_services
 def test_source_build_plan_writer_and_install_retry_share_builder_admission(
     tmp_path, postgres_engine
 ) -> None:
-    sessions, operations, queue, mapping_id, installed_build_id, nodes = (
-        setup_services(tmp_path, engine=postgres_engine, model_artifact=True)
+    sessions, operations, queue, mapping_id, installed_build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine, model_artifact=True
     )
     build_sessions, bundles, build_now, builder_node_id, revision = setup_build(
         tmp_path,
@@ -74,7 +74,9 @@ def test_source_build_plan_writer_and_install_retry_share_builder_admission(
             owns_key = thread_id == owner_thread
         if owns_key:
             owner_has_key.set()
-            assert release_owner.wait(timeout=10), "test did not release the build writer"
+            assert release_owner.wait(timeout=10), (
+                "test did not release the build writer"
+            )
 
     def persist_source_build_plan():
         with build_sessions.begin() as session:
@@ -104,24 +106,33 @@ def test_source_build_plan_writer_and_install_retry_share_builder_admission(
                 assert queue.available == available_before
                 with sessions() as observer:
                     assert observer.get(RecipeBuild, prepared.build_id) is None
-                    assert tuple(
-                        observer.scalars(
-                            select(RecipeInstallation).where(
-                                RecipeInstallation.mapping_id == mapping_id
+                    assert (
+                        tuple(
+                            observer.scalars(
+                                select(RecipeInstallation).where(
+                                    RecipeInstallation.mapping_id == mapping_id
+                                )
                             )
                         )
-                    ) == ()
-                    assert observer.scalar(
-                        select(Job.id).where(Job.request_id == install_request_key)
-                    ) is None
-                    assert tuple(
-                        observer.execute(
-                            select(
-                                AgentNode.node_id,
-                                AgentNode.workload_intent_ordinal,
-                            ).where(AgentNode.node_id.in_(nodes))
+                        == ()
+                    )
+                    assert (
+                        observer.scalar(
+                            select(Job.id).where(Job.request_id == install_request_key)
                         )
-                    ) == ordinals_before
+                        is None
+                    )
+                    assert (
+                        tuple(
+                            observer.execute(
+                                select(
+                                    AgentNode.node_id,
+                                    AgentNode.workload_intent_ordinal,
+                                ).where(AgentNode.node_id.in_(nodes))
+                            )
+                        )
+                        == ordinals_before
+                    )
             finally:
                 release_owner.set()
             persisted = future.result(timeout=10)

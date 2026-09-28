@@ -39,12 +39,11 @@ class RecipeRevisionIntent(StrictJSONModel):
     build_input_sha256: Digest | None = None
     effective_execution_key: Digest | None = None
     force: bool = False
-    force_download: bool = False
     force_rebuild: bool = False
 
     @model_validator(mode="after")
     def one_image_action(self) -> RecipeRevisionIntent:
-        if sum((self.force, self.force_download, self.force_rebuild)) > 1:
+        if self.force and self.force_rebuild:
             raise ValueError("image actions are mutually exclusive")
         return self
 

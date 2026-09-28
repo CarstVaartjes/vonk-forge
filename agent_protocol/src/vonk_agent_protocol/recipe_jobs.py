@@ -289,20 +289,18 @@ class RecipeJobRunRequest(_RecipeJobModel):
             or plan.job.interface != self.interface
             or plan.job.timeout_seconds != self.timeout_seconds
             or plan.identity.recipe_revision_sha256 != self.recipe_content_sha256
-            or plan.runtime.image_digest != self.image_digest
+            or plan.runtime_image.image_digest != self.image_digest
             or (
                 placement.rank,
                 placement.role,
                 placement.reserved_memory_bytes,
                 placement.memory_floor_bytes,
-                placement.memory_kind,
             )
             != (
                 self.rank,
                 self.role,
                 self.reserved_memory_bytes,
                 self.memory_floor_bytes,
-                self.memory_kind,
             )
         ):
             raise ValueError("job invocation does not match request authority")

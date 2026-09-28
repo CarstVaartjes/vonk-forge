@@ -109,7 +109,6 @@ def derive_runtime_plan_binding(
                 runtime_target_id=stop.target_runtime_id,
                 runtime_installation_id=stop.installation_id,
             )
-        _reject_unhandled_stop_hooks(plan, action)
         return binding
     if operation.kind == "recipe.job.run.v1":
         job_plan = _parse_job_run(operation.payload)
@@ -143,7 +142,6 @@ def derive_runtime_plan_binding(
                 runtime_target_id=plan.target_runtime_id,
                 runtime_installation_id=plan.installation_id,
             )
-        _reject_unhandled_stop_hooks(plan, action)
         return binding
     if action is not ContainerRuntimeAction.STOP or operation.kind != "recipe.stop":
         raise RuntimePlanAuthorityError("lifecycle plan owner does not match action")
@@ -157,7 +155,6 @@ def derive_runtime_plan_binding(
         stop=stop,
         now=now,
     )
-    _reject_unhandled_stop_hooks(stop, action)
     return RuntimePlanBinding(
         stop_plan_sha256=_payload_sha256(stop),
         run_generation=stop.run_generation,
@@ -623,19 +620,6 @@ def _parse_stop(value: object) -> RecipeStopPayload:
         return RecipeStopPayload.model_validate_json(canonical_message(value))
     except (TypeError, ValueError) as error:
         raise RuntimePlanAuthorityError("durable Stop plan is invalid") from error
-
-
-def _reject_unhandled_stop_hooks(
-    plan: RecipeStartPayload | RecipeJobRunRequest | RecipeStopPayload,
-    action: ContainerRuntimeAction,
-) -> None:
-    if (
-        action is ContainerRuntimeAction.STOP
-        and plan.compiled_execution_plan.lifecycle.post_stop
-    ):
-        raise RuntimePlanAuthorityError(
-            "hook-bearing Stop requires lifecycle hook authority"
-        )
 
 
 def _payload_sha256(payload: object) -> str:

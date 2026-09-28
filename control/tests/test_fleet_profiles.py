@@ -573,7 +573,7 @@ def _database() -> sessionmaker[Session]:
 def _recipe_document() -> dict[str, object]:
     return json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
 
@@ -680,7 +680,7 @@ def _input(revision_id: str, *, name: str = "Studio ready") -> FleetProfileInput
             "favorite": True,
             "assignments": [
                 {
-                    "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                    "recipe_selector": "vonk-forge/synthetic-tiny-build",
                     "spark_ids": [_node_id(1)],
                     "desired_state": "running",
                     "assignment_name": "studio-chat",
@@ -1664,7 +1664,7 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
                 "name": "Dual plus solo",
                 "assignments": [
                     {
-                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
                         "spark_ids": [_node_id(1), _node_id(2)],
                         "desired_state": "running",
                         "assignment_name": "dual-chat",
@@ -2741,12 +2741,12 @@ def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
         )
     assignments = [
         FleetProfileAssignmentInput(
-            recipe_selector="vonk-forge/synthetic-tiny-image",
+            recipe_selector="vonk-forge/synthetic-tiny-build",
             spark_ids=[_node_id(2)],
             desired_state="installed",
         ),
         FleetProfileAssignmentInput(
-            recipe_selector="vonk-forge/synthetic-tiny-image",
+            recipe_selector="vonk-forge/synthetic-tiny-build",
             spark_ids=[_node_id(1)],
             desired_state="installed",
         ),
@@ -2854,7 +2854,7 @@ def test_profile_create_is_server_owned_validated_and_digest_stable() -> None:
     assert created == loaded
     assert listed.profiles == [created]
     assert created.name == "Studio ready"
-    assert created.assignments[0].recipe["name"] == "Synthetic Tiny image"
+    assert created.assignments[0].recipe["name"] == "Synthetic Tiny build"
     assert created.assignments[0].spark_ids == [_node_id(1)]
     assert len(created.profile_digest) == 64
     assert created.profile_digest == loaded.profile_digest
@@ -3249,7 +3249,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                 "name": "Dual",
                 "assignments": [
                     {
-                        "recipe_selector": "vonk-forge/synthetic-tiny-image",
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
                         "spark_ids": [_node_id(1), _node_id(2)],
                         "desired_state": "running",
                         "assignment_name": "dual-chat",

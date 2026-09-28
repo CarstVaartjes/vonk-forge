@@ -667,16 +667,12 @@ class LibraryProjection:
     @staticmethod
     def _recipe_resources(document: RecipeDefinition) -> LibraryResourceProjection:
         roles = document.topology.roles
-        memory = max(
-            (role.resources.memory.startup_peak_bytes for role in roles), default=None
-        )
+        memory = max((role.resources.memory.peak_bytes for role in roles), default=None)
         disk = max(
             (
                 role.resources.disk.image_bytes
                 + role.resources.disk.artifact_bytes
-                + role.resources.disk.staging_bytes
-                + role.resources.disk.cache_bytes
-                + role.resources.disk.rollback_bytes
+                + role.resources.disk.working_bytes
                 + role.resources.disk.safety_margin_bytes
                 for role in roles
             ),

@@ -242,7 +242,7 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     # _add_revision prefixes the revision key with ``document-`` for the
     # owning document identity, which is limited to 36 characters.
     recipe_revision_id = uuid.uuid4().hex[:24]

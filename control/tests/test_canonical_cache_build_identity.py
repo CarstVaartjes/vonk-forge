@@ -15,8 +15,6 @@ from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
 from vonk_control.recipe_builds import (
-    RecipeBuildError,
-    _canonical_build,
     derive_build_input_identity,
 )
 from vonk_control.runtime_adapters import resolve_runtime_adapter
@@ -350,7 +348,7 @@ def test_build_identity_binds_the_resolved_runtime_adapter() -> None:
         "arguments": [{"name": "flavor", "value": "release"}],
         "network": {"mode": "none", "hosts": []},
     }
-    adapter = resolve_runtime_adapter("vllm", {"mode": "single"})
+    adapter = resolve_runtime_adapter("vllm", {"node_count": 1})
     changed = replace(adapter, adapter_id=f"{adapter.adapter_id}-next")
 
     def identity(value) -> dict[str, object]:
@@ -365,22 +363,3 @@ def test_build_identity_binds_the_resolved_runtime_adapter() -> None:
     # the prepared-image cache key identical and reuses an unadapted image.
     assert identity(adapter) == identity(adapter)
     assert identity(adapter) != identity(changed)
-
-
-def test_prebuilt_recipe_does_not_enter_source_build_path() -> None:
-    image_recipe = {
-        "execution": {
-            "mode": "image",
-            "image": {
-                "repository": "runtime/image",
-                "digest": "a" * 64,
-                "platform": "linux/arm64",
-            },
-        }
-    }
-    try:
-        _canonical_build(image_recipe)
-    except RecipeBuildError as error:
-        assert error.code == "build.not_required"
-    else:
-        raise AssertionError("prebuilt recipe unexpectedly selected source build")

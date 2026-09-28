@@ -25,7 +25,6 @@ from vonk_control.availability_production import (
     build_recipe_image_availability,
 )
 from vonk_control.bounded_json import require_mapping
-from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.catalog_service import CatalogService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -77,7 +76,6 @@ class _Service(RecipeImageAvailabilityService):
             RecipeImageAvailabilityClaim(
                 operation_id="operation",
                 recipe_revision_id="revision",
-                image_identity=None,
                 build_input_sha256=None,
                 claim_owner="owner",
                 execution_attempt=1,
@@ -154,84 +152,6 @@ def test_production_factory_separates_api_service_and_worker_scheduler(
     assert scheduler.executor._shutdown is True
 
 
-def test_production_factory_claim_compiles_and_persists_sql_receipt(
-    tmp_path, monkeypatch
-) -> None:
-    recipe = RecipeDefinition.model_validate(
-        json.loads(
-            files("vonk_forge_contracts")
-            .joinpath("examples", "recipe-image.json")
-            .read_text()
-        )
-    )
-    model = json.loads(
-        files("vonk_forge_contracts")
-        .joinpath("examples", "model-definition.json")
-        .read_text()
-    )
-    engine = create_engine(f"sqlite:///{tmp_path / 'authority.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine)
-    now = datetime.now(UTC)
-    with sessions.begin() as session:
-        catalog = CatalogEntityService(session, clock=lambda: now)
-        model_revision = catalog.create_draft(model, actor="test")
-        catalog.resolve(model_revision.id, actor="test")
-        recipe_revision = catalog.create_draft(
-            recipe.model_dump(mode="json"), actor="test"
-        )
-        catalog.resolve(recipe_revision.id, actor="test")
-        recipe_revision_id = recipe_revision.id
-
-    class Transport:
-        def pull_and_export(self, reference, destination, **_kwargs):
-            archive = b"production availability archive"
-            destination.write_bytes(archive)
-            return PulledImageEvidence(
-                manifest_digest="sha256:" + "e" * 64,
-                requested_manifest_digest="sha256:" + "d" * 64,
-                config_id="sha256:" + "c" * 64,
-                local_reference=reference,
-                architecture="linux/arm64",
-                runtime_interface="v1",
-                archive_sha256=hashlib.sha256(archive).hexdigest(),
-                archive_bytes=len(archive),
-            )
-
-    monkeypatch.setattr(availability_production, "SkopeoOCIImageTransport", Transport)
-
-    class Settings:
-        agent_artifact_root = tmp_path / "artifacts"
-
-    production = build_recipe_image_availability(
-        sessions,
-        settings=Settings(),
-        managed_catalog_sync=None,
-        recipe_builds=object(),
-        recipe_operations=object(),
-        clock=lambda: now,
-    )
-    queued = production.service.start(
-        recipe_revision_id, actor="operator", request_id="r" * 36
-    )
-    claim = production.service.claim_pending(owner_id="worker-a")[0]
-    production.service.run_claim(claim)
-    assert production.service.get(queued.id).state == "succeeded"
-    with sessions() as session:
-        authorization = session.scalar(
-            select(RuntimeImageAuthorization).where(
-                RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id
-            )
-        )
-        assert authorization is not None
-        assert authorization.state == "authorized"
-        receipt = production.service._storage.read_receipt(
-            authorization.oci_archive_sha256
-        )
-        assert receipt.image_bytes == authorization.image_bytes
-    production.close()
-
-
 def test_recipe_download_api_reuses_verified_cached_source_build(
     tmp_path, monkeypatch
 ) -> None:
@@ -274,9 +194,6 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
     class NoNetworkTransport:
         def inspect_archive(self, *_args, **_kwargs):
             pytest.fail("a complete verified build receipt must be reused")
-
-        def pull_and_export(self, *_args, **_kwargs):
-            pytest.fail("source-build cache reuse must not download an image")
 
     monkeypatch.setattr(
         availability_production, "SkopeoOCIImageTransport", NoNetworkTransport
@@ -1376,7 +1293,6 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
             assert archive_path.exists()
             return PulledImageEvidence(
                 manifest_digest=image_digest,
-                requested_manifest_digest=None,
                 config_id="sha256:" + "b" * 64,
                 local_reference="localhost/vonk/recipe-build@" + image_digest,
                 architecture="linux/arm64",
