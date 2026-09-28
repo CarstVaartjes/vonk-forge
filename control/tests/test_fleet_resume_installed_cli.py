@@ -32,7 +32,7 @@ from vonk_control.models import (
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.operator_projection_api import FleetOperatorServices
 
-from .test_agent_upgrades import NODE_A, NODE_B, OLD_IDENTITY, PACKAGE, REVISION, SOURCE
+from .test_agent_upgrades import NODE_A, OLD_IDENTITY, PACKAGE, REVISION, SOURCE
 from .test_cli_first_connection_endpoints_installed import _Authority
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
@@ -52,7 +52,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     with sessions.begin() as session:
-        for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
+        for node_id, serial in ((NODE_A, "serial-a"),):
             session.add(
                 AgentNode(
                     node_id=node_id,
@@ -147,7 +147,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         receipt = json.loads(submitted.stdout)
         job_id = receipt["operation_id"]
         assert receipt["request_key"] == request_key
-        assert receipt["targets"] == [NODE_A, NODE_B]
+        assert receipt["targets"] == [NODE_A]
 
         first_attempt = operations.claim(
             NODE_A,
@@ -158,9 +158,8 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         )
         assert first_attempt is not None
         operations.fail(first_attempt, "agent upgrade request is invalid")
-        # The first helper refusal owns one automatic retry behind the full
-        # install recovery fence. Only the subsequent parked failure is an
-        # operator-resume decision.
+        # A helper refusal retries automatically behind the full install
+        # recovery fence.
         clock_value[0] += timedelta(seconds=961)
         child_attempt = operations.claim(
             NODE_A,
@@ -174,6 +173,18 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         assert child_attempt.attempt == 2
         operations.fail(child_attempt, "agent upgrade request is invalid")
         clock_value[0] += timedelta(minutes=2)
+        # Rollouts no longer park, but a rollout parked for an operator by an
+        # earlier Controller survives in upgraded databases. Operator resume of
+        # that row must still recheck the caller at the registered route.
+        with sessions.begin() as session:
+            job = session.get(Job, job_id)
+            child = session.get(AgentOperation, child_attempt.operation_id)
+            assert job is not None and child is not None
+            assert job.state == "queued"
+            job.state = "waiting-for-operator"
+            child.retry_disposition = None
+            child.retry_disposition_attempt = None
+            child.retry_due_at = None
 
         with sessions() as session:
             job = session.get(Job, job_id)
@@ -309,17 +320,6 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             assert child.state == "waiting-for-operator"
             assert after_denial == original_identity
             assert denied_attempt_audit == original_attempt_audit
-
-        assert (
-            operations.claim(
-                NODE_A,
-                "serial-a",
-                30,
-                capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-                runtime_identity=OLD_IDENTITY,
-            )
-            is None
-        )
 
         second_resume_start = len(peer.calls)
         resumed = run("fleet", "resume", job_id, "--yes", "--json")
