@@ -418,7 +418,10 @@ def _availability_consumer(parent: Job, build: RecipeBuild) -> bool:
     if payload.get("removed") is True or payload.get("removal_fence") is not None:
         return False
     read_availability_intent(payload["request"])
-    read_recipe(payload["recipe"])
+    recipe = payload["recipe"]
+    if not isinstance(recipe, Mapping):
+        raise TypeError("availability recipe is invalid")
+    read_recipe(recipe)
     runtime = payload["runtime"]
     if (
         payload["recipe_revision_id"] != build.recipe_revision_id
