@@ -50,7 +50,7 @@ pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
 def _cached_recipe(slug: str):
-    base = _recipe("recipe-image.json")
+    base = _recipe("recipe-source-build.json")
     execution = base.execution
     assert execution.mode == "image"
     image_digest = hashlib.sha256(slug.encode()).hexdigest()

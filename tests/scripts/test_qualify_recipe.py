@@ -99,13 +99,11 @@ def test_structural_examples_cover_source_job_and_dual_contracts() -> None:
     selected: dict[str, Path] = {}
     for path in _recipes(root):
         document = json.loads(path.read_text(encoding="utf-8"))
-        mode = document["execution"]["mode"]
         adapter = document["interfaces"][0]["adapter"]
         topology = document["topology"]["node_count"] > 1
-        selected.setdefault("source", path) if mode == "build" else None
+        selected.setdefault("source", path)
         selected.setdefault("job", path) if adapter != "openai" else None
         selected.setdefault("dual", path) if topology else None
-        selected.setdefault("image", path) if mode == "image" else None
     assert {"source", "job", "dual"} <= selected.keys()
     for path in selected.values():
         payload = _run(path, root)
@@ -113,8 +111,6 @@ def test_structural_examples_cover_source_job_and_dual_contracts() -> None:
         assert payload["physical_claim"] is False
         if path == selected.get("dual"):
             assert payload["compiled_roles"] > 1
-    if "image" in selected:
-        assert _run(selected["image"], root)["source_build"] is False
 
 
 def test_qualifier_local_http_persists_and_reloads_evidence_ledger(

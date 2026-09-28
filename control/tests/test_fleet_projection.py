@@ -79,7 +79,7 @@ def _canonical_catalog_documents(
     )
     recipe_document = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     recipe_document["identity"]["slug"] = slug

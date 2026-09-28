@@ -29,8 +29,6 @@ function detail(running = true): LibraryViewRecipeDetail {
     definition,
     topology: definition.topology,
     model_documents: [],
-    model_capabilities: {schema_version: 2, state: "unknown", facts: [], provenance: null, reasons: []},
-    recipe_capabilities: {schema_version: 2, state: "unknown", facts: [], provenance: null, reasons: []},
     operational_state: {builds: [], mappings: [], installations: [], runs: running ? [run] : []},
     placement: [],
     reasons: [],

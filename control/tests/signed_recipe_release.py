@@ -33,7 +33,7 @@ from vonk_control.recipe_release import (
     RecipeReleaseError,
 )
 
-RELEASE_TAG = "v1.0.0"
+RELEASE_TAG = "v2.0.0"
 _SIGNATURE_KIND = "vonk-forge-test-recipe-release-signature"
 _RELEASES = f"/repos/{PACKAGE_REPOSITORY}/releases"
 _DOWNLOAD = f"/{PACKAGE_REPOSITORY}/releases/download/{RELEASE_TAG}/"
@@ -139,17 +139,15 @@ class SignedRecipeRelease:
             RELEASE_BUNDLE: self.signature,
             **self.assets,
         }
-        if path in {f"{_RELEASES}/latest", f"{_RELEASES}/tags/{RELEASE_TAG}"}:
-            return httpx2.Response(
-                200,
-                json={
-                    "tag_name": RELEASE_TAG,
-                    "draft": False,
-                    "assets": [
-                        {"name": name, "state": "uploaded"} for name in sorted(served)
-                    ],
-                },
-            )
+        release = {
+            "tag_name": RELEASE_TAG,
+            "draft": False,
+            "assets": [{"name": name, "state": "uploaded"} for name in sorted(served)],
+        }
+        if path == _RELEASES:
+            return httpx2.Response(200, json=[release])
+        if path == f"{_RELEASES}/tags/{RELEASE_TAG}":
+            return httpx2.Response(200, json=release)
         if path.startswith(_DOWNLOAD) and path[len(_DOWNLOAD) :] in served:
             return httpx2.Response(
                 200,

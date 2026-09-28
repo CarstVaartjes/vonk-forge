@@ -64,11 +64,7 @@ def setup(
         .read_text()
     )
     if github_release_source:
-        model_document["access"] = {
-            "visibility": "public",
-            "gated": False,
-            "authentication": "none",
-        }
+        model_document["requires_token"] = False
         model_document["source"] = {
             "provider": "github-release",
             "repository": "https://github.com/valeoai/NAF",
@@ -89,15 +85,7 @@ def setup(
         model.model_dump(mode="json")
     )
     memory = document["topology"]["roles"][0]["resources"]["memory"]
-    memory.update(
-        {
-            "kind": memory_kind,
-            "startup_peak_bytes": 225,
-            "steady_state_bytes": 200,
-            "runtime_growth_bytes": 25,
-            "system_reserve_bytes": system_reserve,
-        }
-    )
+    memory.update({"peak_bytes": 225, "reserve_bytes": system_reserve})
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -158,9 +146,7 @@ def setup(
             schema_version=2,
             state="active",
             document=recipe_document,
-            content_digest=document_sha256(
-                RecipeDefinition.model_validate(document).model_dump(mode="json")
-            ),
+            content_digest=document_sha256(document),
             projected={},
             created_by="admin",
             created_at=now,

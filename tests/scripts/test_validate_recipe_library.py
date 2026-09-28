@@ -180,10 +180,7 @@ def test_contract_recipe_library_rejects_an_archive_without_recipe_entrypoint(
     for path in sorted((candidate / "recipes").glob("*.json")):
         document = json.loads(path.read_text())
         package_path = candidate / "packages" / f"{path.stem}.tar.gz"
-        if (
-            document.get("execution", {}).get("mode") == "build"
-            and package_path.is_file()
-        ):
+        if package_path.is_file():
             recipe_path = path
             recipe_document = document
             break

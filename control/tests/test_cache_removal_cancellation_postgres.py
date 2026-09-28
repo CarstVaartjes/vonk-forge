@@ -176,7 +176,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe_seed = _recipe("recipe-image.json")
+    recipe_seed = _recipe("recipe-source-build.json")
     partial_bytes = b"unique weights held before publication"
     shared_bytes = b"shr"
     model, recipe = _recipe_model_with_assets(

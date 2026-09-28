@@ -51,9 +51,13 @@ jobs:
       - name: Build recipe library index and packages
         run: .vonk-forge/scripts/build-recipe-library "$GITHUB_WORKSPACE"
 
+      # The candidate is validated with its own contract source, so a contract
+      # change in the recipe repository never waits for the Controller's pin.
+      # The validator refuses to run if another contract copy shadows it.
       - name: Validate recipe library
         run: |
           uv run --project .vonk-forge/control --frozen \
+            --with-editable "$GITHUB_WORKSPACE/contracts" \
             .vonk-forge/scripts/validate-recipe-library \
             --library-root "$GITHUB_WORKSPACE" \
             --platform-root "$GITHUB_WORKSPACE/.vonk-forge" \

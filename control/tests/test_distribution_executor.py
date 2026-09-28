@@ -1444,7 +1444,7 @@ def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
     _client, services, _tokens, clock = agent_system
     recipe_document = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     recipe_document["identity"]["slug"] = "published-fallback-guard"

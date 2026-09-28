@@ -35,12 +35,10 @@ from .availability_operation_failure import AvailabilityOperationFailure
 from .availability_recovery_action import AvailabilityRecoveryAction
 from .boolean_parameter import BooleanParameter
 from .bounded_error_response import BoundedErrorResponse
-from .build_argument import BuildArgument
 from .build_compatibility_evidence import BuildCompatibilityEvidence
 from .build_compatibility_evidence_state import BuildCompatibilityEvidenceState
 from .build_context import BuildContext
 from .build_network import BuildNetwork
-from .build_network_mode import BuildNetworkMode
 from .build_patch import BuildPatch
 from .build_source_evidence import BuildSourceEvidence
 from .build_source_evidence_state import BuildSourceEvidenceState
@@ -244,6 +242,7 @@ from .library_model_projection import LibraryModelProjection
 from .library_recipe_identity import LibraryRecipeIdentity
 from .library_recipe_model import LibraryRecipeModel
 from .library_recipe_projection import LibraryRecipeProjection
+from .library_release import LibraryRelease
 from .library_resource_projection import LibraryResourceProjection
 from .lifecycle_code_failure_result import LifecycleCodeFailureResult
 from .lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
@@ -263,9 +262,6 @@ from .mapping_selection import MappingSelection
 from .mapping_selection_action import MappingSelectionAction
 from .mapping_selection_parameters import MappingSelectionParameters
 from .memory_usage_uncertainty import MemoryUsageUncertainty
-from .model_access import ModelAccess
-from .model_access_authentication import ModelAccessAuthentication
-from .model_access_visibility import ModelAccessVisibility
 from .model_artifact_identity import ModelArtifactIdentity
 from .model_artifact_preparation import ModelArtifactPreparation
 from .model_artifact_preparation_completeness import ModelArtifactPreparationCompleteness
@@ -278,29 +274,16 @@ from .model_cache_operator_response_action import ModelCacheOperatorResponseActi
 from .model_cache_operator_response_state import ModelCacheOperatorResponseState
 from .model_cache_removal_request import ModelCacheRemovalRequest
 from .model_cache_removal_result import ModelCacheRemovalResult
-from .model_capabilities import ModelCapabilities
-from .model_capability_fact import ModelCapabilityFact
-from .model_capability_fact_capability import ModelCapabilityFactCapability
-from .model_capability_fact_evidence_status import ModelCapabilityFactEvidenceStatus
-from .model_capability_fact_support import ModelCapabilityFactSupport
-from .model_capability_provenance import ModelCapabilityProvenance
 from .model_definition import ModelDefinition
 from .model_definition_modalities_item import ModelDefinitionModalitiesItem
 from .model_detail_response import ModelDetailResponse
 from .model_family import ModelFamily
 from .model_file import ModelFile
 from .model_format import ModelFormat
-from .model_format_container import ModelFormatContainer
 from .model_identity import ModelIdentity
 from .model_library_response import ModelLibraryResponse
 from .model_license import ModelLicense
-from .model_limits import ModelLimits
-from .model_lineage import ModelLineage
-from .model_lineage_relation import ModelLineageRelation
-from .model_lineage_source import ModelLineageSource
 from .model_metadata import ModelMetadata
-from .model_parameters import ModelParameters
-from .model_provenance import ModelProvenance
 from .model_record import ModelRecord
 from .model_reference import ModelReference
 from .model_source import ModelSource
@@ -332,12 +315,9 @@ from .preparation_reason_severity import PreparationReasonSeverity
 from .projection_reason import ProjectionReason
 from .projection_reason_code import ProjectionReasonCode
 from .projection_reason_severity import ProjectionReasonSeverity
-from .recipe_benchmark import RecipeBenchmark
-from .recipe_benchmark_configuration import RecipeBenchmarkConfiguration
 from .recipe_build_cleanup_evidence import RecipeBuildCleanupEvidence
 from .recipe_build_definition import RecipeBuildDefinition
 from .recipe_build_evidence import RecipeBuildEvidence
-from .recipe_build_execution import RecipeBuildExecution
 from .recipe_build_policy import RecipeBuildPolicy
 from .recipe_build_policy_finding import RecipeBuildPolicyFinding
 from .recipe_cancellation_request import RecipeCancellationRequest
@@ -347,11 +327,7 @@ from .recipe_disk_resources import RecipeDiskResources
 from .recipe_download_request import RecipeDownloadRequest
 from .recipe_embedding_settings import RecipeEmbeddingSettings
 from .recipe_embedding_settings_knobs import RecipeEmbeddingSettingsKnobs
-from .recipe_fabric import RecipeFabric
-from .recipe_fabric_connectivity import RecipeFabricConnectivity
-from .recipe_failure_policy import RecipeFailurePolicy
-from .recipe_failure_policy_rank_loss import RecipeFailurePolicyRankLoss
-from .recipe_failure_policy_recovery import RecipeFailurePolicyRecovery
+from .recipe_execution import RecipeExecution
 from .recipe_generation_settings import RecipeGenerationSettings
 from .recipe_generation_settings_knobs import RecipeGenerationSettingsKnobs
 from .recipe_http_serving_request import RecipeHttpServingRequest
@@ -367,7 +343,6 @@ from .recipe_image_availability_child_state import RecipeImageAvailabilityChildS
 from .recipe_image_availability_response import RecipeImageAvailabilityResponse
 from .recipe_image_availability_response_state import RecipeImageAvailabilityResponseState
 from .recipe_image_availability_result import RecipeImageAvailabilityResult
-from .recipe_image_execution import RecipeImageExecution
 from .recipe_image_import_evidence import RecipeImageImportEvidence
 from .recipe_input_slot import RecipeInputSlot
 from .recipe_installation_change import RecipeInstallationChange
@@ -385,7 +360,6 @@ from .recipe_job_settings_knobs import RecipeJobSettingsKnobs
 from .recipe_library_response import RecipeLibraryResponse
 from .recipe_lifecycle import RecipeLifecycle
 from .recipe_memory_resources import RecipeMemoryResources
-from .recipe_memory_resources_kind import RecipeMemoryResourcesKind
 from .recipe_metadata import RecipeMetadata
 from .recipe_metadata_alignment_type_0 import RecipeMetadataAlignmentType0
 from .recipe_model_file import RecipeModelFile
@@ -405,16 +379,11 @@ from .recipe_presence_degraded_reason_type_0 import RecipePresenceDegradedReason
 from .recipe_presence_group_state import RecipePresenceGroupState
 from .recipe_presence_rank_state import RecipePresenceRankState
 from .recipe_provenance import RecipeProvenance
-from .recipe_provenance_source_kind import RecipeProvenanceSourceKind
 from .recipe_readiness import RecipeReadiness
 from .recipe_readiness_check import RecipeReadinessCheck
 from .recipe_readiness_check_state import RecipeReadinessCheckState
 from .recipe_reconcile_result import RecipeReconcileResult
 from .recipe_release import RecipeRelease
-from .recipe_release_change import RecipeReleaseChange
-from .recipe_release_change_kind import RecipeReleaseChangeKind
-from .recipe_release_history_entry import RecipeReleaseHistoryEntry
-from .recipe_release_history_entry_upgrade_effect import RecipeReleaseHistoryEntryUpgradeEffect
 from .recipe_retry_intent import RecipeRetryIntent
 from .recipe_revision_intent import RecipeRevisionIntent
 from .recipe_role_resources import RecipeRoleResources
@@ -433,7 +402,6 @@ from .recipe_start_rank_launch_evidence import RecipeStartRankLaunchEvidence
 from .recipe_start_single_evidence import RecipeStartSingleEvidence
 from .recipe_stop_result import RecipeStopResult
 from .recipe_topology import RecipeTopology
-from .recipe_topology_mode import RecipeTopologyMode
 from .recipe_topology_role import RecipeTopologyRole
 from .recipe_uninstall_result import RecipeUninstallResult
 from .recipe_update_child import RecipeUpdateChild
@@ -617,12 +585,10 @@ __all__ = (
     "AvailabilityRecoveryAction",
     "BooleanParameter",
     "BoundedErrorResponse",
-    "BuildArgument",
     "BuildCompatibilityEvidence",
     "BuildCompatibilityEvidenceState",
     "BuildContext",
     "BuildNetwork",
-    "BuildNetworkMode",
     "BuildPatch",
     "BuildSourceEvidence",
     "BuildSourceEvidenceState",
@@ -826,6 +792,7 @@ __all__ = (
     "LibraryRecipeIdentity",
     "LibraryRecipeModel",
     "LibraryRecipeProjection",
+    "LibraryRelease",
     "LibraryResourceProjection",
     "LifecycleCodeFailureResult",
     "LifecyclePreflightCheckpoint",
@@ -845,9 +812,6 @@ __all__ = (
     "MappingSelectionAction",
     "MappingSelectionParameters",
     "MemoryUsageUncertainty",
-    "ModelAccess",
-    "ModelAccessAuthentication",
-    "ModelAccessVisibility",
     "ModelArtifactIdentity",
     "ModelArtifactPreparation",
     "ModelArtifactPreparationCompleteness",
@@ -860,29 +824,16 @@ __all__ = (
     "ModelCacheOperatorResponseState",
     "ModelCacheRemovalRequest",
     "ModelCacheRemovalResult",
-    "ModelCapabilities",
-    "ModelCapabilityFact",
-    "ModelCapabilityFactCapability",
-    "ModelCapabilityFactEvidenceStatus",
-    "ModelCapabilityFactSupport",
-    "ModelCapabilityProvenance",
     "ModelDefinition",
     "ModelDefinitionModalitiesItem",
     "ModelDetailResponse",
     "ModelFamily",
     "ModelFile",
     "ModelFormat",
-    "ModelFormatContainer",
     "ModelIdentity",
     "ModelLibraryResponse",
     "ModelLicense",
-    "ModelLimits",
-    "ModelLineage",
-    "ModelLineageRelation",
-    "ModelLineageSource",
     "ModelMetadata",
-    "ModelParameters",
-    "ModelProvenance",
     "ModelRecord",
     "ModelReference",
     "ModelSource",
@@ -914,12 +865,9 @@ __all__ = (
     "ProjectionReason",
     "ProjectionReasonCode",
     "ProjectionReasonSeverity",
-    "RecipeBenchmark",
-    "RecipeBenchmarkConfiguration",
     "RecipeBuildCleanupEvidence",
     "RecipeBuildDefinition",
     "RecipeBuildEvidence",
-    "RecipeBuildExecution",
     "RecipeBuildPolicy",
     "RecipeBuildPolicyFinding",
     "RecipeCancellationRequest",
@@ -929,11 +877,7 @@ __all__ = (
     "RecipeDownloadRequest",
     "RecipeEmbeddingSettings",
     "RecipeEmbeddingSettingsKnobs",
-    "RecipeFabric",
-    "RecipeFabricConnectivity",
-    "RecipeFailurePolicy",
-    "RecipeFailurePolicyRankLoss",
-    "RecipeFailurePolicyRecovery",
+    "RecipeExecution",
     "RecipeGenerationSettings",
     "RecipeGenerationSettingsKnobs",
     "RecipeHttpServingRequest",
@@ -949,7 +893,6 @@ __all__ = (
     "RecipeImageAvailabilityResponse",
     "RecipeImageAvailabilityResponseState",
     "RecipeImageAvailabilityResult",
-    "RecipeImageExecution",
     "RecipeImageImportEvidence",
     "RecipeInputSlot",
     "RecipeInstallationChange",
@@ -967,7 +910,6 @@ __all__ = (
     "RecipeLibraryResponse",
     "RecipeLifecycle",
     "RecipeMemoryResources",
-    "RecipeMemoryResourcesKind",
     "RecipeMetadata",
     "RecipeMetadataAlignmentType0",
     "RecipeModelFile",
@@ -987,16 +929,11 @@ __all__ = (
     "RecipePresenceGroupState",
     "RecipePresenceRankState",
     "RecipeProvenance",
-    "RecipeProvenanceSourceKind",
     "RecipeReadiness",
     "RecipeReadinessCheck",
     "RecipeReadinessCheckState",
     "RecipeReconcileResult",
     "RecipeRelease",
-    "RecipeReleaseChange",
-    "RecipeReleaseChangeKind",
-    "RecipeReleaseHistoryEntry",
-    "RecipeReleaseHistoryEntryUpgradeEffect",
     "RecipeRetryIntent",
     "RecipeRevisionIntent",
     "RecipeRoleResources",
@@ -1015,7 +952,6 @@ __all__ = (
     "RecipeStartSingleEvidence",
     "RecipeStopResult",
     "RecipeTopology",
-    "RecipeTopologyMode",
     "RecipeTopologyRole",
     "RecipeUninstallResult",
     "RecipeUpdateChild",

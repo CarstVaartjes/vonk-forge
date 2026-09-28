@@ -225,7 +225,7 @@ def _die_after_published_checkpoint(root: str, counter: str) -> None:
         ),
     ):
         prepare_runtime_image(
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             runtime=_runtime(),
             storage=FilesystemRuntimeImageStorage(Path(root)),
             transport=SkopeoOCIImageTransport(),
@@ -260,7 +260,7 @@ def _die_after_receiptless_final(root: str, counter: str) -> None:
         ),
     ):
         prepare_runtime_image(
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             runtime=_runtime(),
             storage=FilesystemRuntimeImageStorage(Path(root)),
             transport=SkopeoOCIImageTransport(),
@@ -280,7 +280,7 @@ def test_prebuilt_pull_export_is_verified_and_receipt_is_immediately_readable(
         written.append(value)
 
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=transport,
@@ -312,7 +312,7 @@ def test_prebuilt_pull_export_is_verified_and_receipt_is_immediately_readable(
     assert len(transport.calls) == 1
 
     reused = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=transport,
@@ -328,7 +328,7 @@ def test_prebuilt_cache_reuse_ignores_editorial_recipe_digest(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     transport = TinyTransport()
-    original = _recipe("recipe-image.json")
+    original = _recipe("recipe-source-build.json")
     first = prepare_runtime_image(
         original,
         runtime=_runtime(),
@@ -361,7 +361,7 @@ def test_unparseable_prebuilt_receipt_is_replaced_from_verified_bytes(
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     transport = TinyTransport()
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=transport,
@@ -371,7 +371,7 @@ def test_unparseable_prebuilt_receipt_is_replaced_from_verified_bytes(
     value["image_digest"] = "sha256:" + "f" * 64
     receipt_path.write_text(json.dumps(value), encoding="utf-8")
     repaired = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=transport,
@@ -385,7 +385,7 @@ def test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -415,7 +415,7 @@ def test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived(
     # The scan discarded our own unusable receipt; preparation re-derives it.
     assert not receipt_path.exists()
     restored = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -438,7 +438,7 @@ def test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten(
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -459,7 +459,7 @@ def test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten(
     assert receipt_path.read_text(encoding="utf-8") == newer
     with pytest.raises(RuntimeImagePreparationError) as raised:
         prepare_runtime_image(
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             runtime=_runtime(),
             storage=storage,
             transport=TinyTransport(),
@@ -483,7 +483,7 @@ def test_current_receipt_parser_rejects_noncanonical_shape(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -500,7 +500,7 @@ def test_current_producer_parser_and_compiled_plan_consumer_preserve_archive_ide
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    raw_recipe = _recipe("recipe-image.json").model_dump(mode="json")
+    raw_recipe = _recipe("recipe-source-build.json").model_dump(mode="json")
     raw_recipe["runtime"]["engine"] = "vllm"
     raw_recipe["runtime"]["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
     recipe = RecipeDefinition.model_validate(raw_recipe)
@@ -531,7 +531,7 @@ def test_receipt_reader_requires_every_declared_field(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -802,7 +802,7 @@ def test_transport_digest_mismatch_does_not_publish_archive_or_receipt(
         RuntimeImagePreparationError, match="different recipe image digest"
     ):
         prepare_runtime_image(
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             runtime=_runtime(),
             storage=storage,
             transport=WrongDigest(),
@@ -832,7 +832,7 @@ def test_publication_callback_and_commit_share_the_exact_archive_lock(
 
     monkeypatch.setattr(storage, "commit", commit_while_locked)
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -881,7 +881,7 @@ def test_publication_contention_keeps_skopeo_blob_checkpoint_for_retry(
         pytest.raises(RuntimeImagePreparationError) as contended,
     ):
         prepare_runtime_image(
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             runtime=_runtime(),
             storage=storage,
             transport=transport,
@@ -900,7 +900,7 @@ def test_publication_contention_keeps_skopeo_blob_checkpoint_for_retry(
     stage = storage.published_stage_path(checkpoint.oci_archive_sha256)
     assert stage.read_bytes() == ARCHIVE
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=transport,
@@ -959,7 +959,7 @@ def test_process_death_after_checkpoint_reuses_export_after_restart(
         lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
     )
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=SkopeoOCIImageTransport(),
@@ -1023,7 +1023,7 @@ def test_process_death_after_final_link_repairs_receipt_from_checkpoint(
         lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
     )
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=SkopeoOCIImageTransport(),
@@ -1044,7 +1044,7 @@ def test_cancelled_owner_and_source_lock_loser_preserve_verified_stage(
         "vonk_control.runtime_image_preparation.subprocess.run",
         lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
     )
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     reference = (
         f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
     )
@@ -1110,7 +1110,7 @@ def test_oversized_published_stage_checkpoint_is_discarded_and_pulled_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     reference = (
         f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
     )
@@ -1143,7 +1143,7 @@ def test_nonregular_published_stage_checkpoint_is_discarded(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     reference = (
         f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
     )
@@ -1171,7 +1171,7 @@ def test_fifo_published_stage_checkpoint_is_discarded_without_blocking(
 ) -> None:
     root = tmp_path / "objects"
     storage = FilesystemRuntimeImageStorage(root)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     reference = (
         f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
     )
@@ -1280,7 +1280,7 @@ def test_receiptless_final_with_wrong_bytes_is_discarded_and_re_exported(
     )
     with pytest.raises(RuntimeImagePreparationError) as interrupted:
         prepare_runtime_image(
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             runtime=_runtime(),
             storage=storage,
             transport=SkopeoOCIImageTransport(),
@@ -1296,7 +1296,7 @@ def test_receiptless_final_with_wrong_bytes_is_discarded_and_re_exported(
         "vonk_control.runtime_image_preparation._atomic_json_replace", atomic_replace
     )
     repaired = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=SkopeoOCIImageTransport(),
@@ -1509,7 +1509,7 @@ def test_preparation_backfills_a_missing_build_input_identity(
 def test_verified_lookup_treats_a_vanished_archive_as_a_miss(tmp_path: Path) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -1559,7 +1559,7 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -1571,7 +1571,7 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
     execution_key = "f" * 64
     first_at = datetime.now(UTC)
     with Session(engine) as session:
-        _add_revision(session, revision_id, _recipe("recipe-image.json"))
+        _add_revision(session, revision_id, _recipe("recipe-source-build.json"))
         row = persist_runtime_image_receipt(
             session,
             recipe_revision_id=revision_id,
@@ -1632,7 +1632,7 @@ def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -1652,7 +1652,7 @@ def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
         "receipt": receipt,
     }
     session = Session(engine)
-    _add_revision(session, "revision-direct", _recipe("recipe-image.json"))
+    _add_revision(session, "revision-direct", _recipe("recipe-source-build.json"))
     session.flush()
     with pytest.raises(ValueError, match="not authorized"):
         resolve_persisted_runtime_image_receipt(session, **resolve_kwargs)
@@ -1691,7 +1691,7 @@ def test_one_verified_archive_serves_availability_and_launch_identities(
     """
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     receipt = prepare_runtime_image(
         recipe,
         runtime=_runtime(),
@@ -1944,7 +1944,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    original = _recipe("recipe-image.json")
+    original = _recipe("recipe-source-build.json")
     revised_raw = original.model_dump(mode="json")
     revised_raw["metadata"]["description"] = "Editorial notes only"
     revised = RecipeDefinition.model_validate(revised_raw)
@@ -2099,7 +2099,7 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
 def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     digest = document_sha256(recipe.model_dump(mode="json"))
     revision_id = "authority-revision"
     now = datetime.now(UTC)
@@ -2165,7 +2165,7 @@ def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(
 def test_runtime_image_authority_rejects_changed_current_execution_identity(
     tmp_path: Path,
 ) -> None:
-    original = _recipe("recipe-image.json")
+    original = _recipe("recipe-source-build.json")
     revised_raw = original.model_dump(mode="json")
     revised_raw["metadata"]["description"] = "Changed execution"
     revised = RecipeDefinition.model_validate(revised_raw)
@@ -2223,7 +2223,7 @@ def test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state
 
     with pytest.raises(RuntimeImagePreparationError, match="could not be persisted"):
         prepare_runtime_image(
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             runtime=_runtime(),
             storage=storage,
             transport=transport,
@@ -2231,7 +2231,7 @@ def test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state
         )
     assert len(transport.calls) == 1
     retry = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=transport,
@@ -2253,7 +2253,7 @@ def test_image_preparation_rejects_retired_runtime_interface_before_transport(
     transport = TinyTransport()
     with pytest.raises(RuntimeImagePreparationError, match="retired runtime_interface"):
         prepare_runtime_image(
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             runtime=runtime,
             storage=FilesystemRuntimeImageStorage(tmp_path / "objects"),
             transport=transport,
@@ -2465,7 +2465,7 @@ def test_stale_receipt_is_discarded_once_by_scan(
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     published = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),

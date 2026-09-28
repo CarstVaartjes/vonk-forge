@@ -573,7 +573,7 @@ def _database() -> sessionmaker[Session]:
 def _recipe_document() -> dict[str, object]:
     return json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
 

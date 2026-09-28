@@ -22,6 +22,8 @@ from functools import cached_property
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from vonk_forge_contracts import CONTRACT_MAJOR
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -80,7 +82,9 @@ class DatabaseWaitBudgets:
 DATABASE_WAIT_BUDGETS = DatabaseWaitBudgets()
 
 _AGENT_PROXY_AUTH_PATTERN = re.compile(rb"[A-Za-z0-9_-]{32,}\Z")
-_RELEASE_TAG = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+\Z")
+# Library releases follow the recipe contract version; only this Controller's
+# contract major can be pinned.
+_RELEASE_TAG = re.compile(rf"v{CONTRACT_MAJOR}\.[0-9]+\.[0-9]+\Z")
 _HOSTNAME = re.compile(
     r"(?=.{1,253}\Z)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
     r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\Z"

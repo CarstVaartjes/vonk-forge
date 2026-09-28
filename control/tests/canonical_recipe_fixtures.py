@@ -45,7 +45,9 @@ def canonical_model() -> ModelDefinition:
 
 
 def canonical_recipe() -> RecipeDefinition:
-    return RecipeDefinition.model_validate(canonical_example("recipe-image.json"))
+    return RecipeDefinition.model_validate(
+        canonical_example("recipe-source-build.json")
+    )
 
 
 def canonical_job_recipe() -> RecipeDefinition:

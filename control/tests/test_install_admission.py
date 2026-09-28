@@ -64,9 +64,7 @@ def _canonical_catalog_documents(
             "notice": "Synthetic test restrictions.",
         }
     model = ModelDefinition.model_validate(raw_model)
-    recipe_filename = (
-        "recipe-source-build.json" if recipe_mode == "build" else "recipe-image.json"
-    )
+    recipe_filename = "recipe-source-build.json"
     raw_recipe = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", recipe_filename)
@@ -81,9 +79,7 @@ def _canonical_catalog_documents(
         {
             "image_bytes": disk_estimates[0],
             "artifact_bytes": disk_estimates[1],
-            "staging_bytes": 20,
-            "cache_bytes": 0,
-            "rollback_bytes": 0,
+            "working_bytes": 20,
             "safety_margin_bytes": 10,
         }
     )
@@ -205,11 +201,7 @@ def _seed_canonical_catalog(
         stored_model_revision = session.get(CatalogDocumentRevision, MODEL_REVISION_ID)
         assert stored_model_revision is not None
         assert (
-            document_sha256(
-                ModelDefinition.model_validate(
-                    stored_model_revision.document
-                ).model_dump(mode="json")
-            )
+            document_sha256(stored_model_revision.document)
             == stored_model_revision.content_digest
         )
         stored_recipe_revision = session.get(

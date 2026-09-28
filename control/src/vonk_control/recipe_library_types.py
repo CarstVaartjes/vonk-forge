@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -67,6 +68,10 @@ class RecipeLibrarySnapshot:
     # Index documents skipped because they could not be read, each a
     # ``{"recipe_uri", "code", "detail"}`` sync problem.
     problems: tuple[dict[str, object], ...] = ()
+    # The library release version (its contract version) and when its
+    # recipes last changed.
+    version: str | None = None
+    updated_at: datetime | None = None
 
 
 __all__ = [

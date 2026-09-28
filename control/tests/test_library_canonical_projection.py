@@ -470,9 +470,7 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
 
     old_document = copy.deepcopy(model_revision.document)
     _document_section(old_document, "identity")["version"] = "0.0.1"
-    old_digest = document_sha256(
-        ModelDefinition.model_validate(old_document).model_dump(mode="json")
-    )
+    old_digest = document_sha256(old_document)
     old_revision = CatalogDocumentRevision(
         id=str(uuid.uuid4()),
         document_id=model_revision.document_id,

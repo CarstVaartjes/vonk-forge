@@ -89,9 +89,7 @@ function ModelRevisionsRow({api, revisions, onNavigate, onPrepared}: {api: Contr
     ?? revisions.find(item => item.recipes.length > 0) ?? revisions[0]!;
   const key = modelKey(model.model);
   const bytes = model.model_document.files.reduce((sum, file) => sum + file.size_bytes, 0);
-  const capabilities = (model.model_capabilities?.facts ?? [])
-    .filter(fact => fact.support === "supported")
-    .map(fact => fact.capability);
+  const capabilities = model.model_capabilities ?? [];
   const running = (model.local.running_on ?? []).length;
   const preparation = model.local.preparation;
   // A recipe may reference the same model in more than one selection with

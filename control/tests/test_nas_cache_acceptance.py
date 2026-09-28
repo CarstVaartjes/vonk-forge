@@ -139,7 +139,7 @@ def _seed_recipe_reference(
     slug = f"acceptance-{recipe_id[:8]}"
     document = json.loads(
         resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     document["identity"] = {"publisher": publisher, "slug": slug}

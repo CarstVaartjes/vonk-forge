@@ -163,11 +163,7 @@ PACKAGED_RUNTIME_IDENTITY = {
 def _canonical_recipe_fixture(
     slug: str, *, source: str = "published"
 ) -> tuple[dict[str, object], str]:
-    example = (
-        "recipe-source-build.json"
-        if source == "controller-build"
-        else "recipe-image.json"
-    )
+    example = "recipe-source-build.json"
     raw = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", example)

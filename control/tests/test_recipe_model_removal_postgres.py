@@ -57,7 +57,7 @@ from .test_recipe_image_availability import (
 def _recipe_using_model(
     model_digest: str, publisher: str, slug: str
 ) -> RecipeDefinition:
-    document = json.loads(_recipe("recipe-image.json").model_dump_json())
+    document = json.loads(_recipe("recipe-source-build.json").model_dump_json())
     assert isinstance(document, dict)
     models = document.get("models")
     assert isinstance(models, list) and len(models) == 1
@@ -371,7 +371,7 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = "rev-review-savepoint-001"
     receipt = _reference_receipt()
     with sessions.begin() as session:

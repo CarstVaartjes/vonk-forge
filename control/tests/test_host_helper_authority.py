@@ -311,7 +311,7 @@ def runtime_service(
     lifecycle = operation_kind in {"recipe.start", "recipe.job.run.v1"}
     recipe_raw = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     recipe_raw["identity"].update(publisher="vonk-forge", slug="authority-test")

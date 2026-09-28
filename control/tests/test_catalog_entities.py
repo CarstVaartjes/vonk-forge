@@ -45,13 +45,11 @@ def _recipe(
 ) -> dict[str, object]:
     """Return a validated canonical recipe document bound to *model*."""
 
-    recipe = _example("recipe-image.json")
+    recipe = _example("recipe-source-build.json")
     identity = recipe["identity"]
     assert isinstance(identity, dict)
     identity["slug"] = slug
-    _model_reference(recipe)["content_sha256"] = document_sha256(
-        ModelDefinition.model_validate(model).model_dump(mode="json")
-    )
+    _model_reference(recipe)["content_sha256"] = document_sha256(model)
     RecipeDefinition.model_validate(recipe)
     return recipe
 
@@ -62,10 +60,10 @@ def _metadata(document: dict[str, object]) -> dict[str, object]:
     return metadata
 
 
-def _provenance(document: dict[str, object]) -> dict[str, object]:
-    provenance = document["provenance"]
-    assert isinstance(provenance, dict)
-    return provenance
+def _license(document: dict[str, object]) -> dict[str, object]:
+    license_document = document["license"]
+    assert isinstance(license_document, dict)
+    return license_document
 
 
 def _model_reference(recipe: dict[str, object]) -> dict[str, object]:
@@ -226,7 +224,7 @@ def test_model_capability_revision_reuses_its_artifact_projection(
     first = _resolve(service, original)
     changed = copy.deepcopy(original)
     _metadata(changed)["description"] = "updated capability documentation"
-    _provenance(changed)["attribution"] = ["updated attribution"]
+    _license(changed)["attribution"] = ["updated attribution"]
     successor = service.revise(
         first.document_id, changed, actor="operator", expected_revision=1
     )
@@ -246,7 +244,7 @@ def test_recipe_reuse_keys_follow_effective_model_artifact(
 
     changed_model = copy.deepcopy(original)
     _metadata(changed_model)["description"] = "updated capability documentation"
-    _provenance(changed_model)["attribution"] = ["updated attribution"]
+    _license(changed_model)["attribution"] = ["updated attribution"]
     changed_model_revision = service.revise(
         model_revision.document_id,
         changed_model,

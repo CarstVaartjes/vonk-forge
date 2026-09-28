@@ -600,6 +600,12 @@ def _library(
     rows = _records(payload, "models" if noun == "model" else "recipes")
     cursor = payload.get("next_cursor")
     more = " (more available)" if isinstance(cursor, str) else ""
+    library = _optional(payload.get("library"), "library")
+    if library:
+        print(
+            f"Recipe library v{_text(library.get('version'))}, "
+            f"updated {_time(library.get('updated_at'))}"
+        )
     print(f"{noun.title()}s: {len(rows)}{more}")
     if not rows:
         print(f"No {noun}s match these filters.")

@@ -27,7 +27,7 @@ class RecipeRoleResources:
     """
         Attributes:
             disk (RecipeDiskResources):
-            memory (RecipeMemoryResources):
+            memory (RecipeMemoryResources): Unified (DGX Spark) memory one role needs.
      """
 
     disk: RecipeDiskResources

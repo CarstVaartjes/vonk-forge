@@ -55,7 +55,7 @@ def _hold_lock(path: str) -> subprocess.Popen[str]:
 def claimed_image(tmp_path, postgres_engine):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     with sessions.begin() as session:
         revision = _add_revision(session, "claim-image", recipe)
         _add_head(session, revision)

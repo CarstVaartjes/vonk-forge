@@ -284,7 +284,7 @@ def test_image_contention_resumes_after_release_without_exhausting_transfer_budg
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
