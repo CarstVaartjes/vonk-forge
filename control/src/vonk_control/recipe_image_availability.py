@@ -141,18 +141,24 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _CANCELLATION_UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
-# Only an invalid recipe/runtime contract, a withdrawn revision, or a revoked
-# authority is terminal. Every other failure, including integrity mismatches
-# (whose bytes are then downloaded or built again) and conflicts in our own
-# records, retries with capped backoff while the operation remains the
-# current intent.
+# Only an invalid recipe/runtime contract, a withdrawn revision, a revoked
+# authority, an untrusted source or redirect, or a conflicting registry/build
+# identity for the same bytes is terminal. Every other failure, including
+# integrity mismatches (whose bytes are then downloaded or built again) and
+# malformed records of our own, retries with capped backoff while the
+# operation remains the current intent.
 _TERMINAL_FAILURE_CODES = frozenset(
     {
         "recipe_image.recipe_invalid",
         "recipe_image.recipe_unavailable",
         "recipe_image.runtime_invalid",
+        "registry.destination_forbidden",
+        "registry.redirect_forbidden",
         "runtime_image.authorization_invalid",
         "runtime_image.authorization_revoked",
+        "runtime_image.image_unpinned",
+        "runtime_image.receipt_identity_conflict",
+        "runtime_image.source_mismatch",
     }
 )
 _MAX_RETRY_SECONDS = 900
@@ -5005,10 +5011,12 @@ class RecipeImageAvailabilityService:
                             reference.oci_archive_sha256,
                             existing_reference.oci_archive_sha256,
                         )
-                    # The latest attempt's output leads. This callback runs under the exact archive publication
-                    # lock. The prior attempt can no longer commit after this
-                    # owner transfer; the exact bytes remain protected without
-                    # opening a gap between provisional references.
+                    # The current attempt's output leads (only the current
+                    # claim reaches here). This callback runs under the exact
+                    # archive publication lock. The prior attempt can no
+                    # longer commit after this owner transfer; the exact bytes
+                    # remain protected without opening a gap between
+                    # provisional references.
                     payload["image_reference_intent"] = serialize_json_value(reference)
                     operation.payload = payload
                     operation.updated_at = now

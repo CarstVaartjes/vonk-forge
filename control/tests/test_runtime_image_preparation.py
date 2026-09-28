@@ -424,6 +424,52 @@ def test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived(
 
 
 @pytest.mark.parametrize(
+    "change",
+    [
+        {"schema_version": 3},
+        {"field_from_a_newer_contract": "value"},
+    ],
+    ids=["newer-schema-version", "unknown-field"],
+)
+def test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten(
+    tmp_path: Path, change: dict[str, object]
+) -> None:
+    """A mixed deploy must not delete a newer Controller's valid receipt."""
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    receipt_path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
+    value = json.loads(receipt_path.read_text(encoding="utf-8")) | change
+    newer = json.dumps(value)
+    receipt_path.write_text(newer, encoding="utf-8")
+
+    assert (
+        storage.find_published(
+            IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+    assert receipt_path.read_text(encoding="utf-8") == newer
+    with pytest.raises(RuntimeImagePreparationError) as raised:
+        prepare_runtime_image(
+            _recipe("recipe-image.json"),
+            runtime=_runtime(),
+            storage=storage,
+            transport=TinyTransport(),
+        )
+    assert raised.value.code == "runtime_image.receipt_contract_newer"
+    assert raised.value.retryable is True
+    assert receipt_path.read_text(encoding="utf-8") == newer
+
+
+@pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (lambda value: value.pop("runtime_interface_label"), "identity"),
@@ -1443,23 +1489,25 @@ def test_preparation_backfills_a_missing_build_input_identity(
         == repaired
     )
 
-    rebuilt = prepare_runtime_image(
-        _recipe("recipe-source-build.json"),
-        runtime=_runtime(),
-        storage=storage,
-        transport=TinyTransport(),
-        build_receipt={
-            "state": "succeeded",
-            "build_id": "build-1",
-            "build_input_sha256": "b" * 64,
-            "image_digest": BUILT_IMAGE_DIGEST,
-            "oci_layout_sha256": ARCHIVE_DIGEST,
-            "image_bytes": len(ARCHIVE),
-        },
-    )
-    # The newest build evidence for the same verified bytes leads.
-    assert rebuilt.build_input_sha256 == "b" * 64
-    assert storage.read_receipt(ARCHIVE_DIGEST).build_input_sha256 == "b" * 64
+    # A different build input claiming the same verified bytes is a build
+    # identity conflict: it is refused, never swapped under existing owners.
+    with pytest.raises(RuntimeImagePreparationError) as conflict:
+        prepare_runtime_image(
+            _recipe("recipe-source-build.json"),
+            runtime=_runtime(),
+            storage=storage,
+            transport=TinyTransport(),
+            build_receipt={
+                "state": "succeeded",
+                "build_id": "build-1",
+                "build_input_sha256": "b" * 64,
+                "image_digest": BUILT_IMAGE_DIGEST,
+                "oci_layout_sha256": ARCHIVE_DIGEST,
+                "image_bytes": len(ARCHIVE),
+            },
+        )
+    assert conflict.value.code == "runtime_image.receipt_identity_conflict"
+    assert storage.read_receipt(ARCHIVE_DIGEST).build_input_sha256 == build_input
 
 
 def test_verified_lookup_treats_a_vanished_archive_as_a_miss(tmp_path: Path) -> None:
@@ -1510,7 +1558,7 @@ def test_runtime_distribution_document_is_not_a_recipe_authority(
         )
 
 
-def test_published_receipt_persists_idempotently_and_refreshes_own_identity(
+def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
@@ -1566,10 +1614,13 @@ def test_published_receipt_persists_idempotently_and_refreshes_own_identity(
             "image_digest": BUILT_IMAGE_DIGEST,
         }
     )
-    with Session(engine) as session:
-        # Our own authorization record follows the newly verified receipt for
-        # the same archive instead of failing the preparation.
-        refreshed = persist_runtime_image_receipt(
+    with (
+        Session(engine) as session,
+        pytest.raises(RuntimeImagePreparationError, match="identity changed") as raised,
+    ):
+        # Admitted workloads are bound to the authorized identity, so the same
+        # bytes under another identity are refused rather than swapped.
+        persist_runtime_image_receipt(
             session,
             recipe_revision_id=revision_id,
             original_content_digest=original_digest,
@@ -1577,12 +1628,7 @@ def test_published_receipt_persists_idempotently_and_refreshes_own_identity(
             receipt=conflicting,
             verified_at=second_at,
         )
-        session.commit()
-        assert refreshed.oci_archive_sha256 == ARCHIVE_DIGEST
-        assert (
-            prefixed_image_digest(refreshed.platform_manifest_digest)
-            == BUILT_IMAGE_DIGEST
-        )
+    assert raised.value.code == "runtime_image.receipt_identity_conflict"
 
 
 def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
@@ -2491,7 +2537,7 @@ def test_stale_receipt_is_discarded_once_by_scan(
     assert raised.value.code == "runtime_image.receipt_unavailable"
 
 
-def test_own_receipt_with_a_different_identity_is_replaced_by_latest_evidence(
+def test_parseable_receipt_with_a_different_identity_stays_a_conflict(
     tmp_path: Path,
 ) -> None:
 
@@ -2529,9 +2575,10 @@ def test_own_receipt_with_a_different_identity_is_replaced_by_latest_evidence(
     disagreeing = existing.model_copy(update={"build_id": "build-two"})
     second = storage.prepare_path()
     second.write_bytes(archive)
-    replaced = storage.commit(second, receipt=disagreeing)
+    with pytest.raises(RuntimeImagePreparationError) as raised:
+        storage.commit(second, receipt=disagreeing)
 
-    # The receipt is our own derived record; the latest evidence for the same
-    # verified bytes replaces it instead of failing the preparation.
-    assert replaced.build_id == "build-two"
-    assert storage.read_receipt(digest) == replaced
+    # A parseable receipt binds these bytes to an identity that workloads may
+    # already use; it is never swapped underneath them.
+    assert raised.value.code == "runtime_image.receipt_identity_conflict"
+    assert storage.read_receipt(digest) == existing

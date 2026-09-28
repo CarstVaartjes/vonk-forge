@@ -715,10 +715,32 @@ class _ReceiptDocumentRejected(Exception):
     field read out of it.
     """
 
-    def __init__(self, code: str, detail: str) -> None:
+    def __init__(self, code: str, detail: str, *, own_stale: bool = True) -> None:
         self.code = code
         self.detail = detail
+        # False when the document may belong to a newer receipt contract
+        # (a higher or unknown schema version, or fields this contract does
+        # not know). Such a receipt is never deleted or overwritten here: a
+        # newer Controller in a mixed deploy may still rely on it.
+        self.own_stale = own_stale
         super().__init__(detail)
+
+
+def _receipt_may_be_newer(value: object, error: BaseException | None) -> bool:
+    """Whether a rejected receipt document may come from a newer contract."""
+
+    if not isinstance(value, Mapping):
+        return False
+    version = value.get("schema_version")
+    if type(version) is not int:
+        return "schema_version" in value
+    if version > 2:
+        return True
+    if version < 2:
+        return False
+    if isinstance(error, ValidationError):
+        return any(item.get("type") == "extra_forbidden" for item in error.errors())
+    return False
 
 
 def _load_receipt_document(path: Path) -> RuntimeImageReceipt:
@@ -744,13 +766,25 @@ def _load_receipt_document(path: Path) -> RuntimeImageReceipt:
             "runtime image receipt is not valid UTF-8 JSON",
         ) from error
     try:
-        return _parse_runtime_image_receipt(json.loads(text))
+        document = json.loads(text)
+    except ValueError as error:
+        raise _ReceiptDocumentRejected(
+            "runtime_image.receipt_unavailable",
+            "runtime image receipt identity is unavailable or malformed",
+        ) from error
+    try:
+        return _parse_runtime_image_receipt(document)
     except RuntimeImagePreparationError as error:
-        raise _ReceiptDocumentRejected(error.code, error.detail) from error
+        raise _ReceiptDocumentRejected(
+            error.code,
+            error.detail,
+            own_stale=not _receipt_may_be_newer(document, error.__cause__),
+        ) from error
     except (TypeError, ValueError) as error:
         raise _ReceiptDocumentRejected(
             "runtime_image.receipt_unavailable",
             "runtime image receipt identity is unavailable or malformed",
+            own_stale=not _receipt_may_be_newer(document, error),
         ) from error
 
 
@@ -1108,14 +1142,15 @@ def _authorize_current_revision(
             )
         existing = {key: getattr(authorization, key) for key in values}
         if existing != values:
-            # The archive digest is unchanged; our own record of its receipt
-            # identity is refreshed from the newly verified receipt.
-            _LOGGER.warning(
-                "refreshing runtime image authorization identity for archive %s",
-                receipt.oci_archive_sha256,
+            # Admitted workloads are bound to the authorized identity; the
+            # same bytes under another source or registry digest are refused
+            # rather than swapped underneath them.
+            raise RuntimeImagePreparationError(
+                "runtime_image.receipt_identity_conflict",
+                "durable runtime image receipt identity changed for the same bytes",
+                retryable=False,
+                recovery_actions=("inspect",),
             )
-            for key, value in values.items():
-                setattr(authorization, key, value)
         authorization.authorized_at = authorized_at
         authorization.state = "authorized"
     session.flush()
@@ -1722,8 +1757,17 @@ class FilesystemRuntimeImageStorage:
                     # the current contract cannot parse is stale metadata about
                     # those exact bytes -- not a conflicting identity.  Replace
                     # it below from the freshly validated receipt and record
-                    # the rule that rejected the old file.
+                    # the rule that rejected the old file.  A receipt that may
+                    # belong to a newer contract is left in place: this
+                    # preparation retries until the deploy has converged.
                     _log_rejected_receipt(receipt_path, rejection)
+                    if not rejection.own_stale:
+                        raise RuntimeImagePreparationError(
+                            "runtime_image.receipt_contract_newer",
+                            "runtime image receipt was written by a newer Controller contract",
+                            retryable=True,
+                            recovery_actions=("retry",),
+                        ) from rejection
                     existing_receipt = None
             if existing_receipt is not None and (
                 any(
@@ -1750,13 +1794,16 @@ class FilesystemRuntimeImageStorage:
                     not in {None, receipt.build_input_sha256}
                 )
             ):
-                # Our own receipt describes these verified bytes differently
-                # from the evidence just produced; the latest evidence leads.
-                _LOGGER.warning(
-                    "replacing runtime image receipt %s with a different identity",
-                    receipt.oci_archive_sha256,
+                # A valid receipt binds these bytes to another source, registry
+                # digest or build. Workloads and authorizations may already be
+                # bound to that identity, so it is never swapped underneath
+                # them: the registry/build authority conflict is refused.
+                raise RuntimeImagePreparationError(
+                    "runtime_image.receipt_identity_conflict",
+                    "content-addressed OCI archive already has a different immutable identity",
+                    retryable=False,
+                    recovery_actions=("inspect",),
                 )
-                existing_receipt = None
             if (
                 existing_receipt is not None
                 and existing_receipt.build_input_sha256 is None
@@ -2145,7 +2192,7 @@ class FilesystemRuntimeImageStorage:
         """
 
         archive_sha256 = receipt_path.name.removesuffix(".receipt.json")
-        if _SHA256.fullmatch(archive_sha256) is None:
+        if not rejection.own_stale or _SHA256.fullmatch(archive_sha256) is None:
             _log_rejected_receipt(receipt_path, rejection)
             return
         try:
@@ -2153,8 +2200,9 @@ class FilesystemRuntimeImageStorage:
                 try:
                     _load_receipt_document(receipt_path)
                     return
-                except _ReceiptDocumentRejected:
-                    pass
+                except _ReceiptDocumentRejected as current:
+                    if not current.own_stale:
+                        return
                 receipt_path.unlink(missing_ok=True)
         except (RuntimeImagePreparationError, OSError):
             _log_rejected_receipt(receipt_path, rejection)

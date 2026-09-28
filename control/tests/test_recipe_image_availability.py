@@ -143,6 +143,11 @@ def _progress_members(value: object) -> list[Mapping[str, object]]:
         ("runtime_image.archive_mismatch", None, "digest mismatch", True),
         ("recipe_image.other_failure", None, "permission denied", True),
         ("recipe_image.recipe_invalid", True, "network timeout", False),
+        ("registry.redirect_forbidden", True, "redirect", False),
+        ("registry.destination_forbidden", True, "not public", False),
+        ("runtime_image.image_unpinned", True, "not pinned", False),
+        ("runtime_image.receipt_identity_conflict", True, "identity", False),
+        ("runtime_image.receipt_contract_newer", True, "mixed deploy", True),
     ],
 )
 def test_job_retry_classification_uses_typed_codes(
