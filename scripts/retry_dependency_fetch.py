@@ -6,12 +6,21 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 
+# Every command here only acquires locked or digest-pinned inputs. A command
+# is matched on its executable name, so a path such as
+# control/web/node_modules/.bin/playwright is matched as ``playwright``.
 _COMMANDS = (
     ("uv", "sync"),
     ("skopeo", "inspect"),
     ("docker", "pull"),
     ("docker", "buildx", "imagetools", "inspect"),
+    ("git", "fetch"),
+    ("npm", "ci"),
+    ("cargo", "fetch"),
+    ("rustup", "toolchain", "install"),
+    ("playwright", "install"),
 )
 _PERMANENT = re.compile(
     r"authentication failed|unauthorized|forbidden|permission denied|access denied|"
@@ -24,7 +33,9 @@ _PERMANENT = re.compile(
 _TRANSIENT = re.compile(
     r"connection reset by peer|connection timed out|operation timed out|"
     r"temporary failure in name resolution|unexpected eof|tls handshake timeout|"
-    r"\b(?:429|500|502|503|504) (?:too many requests|internal server error|"
+    r"could not resolve host|early eof|rpc failed|remote end hung up unexpectedly|"
+    r"\b(?:econnreset|etimedout|eai_again|econnrefused)\b|socket hang up|"
+    r"spurious network error|\b(?:429|500|502|503|504) (?:too many requests|internal server error|"
     r"bad gateway|service unavailable|gateway time-?out)\b",
     re.IGNORECASE,
 )
@@ -40,9 +51,11 @@ def retryable(output: str) -> bool:
 
 def main(command: list[str] | None = None) -> int:
     command = sys.argv[1:] if command is None else command
-    if not any(tuple(command[: len(prefix)]) == prefix for prefix in _COMMANDS):
+    words = (Path(command[0]).name, *command[1:]) if command else ()
+    if not any(tuple(words[: len(prefix)]) == prefix for prefix in _COMMANDS):
         print(
-            "Only uv sync, skopeo inspect, docker pull and docker buildx imagetools inspect may be retried.",
+            "Only dependency acquisition may be retried: "
+            + ", ".join(" ".join(prefix) for prefix in _COMMANDS),
             file=sys.stderr,
         )
         return 64

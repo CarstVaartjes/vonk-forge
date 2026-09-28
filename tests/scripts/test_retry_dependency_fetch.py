@@ -62,6 +62,20 @@ def _fetcher(tmp_path, monkeypatch, messages, executable_name="uv"):
             ["docker", "pull", "example@sha256:" + "a" * 64],
             "failed to copy: unexpected status code: 504 Gateway Time-out",
         ),
+        (
+            ["git", "fetch", "--depth=1", "origin", "a" * 40],
+            "fatal: unable to access: Could not resolve host: github.com",
+        ),
+        (["npm", "ci"], "npm error code ECONNRESET"),
+        (
+            ["cargo", "fetch", "--locked"],
+            "warning: spurious network error (2 tries remaining)",
+        ),
+        (
+            ["rustup", "toolchain", "install", "1.98.1"],
+            "error: could not download file: operation timed out",
+        ),
+        (["playwright", "install", "chromium"], "Error: socket hang up"),
     ],
 )
 def test_transient_fetch_retries_without_publishing_partial_stdout(
@@ -120,7 +134,14 @@ def test_transient_failure_stops_at_attempt_limit(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "command",
-    [["uv", "run", "pytest"], ["docker", "build", "."], ["docker", "run", "example"]],
+    [
+        ["uv", "run", "pytest"],
+        ["docker", "build", "."],
+        ["docker", "run", "example"],
+        ["cargo", "build"],
+        ["npm", "test"],
+        ["git", "push"],
+    ],
 )
 def test_cannot_wrap_build_or_test_execution(tmp_path, monkeypatch, command):
     module = _module()

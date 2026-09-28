@@ -117,6 +117,6 @@ Run the disposable end-to-end container test against OrbStack or another test
 Docker engine (it creates and removes only uniquely named disposable containers):
 
 ```sh
-VONK_RUN_BACKUP_CONTAINER_TEST=1 uv run --project control --with-editable . \
+VONK_RUN_BACKUP_CONTAINER_TEST=1 uv run --project control --frozen \
   pytest -q deploy/compose/tests/test_postgres_backup_container.py
 ```

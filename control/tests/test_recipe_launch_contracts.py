@@ -1,18 +1,17 @@
-"""Compile every catalog role and validate its canonical launch contract.
+"""Every catalog rank compiles to a launch payload the agent protocol accepts.
 
-Uses real model/recipe definitions and the production runtime compiler with
-synthetic cache receipts. This proves structure, not downloaded bytes or
-hardware execution. Run inside the Controller environment with the matching
-recipe checkout as the positional argument.
+Uses the real model and recipe definitions of the canonical recipe library and
+the production runtime compiler with synthetic cache receipts. This proves
+structure, not downloaded bytes or hardware execution.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import statistics
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from vonk_agent_protocol import canonical_message, validate_compiled_execution_plan
 from vonk_control.compiled_execution_plan import compile_verified_execution_plan
@@ -20,6 +19,8 @@ from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placem
 from vonk_control.models import ClusterMappingNode
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+from .recipe_library_source import recipe_library_root
 
 
 def _package(recipe: RecipeDefinition) -> dict[str, object]:
@@ -90,7 +91,7 @@ def _image() -> dict[str, object]:
     }
 
 
-def check_catalog(root: Path) -> dict[str, object]:
+def check_catalog(root: Path) -> dict[str, Any]:
     models_by_digest: dict[str, ModelDefinition] = {}
     for path in (root / "models").glob("*.json"):
         model = ModelDefinition.model_validate(json.loads(path.read_text()))
@@ -121,7 +122,9 @@ def check_catalog(root: Path) -> dict[str, object]:
                     role=role_entry.name,
                     rank=rank,
                 )
-                runtime = _bind_runtime_artifacts(runtime, model_revisions)
+                runtime: dict[str, Any] = _bind_runtime_artifacts(
+                    runtime, model_revisions
+                )
                 selected = {
                     (
                         artifact["model"]["content_sha256"],
@@ -190,14 +193,9 @@ def check_catalog(root: Path) -> dict[str, object]:
     }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("library_root", type=Path)
-    args = parser.parse_args()
-    result = check_catalog(args.library_root.resolve())
-    print(json.dumps(result, indent=2))
-    return 1 if result["errors"] else 0
+def test_every_catalog_rank_compiles_to_a_valid_launch_payload() -> None:
+    result = check_catalog(recipe_library_root())
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    assert result["errors"] == []
+    assert result["validated_projections"] == result["projections"]
+    assert result["recipes"] > 0

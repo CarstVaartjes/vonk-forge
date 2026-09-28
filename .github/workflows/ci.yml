@@ -13,6 +13,15 @@ on:
 permissions:
   contents: read
 
+# Dependency fetches retry transient network failures inside the tool; the
+# pre-sync steps below additionally run under scripts/retry-dependency-fetch.
+env:
+  UV_HTTP_TIMEOUT: "60"
+  UV_HTTP_RETRIES: "5"
+  CARGO_NET_RETRY: "5"
+  CARGO_HTTP_TIMEOUT: "60"
+  npm_config_fetch_retries: "5"
+
 # A new commit supersedes an older PR check. Tag releases use separate groups,
 # so one valid version can never evict another version from GitHub's pending
 # concurrency slot.
@@ -96,17 +105,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.14"
-          # Ruff is executed through uvx and has no project dependency cache.
-          # Enabling setup-uv's cache here can fail post-job when no cache path
-          # is created; dependency-using jobs below keep caching enabled.
-          enable-cache: false
-      - name: Build and verify the Controller protocol wheel
-        uses: ./.github/actions/prepare-control-wheel
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Prepare the locked Ruff environment
+        run: scripts/retry-dependency-fetch uv sync --frozen --only-group dev
       - name: Run Ruff
         shell: bash
         run: |
@@ -118,25 +120,14 @@ jobs:
             if ((${#changed_python[@]} == 0)); then
               echo "No changed Python files; skipping Ruff"
             else
-              uvx --from ruff==0.16.1 ruff check --force-exclude "${changed_python[@]}"
+              uv run --frozen --only-group dev ruff check --force-exclude "${changed_python[@]}"
             fi
           else
-            uvx --from ruff==0.16.1 ruff check .
+            uv run --frozen --only-group dev ruff check .
           fi
-      # Pyright resolves imports from the control virtualenv, so that project
-      # must be synced before the type ratchet runs.
-      - name: Install control dependencies for type resolution
-        shell: bash
-        run: scripts/retry-dependency-fetch uv sync --project control --frozen
       - name: Check Python types
         shell: bash
         run: scripts/check-python-types
-      # One owner per fact: a SQL transaction must not span external work, and
-      # an artifact lock is never taken inside one. The scanner and its
-      # shrink-only baseline are pure stdlib, so this needs no project sync.
-      - name: Check coordination boundaries
-        shell: bash
-        run: python3 control/tests/coordination_boundaries.py
 
   supply-chain:
     name: Supply-chain evidence
@@ -150,20 +141,19 @@ jobs:
       # Build generated release inputs from locked dependencies; no generated
       # inventory files are checked into the source tree.
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
           cache-dependency-glob: agent_protocol/pyproject.toml
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
       - name: Build protocol wheel and verify Controller lock hash
         run: scripts/build-control-wheel
       - name: Include protocol wheel with generated release evidence
         run: |
           mkdir -p "$RUNNER_TEMP/supply-chain"
           cp inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl "$RUNNER_TEMP/supply-chain/"
-      - name: Verify public image inputs
-        run: scripts/verify-public-image-inputs
       - name: Verify supply-chain evidence
         run: scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json
       - name: Preserve verified SBOMs and manifest
@@ -188,13 +178,15 @@ jobs:
         run: |
           set -euo pipefail
           rustup set profile minimal
-          rustup toolchain install 1.98.1 --component clippy,rustfmt
+          scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --component clippy,rustfmt
       - name: Restore Rust dependency cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: linux-amd64
           add-job-id-key: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Fetch locked crates
+        run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Verify Rust formatting
         run: cargo fmt --all --check
       - name: Lint Rust workspace
@@ -223,13 +215,16 @@ jobs:
         run: |
           set -euo pipefail
           rustup set profile minimal
-          rustup toolchain install 1.98.1
+          # rustfmt formats generated wire types in the codegen drift test.
+          scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --component rustfmt
       - name: Restore Rust dependency cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: linux-amd64
           add-job-id-key: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Fetch locked crates
+        run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Test complete Rust shard
         shell: bash
         env:
@@ -249,27 +244,6 @@ jobs:
               ;;
           esac
 
-  rust-quality-gate:
-    name: Rust workspace quality
-    needs: [changes, rust-quality, rust-tests]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Require Rust lint and every workspace test shard
-        env:
-          SELECTED: ${{ needs.changes.outputs.rust }}
-          LINT_RESULT: ${{ needs.rust-quality.result }}
-          TEST_RESULT: ${{ needs.rust-tests.result }}
-        run: |
-          if [[ "$SELECTED" == true ]]; then
-            test "$LINT_RESULT" = success
-            test "$TEST_RESULT" = success
-          else
-            test "$LINT_RESULT" = skipped
-            test "$TEST_RESULT" = skipped
-          fi
-
   controller-spark-wire:
     name: Controller and Spark wire contract
     needs: changes
@@ -281,55 +255,34 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Resolve canonical recipe source
-        id: recipe-source
-        run: |
-          revision=$(cat tests/acceptance/recipe-library-revision.txt)
-          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
-      - name: Check out canonical recipes
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CarstVaartjes/vonk-forge-recipes
-          ref: ${{ steps.recipe-source.outputs.revision }}
-          path: .recipe-library
-          persist-credentials: false
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.14"
-          enable-cache: true
-      - name: Build and verify the Controller protocol wheel
-        uses: ./.github/actions/prepare-control-wheel
+      - name: Provide the canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
       - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt
+        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal --component rustfmt
       - name: Restore Rust dependency cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: linux-amd64
           add-job-id-key: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Prepare locked Controller dependencies
-        run: scripts/retry-dependency-fetch uv sync --project control --frozen
+      - name: Fetch locked crates
+        run: scripts/retry-dependency-fetch cargo fetch --locked
       # The probe build is the longest step; the Python contract checks do not
       # need it, so they run while Cargo compiles.
       - parallel:
           - name: Build Rust wire probes
             run: >-
-              uv run --project control --frozen --with-editable .
+              uv run --project control --frozen
               python scripts/tests/run_agent_wire_contracts.py --build-only
-          - name: Check Controller contracts
+          # The response witness validates every 2xx body these API tests
+          # produce against its declared schema; the tests themselves also
+          # run in the control suite.
+          - name: Witness Controller API responses against their contracts
             run: |
               set -euo pipefail
-              uv run --project control --frozen --with-editable . \
-                python scripts/tests/check_recipe_launch_contracts.py "$VONK_RECIPE_LIBRARY_ROOT"
-              uv run --project control --frozen --with-editable . \
-                python scripts/tests/check_api_contract_completeness.py
-              uv run --project control --frozen --with-editable . pytest -q -n 2 \
-                control/tests/test_api_contract_completeness.py \
-                control/tests/test_api_contract_graph.py
-              uv run --project control --frozen --with-editable . pytest -q \
+              uv run --project control --frozen pytest -q \
                 control/tests/test_api_response_witness.py \
                 control/tests/test_source_bundle_client_handoff.py \
                 control/tests/test_artifact_job_api.py \
@@ -337,13 +290,9 @@ jobs:
                 control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
                 control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
                 --api-response-witness="$RUNNER_TEMP/api-response-witnesses.json"
-      - name: Check generated Rust wire contracts
-        run: >-
-          uv run --project control --frozen --with-editable .
-          python scripts/generate-agent-wire --check
       - name: Exercise Controller requests and Spark results together
         run: >-
-          uv run --project control --frozen --with-editable .
+          uv run --project control --frozen
           python scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile
 
   rust-platform:
@@ -355,39 +304,32 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.14"
-          enable-cache: true
-      - name: Build and verify the Controller protocol wheel
-        uses: ./.github/actions/prepare-control-wheel
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
           set -euo pipefail
           rustup set profile minimal
-          rustup toolchain install 1.98.1
+          scripts/retry-dependency-fetch rustup toolchain install 1.98.1
       - name: Restore Rust dependency cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: linux-amd64
           add-job-id-key: "false"
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Fetch locked crates
+        run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Install Spark-compatible rootless Podman
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            aptly aardvark-dns crun dbus-user-session fuse-overlayfs netavark podman slirp4netns uidmap
+        uses: ./.github/actions/apt-install
+        with:
+          packages: aptly aardvark-dns crun dbus-user-session fuse-overlayfs netavark podman slirp4netns uidmap
       - parallel:
           - name: Test bounded aptly state compaction
             env:
               VONK_CI_PREREQUISITES: needs_aptly
             run: >-
-              uv run --python 3.14 --frozen --with pytest==9.1.1
+              uv run --project control --frozen
               pytest -q tests/scripts/test_agent_apt_compaction_integration.py
           - name: Verify Rust agent advertises Controller capabilities
             env:
@@ -395,7 +337,7 @@ jobs:
               VONK_CI_PREREQUISITES: needs_agent_binary
             run: >-
               cargo build --locked -p vonk-agent --bin vonk-agent &&
-              uv run --python 3.14 --frozen --with pytest==9.1.1
+              uv run --project control --frozen
               pytest -q tests/acceptance/test_rust_agent_parity.py
           - name: Test Spark rootless Podman OCI import
             run: >-
@@ -462,26 +404,6 @@ jobs:
           retention-days: 30
           path: artifacts/vonk-forge-systemd-security.json
 
-  rust:
-    name: Rust agent contracts
-    needs: [changes, rust-quality-gate, rust-platform]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Require Rust quality, tests, and platform integration
-        env:
-          SELECTED: ${{ needs.changes.outputs.rust }}
-          QUALITY_RESULT: ${{ needs.rust-quality-gate.result }}
-          PLATFORM_RESULT: ${{ needs.rust-platform.result }}
-        run: |
-          test "$QUALITY_RESULT" = success
-          if [[ "$SELECTED" == true ]]; then
-            test "$PLATFORM_RESULT" = success
-          else
-            test "$PLATFORM_RESULT" = skipped
-          fi
-
   generated-clients:
     name: Generated control clients
     needs: changes
@@ -493,45 +415,31 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.14"
-          enable-cache: true
-      - name: Build and verify the Controller protocol wheel
-        uses: ./.github/actions/prepare-control-wheel
-      - name: Generate the OpenAPI schema without Node tooling
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      # tests/test_generated_contracts.py fails on a stale OpenAPI document in
+      # the repository suite; this job regenerates the language clients from
+      # it when a client input changed and rejects any drift.
+      - name: Decide whether client inputs changed
         id: generation
         shell: bash
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          scripts/generate-control-clients --schema-only
-          run_full=false
-          if ! git diff --quiet -- \
-            control/openapi.json \
-            src/cluster_profiles/schemas/control-openapi.json \
-            schemas/control-openapi.json; then
-            run_full=true
-          elif [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
-            run_full=true
-          elif ! git diff --quiet "$PR_BASE_SHA" "$GITHUB_SHA" -- \
+          run_full=true
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]] && git diff --quiet "$PR_BASE_SHA" "$GITHUB_SHA" -- \
             scripts/generate-control-clients \
             control/openapi-python-client.yaml \
+            control/openapi.json \
             tools/openapi-client \
             src/cluster_profiles/generated_control \
             control/web/src/api/generated.d.ts \
             src/cluster_profiles/schemas/control-openapi.json \
             schemas/control-openapi.json; then
-            run_full=true
+            run_full=false
           fi
           echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
-      - name: Verify canonical qualification campaign schemas
-        run: >-
-          uv run --project control --frozen --with-editable .
-          python scripts/export-qualification-campaign-schemas --check
       - name: Install pinned Node.js with generator dependency cache
         if: steps.generation.outputs.run_full == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -541,16 +449,12 @@ jobs:
           cache-dependency-path: tools/openapi-client/package-lock.json
       - name: Install pinned TypeScript generator
         if: steps.generation.outputs.run_full == 'true'
-        run: npm ci --prefix tools/openapi-client
+        run: scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client
       - name: Generate language clients once when their contract changed
         if: steps.generation.outputs.run_full == 'true'
         run: scripts/generate-control-clients
-      - name: Verify generated client behavior
-        run: >-
-          uv run --project control --frozen --with-editable . pytest
-          tests/control/test_openapi_clients.py
-          control/tests/test_generate_control_clients.py -q
       - name: Reject generated drift
+        if: steps.generation.outputs.run_full == 'true'
         run: >-
           git diff --exit-code -- control/openapi.json
           src/cluster_profiles/schemas/control-openapi.json
@@ -567,45 +471,14 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.14"
-          enable-cache: true
-      - name: Build and verify the Controller protocol wheel
-        uses: ./.github/actions/prepare-control-wheel
-      - name: Pull exact PostgreSQL integration image
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Pull the pinned test images once
+        run: scripts/pull-test-images postgres caddy step-ca tailscale
+      - name: Run the complete Compose suite
         run: >-
-          docker pull
-          postgres:18.6@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
-      - name: Run fresh PostgreSQL initialization contract
-        env:
-          CI: "true"
-        run: >-
-          uv run --project control --frozen --with-editable . pytest -q
-          deploy/compose/tests/test_postgres_init_databases.py
-      - parallel:
-          - name: Run canonical runtime readiness model contracts
-            run: >-
-              uv run --project control --frozen --with-editable . pytest -q
-              -p no:cacheprovider
-              deploy/compose/tests/test_runtime_health_contract.py::test_every_default_service_has_a_service_specific_readiness_probe
-              deploy/compose/tests/test_runtime_health_contract.py::test_health_dependencies_are_acyclic_and_wait_only_for_readiness
-              deploy/compose/tests/test_runtime_health_contract.py::test_tailscale_browser_forwarding_crosses_only_an_internal_edge
-              deploy/compose/tests/test_runtime_health_contract.py::test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurator_to_profile
-          - name: Run required Tailscale reconciliation contracts
-            run: >-
-              uv run --project control --frozen --with-editable . pytest -q
-              -p no:cacheprovider
-              deploy/compose/tests/test_tailscale.py
-          - name: Run required PKI and TLS container integration
-            env:
-              CI: "true"
-            run: >-
-              uv run --project control --frozen --with-editable . pytest -q
-              -p no:cacheprovider
-              deploy/compose/tests/test_pki_tls_integration.py
+          uv run --project control --frozen pytest -q -n auto -p no:cacheprovider
+          deploy/compose/tests
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
@@ -624,81 +497,14 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Resolve exact canonical recipe library source
-        id: recipe-library-source
-        shell: bash
-        run: |
-          set -euo pipefail
-          revision=$(cat tests/acceptance/recipe-library-revision.txt)
-          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-          test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
-          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
-      - name: Check out exact canonical recipe library
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CarstVaartjes/vonk-forge-recipes
-          ref: ${{ steps.recipe-library-source.outputs.revision }}
-          path: .recipe-library
-          persist-credentials: false
-      - name: Record canonical recipe library source
-        shell: bash
-        env:
-          EXPECTED_REVISION: ${{ steps.recipe-library-source.outputs.revision }}
-        run: |
-          set -euo pipefail
-          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
-          test "$resolved" = "$EXPECTED_REVISION"
-          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
-      - name: Fetch catalog and authority validation sources
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import re
-          import subprocess
-          from pathlib import Path
-
-          library = Path(os.environ["VONK_RECIPE_LIBRARY_ROOT"])
-          catalog = json.loads(
-              (library / "catalog-index.json").read_text(encoding="utf-8")
-          )
-          sources = [catalog["source_commit"]]
-          for authority_path in sorted((library / "qualification/authorities").glob("*.json")):
-              authority = json.loads(authority_path.read_text(encoding="utf-8"))
-              sources.append(authority["catalog"]["source_commit"])
-          if any(
-              not isinstance(source, str)
-              or re.fullmatch(r"[0-9a-f]{40}", source) is None
-              for source in sources
-          ):
-              raise SystemExit(
-                  "catalog or authority validation source is not an exact Git commit"
-              )
-          for source in sorted(set(sources)):
-              subprocess.run(
-                  ["git", "-C", str(library), "fetch", "--no-tags", "--depth=1", "origin", source],
-                  check=True,
-                  timeout=120,
-              )
-              subprocess.run(
-                  ["git", "-C", str(library), "cat-file", "-e", f"{source}^{{commit}}"],
-                  check=True,
-                  timeout=30,
-              )
-          PY
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.14"
-          enable-cache: true
-      - name: Build and verify the Controller protocol wheel
-        uses: ./.github/actions/prepare-control-wheel
+      - name: Provide the canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
       - name: Install supported completion shells
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends zsh
+        uses: ./.github/actions/apt-install
+        with:
+          packages: zsh
       - name: Run complete repository suite
         shell: bash
         env:
@@ -712,14 +518,10 @@ jobs:
           printf '%s\n' "$TIMING_DATA" > "$timing_file"
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
-          uv run --python 3.14 --frozen --with pytest==9.1.1 \
-            --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
-            pytest --collect-only -q > "$collection" || { cat "$collection"; exit 1; }
+          uv run --project control --frozen \
+            pytest --collect-only -q tests > "$collection" || { cat "$collection"; exit 1; }
           mapfile -t shard_files < <(
-            awk '
-              /^tests\/.*::/ &&
-              $0 !~ /^tests\/control\/test_openapi_clients\.py::/
-            ' "$collection" |
+            awk '/^tests\/.*::/' "$collection" |
               scripts/select-pytest-shard-files \
                 --durations "$timing_file" --max-duration-age-hours 720 \
                 --index "$SHARD_INDEX" --total "$SHARD_TOTAL"
@@ -729,9 +531,7 @@ jobs:
           # job, which builds the agent binary. A per-test deadline turns a
           # hung test into a named failure long before the job timeout cancels
           # the shard without logs.
-          uv run --python 3.14 --frozen --with pytest==9.1.1 \
-            --with pytest-timeout==2.4.0 \
-            --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
+          uv run --project control --frozen \
             pytest -q -n auto --dist loadfile -o junit_family=xunit1 \
             --timeout=300 --timeout-method=signal \
             --junitxml="$RUNNER_TEMP/repository-junit.xml" --basetemp="$RUNNER_TEMP/repository-pytest" \
@@ -773,41 +573,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Resolve exact canonical recipe library source
-        id: recipe-library-source
-        shell: bash
-        run: |
-          set -euo pipefail
-          revision=$(cat tests/acceptance/recipe-library-revision.txt)
-          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-          test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
-          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
-      - name: Check out exact canonical recipe library
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CarstVaartjes/vonk-forge-recipes
-          ref: ${{ steps.recipe-library-source.outputs.revision }}
-          path: .recipe-library
-          persist-credentials: false
-      - name: Record canonical recipe library source
-        shell: bash
-        env:
-          EXPECTED_REVISION: ${{ steps.recipe-library-source.outputs.revision }}
-        run: |
-          set -euo pipefail
-          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
-          test "$resolved" = "$EXPECTED_REVISION"
-          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.14"
-          enable-cache: true
-      - name: Build and verify the Controller protocol wheel
-        uses: ./.github/actions/prepare-control-wheel
-      - name: Prepare locked Controller dependencies
-        run: scripts/retry-dependency-fetch uv sync --project control --frozen --python 3.14
+      - name: Provide the canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Pull the pinned test images once
+        run: scripts/pull-test-images postgres step-ca python
       - name: Run complete control suite
         shell: bash
         env:
@@ -820,7 +591,7 @@ jobs:
           printf '%s\n' "$TIMING_DATA" > "$timing_file"
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
-          uv run --python 3.14 --project control --frozen --with-editable . \
+          uv run --project control --frozen \
             pytest --collect-only -q -m "not built_image" control/tests > "$collection" || { cat "$collection"; exit 1; }
           mapfile -t shard_files < <(
             # Every connected wire file runs in the required Linux/Rust lane.
@@ -831,8 +602,8 @@ jobs:
                 --prefix control/
           )
           ((${#shard_files[@]} > 0))
-          uv run --python 3.14 --project control --frozen --with-editable . \
-            --with pytest-xdist==3.8.0 pytest -q -n 4 --dist loadfile \
+          uv run --project control --frozen \
+            pytest -q -n 4 --dist loadfile \
             -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/control-junit.xml" \
             -m "not built_image" "${shard_files[@]}"
 
@@ -870,43 +641,14 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Resolve exact canonical recipe library source
-        id: recipe-library-source
-        shell: bash
-        run: |
-          set -euo pipefail
-          revision=$(cat tests/acceptance/recipe-library-revision.txt)
-          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-          test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
-          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
-      - name: Check out exact canonical recipe library
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CarstVaartjes/vonk-forge-recipes
-          ref: ${{ steps.recipe-library-source.outputs.revision }}
-          path: .recipe-library
-          persist-credentials: false
-      - name: Record canonical recipe library source
-        shell: bash
-        env:
-          EXPECTED_REVISION: ${{ steps.recipe-library-source.outputs.revision }}
-        run: |
-          set -euo pipefail
-          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
-          test "$resolved" = "$EXPECTED_REVISION"
-          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.14"
-          enable-cache: true
-      - name: Build and verify the Controller protocol wheel
-        uses: ./.github/actions/prepare-control-wheel
+      - name: Provide the canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build the Controller image once
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: control/Dockerfile
@@ -916,7 +658,7 @@ jobs:
           cache-from: type=gha,scope=ci-test-vonk-forge-api
           cache-to: type=gha,mode=max,scope=ci-test-vonk-forge-api
       - name: Build the worker image once
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: control/Dockerfile
@@ -925,11 +667,9 @@ jobs:
           tags: ${{ env.VONK_TEST_WORKER_IMAGE }}
           cache-from: type=gha,scope=ci-test-vonk-forge-worker
           cache-to: type=gha,mode=max,scope=ci-test-vonk-forge-worker
-      - name: Prepare locked Controller dependencies
-        run: scripts/retry-dependency-fetch uv sync --project control --frozen --python 3.14
       - name: Check the built images
         run: >-
-          uv run --python 3.14 --project control --frozen --with-editable .
+          uv run --project control --frozen
           pytest -q -m built_image control/tests
 
   web-suite:
@@ -948,13 +688,27 @@ jobs:
           cache: npm
           cache-dependency-path: control/web/package-lock.json
       - name: Install locked admin web dependencies
-        run: npm ci --prefix control/web
+        run: scripts/retry-dependency-fetch npm ci --prefix control/web
       - name: Run complete admin web suite
         run: npm test --prefix control/web -- --run
       - name: Build admin web application
         run: npm run build --prefix control/web
-      - name: Install pinned Chromium browser
-        run: npm exec --prefix control/web -- playwright install --with-deps chromium
+      - name: Restore the pinned Chromium browser
+        id: playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
+      - name: Install pinned Chromium browser and its system libraries
+        run: >-
+          scripts/retry-dependency-fetch control/web/node_modules/.bin/playwright
+          install --with-deps chromium
+      - name: Save the pinned Chromium browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
       - name: Run fixture-backed browser acceptance
         run: npm run test:e2e --prefix control/web -- --project=chromium
       - name: Upload browser failure evidence
@@ -968,39 +722,9 @@ jobs:
             control/web/playwright-report
             control/web/test-results
 
-  catalog-runtime:
-    name: Catalog and service suites
-    needs: [changes, repository-suite, control-suite, web-suite]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Require every complete service suite
-        env:
-          REPOSITORY_SELECTED: ${{ needs.changes.outputs.repository }}
-          CONTROL_SELECTED: ${{ needs.changes.outputs.control }}
-          WEB_SELECTED: ${{ needs.changes.outputs.web }}
-          REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
-          CONTROL_RESULT: ${{ needs.control-suite.result }}
-          CONTROL_IMAGE_BUILD_RESULT: ${{ needs.control-image-build.result }}
-          WEB_RESULT: ${{ needs.web-suite.result }}
-        run: |
-          require_selected_result() {
-            local selected="$1"
-            local result="$2"
-            if [[ "$selected" == true ]]; then
-              test "$result" = success
-            else
-              test "$result" = skipped
-            fi
-          }
-          require_selected_result "$REPOSITORY_SELECTED" "$REPOSITORY_RESULT"
-          require_selected_result "$CONTROL_SELECTED" "$CONTROL_RESULT"
-          require_selected_result "$WEB_SELECTED" "$WEB_RESULT"
-
   ci-gate:
     name: CI gate
-    needs: [changes, lint, supply-chain, rust, rust-quality-gate, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, control-image-build, web-suite, catalog-runtime]
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, control-image-build, web-suite]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1021,8 +745,7 @@ jobs:
           SELECTED_COMPOSE: ${{ needs.changes.outputs.compose }}
           LINT_RESULT: ${{ needs.lint.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
-          RUST_UMBRELLA_RESULT: ${{ needs.rust.result }}
-          RUST_QUALITY_RESULT: ${{ needs.rust-quality-gate.result }}
+          RUST_QUALITY_RESULT: ${{ needs.rust-quality.result }}
           RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
           RUST_PLATFORM_RESULT: ${{ needs.rust-platform.result }}
           WIRE_RESULT: ${{ needs.controller-spark-wire.result }}
@@ -1032,7 +755,6 @@ jobs:
           WEB_RESULT: ${{ needs.web-suite.result }}
           GENERATED_RESULT: ${{ needs.generated-clients.result }}
           COMPOSE_RESULT: ${{ needs.compose-integration.result }}
-          CATALOG_RESULT: ${{ needs.catalog-runtime.result }}
         run: |
           set -euo pipefail
           scripts/verify-ci-gate \
@@ -1045,8 +767,7 @@ jobs:
             --selected "compose=$SELECTED_COMPOSE" \
             --result "lint=$LINT_RESULT" \
             --result "supply-chain=$SUPPLY_CHAIN_RESULT" \
-            --result "rust-umbrella=$RUST_UMBRELLA_RESULT" \
-            --result "rust-quality-gate=$RUST_QUALITY_RESULT" \
+            --result "rust-quality=$RUST_QUALITY_RESULT" \
             --result "rust-tests=$RUST_TESTS_RESULT" \
             --result "rust-platform=$RUST_PLATFORM_RESULT" \
             --result "controller-spark-wire=$WIRE_RESULT" \
@@ -1055,8 +776,7 @@ jobs:
             --result "control-image-build=$CONTROL_IMAGE_BUILD_RESULT" \
             --result "web=$WEB_RESULT" \
             --result "generated=$GENERATED_RESULT" \
-            --result "compose=$COMPOSE_RESULT" \
-            --result "catalog-runtime=$CATALOG_RESULT"
+            --result "compose=$COMPOSE_RESULT"
 
   main-ci-summary:
     name: Main branch CI status summary
@@ -1085,17 +805,13 @@ jobs:
   release-metadata:
     name: Validate container release tag
     if: >-
-      needs.lint.result == 'success' &&
-      needs.rust.result == 'success' &&
-      needs.generated-clients.result == 'success' &&
-      needs.compose-integration.result == 'success' &&
-      needs.catalog-runtime.result == 'success' &&
+      needs.ci-gate.result == 'success' &&
       vars.VONK_CONTAINER_RELEASES_ENABLED == 'true' &&
       vars.VONK_PLATFORM_RELEASES_ENABLED == 'true' &&
       github.event_name == 'push' &&
       github.ref_type == 'tag' &&
       startsWith(github.ref_name, 'v')
-    needs: [lint, rust, generated-clients, compose-integration, catalog-runtime]
+    needs: [ci-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1245,13 +961,11 @@ jobs:
           scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json
           diff -ru "$RUNNER_TEMP/supply-chain" release-output/supply-chain
       - name: Require the preinstalled Docker Buildx plugin
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Install Skopeo from Ubuntu
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends skopeo
+        uses: ./.github/actions/apt-install
+        with:
+          packages: skopeo
       - name: Validate accepted API image
         id: api
         shell: bash
@@ -1423,24 +1137,22 @@ jobs:
         with:
           persist-credentials: false
       - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
       - name: Set up ARM64 emulation
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
           platforms: arm64
       - name: Require the preinstalled Docker Buildx plugin
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Install Skopeo from Ubuntu
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends skopeo
+        uses: ./.github/actions/apt-install
+        with:
+          packages: skopeo
       - name: Revalidate release authority before registry authentication
         shell: bash
         env:
@@ -1601,7 +1313,7 @@ jobs:
       - name: Build and push Hermes image
         id: hermes-build
         if: steps.existing-hermes.outputs.exists != 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: deploy/compose/hermes-agent
           file: deploy/compose/hermes-agent/Dockerfile

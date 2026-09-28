@@ -320,7 +320,16 @@ def test_signed_update_installs_real_wheel_into_uv_venv(
             "VONK_BUILD_RELEASE_VERSION": version,
         }
         subprocess.run(
-            [uv, "build", "--wheel", "--offline", "--out-dir", str(directory)],
+            [
+                sys.executable,
+                "-m",
+                "hatchling",
+                "build",
+                "--target",
+                "wheel",
+                "--directory",
+                str(directory),
+            ],
             cwd=root,
             env=environment,
             check=True,
@@ -334,21 +343,8 @@ def test_signed_update_installs_real_wheel_into_uv_venv(
     old_wheel = build(tmp_path / "old", "c" * 40, "0.1.1")
     accepted_wheel = build(tmp_path / "accepted", "b" * 40, "1.2.3")
     environment = tmp_path / "cli-env"
-    subprocess.run(
-        [uv, "venv", "--python", "3.14", str(environment)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    python = environment / "bin" / "python"
+    python = _install_cli_wheel(uv, environment, old_wheel)
     installed_environment = {**os.environ, "PYTHONPATH": ""}
-    initial_install = subprocess.run(
-        [uv, "pip", "install", "--python", str(python), str(old_wheel)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert initial_install.returncode == 0, initial_install.stderr
     assert (
         subprocess.run(
             [str(python), "-m", "pip", "--version"], capture_output=True, check=False
@@ -590,3 +586,51 @@ def test_offline_version_and_json_command_do_not_schedule_notices(
     monkeypatch.setattr(cli.sys, "stderr", InteractiveError())
     assert cli.main(("--version",)) == 0
     assert cli.main(("--json", "profile", "list"), control_client=object()) == 0
+
+
+def _install_cli_wheel(uv: str, venv: Path, wheel: Path) -> Path:
+    """Install a built CLI wheel with --no-deps and link its locked dependencies.
+
+    scripts/sync-cli-dependencies prepares the CLI's own dependency
+    environment; the test never resolves or downloads a dependency.
+    """
+
+    root = Path(__file__).resolve().parents[2]
+    dependencies = sorted(
+        Path(
+            os.environ.get("VONK_CLI_DEPENDENCY_ENV", root / ".cli-dependencies")
+        ).glob("lib/python3.*/site-packages")
+    )
+    if not dependencies:
+        message = "the CLI dependency environment is missing; run scripts/sync-cli-dependencies"
+        if os.environ.get("CI", "").lower() == "true":
+            pytest.fail(message, pytrace=False)
+        pytest.skip(message)
+    subprocess.run(
+        [uv, "venv", "--python", sys.executable, str(venv)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    python = venv / "bin" / "python"
+    installed = subprocess.run(
+        [
+            uv,
+            "pip",
+            "install",
+            "--offline",
+            "--no-deps",
+            "--python",
+            str(python),
+            str(wheel),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert installed.returncode == 0, installed.stderr
+    [site_packages] = venv.glob("lib/python3.*/site-packages")
+    (site_packages / "vonk-cli-dependencies.pth").write_text(
+        f"{dependencies[0]}\n", encoding="utf-8"
+    )
+    return python

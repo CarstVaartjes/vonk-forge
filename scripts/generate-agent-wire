@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Generate (or check) Rust wire declarations from the current Pydantic graph."""
+"""Generate the Rust wire declarations from the current Pydantic graph.
+
+tests/test_generated_contracts.py fails when the committed JSON schemas are
+stale, and the vonk-wire-codegen crate's own test fails when generated.rs does
+not match the committed wire schema.
+"""
 
 from __future__ import annotations
 
@@ -12,25 +17,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
+    argparse.ArgumentParser(description=__doc__).parse_args()
     schema = ROOT / "rust/crates/vonk-agent-protocol/schema/wire.json"
     output = ROOT / "rust/crates/vonk-agent-protocol/src/generated.rs"
-    check = ["--check"] if args.check else []
     subprocess.run(
         [
             sys.executable,
             str(ROOT / "scripts/export-agent-wire-schema"),
             "--output",
             str(schema),
-            *check,
         ],
         cwd=ROOT,
         check=True,
     )
     subprocess.run(
-        [sys.executable, str(ROOT / "scripts/export-installer-release-schema"), *check],
+        [sys.executable, str(ROOT / "scripts/export-installer-release-schema")],
         cwd=ROOT,
         check=True,
     )
@@ -45,7 +46,6 @@ def main() -> None:
             "--",
             str(schema),
             str(output),
-            *check,
         ],
         cwd=ROOT,
         check=True,

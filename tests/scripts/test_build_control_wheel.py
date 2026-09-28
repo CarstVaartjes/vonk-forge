@@ -72,6 +72,30 @@ def _is_control_uv_step(step: dict[str, object]) -> bool:
     return isinstance(run, str) and CONTROL_UV_COMMAND.search(run) is not None
 
 
+_PREPARING_ACTIONS = {
+    "./.github/actions/prepare-control-wheel",
+    "./.github/actions/python-env",
+    "./.vonk-forge/.github/actions/prepare-control-wheel",
+}
+
+
+def _prepares_protocol_wheel(step: dict[str, object], same_step: bool) -> bool:
+    """The step builds the wheel, before its own control command if it has one."""
+
+    if step.get("uses") in _PREPARING_ACTIONS:
+        return True
+    run = step.get("run")
+    if not isinstance(run, str) or "scripts/build-control-wheel" not in run:
+        return False
+    if not same_step:
+        return True
+    control = CONTROL_UV_COMMAND.search(run)
+    return (
+        control is not None
+        and run.index("scripts/build-control-wheel") < control.start()
+    )
+
+
 def test_build_script_verifies_the_frozen_wheel_digest(tmp_path: Path) -> None:
     expected_bytes = b"reproducible protocol wheel"
     root, fake_bin = _repository(tmp_path, wheel_bytes=expected_bytes)
@@ -117,26 +141,17 @@ def test_every_control_workflow_builds_the_wheel_before_uv() -> None:
             if not any(_is_control_uv_step(step) for step in ordered_steps):
                 continue
             checked_jobs += 1
-            action = "./.github/actions/prepare-control-wheel"
-            if path.name == "validate-recipe-library.yml":
-                action = "./.vonk-forge/.github/actions/prepare-control-wheel"
-            action_index = next(
-                (
-                    index
-                    for index, step in enumerate(ordered_steps)
-                    if step.get("uses") == action
-                ),
-                None,
-            )
             first_control_run = next(
                 index
                 for index, step in enumerate(ordered_steps)
                 if _is_control_uv_step(step)
             )
-            assert action_index is not None, (
-                f"{path}: missing shared wheel preparation action"
-            )
-            assert action_index < first_control_run, (
+            prepared = [
+                index
+                for index, step in enumerate(ordered_steps[: first_control_run + 1])
+                if _prepares_protocol_wheel(step, index == first_control_run)
+            ]
+            assert prepared, (
                 f"{path}: Controller command runs before the protocol wheel is prepared"
             )
     assert checked_jobs >= 8
