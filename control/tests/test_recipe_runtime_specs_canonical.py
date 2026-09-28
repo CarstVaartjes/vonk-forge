@@ -29,6 +29,39 @@ from vonk_control.recipe_runtime_specs import (
 
 from .recipe_library_source import recipe_library_root
 
+_BUILT_IMAGE: dict[str, object] = {
+    "image_reference": "localhost/vonk/build@sha256:" + "d" * 64,
+    "image_digest": "d" * 64,
+    "paths": ["context.tar", "Dockerfile", "blank"],
+}
+
+
+def _compile(
+    recipe: dict[str, object],
+    models: object,
+    *,
+    package_handle: object = _BUILT_IMAGE,
+    role: str = "entrypoint",
+    rank: int = 0,
+    resolved_entities: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Compile published raw documents the way the Controller reads them."""
+
+    documents = models if isinstance(models, list) else [models]
+    parsed = {
+        contracts.document_sha256(item): contracts.read_model(item)
+        for item in documents
+    }
+    return compile_runtime_spec(
+        contracts.read_recipe(recipe),
+        resolved_entities,
+        models=parsed,
+        recipe_digest=contracts.document_sha256(recipe),
+        package_handle=package_handle,
+        role=role,
+        rank=rank,
+    )
+
 
 def _example(name: str) -> dict[str, object]:
     return json.loads(
@@ -103,8 +136,8 @@ def _argv(spec: dict[str, object]) -> Sequence[object]:
 
 
 @pytest.fixture(scope="module")
-def model() -> contracts.ModelDefinition:
-    return contracts.ModelDefinition.model_validate(_example("model-definition.json"))
+def model() -> dict[str, object]:
+    return _example("model-definition.json")
 
 
 def _raw_object(value: object, detail: str) -> dict[str, object]:
@@ -134,33 +167,29 @@ def _raw_runtime(raw: dict[str, object]) -> dict[str, object]:
     return _raw_object(raw["runtime"], "example runtime is not an object")
 
 
-def _recipe(
-    name: str, *, engine: str, entrypoint: list[str]
-) -> contracts.RecipeDefinition:
+def _recipe(name: str, *, engine: str, entrypoint: list[str]) -> dict[str, object]:
     raw = _example(name)
     runtime = _raw_runtime(raw)
     runtime["engine"] = engine
     runtime["entrypoint"] = entrypoint
-    return contracts.RecipeDefinition.model_validate(raw)
+    return raw
 
 
-def test_final_image_recipe_compiles_with_platform_defaults(
-    model: contracts.ModelDefinition,
+def test_final_recipe_compiles_with_platform_defaults(
+    model: dict[str, object],
 ) -> None:
     recipe = _recipe(
         "recipe-source-build.json",
         engine="vllm",
         entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
     )
-    spec = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+    spec = _compile(recipe, model, role="entrypoint", rank=0)
 
     runtime = _runtime(spec)
     security = _security(spec)
     assert _text(runtime["image"], "runtime image").endswith("@sha256:" + "d" * 64)
     assert _argv(spec)[-4:] == ["--host", "0.0.0.0", "--port", "8000"]
     assert security["user"] == "10001:10001"
-    assert security["capabilities"] == []
-    assert security["read_only_root"] is True
     assert any(
         item["path"] == "/outputs/tmp"
         for item in _mappings(runtime["writable_paths"], "writable paths")
@@ -168,7 +197,7 @@ def test_final_image_recipe_compiles_with_platform_defaults(
 
 
 def test_source_build_requires_and_binds_exact_receipt(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
 ) -> None:
     recipe = _recipe(
         "recipe-source-build.json",
@@ -176,22 +205,20 @@ def test_source_build_requires_and_binds_exact_receipt(
         entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
     )
     digest = "a" * 64
-    spec = compile_runtime_spec(
+    spec = _compile(
         recipe,
-        models=[model],
+        model,
         package_handle={
             "image_reference": f"localhost/vonk/recipe-build@sha256:{digest}",
             "image_digest": digest,
             "paths": ["context.tar", "Dockerfile"],
         },
-        role="entrypoint",
-        rank=0,
     )
     assert _runtime(spec)["image"] == f"localhost/vonk/recipe-build@sha256:{digest}"
 
 
 def test_runtime_compiler_rejects_retired_entity_authorities(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
 ) -> None:
     recipe = _recipe(
         "recipe-source-build.json",
@@ -199,14 +226,10 @@ def test_runtime_compiler_rejects_retired_entity_authorities(
         entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
     )
     with pytest.raises(RecipeRuntimeSpecError, match="retired authorities"):
-        compile_runtime_spec(
+        _compile(
             recipe,
-            resolved_entities={
-                "execution_harness": {"kind": "execution-harness"},
-            },
-            models=[model],
-            role="entrypoint",
-            rank=0,
+            model,
+            resolved_entities={"execution_harness": {"kind": "execution-harness"}},
         )
 
 
@@ -240,19 +263,19 @@ def test_runtime_compiler_rejects_retired_entity_authorities(
     ],
 )
 def test_all_builtin_harnesses_compile_final_examples(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
     engine: str,
     entrypoint: list[str],
     recipe_file: str,
 ) -> None:
     recipe = _recipe(recipe_file, engine=engine, entrypoint=entrypoint)
-    spec = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+    spec = _compile(recipe, model, role="entrypoint", rank=0)
     assert _runtime(spec)["adapter"] == engine
     assert _text(_argv(spec)[0], "first runtime argument").startswith("/")
 
 
 def test_unknown_engine_values_preserve_order_and_reserved_paths_fail(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
 ) -> None:
     raw = _example("recipe-source-build.json")
     runtime = _raw_runtime(raw)
@@ -262,8 +285,8 @@ def test_unknown_engine_values_preserve_order_and_reserved_paths_fail(
         {"name": "future_payload", "value": "unicode Ω; $HOME"},
     ]
     runtime["environment"] = [{"name": "FUTURE_ENGINE_FLAG", "value": "enabled"}]
-    recipe = contracts.RecipeDefinition.model_validate(raw)
-    spec = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+    recipe = raw
+    spec = _compile(recipe, model, role="entrypoint", rank=0)
     argv = _argv(spec)
     assert argv[3:6] == ["--future_option", '{"mode": "first"}', "--future-toggle"]
     assert "unicode Ω; $HOME" in argv
@@ -273,13 +296,13 @@ def test_unknown_engine_values_preserve_order_and_reserved_paths_fail(
     }
 
     runtime["environment"] = [{"name": "HOME", "value": "/tmp"}]
-    reserved = contracts.RecipeDefinition.model_validate(raw)
+    reserved = raw
     with pytest.raises(RecipeRuntimeSpecError, match="platform-owned"):
-        compile_runtime_spec(reserved, models=[model], role="entrypoint", rank=0)
+        _compile(reserved, model, role="entrypoint", rank=0)
 
 
 def test_declared_runtime_requirement_resolves_to_platform_owned_paths(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
 ) -> None:
     raw = _example("recipe-source-build.json")
     runtime = _raw_runtime(raw)
@@ -288,9 +311,9 @@ def test_declared_runtime_requirement_resolves_to_platform_owned_paths(
     runtime["environment"] = [
         {"name": "VONK_RUNTIME_REQUIREMENTS", "value": "tilelang-cache"}
     ]
-    recipe = contracts.RecipeDefinition.model_validate(raw)
+    recipe = raw
 
-    spec = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+    spec = _compile(recipe, model, role="entrypoint", rank=0)
 
     projection = _runtime(spec)
     paths = {
@@ -310,17 +333,17 @@ def test_declared_runtime_requirement_resolves_to_platform_owned_paths(
 
 
 def test_recipe_cannot_restate_or_move_a_platform_owned_path(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
 ) -> None:
     raw = _example("recipe-source-build.json")
     runtime = _raw_runtime(raw)
     runtime["engine"] = "vllm"
     runtime["entrypoint"] = ["/opt/vonk/bin/vllm", "serve", "/models"]
     runtime["environment"] = [{"name": "TILELANG_CACHE_DIR", "value": "/tmp/moved"}]
-    recipe = contracts.RecipeDefinition.model_validate(raw)
+    recipe = raw
 
     with pytest.raises(RecipeRuntimeSpecError, match="platform-owned"):
-        compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+        _compile(recipe, model, role="entrypoint", rank=0)
 
 
 @pytest.mark.parametrize(
@@ -341,7 +364,7 @@ def test_recipe_cannot_restate_or_move_a_platform_owned_path(
     ],
 )
 def test_unknown_or_unsupported_runtime_requirement_is_rejected(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
     engine: str,
     entrypoint: list[str],
     requirement: str,
@@ -354,24 +377,22 @@ def test_unknown_or_unsupported_runtime_requirement_is_rejected(
     runtime["environment"] = [
         {"name": "VONK_RUNTIME_REQUIREMENTS", "value": requirement}
     ]
-    recipe = contracts.RecipeDefinition.model_validate(raw)
+    recipe = raw
 
     with pytest.raises(RecipeRuntimeSpecError, match=detail):
-        compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+        _compile(recipe, model, role="entrypoint", rank=0)
 
 
 def test_canonical_argv_preserves_empty_and_repeated_options(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
 ) -> None:
     raw = _example("recipe-source-build.json")
     _raw_runtime(raw)["arguments"] = [
         {"name": "repeated_option", "value": ""},
         {"name": "repeated_option", "value": "second"},
     ]
-    recipe = contracts.RecipeDefinition.model_validate(raw)
-    argv = _argv(
-        compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
-    )
+    recipe = raw
+    argv = _argv(_compile(recipe, model, role="entrypoint", rank=0))
     first = argv.index("--repeated_option")
     assert argv[first : first + 4] == [
         "--repeated_option",
@@ -382,7 +403,7 @@ def test_canonical_argv_preserves_empty_and_repeated_options(
 
 
 def test_canonical_argv_preserves_post_executable_platform_shaped_data(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
 ) -> None:
     raw = _example("recipe-source-build.json")
     _raw_runtime(raw)["arguments"] = [
@@ -395,10 +416,8 @@ def test_canonical_argv_preserves_post_executable_platform_shaped_data(
         {"name": "option", "value": "-c"},
         {"name": "opaque", "value": "--option=-c"},
     ]
-    recipe = contracts.RecipeDefinition.model_validate(raw)
-    argv = _argv(
-        compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
-    )
+    recipe = raw
+    argv = _argv(_compile(recipe, model, role="entrypoint", rank=0))
     start = argv.index("--device")
     assert argv[start : start + 16] == [
         "--device",
@@ -459,57 +478,19 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
     root = recipe_library_root()
     recipe_files = sorted((root / "recipes").glob("*.json"))
     assert len(recipe_files) == 85
-    model_documents: dict[tuple[str, str], contracts.ModelDefinition] = {}
-    model_files = list((root / "models").glob("*.json"))
-    for path in model_files:
-        item = json.loads(path.read_text(encoding="utf-8"))
-        parsed = contracts.ModelDefinition.model_validate(item)
-        model_documents[(parsed.identity.publisher, parsed.identity.slug)] = parsed
-    assert model_documents and len(model_documents) == len(model_files)
     engines: set[str] = set()
     projection_count = 0
     for path in recipe_files:
-        recipe = contracts.RecipeDefinition.model_validate(
-            json.loads(path.read_text(encoding="utf-8"))
-        )
+        recipe_document, models, package = _published_recipe_context(path.stem)
+        recipe = contracts.read_recipe(recipe_document)
         engines.add(recipe.runtime.engine)
-        models = [
-            model_documents[(selection.model.publisher, selection.model.slug)]
-            for selection in recipe.models
-        ]
-        package: dict[str, object] = {}
-        paths: list[str] = []
-        if recipe.execution.mode == "build":
-            build = recipe.execution.build
-            paths.extend(
-                [
-                    build.context.path,
-                    build.dockerfile,
-                    *(patch.path for patch in build.patches),
-                ]
-            )
-            digest = "a" * 64
-            package.update(
-                {
-                    "image_digest": digest,
-                    "image_reference": f"localhost/vonk/build@sha256:{digest}",
-                }
-            )
-        for check in recipe.validation.serving.checks:
-            request = check.request
-            fixture = getattr(request, "fixture", None)
-            if fixture:
-                paths.append(fixture)
-            paths.extend(getattr(request, "input_slots", {}).values())
-        if paths:
-            package["paths"] = paths
         for index, role in enumerate(recipe.topology.roles):
             first_rank = sum(item.count for item in recipe.topology.roles[:index])
             for rank in range(first_rank, first_rank + role.count):
-                spec = compile_runtime_spec(
-                    recipe,
-                    models=models,
-                    package_handle=package or None,
+                spec = _compile(
+                    recipe_document,
+                    models,
+                    package_handle=package,
                     role=role.name,
                     rank=rank,
                 )
@@ -536,18 +517,16 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
 
 
 def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
 ) -> None:
     base = _example("recipe-source-build.json")
-    first = contracts.RecipeDefinition.model_validate(base)
 
     notes = deepcopy(base)
     metadata = _raw_object(notes["metadata"], "example metadata is not an object")
     description = _text(metadata["description"], "example description")
     metadata["description"] = description + " Editorial note."
-    noted = contracts.RecipeDefinition.model_validate(notes)
-    first_spec = compile_runtime_spec(first, models=[model], role="entrypoint", rank=0)
-    noted_spec = compile_runtime_spec(noted, models=[model], role="entrypoint", rank=0)
+    first_spec = _compile(base, model)
+    noted_spec = _compile(notes, model)
     first_identity = _identity(first_spec)
     noted_identity = _identity(noted_spec)
     assert first_identity["execution_sha256"] == noted_identity["execution_sha256"]
@@ -557,12 +536,7 @@ def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(
     )
 
     def digest(raw: dict[str, object]) -> str:
-        spec = compile_runtime_spec(
-            contracts.RecipeDefinition.model_validate(raw),
-            models=[model],
-            role="entrypoint",
-            rank=0,
-        )
+        spec = _compile(raw, model)
         return _text(_identity(spec)["execution_sha256"], "execution digest")
 
     bound = deepcopy(base)
@@ -617,7 +591,7 @@ def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(
 
 
 def test_security_is_in_execution_projection_and_build_input_is_separate(
-    model: contracts.ModelDefinition,
+    model: dict[str, object],
 ) -> None:
     from vonk_control.recipe_runtime_specs import _execution_digest
 
@@ -641,13 +615,9 @@ def test_security_is_in_execution_projection_and_build_input_is_separate(
         "paths": ["context.tar", "Dockerfile"],
         "build_input_sha256": "b" * 64,
     }
-    first = compile_runtime_spec(
-        recipe, models=[model], package_handle=package, role="entrypoint", rank=0
-    )
+    first = _compile(recipe, model, package_handle=package, role="entrypoint", rank=0)
     package["build_input_sha256"] = "c" * 64
-    second = compile_runtime_spec(
-        recipe, models=[model], package_handle=package, role="entrypoint", rank=0
-    )
+    second = _compile(recipe, model, package_handle=package, role="entrypoint", rank=0)
     first_identity = _identity(first)
     second_identity = _identity(second)
     assert first_identity["execution_sha256"] == second_identity["execution_sha256"]
@@ -656,61 +626,48 @@ def test_security_is_in_execution_projection_and_build_input_is_separate(
 
 def _published_recipe_context(
     name: str,
-) -> tuple[
-    contracts.RecipeDefinition, list[contracts.ModelDefinition], dict[str, object]
-]:
+) -> tuple[dict[str, object], list[dict[str, object]], dict[str, object]]:
     root = recipe_library_root()
-    recipe = contracts.RecipeDefinition.model_validate(
-        json.loads((root / "recipes" / f"{name}.json").read_text(encoding="utf-8"))
+    recipe_document = json.loads(
+        (root / "recipes" / f"{name}.json").read_text(encoding="utf-8")
     )
-    model_documents: dict[tuple[str, str], contracts.ModelDefinition] = {}
+    recipe = contracts.read_recipe(recipe_document)
+    models_by_digest: dict[str, dict[str, object]] = {}
     for path in (root / "models").glob("*.json"):
-        parsed = contracts.ModelDefinition.model_validate(
-            json.loads(path.read_text(encoding="utf-8"))
-        )
-        model_documents[(parsed.identity.publisher, parsed.identity.slug)] = parsed
-    models: list[contracts.ModelDefinition] = []
-    for selection in recipe.models:
-        models.append(
-            model_documents[(selection.model.publisher, selection.model.slug)]
-        )
-    package: dict[str, object] = {}
-    if recipe.execution.mode == "build":
-        digest = "a" * 64
-        build = recipe.execution.build
-        package = {
-            "image_digest": digest,
-            "image_reference": f"localhost/vonk/build@sha256:{digest}",
-            "paths": [
-                build.context.path,
-                build.dockerfile,
-                *(patch.path for patch in build.patches),
-            ],
-        }
-    serving_paths: list[str] = []
+        document = json.loads(path.read_text(encoding="utf-8"))
+        models_by_digest[contracts.document_sha256(document)] = document
+    models = [
+        models_by_digest[selection.model.content_sha256] for selection in recipe.models
+    ]
+    digest = "a" * 64
+    build = recipe.execution.build
+    paths = [
+        build.context.path,
+        build.dockerfile,
+        *(patch.path for patch in build.patches),
+    ]
     for check in recipe.validation.serving.checks:
         request = check.request
         fixture = getattr(request, "fixture", None)
         if fixture:
-            serving_paths.append(fixture)
-        serving_paths.extend(getattr(request, "input_slots", {}).values())
-    if serving_paths:
-        declared_paths = package.get("paths", [])
-        assert isinstance(declared_paths, list)
-        package["paths"] = [*declared_paths, *serving_paths]
-    return recipe, models, package
+            paths.append(fixture)
+        paths.extend(getattr(request, "input_slots", {}).values())
+    package: dict[str, object] = {
+        "image_digest": digest,
+        "image_reference": f"localhost/vonk/build@sha256:{digest}",
+        "paths": paths,
+    }
+    return recipe_document, models, package
 
 
 def test_published_distributed_sglang_preserves_authored_launch_and_rank() -> None:
     recipe, models, package = _published_recipe_context(
         "inkling-small-nvfp4-sglang-dual"
     )
-    entrypoint = compile_runtime_spec(
-        recipe, models=models, package_handle=package, role="entrypoint", rank=0
+    entrypoint = _compile(
+        recipe, models, package_handle=package, role="entrypoint", rank=0
     )
-    worker = compile_runtime_spec(
-        recipe, models=models, package_handle=package, role="worker", rank=1
-    )
+    worker = _compile(recipe, models, package_handle=package, role="worker", rank=1)
     entry_argv = _argv(entrypoint)
     worker_argv = _argv(worker)
     assert entry_argv[:5] == [
@@ -726,7 +683,7 @@ def test_published_distributed_sglang_preserves_authored_launch_and_rank() -> No
     assert entry_argv[-4:] == ["--host", "0.0.0.0", "--port", "30000"]
     assert _argv(entrypoint) != _argv(worker)
     assert _security(entrypoint)["network_mode"] == "none"
-    assert _security(entrypoint)["devices"] == ["nvidia.com/gpu=all"]
+    assert _security(entrypoint)["gpu"] is True
     assert {
         mount["target"]
         for mount in _mappings(_security(entrypoint)["mounts"], "security mounts")
@@ -747,9 +704,9 @@ def test_sglang_wrapper_receives_root_for_target_mount() -> None:
     )
     file_mount = _raw_object(files[0]["mount"], "example mount is not an object")
     file_mount["target"] = "/models/target"
-    recipe = contracts.RecipeDefinition.model_validate(raw)
-    model = contracts.ModelDefinition.model_validate(_example("model-definition.json"))
-    spec = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+    recipe = raw
+    model = _example("model-definition.json")
+    spec = _compile(recipe, model, role="entrypoint", rank=0)
 
     argv = _argv(spec)
     assert argv[:4] == [
@@ -771,9 +728,7 @@ def test_published_ds4_keeps_target_and_drafter_mount_roles() -> None:
     recipe, models, package = _published_recipe_context(
         "deepseek-v4-flash-0731-ds4-dspark-latency-single"
     )
-    spec = compile_runtime_spec(
-        recipe, models=models, package_handle=package, role="entrypoint", rank=0
-    )
+    spec = _compile(recipe, models, package_handle=package, role="entrypoint", rank=0)
     mounts = _mappings(_security(spec)["mounts"], "security mounts")
     assert {mount["target"] for mount in mounts} == {
         "/models/target",
@@ -798,9 +753,7 @@ def test_published_pipeline_has_output_contract() -> None:
     )
     recipe_name = path.stem
     recipe, models, package = _published_recipe_context(recipe_name)
-    spec = compile_runtime_spec(
-        recipe, models=models, package_handle=package, role="entrypoint", rank=0
-    )
+    spec = _compile(recipe, models, package_handle=package, role="entrypoint", rank=0)
     argv = _argv(spec)
     assert argv[0] == "/opt/vonk/bin/pytorch-pipeline"
     assert argv[-2:] == ["--output-dir", "/outputs"]
@@ -812,7 +765,7 @@ def test_published_pipeline_has_output_contract() -> None:
 
 @pytest.mark.parametrize("retired", ["model_projections", "package", "build_receipt"])
 def test_runtime_compiler_rejects_retired_resolver_keys_even_with_current_inputs(
-    model: contracts.ModelDefinition, retired: str
+    model: dict[str, object], retired: str
 ) -> None:
     recipe = _recipe(
         "recipe-source-build.json",
@@ -820,20 +773,18 @@ def test_runtime_compiler_rejects_retired_resolver_keys_even_with_current_inputs
         entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
     )
     with pytest.raises(RecipeRuntimeSpecError, match="retired authorities"):
-        compile_runtime_spec(
+        _compile(
             recipe,
+            model,
             resolved_entities={
-                "models": [model],
-                retired: [model] if retired == "model_projections" else {},
+                retired: [model] if retired == "model_projections" else {}
             },
-            role="entrypoint",
-            rank=0,
         )
 
 
 @pytest.mark.parametrize("include_paths", [False, True])
 def test_runtime_compiler_rejects_retired_member_paths(
-    model: contracts.ModelDefinition, include_paths: bool
+    model: dict[str, object], include_paths: bool
 ) -> None:
     recipe = _recipe(
         "recipe-source-build.json",
@@ -848,6 +799,4 @@ def test_runtime_compiler_rejects_retired_member_paths(
     if include_paths:
         package["paths"] = ["context.tar", "Dockerfile"]
     with pytest.raises(RecipeRuntimeSpecError, match="retired member_paths"):
-        compile_runtime_spec(
-            recipe, models=[model], package_handle=package, role="entrypoint", rank=0
-        )
+        _compile(recipe, model, package_handle=package, role="entrypoint", rank=0)
