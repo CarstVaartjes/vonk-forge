@@ -29,16 +29,8 @@ The control plane runs on one local computer with Docker Compose—a laptop, a N
 Current architecture and storage ownership are defined in
 [the architecture overview](docs/architecture-overview.md). PostgreSQL owns
 coordinated intent and security; the target managed-storage boundary owns
-artifact availability and local checkpoints. The
-[implementation plan](docs/plans/resilient-artifact-storage.md) tracks the
-cutover and deadlock-prevention evidence. Waiting work must leave resources
+artifact availability and local checkpoints. Waiting work must leave resources
 available to its dependencies, and failed work must not block unrelated work.
-
-The retained source briefs explain product rationale and requirements. Their
-dated implementation descriptions do not override the current architecture:
-
-- `docs/superpowers/specs/2026-08-14-control-plane-experience-design.md`
-- `docs/superpowers/specs/2026-08-17-fleet-library-product-simplification-design.md`
 
 ## Capabilities and Constraints
 

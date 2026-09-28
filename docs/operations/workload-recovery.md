@@ -2,10 +2,7 @@
 
 This runbook describes implemented workload recovery. The
 [coordination architecture](../architecture-overview.md#coordination-and-deadlock-prevention)
-sets the required lock and scheduling boundaries; the
-[implementation plan](../plans/resilient-artifact-storage.md) records implemented
-coordination and artifact-storage work and the evidence still required for
-deployed recovery. That plan does not make
+sets the required lock and scheduling boundaries. Recovery does not make
 arbitrary jobs, hooks, or upgrades safe to replay.
 
 An accepted workload request remains the owner of its preparation, installation,

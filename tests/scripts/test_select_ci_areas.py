@@ -118,9 +118,7 @@ def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
     "path",
     [
         "tests/acceptance/recipe-library-revision.txt",
-        "scripts/tests/check_recipe_launch_contracts.py",
         "scripts/tests/run_agent_wire_contracts.py",
-        "scripts/tests/check_api_contract_completeness.py",
         "scripts/export-agent-wire-schema",
         "scripts/export-installer-release-schema",
         "scripts/generate-agent-wire",

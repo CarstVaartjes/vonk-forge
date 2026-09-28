@@ -32,8 +32,6 @@ schemas/global/*
 !tools/
 tools/*
 !tools/hatch_build.py
-!config/
-config/*
 !inventory/
 !inventory/wheels/
 !inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl

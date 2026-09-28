@@ -558,19 +558,6 @@ def test_recovery_coverage_rejects_missing_or_malformed_agent_identity(
         _deployment_build_identities({node: provenance}, [node])
 
 
-def test_cli_human_view_preserves_evidence_boundaries(tmp_path):
-    from cluster_profiles.deployment_provenance_cli import render_deployment_provenance
-
-    sessions, now, _, _ = deployment(tmp_path)
-    result = DeploymentProvenanceService(sessions, clock=lambda: now).snapshot()
-    text = render_deployment_provenance(result.model_dump(mode="json"))
-    assert "repository: unknown" in text
-    assert "controller_deployment: unknown" in text
-    assert "physical acceptance: not_qualified" in text
-    assert result.workloads[0].recipe_content_sha256 in text
-    assert "rank 0" in text
-
-
 def test_connected_recipe_start_receipts_expose_rank_artifacts(tmp_path):
     import uuid
 

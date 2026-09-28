@@ -12,10 +12,10 @@ SCRIPT = ROOT / "scripts/render-production-compose"
 DEV_SCRIPT = ROOT / "scripts/render-dev-compose"
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 DIGEST = "a" * 64
-API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:{DIGEST}"
-WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3@sha256:{DIGEST}"
-HERMES_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{DIGEST}"
-LITELLM_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3@sha256:{DIGEST}"
+API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3"
+WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3"
+HERMES_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3"
+LITELLM_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3"
 DEV_API_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'b' * 40}@sha256:{DIGEST}"
 )
@@ -187,7 +187,7 @@ def test_render_rejects_nonproduction_or_unpinned_images(
     result = _run_production(TEMPLATE, output, api_image=image)
 
     assert result.returncode != 0
-    assert "immutable production version" in result.stderr
+    assert "immutable production semantic version tag" in result.stderr
     assert output.read_text(encoding="utf-8") == "preserve\n"
 
 

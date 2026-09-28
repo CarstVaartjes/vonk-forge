@@ -1,9 +1,9 @@
-"""Canonical platform harness metadata and compiler contracts."""
+"""Canonical platform harness metadata and projection contracts."""
 
 from ..runtime_writable_paths import EngineTelemetryContract, RuntimeWritablePath
 from .canonical_metadata import CANONICAL_HARNESSES, CanonicalHarnessMetadata
 from .common import HarnessCompileError
-from .contracts import HarnessBinding, HarnessCompiler, HarnessMount, HarnessProjection
+from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 __all__ = [
     "CANONICAL_HARNESSES",
@@ -11,7 +11,6 @@ __all__ = [
     "EngineTelemetryContract",
     "HarnessBinding",
     "HarnessCompileError",
-    "HarnessCompiler",
     "HarnessMount",
     "HarnessProjection",
     "RuntimeWritablePath",

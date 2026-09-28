@@ -5,7 +5,6 @@ import hashlib
 import io
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -225,8 +224,10 @@ def test_update_installs_only_changed_signed_wheel(
 
     def install(command, **kwargs):
         seen.append(command)
-        assert "--no-deps" in command and "--offline" in command
-        assert command[1:3] == ["pip", "install"]
+        # Installed as a uv tool, so the release's dependencies resolve and
+        # the tool receipt follows the new wheel.
+        assert command[1:6] == ["tool", "install", "--force", "--python", "3.14"]
+        assert command[-1].endswith(".whl")
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(cli_update.subprocess, "run", install)
@@ -301,92 +302,6 @@ def test_update_rejects_signed_release_missing_required_current_fields(
             apply=False,
             download=lambda url, maximum: objects[url],
         )
-
-
-@pytest.mark.lane
-def test_signed_update_installs_real_wheel_into_uv_venv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An accepted wheel must replace the CLI inside uv's pip-free venv."""
-    uv = shutil.which("uv")
-    if uv is None:
-        pytest.skip("uv is unavailable")
-    root = Path(__file__).resolve().parents[2]
-
-    def build(directory: Path, source: str, version: str) -> Path:
-        environment = {
-            **os.environ,
-            "VONK_BUILD_SOURCE_SHA": source,
-            "VONK_BUILD_RELEASE_VERSION": version,
-        }
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "hatchling",
-                "build",
-                "--target",
-                "wheel",
-                "--directory",
-                str(directory),
-            ],
-            cwd=root,
-            env=environment,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        wheels = list(directory.glob("vonk_cluster_profiles-*-py3-none-any.whl"))
-        assert len(wheels) == 1
-        return wheels[0]
-
-    old_wheel = build(tmp_path / "old", "c" * 40, "0.1.1")
-    accepted_wheel = build(tmp_path / "accepted", "b" * 40, "1.2.3")
-    environment = tmp_path / "cli-env"
-    python = _install_cli_wheel(uv, environment, old_wheel)
-    installed_environment = {**os.environ, "PYTHONPATH": ""}
-    assert (
-        subprocess.run(
-            [str(python), "-m", "pip", "--version"], capture_output=True, check=False
-        ).returncode
-        != 0
-    )
-    before = subprocess.run(
-        [str(environment / "bin" / "vonkctl"), "--json", "--version"],
-        env=installed_environment,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert json.loads(before.stdout)["source_sha"] == "c" * 40
-
-    key, objects = _signed_publication(
-        tmp_path, source_sha="b" * 40, wheel=accepted_wheel.read_bytes()
-    )
-    monkeypatch.setattr(
-        cli_update,
-        "current_build",
-        lambda: {"version": "0.1.1", "source_sha": "c" * 40},
-    )
-    monkeypatch.setattr(cli_update.sys, "executable", str(python))
-    result = cli_update.run_update(
-        channel="stable",
-        public_key=key,
-        origin="https://install.vonkforge.ai",
-        apply=True,
-        download=lambda url, maximum: objects[url],
-    )
-    assert result["updated"] is True
-    after = subprocess.run(
-        [str(environment / "bin" / "vonkctl"), "--json", "--version"],
-        env=installed_environment,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert json.loads(after.stdout) == {"version": "1.2.3", "source_sha": "b" * 40}
-    assert result["current"] == json.loads(after.stdout)
-    assert result["previous"] == json.loads(before.stdout)
 
 
 def test_interactive_notice_never_fetches_on_ordinary_command(

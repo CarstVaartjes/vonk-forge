@@ -31,6 +31,13 @@ PROBES = {
     ),
     "VONK_COMPILED_PLAN_WIRE_PROBE": ("vonk-agent", "compiled_plan_wire_probe"),
     "VONK_RESTART_RECOVERY_PROBE": ("vonk-agent", "restart_recovery_probe"),
+    "VONK_CANONICAL_WIRE_PROBE": ("vonk-agent-protocol", "canonical_wire_probe"),
+    "VONK_PROGRESS_WIRE_PROBE": ("vonk-agent-protocol", "progress_wire_probe"),
+    "VONK_RUNTIME_PREFLIGHT_WIRE_PROBE": (
+        "vonk-agent-protocol",
+        "runtime_preflight_wire_probe",
+    ),
+    "VONK_RUNTIME_PREFLIGHT_PROBE": ("vonk-agent", "runtime_preflight_probe"),
 }
 # Whole binaries the boundary tests run, built in the same Cargo invocation.
 BINARIES = {
@@ -127,6 +134,7 @@ def main() -> int:
         [
             "agent_protocol/tests",
             *[str(path.relative_to(repository)) for path in bridges],
+            "control/tests/test_agent_jobs.py::test_queue_stores_and_claims_the_canonical_payload_hash",
         ],
         [
             "tests/scripts/test_install_release_publication.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary",
