@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,8 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 
 
@@ -25,15 +26,15 @@ class RecipeUpdateRequest:
     """
         Attributes:
             request_key (str):
-            all_ (Union[Unset, bool]):  Default: False.
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
-            selectors (Union[Unset, list[str]]):
+            all_ (bool | Unset):  Default: False.
+            schema_version (Literal[2] | Unset):  Default: 2.
+            selectors (list[str] | Unset):
      """
 
     request_key: str
-    all_: Union[Unset, bool] = False
-    schema_version: Union[Literal[2], Unset] = 2
-    selectors: Union[Unset, list[str]] = UNSET
+    all_: bool | Unset = False
+    schema_version: Literal[2] | Unset = 2
+    selectors: list[str] | Unset = UNSET
 
 
 
@@ -46,7 +47,7 @@ class RecipeUpdateRequest:
 
         schema_version = self.schema_version
 
-        selectors: Union[Unset, list[str]] = UNSET
+        selectors: list[str] | Unset = UNSET
         if not isinstance(self.selectors, Unset):
             selectors = self.selectors
 
@@ -76,7 +77,7 @@ class RecipeUpdateRequest:
 
         all_ = d.pop("all", UNSET)
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

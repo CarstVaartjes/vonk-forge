@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,7 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 
 
@@ -24,12 +26,12 @@ class ModelLineageSource:
         Attributes:
             publisher (str):
             slug (str):
-            kind (Union[Literal['model'], Unset]):  Default: 'model'.
+            kind (Literal['model'] | Unset):  Default: 'model'.
      """
 
     publisher: str
     slug: str
-    kind: Union[Literal['model'], Unset] = 'model'
+    kind: Literal['model'] | Unset = 'model'
 
 
 
@@ -63,7 +65,7 @@ class ModelLineageSource:
 
         slug = d.pop("slug")
 
-        kind = cast(Union[Literal['model'], Unset] , d.pop("kind", UNSET))
+        kind = cast(Literal['model'] | Unset , d.pop("kind", UNSET))
         if kind != 'model' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'model', got '{kind}'")
 

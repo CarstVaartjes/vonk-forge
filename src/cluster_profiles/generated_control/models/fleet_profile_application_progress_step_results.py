@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -21,17 +23,16 @@ T = TypeVar("T", bound="FleetProfileApplicationProgressStepResults")
 
 @_attrs_define
 class FleetProfileApplicationProgressStepResults:
-    """
-     """
 
-    additional_properties: dict[str, 'FleetProfileStepResult'] = _attrs_field(init=False, factory=dict)
+
+    additional_properties: dict[str, FleetProfileStepResult] = _attrs_field(init=False, factory=dict)
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_step_result import FleetProfileStepResult
+        from ..models.fleet_profile_step_result import FleetProfileStepResult # noqa: PLC0415
 
         field_dict: dict[str, Any] = {}
         for prop_name, prop in self.additional_properties.items():
@@ -44,7 +45,7 @@ class FleetProfileApplicationProgressStepResults:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_step_result import FleetProfileStepResult
+        from ..models.fleet_profile_step_result import FleetProfileStepResult # noqa: PLC0415
         d = dict(src_dict)
         fleet_profile_application_progress_step_results = cls(
         )
@@ -65,10 +66,10 @@ class FleetProfileApplicationProgressStepResults:
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> 'FleetProfileStepResult':
+    def __getitem__(self, key: str) -> FleetProfileStepResult:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: 'FleetProfileStepResult') -> None:
+    def __setitem__(self, key: str, value: FleetProfileStepResult) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:

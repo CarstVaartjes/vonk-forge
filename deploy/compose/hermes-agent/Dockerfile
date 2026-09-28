@@ -1,4 +1,4 @@
-ARG HERMES_IMAGE=nousresearch/hermes-agent:v2026.7.20
+ARG HERMES_IMAGE=nousresearch/hermes-agent:v2026.9.24
 FROM ${HERMES_IMAGE} AS managed
 
 ARG HERMES_UID=1100

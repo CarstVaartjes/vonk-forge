@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,8 +14,6 @@ from ..models.fleet_profile_application_effect_outcome import check_fleet_profil
 from ..models.fleet_profile_application_effect_outcome import FleetProfileApplicationEffectOutcome
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -33,14 +33,14 @@ class FleetProfileApplicationEffect:
             kind (FleetProfileApplicationEffectKind):
             label (str):
             outcome (FleetProfileApplicationEffectOutcome):
-            operation_id (Union[None, Unset, str]):
+            operation_id (None | str | Unset):
      """
 
     effect_id: str
     kind: FleetProfileApplicationEffectKind
     label: str
     outcome: FleetProfileApplicationEffectOutcome
-    operation_id: Union[None, Unset, str] = UNSET
+    operation_id: None | str | Unset = UNSET
 
 
 
@@ -55,7 +55,7 @@ class FleetProfileApplicationEffect:
 
         outcome: str = self.outcome
 
-        operation_id: Union[None, Unset, str]
+        operation_id: None | str | Unset
         if isinstance(self.operation_id, Unset):
             operation_id = UNSET
         else:
@@ -94,12 +94,12 @@ class FleetProfileApplicationEffect:
 
 
 
-        def _parse_operation_id(data: object) -> Union[None, Unset, str]:
+        def _parse_operation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         operation_id = _parse_operation_id(d.pop("operation_id", UNSET))
 

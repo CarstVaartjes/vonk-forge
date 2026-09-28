@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,10 +13,7 @@ from ..models.fleet_profile_application_cancellation_intent_cause import FleetPr
 from ..models.fleet_profile_application_cancellation_intent_state import check_fleet_profile_application_cancellation_intent_state
 from ..models.fleet_profile_application_cancellation_intent_state import FleetProfileApplicationCancellationIntentState
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
@@ -35,24 +34,24 @@ class FleetProfileApplicationCancellationIntent:
             cause (FleetProfileApplicationCancellationIntentCause):
             request_key (str):
             requested_at (datetime.datetime):
-            observation_deadline_at (Union[None, Unset, datetime.datetime]):
-            observation_due_at (Union[None, Unset, datetime.datetime]):
-            pending_operation_ids (Union[Unset, list[str]]):
-            state (Union[Unset, FleetProfileApplicationCancellationIntentState]):  Default: 'cancelling'.
-            successor_application_id (Union[None, Unset, str]):
-            workload_intent_ordinal (Union[None, Unset, int]):
+            observation_deadline_at (datetime.datetime | None | Unset):
+            observation_due_at (datetime.datetime | None | Unset):
+            pending_operation_ids (list[str] | Unset):
+            state (FleetProfileApplicationCancellationIntentState | Unset):  Default: 'cancelling'.
+            successor_application_id (None | str | Unset):
+            workload_intent_ordinal (int | None | Unset):
      """
 
     actor: str
     cause: FleetProfileApplicationCancellationIntentCause
     request_key: str
     requested_at: datetime.datetime
-    observation_deadline_at: Union[None, Unset, datetime.datetime] = UNSET
-    observation_due_at: Union[None, Unset, datetime.datetime] = UNSET
-    pending_operation_ids: Union[Unset, list[str]] = UNSET
-    state: Union[Unset, FleetProfileApplicationCancellationIntentState] = 'cancelling'
-    successor_application_id: Union[None, Unset, str] = UNSET
-    workload_intent_ordinal: Union[None, Unset, int] = UNSET
+    observation_deadline_at: datetime.datetime | None | Unset = UNSET
+    observation_due_at: datetime.datetime | None | Unset = UNSET
+    pending_operation_ids: list[str] | Unset = UNSET
+    state: FleetProfileApplicationCancellationIntentState | Unset = 'cancelling'
+    successor_application_id: None | str | Unset = UNSET
+    workload_intent_ordinal: int | None | Unset = UNSET
 
 
 
@@ -67,7 +66,7 @@ class FleetProfileApplicationCancellationIntent:
 
         requested_at = self.requested_at.isoformat()
 
-        observation_deadline_at: Union[None, Unset, str]
+        observation_deadline_at: None | str | Unset
         if isinstance(self.observation_deadline_at, Unset):
             observation_deadline_at = UNSET
         elif isinstance(self.observation_deadline_at, datetime.datetime):
@@ -75,7 +74,7 @@ class FleetProfileApplicationCancellationIntent:
         else:
             observation_deadline_at = self.observation_deadline_at
 
-        observation_due_at: Union[None, Unset, str]
+        observation_due_at: None | str | Unset
         if isinstance(self.observation_due_at, Unset):
             observation_due_at = UNSET
         elif isinstance(self.observation_due_at, datetime.datetime):
@@ -83,24 +82,24 @@ class FleetProfileApplicationCancellationIntent:
         else:
             observation_due_at = self.observation_due_at
 
-        pending_operation_ids: Union[Unset, list[str]] = UNSET
+        pending_operation_ids: list[str] | Unset = UNSET
         if not isinstance(self.pending_operation_ids, Unset):
             pending_operation_ids = self.pending_operation_ids
 
 
 
-        state: Union[Unset, str] = UNSET
+        state: str | Unset = UNSET
         if not isinstance(self.state, Unset):
             state = self.state
 
 
-        successor_application_id: Union[None, Unset, str]
+        successor_application_id: None | str | Unset
         if isinstance(self.successor_application_id, Unset):
             successor_application_id = UNSET
         else:
             successor_application_id = self.successor_application_id
 
-        workload_intent_ordinal: Union[None, Unset, int]
+        workload_intent_ordinal: int | None | Unset
         if isinstance(self.workload_intent_ordinal, Unset):
             workload_intent_ordinal = UNSET
         else:
@@ -144,12 +143,12 @@ class FleetProfileApplicationCancellationIntent:
 
         request_key = d.pop("request_key")
 
-        requested_at = isoparse(d.pop("requested_at"))
+        requested_at = datetime.datetime.fromisoformat(d.pop("requested_at"))
 
 
 
 
-        def _parse_observation_deadline_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_observation_deadline_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -157,19 +156,19 @@ class FleetProfileApplicationCancellationIntent:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                observation_deadline_at_type_0 = isoparse(data)
+                observation_deadline_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return observation_deadline_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         observation_deadline_at = _parse_observation_deadline_at(d.pop("observation_deadline_at", UNSET))
 
 
-        def _parse_observation_due_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_observation_due_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -177,14 +176,14 @@ class FleetProfileApplicationCancellationIntent:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                observation_due_at_type_0 = isoparse(data)
+                observation_due_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return observation_due_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         observation_due_at = _parse_observation_due_at(d.pop("observation_due_at", UNSET))
 
@@ -193,7 +192,7 @@ class FleetProfileApplicationCancellationIntent:
 
 
         _state = d.pop("state", UNSET)
-        state: Union[Unset, FleetProfileApplicationCancellationIntentState]
+        state: FleetProfileApplicationCancellationIntentState | Unset
         if isinstance(_state,  Unset):
             state = UNSET
         else:
@@ -202,22 +201,22 @@ class FleetProfileApplicationCancellationIntent:
 
 
 
-        def _parse_successor_application_id(data: object) -> Union[None, Unset, str]:
+        def _parse_successor_application_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         successor_application_id = _parse_successor_application_id(d.pop("successor_application_id", UNSET))
 
 
-        def _parse_workload_intent_ordinal(data: object) -> Union[None, Unset, int]:
+        def _parse_workload_intent_ordinal(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         workload_intent_ordinal = _parse_workload_intent_ordinal(d.pop("workload_intent_ordinal", UNSET))
 

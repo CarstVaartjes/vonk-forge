@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,10 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -28,22 +28,22 @@ T = TypeVar("T", bound="FleetLogResponse")
 class FleetLogResponse:
     """
         Attributes:
-            entries (list['FleetLogEntry']):
+            entries (list[FleetLogEntry]):
             follow (bool):
             lines (int):
             node_id (str):
             retained (bool):
-            since (Union[None, datetime.datetime]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            since (datetime.datetime | None):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    entries: list['FleetLogEntry']
+    entries: list[FleetLogEntry]
     follow: bool
     lines: int
     node_id: str
     retained: bool
-    since: Union[None, datetime.datetime]
-    schema_version: Union[Literal[2], Unset] = 2
+    since: datetime.datetime | None
+    schema_version: Literal[2] | Unset = 2
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -51,7 +51,7 @@ class FleetLogResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_log_entry import FleetLogEntry
+        from ..models.fleet_log_entry import FleetLogEntry # noqa: PLC0415
         entries = []
         for entries_item_data in self.entries:
             entries_item = entries_item_data.to_dict()
@@ -67,7 +67,7 @@ class FleetLogResponse:
 
         retained = self.retained
 
-        since: Union[None, str]
+        since: None | str
         if isinstance(self.since, datetime.datetime):
             since = self.since.isoformat()
         else:
@@ -95,7 +95,7 @@ class FleetLogResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_log_entry import FleetLogEntry
+        from ..models.fleet_log_entry import FleetLogEntry # noqa: PLC0415
         d = dict(src_dict)
         entries = []
         _entries = d.pop("entries")
@@ -115,25 +115,25 @@ class FleetLogResponse:
 
         retained = d.pop("retained")
 
-        def _parse_since(data: object) -> Union[None, datetime.datetime]:
+        def _parse_since(data: object) -> datetime.datetime | None:
             if data is None:
                 return data
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                since_type_0 = isoparse(data)
+                since_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return since_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, datetime.datetime], data)
+            return cast(datetime.datetime | None, data)
 
         since = _parse_since(d.pop("since"))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

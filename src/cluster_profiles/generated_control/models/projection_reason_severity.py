@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 ProjectionReasonSeverity = Literal['error', 'info', 'warning']
 
@@ -6,5 +6,5 @@ PROJECTION_REASON_SEVERITY_VALUES: set[ProjectionReasonSeverity] = { 'error', 'i
 
 def check_projection_reason_severity(value: str) -> ProjectionReasonSeverity:
     if value in PROJECTION_REASON_SEVERITY_VALUES:
-        return cast(ProjectionReasonSeverity, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {PROJECTION_REASON_SEVERITY_VALUES!r}")

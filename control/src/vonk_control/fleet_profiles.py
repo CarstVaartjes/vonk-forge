@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Protocol, TypedDict
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import String, case, cast, func, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -2371,7 +2372,7 @@ def _replace_selected_profile_roster(
             updated_at=now,
         )
     )
-    if result.rowcount != 1:
+    if not isinstance(result, CursorResult) or result.rowcount != 1:
         raise FleetProfileStalePlanConflict(
             "Selected profile or fleet membership changed during reconciliation"
         )
@@ -2399,7 +2400,7 @@ def _replace_selected_profile_application(
         )
         .values(application_id=application_id, updated_at=now)
     )
-    if result.rowcount != 1:
+    if not isinstance(result, CursorResult) or result.rowcount != 1:
         raise FleetProfileStalePlanConflict(
             "Selected profile changed before its retry was admitted"
         )

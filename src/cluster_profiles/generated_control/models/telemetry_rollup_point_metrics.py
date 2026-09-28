@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -21,17 +23,16 @@ T = TypeVar("T", bound="TelemetryRollupPointMetrics")
 
 @_attrs_define
 class TelemetryRollupPointMetrics:
-    """
-     """
 
-    additional_properties: dict[str, 'TelemetryMetricSummary'] = _attrs_field(init=False, factory=dict)
+
+    additional_properties: dict[str, TelemetryMetricSummary] = _attrs_field(init=False, factory=dict)
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.telemetry_metric_summary import TelemetryMetricSummary
+        from ..models.telemetry_metric_summary import TelemetryMetricSummary # noqa: PLC0415
 
         field_dict: dict[str, Any] = {}
         for prop_name, prop in self.additional_properties.items():
@@ -44,7 +45,7 @@ class TelemetryRollupPointMetrics:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.telemetry_metric_summary import TelemetryMetricSummary
+        from ..models.telemetry_metric_summary import TelemetryMetricSummary # noqa: PLC0415
         d = dict(src_dict)
         telemetry_rollup_point_metrics = cls(
         )
@@ -65,10 +66,10 @@ class TelemetryRollupPointMetrics:
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> 'TelemetryMetricSummary':
+    def __getitem__(self, key: str) -> TelemetryMetricSummary:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: 'TelemetryMetricSummary') -> None:
+    def __setitem__(self, key: str, value: TelemetryMetricSummary) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:

@@ -3,7 +3,7 @@ import json
 import threading
 from datetime import timedelta
 
-import httpx
+import httpx2
 from sqlalchemy import func, select
 from vonk_control.deployment_observer import DeploymentObserver
 from vonk_control.deployment_provenance import DeploymentProvenanceService
@@ -43,19 +43,19 @@ def test_background_observation_reaches_api_projection_and_retains_age_on_outage
 
     def respond(request):
         if unavailable:
-            return httpx.Response(503)
+            return httpx2.Response(503)
         if request.url.host == "api.github.com":
             entered.set()
             assert proceed.wait(5)
-            return httpx.Response(200, json={"sha": "d" * 40})
+            return httpx2.Response(200, json={"sha": "d" * 40})
         if request.url.path.endswith("current.manifest"):
-            return httpx.Response(200, text=manifest)
-        return httpx.Response(200, content=release)
+            return httpx2.Response(200, text=manifest)
+        return httpx2.Response(200, content=release)
 
     observer = DeploymentObserver(
         sessions,
         channel="dev",
-        transport=httpx.MockTransport(respond),
+        transport=httpx2.MockTransport(respond),
         clock=lambda: now,
     )
     try:
@@ -96,8 +96,8 @@ def test_inconsistent_publication_does_not_become_deployment_evidence(tmp_path):
     sessions, now, _, _ = deployment(tmp_path)
     observer = DeploymentObserver(
         sessions,
-        transport=httpx.MockTransport(
-            lambda _: httpx.Response(200, text="schema_version=1")
+        transport=httpx2.MockTransport(
+            lambda _: httpx2.Response(200, text="schema_version=1")
         ),
         clock=lambda: now,
     )

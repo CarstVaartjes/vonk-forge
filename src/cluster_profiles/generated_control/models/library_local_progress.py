@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.library_local_progress_state import check_library_local_progress_s
 from ..models.library_local_progress_state import LibraryLocalProgressState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -28,17 +28,17 @@ class LibraryLocalProgress:
 
         Attributes:
             state (LibraryLocalProgressState):
-            completed_bytes (Union[Unset, int]):  Default: 0.
-            operation_id (Union[None, Unset, str]):
-            phase (Union[None, Unset, str]):
-            total_bytes (Union[None, Unset, int]):
+            completed_bytes (int | Unset):  Default: 0.
+            operation_id (None | str | Unset):
+            phase (None | str | Unset):
+            total_bytes (int | None | Unset):
      """
 
     state: LibraryLocalProgressState
-    completed_bytes: Union[Unset, int] = 0
-    operation_id: Union[None, Unset, str] = UNSET
-    phase: Union[None, Unset, str] = UNSET
-    total_bytes: Union[None, Unset, int] = UNSET
+    completed_bytes: int | Unset = 0
+    operation_id: None | str | Unset = UNSET
+    phase: None | str | Unset = UNSET
+    total_bytes: int | None | Unset = UNSET
 
 
 
@@ -49,19 +49,19 @@ class LibraryLocalProgress:
 
         completed_bytes = self.completed_bytes
 
-        operation_id: Union[None, Unset, str]
+        operation_id: None | str | Unset
         if isinstance(self.operation_id, Unset):
             operation_id = UNSET
         else:
             operation_id = self.operation_id
 
-        phase: Union[None, Unset, str]
+        phase: None | str | Unset
         if isinstance(self.phase, Unset):
             phase = UNSET
         else:
             phase = self.phase
 
-        total_bytes: Union[None, Unset, int]
+        total_bytes: int | None | Unset
         if isinstance(self.total_bytes, Unset):
             total_bytes = UNSET
         else:
@@ -96,32 +96,32 @@ class LibraryLocalProgress:
 
         completed_bytes = d.pop("completed_bytes", UNSET)
 
-        def _parse_operation_id(data: object) -> Union[None, Unset, str]:
+        def _parse_operation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         operation_id = _parse_operation_id(d.pop("operation_id", UNSET))
 
 
-        def _parse_phase(data: object) -> Union[None, Unset, str]:
+        def _parse_phase(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         phase = _parse_phase(d.pop("phase", UNSET))
 
 
-        def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_total_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         total_bytes = _parse_total_bytes(d.pop("total_bytes", UNSET))
 

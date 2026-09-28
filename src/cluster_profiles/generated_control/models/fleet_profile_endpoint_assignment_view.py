@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,8 +14,6 @@ from ..models.fleet_profile_endpoint_assignment_view_state import check_fleet_pr
 from ..models.fleet_profile_endpoint_assignment_view_state import FleetProfileEndpointAssignmentViewState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.endpoint_response import EndpointResponse
@@ -34,23 +34,23 @@ class FleetProfileEndpointAssignmentView:
             desired_state (FleetProfileEndpointAssignmentViewDesiredState):
             recipe_title (str):
             state (FleetProfileEndpointAssignmentViewState):
-            alias (Union[None, Unset, str]):
-            endpoint (Union['EndpointResponse', None, Unset]):
+            alias (None | str | Unset):
+            endpoint (EndpointResponse | None | Unset):
      """
 
     assignment_id: str
     desired_state: FleetProfileEndpointAssignmentViewDesiredState
     recipe_title: str
     state: FleetProfileEndpointAssignmentViewState
-    alias: Union[None, Unset, str] = UNSET
-    endpoint: Union['EndpointResponse', None, Unset] = UNSET
+    alias: None | str | Unset = UNSET
+    endpoint: EndpointResponse | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.endpoint_response import EndpointResponse
+        from ..models.endpoint_response import EndpointResponse # noqa: PLC0415
         assignment_id = self.assignment_id
 
         desired_state: str = self.desired_state
@@ -59,13 +59,13 @@ class FleetProfileEndpointAssignmentView:
 
         state: str = self.state
 
-        alias: Union[None, Unset, str]
+        alias: None | str | Unset
         if isinstance(self.alias, Unset):
             alias = UNSET
         else:
             alias = self.alias
 
-        endpoint: Union[None, Unset, dict[str, Any]]
+        endpoint: dict[str, Any] | None | Unset
         if isinstance(self.endpoint, Unset):
             endpoint = UNSET
         elif isinstance(self.endpoint, EndpointResponse):
@@ -93,7 +93,7 @@ class FleetProfileEndpointAssignmentView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.endpoint_response import EndpointResponse
+        from ..models.endpoint_response import EndpointResponse # noqa: PLC0415
         d = dict(src_dict)
         assignment_id = d.pop("assignment_id")
 
@@ -109,17 +109,17 @@ class FleetProfileEndpointAssignmentView:
 
 
 
-        def _parse_alias(data: object) -> Union[None, Unset, str]:
+        def _parse_alias(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         alias = _parse_alias(d.pop("alias", UNSET))
 
 
-        def _parse_endpoint(data: object) -> Union['EndpointResponse', None, Unset]:
+        def _parse_endpoint(data: object) -> EndpointResponse | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -132,9 +132,9 @@ class FleetProfileEndpointAssignmentView:
 
 
                 return endpoint_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['EndpointResponse', None, Unset], data)
+            return cast(EndpointResponse | None | Unset, data)
 
         endpoint = _parse_endpoint(d.pop("endpoint", UNSET))
 

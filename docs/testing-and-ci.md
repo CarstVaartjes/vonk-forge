@@ -260,9 +260,9 @@ UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
   python scripts/generate-agent-wire --check
 ```
 
-`control/.venv` cannot satisfy the ruff pin because `openapi-python-client`
-requires `ruff<0.14`; always lint through the root project. CI runs the same
-version via `uvx --from ruff==0.16.1 ruff check .`.
+Lint through the root project, which declares ruff and whose
+`[tool.ruff] required-version` names the exact version. CI and the pre-commit
+hook run that same version via `uvx --from ruff==0.16.9 ruff check .`.
 
 The repository does not type-check cleanly yet, but every surviving error is a
 reviewed one. `scripts/check-python-types` treats

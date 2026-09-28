@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,8 +14,6 @@ from ..models.enrollment_grant_response_purpose import check_enrollment_grant_re
 from ..models.enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -36,8 +36,8 @@ class EnrollmentGrantResponse:
             installer_url (EnrollmentGrantResponseInstallerUrl):
             purpose (EnrollmentGrantResponsePurpose):
             token (str):
-            controller_address (Union[None, Unset, str]):
-            service_hostnames (Union[Unset, list[str]]):
+            controller_address (None | str | Unset):
+            service_hostnames (list[str] | Unset):
      """
 
     ca_fingerprint: str
@@ -48,8 +48,8 @@ class EnrollmentGrantResponse:
     installer_url: EnrollmentGrantResponseInstallerUrl
     purpose: EnrollmentGrantResponsePurpose
     token: str
-    controller_address: Union[None, Unset, str] = UNSET
-    service_hostnames: Union[Unset, list[str]] = UNSET
+    controller_address: None | str | Unset = UNSET
+    service_hostnames: list[str] | Unset = UNSET
 
 
 
@@ -72,13 +72,13 @@ class EnrollmentGrantResponse:
 
         token = self.token
 
-        controller_address: Union[None, Unset, str]
+        controller_address: None | str | Unset
         if isinstance(self.controller_address, Unset):
             controller_address = UNSET
         else:
             controller_address = self.controller_address
 
-        service_hostnames: Union[Unset, list[str]] = UNSET
+        service_hostnames: list[str] | Unset = UNSET
         if not isinstance(self.service_hostnames, Unset):
             service_hostnames = self.service_hostnames
 
@@ -131,12 +131,12 @@ class EnrollmentGrantResponse:
 
         token = d.pop("token")
 
-        def _parse_controller_address(data: object) -> Union[None, Unset, str]:
+        def _parse_controller_address(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         controller_address = _parse_controller_address(d.pop("controller_address", UNSET))
 

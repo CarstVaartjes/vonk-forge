@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -32,17 +34,17 @@ class RecipeTopology:
             name (str):
             node_count (int):
             parallelism (RecipeParallelism):
-            roles (list['RecipeTopologyRole']):
+            roles (list[RecipeTopologyRole]):
             start_order (list[str]):
             stop_order (list[str]):
      """
 
-    fabric: 'RecipeFabric'
+    fabric: RecipeFabric
     mode: RecipeTopologyMode
     name: str
     node_count: int
-    parallelism: 'RecipeParallelism'
-    roles: list['RecipeTopologyRole']
+    parallelism: RecipeParallelism
+    roles: list[RecipeTopologyRole]
     start_order: list[str]
     stop_order: list[str]
 
@@ -51,9 +53,9 @@ class RecipeTopology:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_fabric import RecipeFabric
-        from ..models.recipe_parallelism import RecipeParallelism
-        from ..models.recipe_topology_role import RecipeTopologyRole
+        from ..models.recipe_fabric import RecipeFabric # noqa: PLC0415
+        from ..models.recipe_parallelism import RecipeParallelism # noqa: PLC0415
+        from ..models.recipe_topology_role import RecipeTopologyRole # noqa: PLC0415
         fabric = self.fabric.to_dict()
 
         mode: str = self.mode
@@ -99,9 +101,9 @@ class RecipeTopology:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_fabric import RecipeFabric
-        from ..models.recipe_parallelism import RecipeParallelism
-        from ..models.recipe_topology_role import RecipeTopologyRole
+        from ..models.recipe_fabric import RecipeFabric # noqa: PLC0415
+        from ..models.recipe_parallelism import RecipeParallelism # noqa: PLC0415
+        from ..models.recipe_topology_role import RecipeTopologyRole # noqa: PLC0415
         d = dict(src_dict)
         fabric = RecipeFabric.from_dict(d.pop("fabric"))
 

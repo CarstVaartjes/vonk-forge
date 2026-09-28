@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RecipeReleaseHistoryEntryUpgradeEffect = Literal['none', 'rebuild', 'reprepare', 'restart']
 
@@ -6,5 +6,5 @@ RECIPE_RELEASE_HISTORY_ENTRY_UPGRADE_EFFECT_VALUES: set[RecipeReleaseHistoryEntr
 
 def check_recipe_release_history_entry_upgrade_effect(value: str) -> RecipeReleaseHistoryEntryUpgradeEffect:
     if value in RECIPE_RELEASE_HISTORY_ENTRY_UPGRADE_EFFECT_VALUES:
-        return cast(RecipeReleaseHistoryEntryUpgradeEffect, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RECIPE_RELEASE_HISTORY_ENTRY_UPGRADE_EFFECT_VALUES!r}")

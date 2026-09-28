@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -34,7 +35,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/operations/{operation_id}/evidence".format(operation_id=operation_id,),
+        "url": "/api/operations/{operation_id}/evidence".format(operation_id=quote(str(operation_id), safe=""),),
         "params": params,
     }
 
@@ -43,7 +44,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = FailureEvidenceBundle.from_dict(response.json())
 
@@ -85,7 +86,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -100,7 +101,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     attempt: int,
 
-) -> Response[Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]:
     """ Evidence
 
     Args:
@@ -109,10 +110,10 @@ def sync_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]]
+        Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]
      """
 
 
@@ -134,7 +135,7 @@ def sync(
     client: AuthenticatedClient,
     attempt: int,
 
-) -> Optional[Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]]:
+) -> BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem | None:
     """ Evidence
 
     Args:
@@ -143,10 +144,10 @@ def sync(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]
+        BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem
      """
 
 
@@ -163,7 +164,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     attempt: int,
 
-) -> Response[Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]:
     """ Evidence
 
     Args:
@@ -172,10 +173,10 @@ async def asyncio_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]]
+        Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]
      """
 
 
@@ -197,7 +198,7 @@ async def asyncio(
     client: AuthenticatedClient,
     attempt: int,
 
-) -> Optional[Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]]:
+) -> BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem | None:
     """ Evidence
 
     Args:
@@ -206,10 +207,10 @@ async def asyncio(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FailureEvidenceBundle, RequestValidationProblem]
+        BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem
      """
 
 

@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-import httpx
+import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -1418,10 +1418,10 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(
 
     request_hosts: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         request_hosts.append(request.url.host)
         if request.url.path == "/artifacts/dev/current.manifest":
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 text=(
                     f"generation={generation}\n"
@@ -1429,10 +1429,10 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(
                 ),
             )
         if request.url.path == f"/artifacts/dev/releases/{generation}/release.json":
-            return httpx.Response(200, content=json.dumps(release).encode())
+            return httpx2.Response(200, content=json.dumps(release).encode())
         if request.url.path == f"/{signature_path}":
-            return httpx.Response(200, content=signature_raw)
-        return httpx.Response(404)
+            return httpx2.Response(200, content=signature_raw)
+        return httpx2.Response(404)
 
     engine = create_engine(f"sqlite:///{tmp_path / 'candidate.sqlite'}")
     Base.metadata.create_all(engine)
@@ -1446,7 +1446,7 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(
         clock=lambda: datetime(2026, 8, 27, tzinfo=UTC),
         current_revision=lambda: REVISION,
         release_api_url="http://caddy:8084",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
 
     assert upgrades.current_package() == {

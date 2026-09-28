@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FleetLogEntrySource = Literal['client', 'job', 'monitor', 'runtime']
 
@@ -6,5 +6,5 @@ FLEET_LOG_ENTRY_SOURCE_VALUES: set[FleetLogEntrySource] = { 'client', 'job', 'mo
 
 def check_fleet_log_entry_source(value: str) -> FleetLogEntrySource:
     if value in FLEET_LOG_ENTRY_SOURCE_VALUES:
-        return cast(FleetLogEntrySource, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FLEET_LOG_ENTRY_SOURCE_VALUES!r}")

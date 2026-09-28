@@ -14,7 +14,7 @@ from .conftest import (
 
 
 def test_postgres_runtime_is_version_pinned_18_3() -> None:
-    assert POSTGRES_IMAGE == "postgres:18.3"
+    assert POSTGRES_IMAGE == "postgres:18.6"
 
 
 def test_postgres_database_names_are_unique_safe_identifiers() -> None:

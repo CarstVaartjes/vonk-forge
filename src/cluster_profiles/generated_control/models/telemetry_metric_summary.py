@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -27,34 +28,34 @@ class TelemetryMetricSummary:
             maximum (float):
             mean (float):
             minimum (float):
-            aggregation (Union[Unset, str]):  Default: 'mean'.
-            device_id (Union[None, Unset, str]):
-            interface_name (Union[None, Unset, str]):
-            key (Union[None, Unset, str]):
-            measurement_kind (Union[Unset, str]):  Default: 'measured'.
-            process_id (Union[None, Unset, int]):
-            process_name (Union[None, Unset, str]):
-            run_id (Union[None, Unset, str]):
-            scope (Union[None, Unset, str]):
-            source (Union[Unset, str]):  Default: 'controller-derived'.
-            unit (Union[Unset, str]):  Default: 'unknown'.
+            aggregation (str | Unset):  Default: 'mean'.
+            device_id (None | str | Unset):
+            interface_name (None | str | Unset):
+            key (None | str | Unset):
+            measurement_kind (str | Unset):  Default: 'measured'.
+            process_id (int | None | Unset):
+            process_name (None | str | Unset):
+            run_id (None | str | Unset):
+            scope (None | str | Unset):
+            source (str | Unset):  Default: 'controller-derived'.
+            unit (str | Unset):  Default: 'unknown'.
      """
 
     count: int
     maximum: float
     mean: float
     minimum: float
-    aggregation: Union[Unset, str] = 'mean'
-    device_id: Union[None, Unset, str] = UNSET
-    interface_name: Union[None, Unset, str] = UNSET
-    key: Union[None, Unset, str] = UNSET
-    measurement_kind: Union[Unset, str] = 'measured'
-    process_id: Union[None, Unset, int] = UNSET
-    process_name: Union[None, Unset, str] = UNSET
-    run_id: Union[None, Unset, str] = UNSET
-    scope: Union[None, Unset, str] = UNSET
-    source: Union[Unset, str] = 'controller-derived'
-    unit: Union[Unset, str] = 'unknown'
+    aggregation: str | Unset = 'mean'
+    device_id: None | str | Unset = UNSET
+    interface_name: None | str | Unset = UNSET
+    key: None | str | Unset = UNSET
+    measurement_kind: str | Unset = 'measured'
+    process_id: int | None | Unset = UNSET
+    process_name: None | str | Unset = UNSET
+    run_id: None | str | Unset = UNSET
+    scope: None | str | Unset = UNSET
+    source: str | Unset = 'controller-derived'
+    unit: str | Unset = 'unknown'
 
 
 
@@ -71,19 +72,19 @@ class TelemetryMetricSummary:
 
         aggregation = self.aggregation
 
-        device_id: Union[None, Unset, str]
+        device_id: None | str | Unset
         if isinstance(self.device_id, Unset):
             device_id = UNSET
         else:
             device_id = self.device_id
 
-        interface_name: Union[None, Unset, str]
+        interface_name: None | str | Unset
         if isinstance(self.interface_name, Unset):
             interface_name = UNSET
         else:
             interface_name = self.interface_name
 
-        key: Union[None, Unset, str]
+        key: None | str | Unset
         if isinstance(self.key, Unset):
             key = UNSET
         else:
@@ -91,25 +92,25 @@ class TelemetryMetricSummary:
 
         measurement_kind = self.measurement_kind
 
-        process_id: Union[None, Unset, int]
+        process_id: int | None | Unset
         if isinstance(self.process_id, Unset):
             process_id = UNSET
         else:
             process_id = self.process_id
 
-        process_name: Union[None, Unset, str]
+        process_name: None | str | Unset
         if isinstance(self.process_name, Unset):
             process_name = UNSET
         else:
             process_name = self.process_name
 
-        run_id: Union[None, Unset, str]
+        run_id: None | str | Unset
         if isinstance(self.run_id, Unset):
             run_id = UNSET
         else:
             run_id = self.run_id
 
-        scope: Union[None, Unset, str]
+        scope: None | str | Unset
         if isinstance(self.scope, Unset):
             scope = UNSET
         else:
@@ -168,74 +169,74 @@ class TelemetryMetricSummary:
 
         aggregation = d.pop("aggregation", UNSET)
 
-        def _parse_device_id(data: object) -> Union[None, Unset, str]:
+        def _parse_device_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         device_id = _parse_device_id(d.pop("device_id", UNSET))
 
 
-        def _parse_interface_name(data: object) -> Union[None, Unset, str]:
+        def _parse_interface_name(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         interface_name = _parse_interface_name(d.pop("interface_name", UNSET))
 
 
-        def _parse_key(data: object) -> Union[None, Unset, str]:
+        def _parse_key(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         key = _parse_key(d.pop("key", UNSET))
 
 
         measurement_kind = d.pop("measurement_kind", UNSET)
 
-        def _parse_process_id(data: object) -> Union[None, Unset, int]:
+        def _parse_process_id(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         process_id = _parse_process_id(d.pop("process_id", UNSET))
 
 
-        def _parse_process_name(data: object) -> Union[None, Unset, str]:
+        def _parse_process_name(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         process_name = _parse_process_name(d.pop("process_name", UNSET))
 
 
-        def _parse_run_id(data: object) -> Union[None, Unset, str]:
+        def _parse_run_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         run_id = _parse_run_id(d.pop("run_id", UNSET))
 
 
-        def _parse_scope(data: object) -> Union[None, Unset, str]:
+        def _parse_scope(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         scope = _parse_scope(d.pop("scope", UNSET))
 

@@ -7,9 +7,9 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-typify = { version = "=0.7.0", default-features = false }
+typify = { version = "=0.8.0", default-features = false }
 schemars = "=0.8.22"
 serde_json.workspace = true
-syn = { version = "=2.0.119", features = ["full", "visit-mut"] }
-prettyplease = "=0.2.37"
+syn = { version = "=3.0.6", features = ["full", "visit-mut"] }
+prettyplease = "=0.3.0"
 quote = "=1.0.47"

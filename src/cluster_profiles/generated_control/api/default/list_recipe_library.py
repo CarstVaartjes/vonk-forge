@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -13,30 +14,27 @@ from ...models.list_recipe_library_sort import ListRecipeLibrarySort
 from ...models.recipe_library_response import RecipeLibraryResponse
 from ...models.request_validation_problem import RequestValidationProblem
 from ...types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
 
 def _get_kwargs(
     *,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, list[str]] = UNSET,
-    all_models: Union[Unset, bool] = False,
-    ready: Union[None, Unset, bool] = UNSET,
-    fits_fleet: Union[None, Unset, bool] = UNSET,
-    assess: Union[Unset, bool] = True,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    sparks: Union[None, Unset, list[int]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    model: list[str] | None | Unset = UNSET,
+    all_models: bool | Unset = False,
+    ready: bool | None | Unset = UNSET,
+    fits_fleet: bool | None | Unset = UNSET,
+    assess: bool | Unset = True,
+    usage: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    sparks: list[int] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListRecipeLibrarySort | Unset = 'updated',
 
 ) -> dict[str, Any]:
 
@@ -47,14 +45,14 @@ def _get_kwargs(
 
     params["limit"] = limit
 
-    json_cursor: Union[None, Unset, str]
+    json_cursor: None | str | Unset
     if isinstance(cursor, Unset):
         json_cursor = UNSET
     else:
         json_cursor = cursor
     params["cursor"] = json_cursor
 
-    json_model: Union[None, Unset, list[str]]
+    json_model: list[str] | None | Unset
     if isinstance(model, Unset):
         json_model = UNSET
     elif isinstance(model, list):
@@ -67,14 +65,14 @@ def _get_kwargs(
 
     params["all_models"] = all_models
 
-    json_ready: Union[None, Unset, bool]
+    json_ready: bool | None | Unset
     if isinstance(ready, Unset):
         json_ready = UNSET
     else:
         json_ready = ready
     params["ready"] = json_ready
 
-    json_fits_fleet: Union[None, Unset, bool]
+    json_fits_fleet: bool | None | Unset
     if isinstance(fits_fleet, Unset):
         json_fits_fleet = UNSET
     else:
@@ -83,7 +81,7 @@ def _get_kwargs(
 
     params["assess"] = assess
 
-    json_usage: Union[None, Unset, list[str]]
+    json_usage: list[str] | None | Unset
     if isinstance(usage, Unset):
         json_usage = UNSET
     elif isinstance(usage, list):
@@ -94,7 +92,7 @@ def _get_kwargs(
         json_usage = usage
     params["usage"] = json_usage
 
-    json_publisher: Union[None, Unset, list[str]]
+    json_publisher: list[str] | None | Unset
     if isinstance(publisher, Unset):
         json_publisher = UNSET
     elif isinstance(publisher, list):
@@ -105,7 +103,7 @@ def _get_kwargs(
         json_publisher = publisher
     params["publisher"] = json_publisher
 
-    json_alignment: Union[None, Unset, list[str]]
+    json_alignment: list[str] | None | Unset
     if isinstance(alignment, Unset):
         json_alignment = UNSET
     elif isinstance(alignment, list):
@@ -116,7 +114,7 @@ def _get_kwargs(
         json_alignment = alignment
     params["alignment"] = json_alignment
 
-    json_sparks: Union[None, Unset, list[int]]
+    json_sparks: list[int] | None | Unset
     if isinstance(sparks, Unset):
         json_sparks = UNSET
     elif isinstance(sparks, list):
@@ -127,14 +125,14 @@ def _get_kwargs(
         json_sparks = sparks
     params["sparks"] = json_sparks
 
-    json_search: Union[None, Unset, str]
+    json_search: None | str | Unset
     if isinstance(search, Unset):
         json_search = UNSET
     else:
         json_search = search
     params["search"] = json_search
 
-    json_updated_since: Union[None, Unset, str]
+    json_updated_since: None | str | Unset
     if isinstance(updated_since, Unset):
         json_updated_since = UNSET
     elif isinstance(updated_since, datetime.datetime):
@@ -143,7 +141,7 @@ def _get_kwargs(
         json_updated_since = updated_since
     params["updated_since"] = json_updated_since
 
-    json_sort: Union[Unset, str] = UNSET
+    json_sort: str | Unset = UNSET
     if not isinstance(sort, Unset):
         json_sort = sort
 
@@ -164,7 +162,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = RecipeLibraryResponse.from_dict(response.json())
 
@@ -199,7 +197,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -211,46 +209,46 @@ def _build_response(*, client: Union[AuthenticatedClient, Client], response: htt
 def sync_detailed(
     *,
     client: AuthenticatedClient,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, list[str]] = UNSET,
-    all_models: Union[Unset, bool] = False,
-    ready: Union[None, Unset, bool] = UNSET,
-    fits_fleet: Union[None, Unset, bool] = UNSET,
-    assess: Union[Unset, bool] = True,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    sparks: Union[None, Unset, list[int]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    model: list[str] | None | Unset = UNSET,
+    all_models: bool | Unset = False,
+    ready: bool | None | Unset = UNSET,
+    fits_fleet: bool | None | Unset = UNSET,
+    assess: bool | Unset = True,
+    usage: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    sparks: list[int] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListRecipeLibrarySort | Unset = 'updated',
 
-) -> Response[Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]:
     """ Recipe Library
 
     Args:
-        limit (Union[Unset, int]):  Default: 100.
-        cursor (Union[None, Unset, str]):
-        model (Union[None, Unset, list[str]]):
-        all_models (Union[Unset, bool]):  Default: False.
-        ready (Union[None, Unset, bool]):
-        fits_fleet (Union[None, Unset, bool]):
-        assess (Union[Unset, bool]):  Default: True.
-        usage (Union[None, Unset, list[str]]):
-        publisher (Union[None, Unset, list[str]]):
-        alignment (Union[None, Unset, list[str]]):
-        sparks (Union[None, Unset, list[int]]):
-        search (Union[None, Unset, str]):
-        updated_since (Union[None, Unset, datetime.datetime]):
-        sort (Union[Unset, ListRecipeLibrarySort]):  Default: 'updated'.
+        limit (int | Unset):  Default: 100.
+        cursor (None | str | Unset):
+        model (list[str] | None | Unset):
+        all_models (bool | Unset):  Default: False.
+        ready (bool | None | Unset):
+        fits_fleet (bool | None | Unset):
+        assess (bool | Unset):  Default: True.
+        usage (list[str] | None | Unset):
+        publisher (list[str] | None | Unset):
+        alignment (list[str] | None | Unset):
+        sparks (list[int] | None | Unset):
+        search (None | str | Unset):
+        updated_since (datetime.datetime | None | Unset):
+        sort (ListRecipeLibrarySort | Unset):  Default: 'updated'.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]
      """
 
 
@@ -281,46 +279,46 @@ sort=sort,
 def sync(
     *,
     client: AuthenticatedClient,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, list[str]] = UNSET,
-    all_models: Union[Unset, bool] = False,
-    ready: Union[None, Unset, bool] = UNSET,
-    fits_fleet: Union[None, Unset, bool] = UNSET,
-    assess: Union[Unset, bool] = True,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    sparks: Union[None, Unset, list[int]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    model: list[str] | None | Unset = UNSET,
+    all_models: bool | Unset = False,
+    ready: bool | None | Unset = UNSET,
+    fits_fleet: bool | None | Unset = UNSET,
+    assess: bool | Unset = True,
+    usage: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    sparks: list[int] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListRecipeLibrarySort | Unset = 'updated',
 
-) -> Optional[Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem | None:
     """ Recipe Library
 
     Args:
-        limit (Union[Unset, int]):  Default: 100.
-        cursor (Union[None, Unset, str]):
-        model (Union[None, Unset, list[str]]):
-        all_models (Union[Unset, bool]):  Default: False.
-        ready (Union[None, Unset, bool]):
-        fits_fleet (Union[None, Unset, bool]):
-        assess (Union[Unset, bool]):  Default: True.
-        usage (Union[None, Unset, list[str]]):
-        publisher (Union[None, Unset, list[str]]):
-        alignment (Union[None, Unset, list[str]]):
-        sparks (Union[None, Unset, list[int]]):
-        search (Union[None, Unset, str]):
-        updated_since (Union[None, Unset, datetime.datetime]):
-        sort (Union[Unset, ListRecipeLibrarySort]):  Default: 'updated'.
+        limit (int | Unset):  Default: 100.
+        cursor (None | str | Unset):
+        model (list[str] | None | Unset):
+        all_models (bool | Unset):  Default: False.
+        ready (bool | None | Unset):
+        fits_fleet (bool | None | Unset):
+        assess (bool | Unset):  Default: True.
+        usage (list[str] | None | Unset):
+        publisher (list[str] | None | Unset):
+        alignment (list[str] | None | Unset):
+        sparks (list[int] | None | Unset):
+        search (None | str | Unset):
+        updated_since (datetime.datetime | None | Unset):
+        sort (ListRecipeLibrarySort | Unset):  Default: 'updated'.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]
+        BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem
      """
 
 
@@ -346,46 +344,46 @@ sort=sort,
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, list[str]] = UNSET,
-    all_models: Union[Unset, bool] = False,
-    ready: Union[None, Unset, bool] = UNSET,
-    fits_fleet: Union[None, Unset, bool] = UNSET,
-    assess: Union[Unset, bool] = True,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    sparks: Union[None, Unset, list[int]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    model: list[str] | None | Unset = UNSET,
+    all_models: bool | Unset = False,
+    ready: bool | None | Unset = UNSET,
+    fits_fleet: bool | None | Unset = UNSET,
+    assess: bool | Unset = True,
+    usage: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    sparks: list[int] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListRecipeLibrarySort | Unset = 'updated',
 
-) -> Response[Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]:
     """ Recipe Library
 
     Args:
-        limit (Union[Unset, int]):  Default: 100.
-        cursor (Union[None, Unset, str]):
-        model (Union[None, Unset, list[str]]):
-        all_models (Union[Unset, bool]):  Default: False.
-        ready (Union[None, Unset, bool]):
-        fits_fleet (Union[None, Unset, bool]):
-        assess (Union[Unset, bool]):  Default: True.
-        usage (Union[None, Unset, list[str]]):
-        publisher (Union[None, Unset, list[str]]):
-        alignment (Union[None, Unset, list[str]]):
-        sparks (Union[None, Unset, list[int]]):
-        search (Union[None, Unset, str]):
-        updated_since (Union[None, Unset, datetime.datetime]):
-        sort (Union[Unset, ListRecipeLibrarySort]):  Default: 'updated'.
+        limit (int | Unset):  Default: 100.
+        cursor (None | str | Unset):
+        model (list[str] | None | Unset):
+        all_models (bool | Unset):  Default: False.
+        ready (bool | None | Unset):
+        fits_fleet (bool | None | Unset):
+        assess (bool | Unset):  Default: True.
+        usage (list[str] | None | Unset):
+        publisher (list[str] | None | Unset):
+        alignment (list[str] | None | Unset):
+        sparks (list[int] | None | Unset):
+        search (None | str | Unset):
+        updated_since (datetime.datetime | None | Unset):
+        sort (ListRecipeLibrarySort | Unset):  Default: 'updated'.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]
      """
 
 
@@ -416,46 +414,46 @@ sort=sort,
 async def asyncio(
     *,
     client: AuthenticatedClient,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    model: Union[None, Unset, list[str]] = UNSET,
-    all_models: Union[Unset, bool] = False,
-    ready: Union[None, Unset, bool] = UNSET,
-    fits_fleet: Union[None, Unset, bool] = UNSET,
-    assess: Union[Unset, bool] = True,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    sparks: Union[None, Unset, list[int]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListRecipeLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    model: list[str] | None | Unset = UNSET,
+    all_models: bool | Unset = False,
+    ready: bool | None | Unset = UNSET,
+    fits_fleet: bool | None | Unset = UNSET,
+    assess: bool | Unset = True,
+    usage: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    sparks: list[int] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListRecipeLibrarySort | Unset = 'updated',
 
-) -> Optional[Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem | None:
     """ Recipe Library
 
     Args:
-        limit (Union[Unset, int]):  Default: 100.
-        cursor (Union[None, Unset, str]):
-        model (Union[None, Unset, list[str]]):
-        all_models (Union[Unset, bool]):  Default: False.
-        ready (Union[None, Unset, bool]):
-        fits_fleet (Union[None, Unset, bool]):
-        assess (Union[Unset, bool]):  Default: True.
-        usage (Union[None, Unset, list[str]]):
-        publisher (Union[None, Unset, list[str]]):
-        alignment (Union[None, Unset, list[str]]):
-        sparks (Union[None, Unset, list[int]]):
-        search (Union[None, Unset, str]):
-        updated_since (Union[None, Unset, datetime.datetime]):
-        sort (Union[Unset, ListRecipeLibrarySort]):  Default: 'updated'.
+        limit (int | Unset):  Default: 100.
+        cursor (None | str | Unset):
+        model (list[str] | None | Unset):
+        all_models (bool | Unset):  Default: False.
+        ready (bool | None | Unset):
+        fits_fleet (bool | None | Unset):
+        assess (bool | Unset):  Default: True.
+        usage (list[str] | None | Unset):
+        publisher (list[str] | None | Unset):
+        alignment (list[str] | None | Unset):
+        sparks (list[int] | None | Unset):
+        search (None | str | Unset):
+        updated_since (datetime.datetime | None | Unset):
+        sort (ListRecipeLibrarySort | Unset):  Default: 'updated'.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RecipeLibraryResponse, RequestValidationProblem]
+        BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem
      """
 
 

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 
 
@@ -26,15 +26,15 @@ class FleetUpgradeRequest:
     """
         Attributes:
             request_key (str):
-            all_ (Union[Unset, bool]):  Default: False.
-            selectors (Union[None, Unset, list[str]]):
-            strategy (Union[Literal['one-at-a-time'], Unset]):  Default: 'one-at-a-time'.
+            all_ (bool | Unset):  Default: False.
+            selectors (list[str] | None | Unset):
+            strategy (Literal['one-at-a-time'] | Unset):  Default: 'one-at-a-time'.
      """
 
     request_key: str
-    all_: Union[Unset, bool] = False
-    selectors: Union[None, Unset, list[str]] = UNSET
-    strategy: Union[Literal['one-at-a-time'], Unset] = 'one-at-a-time'
+    all_: bool | Unset = False
+    selectors: list[str] | None | Unset = UNSET
+    strategy: Literal['one-at-a-time'] | Unset = 'one-at-a-time'
 
 
 
@@ -45,7 +45,7 @@ class FleetUpgradeRequest:
 
         all_ = self.all_
 
-        selectors: Union[None, Unset, list[str]]
+        selectors: list[str] | None | Unset
         if isinstance(self.selectors, Unset):
             selectors = UNSET
         elif isinstance(self.selectors, list):
@@ -81,7 +81,7 @@ class FleetUpgradeRequest:
 
         all_ = d.pop("all", UNSET)
 
-        def _parse_selectors(data: object) -> Union[None, Unset, list[str]]:
+        def _parse_selectors(data: object) -> list[str] | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -92,14 +92,14 @@ class FleetUpgradeRequest:
                 selectors_type_0 = cast(list[str], data)
 
                 return selectors_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, list[str]], data)
+            return cast(list[str] | None | Unset, data)
 
         selectors = _parse_selectors(d.pop("selectors", UNSET))
 
 
-        strategy = cast(Union[Literal['one-at-a-time'], Unset] , d.pop("strategy", UNSET))
+        strategy = cast(Literal['one-at-a-time'] | Unset , d.pop("strategy", UNSET))
         if strategy != 'one-at-a-time' and not isinstance(strategy, Unset):
             raise ValueError(f"strategy must match const 'one-at-a-time', got '{strategy}'")
 

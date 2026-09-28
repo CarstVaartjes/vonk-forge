@@ -660,7 +660,7 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
     with sessions.begin() as session:
         node = AgentNode(node_id=NODE_A, state="active", capabilities=[])
         session.add(node)
-        session.flush([node])
+        session.flush()
         session.add(
             _profile(
                 NODE_A,

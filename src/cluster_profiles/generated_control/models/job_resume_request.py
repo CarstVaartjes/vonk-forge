@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,7 +12,6 @@ from ..models.job_resume_request_disposition import check_job_resume_request_dis
 from ..models.job_resume_request_disposition import JobResumeRequestDisposition
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Union
 
 
 
@@ -30,17 +31,17 @@ class JobResumeRequest:
     the terminal disposition for work whose retry budget is already spent.
 
         Attributes:
-            disposition (Union[Unset, JobResumeRequestDisposition]):  Default: 'resume'.
+            disposition (JobResumeRequestDisposition | Unset):  Default: 'resume'.
      """
 
-    disposition: Union[Unset, JobResumeRequestDisposition] = 'resume'
+    disposition: JobResumeRequestDisposition | Unset = 'resume'
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        disposition: Union[Unset, str] = UNSET
+        disposition: str | Unset = UNSET
         if not isinstance(self.disposition, Unset):
             disposition = self.disposition
 
@@ -61,7 +62,7 @@ class JobResumeRequest:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         _disposition = d.pop("disposition", UNSET)
-        disposition: Union[Unset, JobResumeRequestDisposition]
+        disposition: JobResumeRequestDisposition | Unset
         if isinstance(_disposition,  Unset):
             disposition = UNSET
         else:

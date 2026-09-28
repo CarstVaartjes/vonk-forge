@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 
 
@@ -33,8 +33,8 @@ class RunSwitchTargetTransferEvidenceResult:
             verified_digests (list[str]):
             verified_image_digest (str):
             verified_oci_layout_sha256 (str):
-            copied_bytes (Union[None, Unset, int]):
-            downloaded_bytes (Union[None, Unset, int]):
+            copied_bytes (int | None | Unset):
+            downloaded_bytes (int | None | Unset):
      """
 
     imported_image_digest: str
@@ -45,8 +45,8 @@ class RunSwitchTargetTransferEvidenceResult:
     verified_digests: list[str]
     verified_image_digest: str
     verified_oci_layout_sha256: str
-    copied_bytes: Union[None, Unset, int] = UNSET
-    downloaded_bytes: Union[None, Unset, int] = UNSET
+    copied_bytes: int | None | Unset = UNSET
+    downloaded_bytes: int | None | Unset = UNSET
 
 
 
@@ -71,13 +71,13 @@ class RunSwitchTargetTransferEvidenceResult:
 
         verified_oci_layout_sha256 = self.verified_oci_layout_sha256
 
-        copied_bytes: Union[None, Unset, int]
+        copied_bytes: int | None | Unset
         if isinstance(self.copied_bytes, Unset):
             copied_bytes = UNSET
         else:
             copied_bytes = self.copied_bytes
 
-        downloaded_bytes: Union[None, Unset, int]
+        downloaded_bytes: int | None | Unset
         if isinstance(self.downloaded_bytes, Unset):
             downloaded_bytes = UNSET
         else:
@@ -129,22 +129,22 @@ class RunSwitchTargetTransferEvidenceResult:
 
         verified_oci_layout_sha256 = d.pop("verified_oci_layout_sha256")
 
-        def _parse_copied_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_copied_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         copied_bytes = _parse_copied_bytes(d.pop("copied_bytes", UNSET))
 
 
-        def _parse_downloaded_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_downloaded_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         downloaded_bytes = _parse_downloaded_bytes(d.pop("downloaded_bytes", UNSET))
 

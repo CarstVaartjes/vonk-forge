@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -151,7 +151,7 @@ def _package_path(corpus: FrozenCorpus, row: dict[str, Any]) -> Path:
     pytest.fail(f"frozen package archive is unavailable: {location}")
 
 
-def _transport(corpus: FrozenCorpus, calls: list[str]) -> httpx.MockTransport:
+def _transport(corpus: FrozenCorpus, calls: list[str]) -> httpx2.MockTransport:
     index_bytes = json.dumps(
         corpus.index, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
@@ -159,7 +159,7 @@ def _transport(corpus: FrozenCorpus, calls: list[str]) -> httpx.MockTransport:
         Path(str(row["package"]["path"])).name: row for row in corpus.index["recipes"]
     }
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(request.url.path)
         if request.url.path.endswith("index.json"):
             # Raw GitHub serves generated catalog JSON as text/plain on some
@@ -168,12 +168,12 @@ def _transport(corpus: FrozenCorpus, calls: list[str]) -> httpx.MockTransport:
             headers = {"content-type": "text/plain"}
             if corpus.publication_commit:
                 headers["x-vonk-publication-commit"] = corpus.publication_commit
-            return httpx.Response(200, headers=headers, content=index_bytes)
+            return httpx2.Response(200, headers=headers, content=index_bytes)
         row = by_name.get(Path(request.url.path).name)
         if row is None:
-            return httpx.Response(404)
+            return httpx2.Response(404)
         archive = _package_path(corpus, row).read_bytes()
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={
                 "content-type": PACKAGE_MEDIA_TYPE,
@@ -186,7 +186,7 @@ def _transport(corpus: FrozenCorpus, calls: list[str]) -> httpx.MockTransport:
             content=archive,
         )
 
-    return httpx.MockTransport(handler)
+    return httpx2.MockTransport(handler)
 
 
 def _upgrade_fresh_database(engine: Engine) -> None:
@@ -547,14 +547,14 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     # visible in calls; no package request is hidden behind synthetic success.
     offline_calls: list[str] = []
 
-    def offline(request: httpx.Request) -> httpx.Response:
+    def offline(request: httpx2.Request) -> httpx2.Response:
         offline_calls.append(request.url.path)
-        raise httpx.ConnectError("publication offline", request=request)
+        raise httpx2.ConnectError("publication offline", request=request)
 
     restarted = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(offline),
+        transport=httpx2.MockTransport(offline),
         publication_commit=corpus.publication_commit,
     )
     offline_snapshot = restarted.list()

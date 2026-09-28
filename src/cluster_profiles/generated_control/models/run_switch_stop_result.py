@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,9 +12,7 @@ from ..models.run_switch_stop_result_subphase_type_0 import check_run_switch_sto
 from ..models.run_switch_stop_result_subphase_type_0 import RunSwitchStopResultSubphaseType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 
 
@@ -29,12 +29,12 @@ class RunSwitchStopResult:
         Attributes:
             phase (Literal['stop']):
             run_id (str):
-            subphase (Union[None, RunSwitchStopResultSubphaseType0, Unset]):
+            subphase (None | RunSwitchStopResultSubphaseType0 | Unset):
      """
 
     phase: Literal['stop']
     run_id: str
-    subphase: Union[None, RunSwitchStopResultSubphaseType0, Unset] = UNSET
+    subphase: None | RunSwitchStopResultSubphaseType0 | Unset = UNSET
 
 
 
@@ -45,7 +45,7 @@ class RunSwitchStopResult:
 
         run_id = self.run_id
 
-        subphase: Union[None, Unset, str]
+        subphase: None | str | Unset
         if isinstance(self.subphase, Unset):
             subphase = UNSET
         elif isinstance(self.subphase, str):
@@ -76,7 +76,7 @@ class RunSwitchStopResult:
 
         run_id = d.pop("run_id")
 
-        def _parse_subphase(data: object) -> Union[None, RunSwitchStopResultSubphaseType0, Unset]:
+        def _parse_subphase(data: object) -> None | RunSwitchStopResultSubphaseType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -89,9 +89,9 @@ class RunSwitchStopResult:
 
 
                 return subphase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchStopResultSubphaseType0, Unset], data)
+            return cast(None | RunSwitchStopResultSubphaseType0 | Unset, data)
 
         subphase = _parse_subphase(d.pop("subphase", UNSET))
 

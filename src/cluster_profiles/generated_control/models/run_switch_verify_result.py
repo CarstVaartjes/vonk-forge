@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,13 +10,11 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.run_switch_verify_result_cached_target_totals import RunSwitchVerifyResultCachedTargetTotals
   from ..models.artifact_verification_evidence import ArtifactVerificationEvidence
+  from ..models.run_switch_verify_result_cached_target_totals import RunSwitchVerifyResultCachedTargetTotals
 
 
 
@@ -31,44 +31,44 @@ class RunSwitchVerifyResult:
             phase (Literal['verify']):
             subphase (Literal['target-copy']):
             verified (bool):
-            verified_build_id (Union[None, str]):
+            verified_build_id (None | str):
             verified_digests (list[str]):
             verified_image_digest (str):
             verified_oci_layout_sha256 (str):
-            cached_nodes (Union[Unset, list[str]]):
-            cached_target_totals (Union[Unset, RunSwitchVerifyResultCachedTargetTotals]):
-            evidence (Union[Unset, list['ArtifactVerificationEvidence']]):
-            skipped (Union[Unset, bool]):  Default: False.
-            verified_registry_manifest_digest (Union[None, Unset, str]):
+            cached_nodes (list[str] | Unset):
+            cached_target_totals (RunSwitchVerifyResultCachedTargetTotals | Unset):
+            evidence (list[ArtifactVerificationEvidence] | Unset):
+            skipped (bool | Unset):  Default: False.
+            verified_registry_manifest_digest (None | str | Unset):
      """
 
     phase: Literal['verify']
     subphase: Literal['target-copy']
     verified: bool
-    verified_build_id: Union[None, str]
+    verified_build_id: None | str
     verified_digests: list[str]
     verified_image_digest: str
     verified_oci_layout_sha256: str
-    cached_nodes: Union[Unset, list[str]] = UNSET
-    cached_target_totals: Union[Unset, 'RunSwitchVerifyResultCachedTargetTotals'] = UNSET
-    evidence: Union[Unset, list['ArtifactVerificationEvidence']] = UNSET
-    skipped: Union[Unset, bool] = False
-    verified_registry_manifest_digest: Union[None, Unset, str] = UNSET
+    cached_nodes: list[str] | Unset = UNSET
+    cached_target_totals: RunSwitchVerifyResultCachedTargetTotals | Unset = UNSET
+    evidence: list[ArtifactVerificationEvidence] | Unset = UNSET
+    skipped: bool | Unset = False
+    verified_registry_manifest_digest: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_verify_result_cached_target_totals import RunSwitchVerifyResultCachedTargetTotals
-        from ..models.artifact_verification_evidence import ArtifactVerificationEvidence
+        from ..models.artifact_verification_evidence import ArtifactVerificationEvidence # noqa: PLC0415
+        from ..models.run_switch_verify_result_cached_target_totals import RunSwitchVerifyResultCachedTargetTotals # noqa: PLC0415
         phase = self.phase
 
         subphase = self.subphase
 
         verified = self.verified
 
-        verified_build_id: Union[None, str]
+        verified_build_id: None | str
         verified_build_id = self.verified_build_id
 
         verified_digests = self.verified_digests
@@ -79,17 +79,17 @@ class RunSwitchVerifyResult:
 
         verified_oci_layout_sha256 = self.verified_oci_layout_sha256
 
-        cached_nodes: Union[Unset, list[str]] = UNSET
+        cached_nodes: list[str] | Unset = UNSET
         if not isinstance(self.cached_nodes, Unset):
             cached_nodes = self.cached_nodes
 
 
 
-        cached_target_totals: Union[Unset, dict[str, Any]] = UNSET
+        cached_target_totals: dict[str, Any] | Unset = UNSET
         if not isinstance(self.cached_target_totals, Unset):
             cached_target_totals = self.cached_target_totals.to_dict()
 
-        evidence: Union[Unset, list[dict[str, Any]]] = UNSET
+        evidence: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.evidence, Unset):
             evidence = []
             for evidence_item_data in self.evidence:
@@ -100,7 +100,7 @@ class RunSwitchVerifyResult:
 
         skipped = self.skipped
 
-        verified_registry_manifest_digest: Union[None, Unset, str]
+        verified_registry_manifest_digest: None | str | Unset
         if isinstance(self.verified_registry_manifest_digest, Unset):
             verified_registry_manifest_digest = UNSET
         else:
@@ -135,8 +135,8 @@ class RunSwitchVerifyResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_verify_result_cached_target_totals import RunSwitchVerifyResultCachedTargetTotals
-        from ..models.artifact_verification_evidence import ArtifactVerificationEvidence
+        from ..models.artifact_verification_evidence import ArtifactVerificationEvidence # noqa: PLC0415
+        from ..models.run_switch_verify_result_cached_target_totals import RunSwitchVerifyResultCachedTargetTotals # noqa: PLC0415
         d = dict(src_dict)
         phase = cast(Literal['verify'] , d.pop("phase"))
         if phase != 'verify':
@@ -148,10 +148,10 @@ class RunSwitchVerifyResult:
 
         verified = d.pop("verified")
 
-        def _parse_verified_build_id(data: object) -> Union[None, str]:
+        def _parse_verified_build_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         verified_build_id = _parse_verified_build_id(d.pop("verified_build_id"))
 
@@ -167,7 +167,7 @@ class RunSwitchVerifyResult:
 
 
         _cached_target_totals = d.pop("cached_target_totals", UNSET)
-        cached_target_totals: Union[Unset, RunSwitchVerifyResultCachedTargetTotals]
+        cached_target_totals: RunSwitchVerifyResultCachedTargetTotals | Unset
         if isinstance(_cached_target_totals,  Unset):
             cached_target_totals = UNSET
         else:
@@ -176,24 +176,26 @@ class RunSwitchVerifyResult:
 
 
 
-        evidence = []
         _evidence = d.pop("evidence", UNSET)
-        for evidence_item_data in (_evidence or []):
-            evidence_item = ArtifactVerificationEvidence.from_dict(evidence_item_data)
+        evidence: list[ArtifactVerificationEvidence] | Unset = UNSET
+        if _evidence is not UNSET:
+            evidence = []
+            for evidence_item_data in _evidence:
+                evidence_item = ArtifactVerificationEvidence.from_dict(evidence_item_data)
 
 
 
-            evidence.append(evidence_item)
+                evidence.append(evidence_item)
 
 
         skipped = d.pop("skipped", UNSET)
 
-        def _parse_verified_registry_manifest_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_verified_registry_manifest_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         verified_registry_manifest_digest = _parse_verified_registry_manifest_digest(d.pop("verified_registry_manifest_digest", UNSET))
 

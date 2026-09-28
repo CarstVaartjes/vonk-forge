@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from dateutil.parser import isoparse
 from typing import cast
 from typing import Literal, cast
 from uuid import UUID
@@ -33,7 +34,7 @@ class DistributionAssignment:
             generation (int):
             model_artifact_set_sha256 (str):
             node_id (str):
-            objects (list['DistributionObject']):
+            objects (list[DistributionObject]):
             oci_archive_sha256 (str):
             oci_image_digest (str):
             plan_digest (str):
@@ -45,7 +46,7 @@ class DistributionAssignment:
     generation: int
     model_artifact_set_sha256: str
     node_id: str
-    objects: list['DistributionObject']
+    objects: list[DistributionObject]
     oci_archive_sha256: str
     oci_image_digest: str
     plan_digest: str
@@ -56,7 +57,7 @@ class DistributionAssignment:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.distribution_object import DistributionObject
+        from ..models.distribution_object import DistributionObject # noqa: PLC0415
         assignment_id = str(self.assignment_id)
 
         expires_at = self.expires_at.isoformat()
@@ -104,14 +105,14 @@ class DistributionAssignment:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.distribution_object import DistributionObject
+        from ..models.distribution_object import DistributionObject # noqa: PLC0415
         d = dict(src_dict)
         assignment_id = UUID(d.pop("assignment_id"))
 
 
 
 
-        expires_at = isoparse(d.pop("expires_at"))
+        expires_at = datetime.datetime.fromisoformat(d.pop("expires_at"))
 
 
 

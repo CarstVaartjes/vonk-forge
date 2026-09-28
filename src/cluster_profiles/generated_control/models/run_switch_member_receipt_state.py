@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RunSwitchMemberReceiptState = Literal['failed', 'pending', 'running', 'succeeded', 'unknown']
 
@@ -6,5 +6,5 @@ RUN_SWITCH_MEMBER_RECEIPT_STATE_VALUES: set[RunSwitchMemberReceiptState] = { 'fa
 
 def check_run_switch_member_receipt_state(value: str) -> RunSwitchMemberReceiptState:
     if value in RUN_SWITCH_MEMBER_RECEIPT_STATE_VALUES:
-        return cast(RunSwitchMemberReceiptState, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RUN_SWITCH_MEMBER_RECEIPT_STATE_VALUES!r}")

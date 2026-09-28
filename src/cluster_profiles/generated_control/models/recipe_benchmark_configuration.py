@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from typing import cast, Union
+from typing import cast
 
 
 
@@ -19,10 +21,9 @@ T = TypeVar("T", bound="RecipeBenchmarkConfiguration")
 
 @_attrs_define
 class RecipeBenchmarkConfiguration:
-    """
-     """
 
-    additional_properties: dict[str, Union[bool, float, int, str]] = _attrs_field(init=False, factory=dict)
+
+    additional_properties: dict[str, bool | float | int | str] = _attrs_field(init=False, factory=dict)
 
 
 
@@ -49,8 +50,8 @@ class RecipeBenchmarkConfiguration:
 
         additional_properties = {}
         for prop_name, prop_dict in d.items():
-            def _parse_additional_property(data: object) -> Union[bool, float, int, str]:
-                return cast(Union[bool, float, int, str], data)
+            def _parse_additional_property(data: object) -> bool | float | int | str:
+                return cast(bool | float | int | str, data)
 
             additional_property = _parse_additional_property(prop_dict)
 
@@ -63,10 +64,10 @@ class RecipeBenchmarkConfiguration:
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> Union[bool, float, int, str]:
+    def __getitem__(self, key: str) -> bool | float | int | str:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: Union[bool, float, int, str]) -> None:
+    def __setitem__(self, key: str, value: bool | float | int | str) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:

@@ -304,7 +304,7 @@ class BrowserAuthService:
         ).one_or_none()
         if result is None:
             raise BrowserAuthenticationError()
-        row, user = result._tuple()
+        row, user = result
         if (
             row.revoked_at is not None
             or _database_utc(row.expires_at) <= now

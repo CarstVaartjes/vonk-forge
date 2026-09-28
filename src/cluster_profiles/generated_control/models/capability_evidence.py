@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,8 +14,6 @@ from ..models.capability_evidence_support import CapabilityEvidenceSupport
 from ..models.capability_evidence_support import check_capability_evidence_support
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -29,27 +29,27 @@ class CapabilityEvidence:
     """ One capability's declaration and evidence, kept separate by owner.
 
         Attributes:
-            declared (Union[None, bool]):
+            declared (bool | None):
             evidence (CapabilityEvidenceEvidence):
             name (str):
             support (CapabilityEvidenceSupport):
-            detail (Union[None, Unset, str]):
-            evidence_digest (Union[None, Unset, str]):
+            detail (None | str | Unset):
+            evidence_digest (None | str | Unset):
      """
 
-    declared: Union[None, bool]
+    declared: bool | None
     evidence: CapabilityEvidenceEvidence
     name: str
     support: CapabilityEvidenceSupport
-    detail: Union[None, Unset, str] = UNSET
-    evidence_digest: Union[None, Unset, str] = UNSET
+    detail: None | str | Unset = UNSET
+    evidence_digest: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        declared: Union[None, bool]
+        declared: bool | None
         declared = self.declared
 
         evidence: str = self.evidence
@@ -58,13 +58,13 @@ class CapabilityEvidence:
 
         support: str = self.support
 
-        detail: Union[None, Unset, str]
+        detail: None | str | Unset
         if isinstance(self.detail, Unset):
             detail = UNSET
         else:
             detail = self.detail
 
-        evidence_digest: Union[None, Unset, str]
+        evidence_digest: None | str | Unset
         if isinstance(self.evidence_digest, Unset):
             evidence_digest = UNSET
         else:
@@ -91,10 +91,10 @@ class CapabilityEvidence:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        def _parse_declared(data: object) -> Union[None, bool]:
+        def _parse_declared(data: object) -> bool | None:
             if data is None:
                 return data
-            return cast(Union[None, bool], data)
+            return cast(bool | None, data)
 
         declared = _parse_declared(d.pop("declared"))
 
@@ -111,22 +111,22 @@ class CapabilityEvidence:
 
 
 
-        def _parse_detail(data: object) -> Union[None, Unset, str]:
+        def _parse_detail(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         detail = _parse_detail(d.pop("detail", UNSET))
 
 
-        def _parse_evidence_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_evidence_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         evidence_digest = _parse_evidence_digest(d.pop("evidence_digest", UNSET))
 

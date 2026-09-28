@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,20 +13,17 @@ from ..models.fleet_profile_switch_adapter_state_active_kind_type_0 import Fleet
 from ..models.fleet_profile_switch_adapter_state_state import check_fleet_profile_switch_adapter_state_state
 from ..models.fleet_profile_switch_adapter_state_state import FleetProfileSwitchAdapterStateState
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState
-  from ..models.fleet_profile_child_progress import FleetProfileChildProgress
-  from ..models.fleet_profile_assignment_failure import FleetProfileAssignmentFailure
-  from ..models.fleet_profile_switch_adapter_result import FleetProfileSwitchAdapterResult
-  from ..models.fleet_profile_switch_queue_item import FleetProfileSwitchQueueItem
   from ..models.fleet_profile_assignment import FleetProfileAssignment
+  from ..models.fleet_profile_assignment_failure import FleetProfileAssignmentFailure
+  from ..models.fleet_profile_child_progress import FleetProfileChildProgress
+  from ..models.fleet_profile_switch_adapter_result import FleetProfileSwitchAdapterResult
+  from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState
+  from ..models.fleet_profile_switch_queue_item import FleetProfileSwitchQueueItem
 
 
 
@@ -41,60 +40,60 @@ class FleetProfileSwitchAdapterState:
         Attributes:
             actor (str):
             assignment_ids (list[str]):
-            assignments (list['FleetProfileAssignment']):
+            assignments (list[FleetProfileAssignment]):
             child_id (str):
-            queue (list['FleetProfileSwitchQueueItem']):
+            queue (list[FleetProfileSwitchQueueItem]):
             request_id (str):
             scope_node_ids (list[str]):
-            active_kind (Union[FleetProfileSwitchAdapterStateActiveKindType0, None, Unset]):
-            active_operation_id (Union[None, Unset, str]):
-            assignment_failures (Union[Unset, list['FleetProfileAssignmentFailure']]):
-            child_progress (Union['FleetProfileChildProgress', None, Unset]):
-            children (Union[Unset, list['FleetProfileSwitchChildState']]):
-            observation_deadline_at (Union[None, Unset, datetime.datetime]):
-            observation_due_at (Union[None, Unset, datetime.datetime]):
-            pending_operation_ids (Union[Unset, list[str]]):
-            position (Union[Unset, int]):  Default: 0.
-            result (Union['FleetProfileSwitchAdapterResult', None, Unset]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
-            state (Union[Unset, FleetProfileSwitchAdapterStateState]):  Default: 'queued'.
-            status_reason (Union[None, Unset, str]):
-            stop_reissue_attempt (Union[Unset, int]):  Default: 0.
+            active_kind (FleetProfileSwitchAdapterStateActiveKindType0 | None | Unset):
+            active_operation_id (None | str | Unset):
+            assignment_failures (list[FleetProfileAssignmentFailure] | Unset):
+            child_progress (FleetProfileChildProgress | None | Unset):
+            children (list[FleetProfileSwitchChildState] | Unset):
+            observation_deadline_at (datetime.datetime | None | Unset):
+            observation_due_at (datetime.datetime | None | Unset):
+            pending_operation_ids (list[str] | Unset):
+            position (int | Unset):  Default: 0.
+            result (FleetProfileSwitchAdapterResult | None | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
+            state (FleetProfileSwitchAdapterStateState | Unset):  Default: 'queued'.
+            status_reason (None | str | Unset):
+            stop_reissue_attempt (int | Unset):  Default: 0.
      """
 
     actor: str
     assignment_ids: list[str]
-    assignments: list['FleetProfileAssignment']
+    assignments: list[FleetProfileAssignment]
     child_id: str
-    queue: list['FleetProfileSwitchQueueItem']
+    queue: list[FleetProfileSwitchQueueItem]
     request_id: str
     scope_node_ids: list[str]
-    active_kind: Union[FleetProfileSwitchAdapterStateActiveKindType0, None, Unset] = UNSET
-    active_operation_id: Union[None, Unset, str] = UNSET
-    assignment_failures: Union[Unset, list['FleetProfileAssignmentFailure']] = UNSET
-    child_progress: Union['FleetProfileChildProgress', None, Unset] = UNSET
-    children: Union[Unset, list['FleetProfileSwitchChildState']] = UNSET
-    observation_deadline_at: Union[None, Unset, datetime.datetime] = UNSET
-    observation_due_at: Union[None, Unset, datetime.datetime] = UNSET
-    pending_operation_ids: Union[Unset, list[str]] = UNSET
-    position: Union[Unset, int] = 0
-    result: Union['FleetProfileSwitchAdapterResult', None, Unset] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
-    state: Union[Unset, FleetProfileSwitchAdapterStateState] = 'queued'
-    status_reason: Union[None, Unset, str] = UNSET
-    stop_reissue_attempt: Union[Unset, int] = 0
+    active_kind: FleetProfileSwitchAdapterStateActiveKindType0 | None | Unset = UNSET
+    active_operation_id: None | str | Unset = UNSET
+    assignment_failures: list[FleetProfileAssignmentFailure] | Unset = UNSET
+    child_progress: FleetProfileChildProgress | None | Unset = UNSET
+    children: list[FleetProfileSwitchChildState] | Unset = UNSET
+    observation_deadline_at: datetime.datetime | None | Unset = UNSET
+    observation_due_at: datetime.datetime | None | Unset = UNSET
+    pending_operation_ids: list[str] | Unset = UNSET
+    position: int | Unset = 0
+    result: FleetProfileSwitchAdapterResult | None | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
+    state: FleetProfileSwitchAdapterStateState | Unset = 'queued'
+    status_reason: None | str | Unset = UNSET
+    stop_reissue_attempt: int | Unset = 0
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState
-        from ..models.fleet_profile_child_progress import FleetProfileChildProgress
-        from ..models.fleet_profile_assignment_failure import FleetProfileAssignmentFailure
-        from ..models.fleet_profile_switch_adapter_result import FleetProfileSwitchAdapterResult
-        from ..models.fleet_profile_switch_queue_item import FleetProfileSwitchQueueItem
-        from ..models.fleet_profile_assignment import FleetProfileAssignment
+        from ..models.fleet_profile_assignment import FleetProfileAssignment # noqa: PLC0415
+        from ..models.fleet_profile_assignment_failure import FleetProfileAssignmentFailure # noqa: PLC0415
+        from ..models.fleet_profile_child_progress import FleetProfileChildProgress # noqa: PLC0415
+        from ..models.fleet_profile_switch_adapter_result import FleetProfileSwitchAdapterResult # noqa: PLC0415
+        from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState # noqa: PLC0415
+        from ..models.fleet_profile_switch_queue_item import FleetProfileSwitchQueueItem # noqa: PLC0415
         actor = self.actor
 
         assignment_ids = self.assignment_ids
@@ -123,7 +122,7 @@ class FleetProfileSwitchAdapterState:
 
 
 
-        active_kind: Union[None, Unset, str]
+        active_kind: None | str | Unset
         if isinstance(self.active_kind, Unset):
             active_kind = UNSET
         elif isinstance(self.active_kind, str):
@@ -131,13 +130,13 @@ class FleetProfileSwitchAdapterState:
         else:
             active_kind = self.active_kind
 
-        active_operation_id: Union[None, Unset, str]
+        active_operation_id: None | str | Unset
         if isinstance(self.active_operation_id, Unset):
             active_operation_id = UNSET
         else:
             active_operation_id = self.active_operation_id
 
-        assignment_failures: Union[Unset, list[dict[str, Any]]] = UNSET
+        assignment_failures: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.assignment_failures, Unset):
             assignment_failures = []
             for assignment_failures_item_data in self.assignment_failures:
@@ -146,7 +145,7 @@ class FleetProfileSwitchAdapterState:
 
 
 
-        child_progress: Union[None, Unset, dict[str, Any]]
+        child_progress: dict[str, Any] | None | Unset
         if isinstance(self.child_progress, Unset):
             child_progress = UNSET
         elif isinstance(self.child_progress, FleetProfileChildProgress):
@@ -154,7 +153,7 @@ class FleetProfileSwitchAdapterState:
         else:
             child_progress = self.child_progress
 
-        children: Union[Unset, list[dict[str, Any]]] = UNSET
+        children: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.children, Unset):
             children = []
             for children_item_data in self.children:
@@ -163,7 +162,7 @@ class FleetProfileSwitchAdapterState:
 
 
 
-        observation_deadline_at: Union[None, Unset, str]
+        observation_deadline_at: None | str | Unset
         if isinstance(self.observation_deadline_at, Unset):
             observation_deadline_at = UNSET
         elif isinstance(self.observation_deadline_at, datetime.datetime):
@@ -171,7 +170,7 @@ class FleetProfileSwitchAdapterState:
         else:
             observation_deadline_at = self.observation_deadline_at
 
-        observation_due_at: Union[None, Unset, str]
+        observation_due_at: None | str | Unset
         if isinstance(self.observation_due_at, Unset):
             observation_due_at = UNSET
         elif isinstance(self.observation_due_at, datetime.datetime):
@@ -179,7 +178,7 @@ class FleetProfileSwitchAdapterState:
         else:
             observation_due_at = self.observation_due_at
 
-        pending_operation_ids: Union[Unset, list[str]] = UNSET
+        pending_operation_ids: list[str] | Unset = UNSET
         if not isinstance(self.pending_operation_ids, Unset):
             pending_operation_ids = self.pending_operation_ids
 
@@ -187,7 +186,7 @@ class FleetProfileSwitchAdapterState:
 
         position = self.position
 
-        result: Union[None, Unset, dict[str, Any]]
+        result: dict[str, Any] | None | Unset
         if isinstance(self.result, Unset):
             result = UNSET
         elif isinstance(self.result, FleetProfileSwitchAdapterResult):
@@ -197,12 +196,12 @@ class FleetProfileSwitchAdapterState:
 
         schema_version = self.schema_version
 
-        state: Union[Unset, str] = UNSET
+        state: str | Unset = UNSET
         if not isinstance(self.state, Unset):
             state = self.state
 
 
-        status_reason: Union[None, Unset, str]
+        status_reason: None | str | Unset
         if isinstance(self.status_reason, Unset):
             status_reason = UNSET
         else:
@@ -257,12 +256,12 @@ class FleetProfileSwitchAdapterState:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState
-        from ..models.fleet_profile_child_progress import FleetProfileChildProgress
-        from ..models.fleet_profile_assignment_failure import FleetProfileAssignmentFailure
-        from ..models.fleet_profile_switch_adapter_result import FleetProfileSwitchAdapterResult
-        from ..models.fleet_profile_switch_queue_item import FleetProfileSwitchQueueItem
-        from ..models.fleet_profile_assignment import FleetProfileAssignment
+        from ..models.fleet_profile_assignment import FleetProfileAssignment # noqa: PLC0415
+        from ..models.fleet_profile_assignment_failure import FleetProfileAssignmentFailure # noqa: PLC0415
+        from ..models.fleet_profile_child_progress import FleetProfileChildProgress # noqa: PLC0415
+        from ..models.fleet_profile_switch_adapter_result import FleetProfileSwitchAdapterResult # noqa: PLC0415
+        from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState # noqa: PLC0415
+        from ..models.fleet_profile_switch_queue_item import FleetProfileSwitchQueueItem # noqa: PLC0415
         d = dict(src_dict)
         actor = d.pop("actor")
 
@@ -296,7 +295,7 @@ class FleetProfileSwitchAdapterState:
         scope_node_ids = cast(list[str], d.pop("scope_node_ids"))
 
 
-        def _parse_active_kind(data: object) -> Union[FleetProfileSwitchAdapterStateActiveKindType0, None, Unset]:
+        def _parse_active_kind(data: object) -> FleetProfileSwitchAdapterStateActiveKindType0 | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -309,34 +308,36 @@ class FleetProfileSwitchAdapterState:
 
 
                 return active_kind_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[FleetProfileSwitchAdapterStateActiveKindType0, None, Unset], data)
+            return cast(FleetProfileSwitchAdapterStateActiveKindType0 | None | Unset, data)
 
         active_kind = _parse_active_kind(d.pop("active_kind", UNSET))
 
 
-        def _parse_active_operation_id(data: object) -> Union[None, Unset, str]:
+        def _parse_active_operation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         active_operation_id = _parse_active_operation_id(d.pop("active_operation_id", UNSET))
 
 
-        assignment_failures = []
         _assignment_failures = d.pop("assignment_failures", UNSET)
-        for assignment_failures_item_data in (_assignment_failures or []):
-            assignment_failures_item = FleetProfileAssignmentFailure.from_dict(assignment_failures_item_data)
+        assignment_failures: list[FleetProfileAssignmentFailure] | Unset = UNSET
+        if _assignment_failures is not UNSET:
+            assignment_failures = []
+            for assignment_failures_item_data in _assignment_failures:
+                assignment_failures_item = FleetProfileAssignmentFailure.from_dict(assignment_failures_item_data)
 
 
 
-            assignment_failures.append(assignment_failures_item)
+                assignment_failures.append(assignment_failures_item)
 
 
-        def _parse_child_progress(data: object) -> Union['FleetProfileChildProgress', None, Unset]:
+        def _parse_child_progress(data: object) -> FleetProfileChildProgress | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -349,24 +350,26 @@ class FleetProfileSwitchAdapterState:
 
 
                 return child_progress_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileChildProgress', None, Unset], data)
+            return cast(FleetProfileChildProgress | None | Unset, data)
 
         child_progress = _parse_child_progress(d.pop("child_progress", UNSET))
 
 
-        children = []
         _children = d.pop("children", UNSET)
-        for children_item_data in (_children or []):
-            children_item = FleetProfileSwitchChildState.from_dict(children_item_data)
+        children: list[FleetProfileSwitchChildState] | Unset = UNSET
+        if _children is not UNSET:
+            children = []
+            for children_item_data in _children:
+                children_item = FleetProfileSwitchChildState.from_dict(children_item_data)
 
 
 
-            children.append(children_item)
+                children.append(children_item)
 
 
-        def _parse_observation_deadline_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_observation_deadline_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -374,19 +377,19 @@ class FleetProfileSwitchAdapterState:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                observation_deadline_at_type_0 = isoparse(data)
+                observation_deadline_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return observation_deadline_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         observation_deadline_at = _parse_observation_deadline_at(d.pop("observation_deadline_at", UNSET))
 
 
-        def _parse_observation_due_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_observation_due_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -394,14 +397,14 @@ class FleetProfileSwitchAdapterState:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                observation_due_at_type_0 = isoparse(data)
+                observation_due_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return observation_due_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         observation_due_at = _parse_observation_due_at(d.pop("observation_due_at", UNSET))
 
@@ -411,7 +414,7 @@ class FleetProfileSwitchAdapterState:
 
         position = d.pop("position", UNSET)
 
-        def _parse_result(data: object) -> Union['FleetProfileSwitchAdapterResult', None, Unset]:
+        def _parse_result(data: object) -> FleetProfileSwitchAdapterResult | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -424,19 +427,19 @@ class FleetProfileSwitchAdapterState:
 
 
                 return result_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileSwitchAdapterResult', None, Unset], data)
+            return cast(FleetProfileSwitchAdapterResult | None | Unset, data)
 
         result = _parse_result(d.pop("result", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
         _state = d.pop("state", UNSET)
-        state: Union[Unset, FleetProfileSwitchAdapterStateState]
+        state: FleetProfileSwitchAdapterStateState | Unset
         if isinstance(_state,  Unset):
             state = UNSET
         else:
@@ -445,12 +448,12 @@ class FleetProfileSwitchAdapterState:
 
 
 
-        def _parse_status_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_status_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         status_reason = _parse_status_reason(d.pop("status_reason", UNSET))
 

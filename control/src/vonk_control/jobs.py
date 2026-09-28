@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import String, cast, func, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -553,7 +554,7 @@ class JobService:
                 )
                 .execution_options(synchronize_session=False)
             )
-            if result.rowcount != 1:
+            if not isinstance(result, CursorResult) or result.rowcount != 1:
                 raise ValueError("job is not waiting for operator")
             job.state = "queued"
             job.status_reason = None

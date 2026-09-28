@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,16 +10,14 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.operation_evidence_provenance import OperationEvidenceProvenance
+  from ..models.agent_failure_result import AgentFailureResult
   from ..models.availability_operation_failure import AvailabilityOperationFailure
   from ..models.operation_evidence_download import OperationEvidenceDownload
-  from ..models.operation_progress import OperationProgress
-  from ..models.agent_failure_result import AgentFailureResult
+  from ..models.operation_evidence_provenance import OperationEvidenceProvenance
   from ..models.operation_failure_evidence import OperationFailureEvidence
+  from ..models.operation_progress import OperationProgress
   from ..models.operation_recovery import OperationRecovery
 
 
@@ -37,12 +37,12 @@ class JobOperationResponse:
             kind (str):
             node_id (str):
             state (str):
-            evidence_download (Union['OperationEvidenceDownload', None, Unset]):
-            failure (Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset]):
-            progress (Union['OperationProgress', None, Unset]):
-            provenance (Union['OperationEvidenceProvenance', None, Unset]):
-            recovery (Union['OperationRecovery', None, Unset]):
-            updated_at (Union[None, Unset, str]):
+            evidence_download (None | OperationEvidenceDownload | Unset):
+            failure (AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset):
+            progress (None | OperationProgress | Unset):
+            provenance (None | OperationEvidenceProvenance | Unset):
+            recovery (None | OperationRecovery | Unset):
+            updated_at (None | str | Unset):
      """
 
     attempt: int
@@ -50,25 +50,25 @@ class JobOperationResponse:
     kind: str
     node_id: str
     state: str
-    evidence_download: Union['OperationEvidenceDownload', None, Unset] = UNSET
-    failure: Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset] = UNSET
-    progress: Union['OperationProgress', None, Unset] = UNSET
-    provenance: Union['OperationEvidenceProvenance', None, Unset] = UNSET
-    recovery: Union['OperationRecovery', None, Unset] = UNSET
-    updated_at: Union[None, Unset, str] = UNSET
+    evidence_download: None | OperationEvidenceDownload | Unset = UNSET
+    failure: AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset = UNSET
+    progress: None | OperationProgress | Unset = UNSET
+    provenance: None | OperationEvidenceProvenance | Unset = UNSET
+    recovery: None | OperationRecovery | Unset = UNSET
+    updated_at: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.operation_evidence_provenance import OperationEvidenceProvenance
-        from ..models.availability_operation_failure import AvailabilityOperationFailure
-        from ..models.operation_evidence_download import OperationEvidenceDownload
-        from ..models.operation_progress import OperationProgress
-        from ..models.agent_failure_result import AgentFailureResult
-        from ..models.operation_failure_evidence import OperationFailureEvidence
-        from ..models.operation_recovery import OperationRecovery
+        from ..models.agent_failure_result import AgentFailureResult # noqa: PLC0415
+        from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
+        from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
+        from ..models.operation_evidence_provenance import OperationEvidenceProvenance # noqa: PLC0415
+        from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
+        from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
         attempt = self.attempt
 
         id = self.id
@@ -79,7 +79,7 @@ class JobOperationResponse:
 
         state = self.state
 
-        evidence_download: Union[None, Unset, dict[str, Any]]
+        evidence_download: dict[str, Any] | None | Unset
         if isinstance(self.evidence_download, Unset):
             evidence_download = UNSET
         elif isinstance(self.evidence_download, OperationEvidenceDownload):
@@ -87,7 +87,7 @@ class JobOperationResponse:
         else:
             evidence_download = self.evidence_download
 
-        failure: Union[None, Unset, dict[str, Any]]
+        failure: dict[str, Any] | None | Unset
         if isinstance(self.failure, Unset):
             failure = UNSET
         elif isinstance(self.failure, AgentFailureResult):
@@ -99,7 +99,7 @@ class JobOperationResponse:
         else:
             failure = self.failure
 
-        progress: Union[None, Unset, dict[str, Any]]
+        progress: dict[str, Any] | None | Unset
         if isinstance(self.progress, Unset):
             progress = UNSET
         elif isinstance(self.progress, OperationProgress):
@@ -107,7 +107,7 @@ class JobOperationResponse:
         else:
             progress = self.progress
 
-        provenance: Union[None, Unset, dict[str, Any]]
+        provenance: dict[str, Any] | None | Unset
         if isinstance(self.provenance, Unset):
             provenance = UNSET
         elif isinstance(self.provenance, OperationEvidenceProvenance):
@@ -115,7 +115,7 @@ class JobOperationResponse:
         else:
             provenance = self.provenance
 
-        recovery: Union[None, Unset, dict[str, Any]]
+        recovery: dict[str, Any] | None | Unset
         if isinstance(self.recovery, Unset):
             recovery = UNSET
         elif isinstance(self.recovery, OperationRecovery):
@@ -123,7 +123,7 @@ class JobOperationResponse:
         else:
             recovery = self.recovery
 
-        updated_at: Union[None, Unset, str]
+        updated_at: None | str | Unset
         if isinstance(self.updated_at, Unset):
             updated_at = UNSET
         else:
@@ -158,13 +158,13 @@ class JobOperationResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.operation_evidence_provenance import OperationEvidenceProvenance
-        from ..models.availability_operation_failure import AvailabilityOperationFailure
-        from ..models.operation_evidence_download import OperationEvidenceDownload
-        from ..models.operation_progress import OperationProgress
-        from ..models.agent_failure_result import AgentFailureResult
-        from ..models.operation_failure_evidence import OperationFailureEvidence
-        from ..models.operation_recovery import OperationRecovery
+        from ..models.agent_failure_result import AgentFailureResult # noqa: PLC0415
+        from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
+        from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
+        from ..models.operation_evidence_provenance import OperationEvidenceProvenance # noqa: PLC0415
+        from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
+        from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
         d = dict(src_dict)
         attempt = d.pop("attempt")
 
@@ -176,7 +176,7 @@ class JobOperationResponse:
 
         state = d.pop("state")
 
-        def _parse_evidence_download(data: object) -> Union['OperationEvidenceDownload', None, Unset]:
+        def _parse_evidence_download(data: object) -> None | OperationEvidenceDownload | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -189,14 +189,14 @@ class JobOperationResponse:
 
 
                 return evidence_download_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['OperationEvidenceDownload', None, Unset], data)
+            return cast(None | OperationEvidenceDownload | Unset, data)
 
         evidence_download = _parse_evidence_download(d.pop("evidence_download", UNSET))
 
 
-        def _parse_failure(data: object) -> Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset]:
+        def _parse_failure(data: object) -> AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -209,7 +209,7 @@ class JobOperationResponse:
 
 
                 return failure_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -219,7 +219,7 @@ class JobOperationResponse:
 
 
                 return failure_type_1
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -229,14 +229,14 @@ class JobOperationResponse:
 
 
                 return failure_type_2
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['AgentFailureResult', 'AvailabilityOperationFailure', 'OperationFailureEvidence', None, Unset], data)
+            return cast(AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset, data)
 
         failure = _parse_failure(d.pop("failure", UNSET))
 
 
-        def _parse_progress(data: object) -> Union['OperationProgress', None, Unset]:
+        def _parse_progress(data: object) -> None | OperationProgress | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -249,14 +249,14 @@ class JobOperationResponse:
 
 
                 return progress_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['OperationProgress', None, Unset], data)
+            return cast(None | OperationProgress | Unset, data)
 
         progress = _parse_progress(d.pop("progress", UNSET))
 
 
-        def _parse_provenance(data: object) -> Union['OperationEvidenceProvenance', None, Unset]:
+        def _parse_provenance(data: object) -> None | OperationEvidenceProvenance | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -269,14 +269,14 @@ class JobOperationResponse:
 
 
                 return provenance_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['OperationEvidenceProvenance', None, Unset], data)
+            return cast(None | OperationEvidenceProvenance | Unset, data)
 
         provenance = _parse_provenance(d.pop("provenance", UNSET))
 
 
-        def _parse_recovery(data: object) -> Union['OperationRecovery', None, Unset]:
+        def _parse_recovery(data: object) -> None | OperationRecovery | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -289,19 +289,19 @@ class JobOperationResponse:
 
 
                 return recovery_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['OperationRecovery', None, Unset], data)
+            return cast(None | OperationRecovery | Unset, data)
 
         recovery = _parse_recovery(d.pop("recovery", UNSET))
 
 
-        def _parse_updated_at(data: object) -> Union[None, Unset, str]:
+        def _parse_updated_at(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         updated_at = _parse_updated_at(d.pop("updated_at", UNSET))
 

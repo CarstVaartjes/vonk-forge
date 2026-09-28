@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -13,10 +14,7 @@ from ...models.get_fleet_log_info_source_type_0 import check_get_fleet_log_info_
 from ...models.get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from ...models.request_validation_problem import RequestValidationProblem
 from ...types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
@@ -24,11 +22,11 @@ import datetime
 def _get_kwargs(
     selector: str,
     *,
-    since: Union[None, Unset, datetime.datetime] = UNSET,
-    lines: Union[Unset, int] = 100,
-    recipe: Union[None, Unset, str] = UNSET,
-    source: Union[GetFleetLogInfoSourceType0, None, Unset] = UNSET,
-    follow: Union[Unset, bool] = False,
+    since: datetime.datetime | None | Unset = UNSET,
+    lines: int | Unset = 100,
+    recipe: None | str | Unset = UNSET,
+    source: GetFleetLogInfoSourceType0 | None | Unset = UNSET,
+    follow: bool | Unset = False,
 
 ) -> dict[str, Any]:
 
@@ -37,7 +35,7 @@ def _get_kwargs(
 
     params: dict[str, Any] = {}
 
-    json_since: Union[None, Unset, str]
+    json_since: None | str | Unset
     if isinstance(since, Unset):
         json_since = UNSET
     elif isinstance(since, datetime.datetime):
@@ -48,14 +46,14 @@ def _get_kwargs(
 
     params["lines"] = lines
 
-    json_recipe: Union[None, Unset, str]
+    json_recipe: None | str | Unset
     if isinstance(recipe, Unset):
         json_recipe = UNSET
     else:
         json_recipe = recipe
     params["recipe"] = json_recipe
 
-    json_source: Union[None, Unset, str]
+    json_source: None | str | Unset
     if isinstance(source, Unset):
         json_source = UNSET
     elif isinstance(source, str):
@@ -72,7 +70,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/fleet/{selector}/loginfo".format(selector=selector,),
+        "url": "/api/fleet/{selector}/loginfo".format(selector=quote(str(selector), safe=""),),
         "params": params,
     }
 
@@ -81,7 +79,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | FleetLogResponse | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = FleetLogResponse.from_dict(response.json())
 
@@ -123,7 +121,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -136,29 +134,29 @@ def sync_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
-    since: Union[None, Unset, datetime.datetime] = UNSET,
-    lines: Union[Unset, int] = 100,
-    recipe: Union[None, Unset, str] = UNSET,
-    source: Union[GetFleetLogInfoSourceType0, None, Unset] = UNSET,
-    follow: Union[Unset, bool] = False,
+    since: datetime.datetime | None | Unset = UNSET,
+    lines: int | Unset = 100,
+    recipe: None | str | Unset = UNSET,
+    source: GetFleetLogInfoSourceType0 | None | Unset = UNSET,
+    follow: bool | Unset = False,
 
-) -> Response[Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]:
     """ Fleet Loginfo
 
     Args:
         selector (str):
-        since (Union[None, Unset, datetime.datetime]):
-        lines (Union[Unset, int]):  Default: 100.
-        recipe (Union[None, Unset, str]):
-        source (Union[GetFleetLogInfoSourceType0, None, Unset]):
-        follow (Union[Unset, bool]):  Default: False.
+        since (datetime.datetime | None | Unset):
+        lines (int | Unset):  Default: 100.
+        recipe (None | str | Unset):
+        source (GetFleetLogInfoSourceType0 | None | Unset):
+        follow (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]
      """
 
 
@@ -182,29 +180,29 @@ def sync(
     selector: str,
     *,
     client: AuthenticatedClient,
-    since: Union[None, Unset, datetime.datetime] = UNSET,
-    lines: Union[Unset, int] = 100,
-    recipe: Union[None, Unset, str] = UNSET,
-    source: Union[GetFleetLogInfoSourceType0, None, Unset] = UNSET,
-    follow: Union[Unset, bool] = False,
+    since: datetime.datetime | None | Unset = UNSET,
+    lines: int | Unset = 100,
+    recipe: None | str | Unset = UNSET,
+    source: GetFleetLogInfoSourceType0 | None | Unset = UNSET,
+    follow: bool | Unset = False,
 
-) -> Optional[Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | FleetLogResponse | RequestValidationProblem | None:
     """ Fleet Loginfo
 
     Args:
         selector (str):
-        since (Union[None, Unset, datetime.datetime]):
-        lines (Union[Unset, int]):  Default: 100.
-        recipe (Union[None, Unset, str]):
-        source (Union[GetFleetLogInfoSourceType0, None, Unset]):
-        follow (Union[Unset, bool]):  Default: False.
+        since (datetime.datetime | None | Unset):
+        lines (int | Unset):  Default: 100.
+        recipe (None | str | Unset):
+        source (GetFleetLogInfoSourceType0 | None | Unset):
+        follow (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]
+        BoundedErrorResponse | FleetLogResponse | RequestValidationProblem
      """
 
 
@@ -223,29 +221,29 @@ async def asyncio_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
-    since: Union[None, Unset, datetime.datetime] = UNSET,
-    lines: Union[Unset, int] = 100,
-    recipe: Union[None, Unset, str] = UNSET,
-    source: Union[GetFleetLogInfoSourceType0, None, Unset] = UNSET,
-    follow: Union[Unset, bool] = False,
+    since: datetime.datetime | None | Unset = UNSET,
+    lines: int | Unset = 100,
+    recipe: None | str | Unset = UNSET,
+    source: GetFleetLogInfoSourceType0 | None | Unset = UNSET,
+    follow: bool | Unset = False,
 
-) -> Response[Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]:
     """ Fleet Loginfo
 
     Args:
         selector (str):
-        since (Union[None, Unset, datetime.datetime]):
-        lines (Union[Unset, int]):  Default: 100.
-        recipe (Union[None, Unset, str]):
-        source (Union[GetFleetLogInfoSourceType0, None, Unset]):
-        follow (Union[Unset, bool]):  Default: False.
+        since (datetime.datetime | None | Unset):
+        lines (int | Unset):  Default: 100.
+        recipe (None | str | Unset):
+        source (GetFleetLogInfoSourceType0 | None | Unset):
+        follow (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]
      """
 
 
@@ -269,29 +267,29 @@ async def asyncio(
     selector: str,
     *,
     client: AuthenticatedClient,
-    since: Union[None, Unset, datetime.datetime] = UNSET,
-    lines: Union[Unset, int] = 100,
-    recipe: Union[None, Unset, str] = UNSET,
-    source: Union[GetFleetLogInfoSourceType0, None, Unset] = UNSET,
-    follow: Union[Unset, bool] = False,
+    since: datetime.datetime | None | Unset = UNSET,
+    lines: int | Unset = 100,
+    recipe: None | str | Unset = UNSET,
+    source: GetFleetLogInfoSourceType0 | None | Unset = UNSET,
+    follow: bool | Unset = False,
 
-) -> Optional[Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | FleetLogResponse | RequestValidationProblem | None:
     """ Fleet Loginfo
 
     Args:
         selector (str):
-        since (Union[None, Unset, datetime.datetime]):
-        lines (Union[Unset, int]):  Default: 100.
-        recipe (Union[None, Unset, str]):
-        source (Union[GetFleetLogInfoSourceType0, None, Unset]):
-        follow (Union[Unset, bool]):  Default: False.
+        since (datetime.datetime | None | Unset):
+        lines (int | Unset):  Default: 100.
+        recipe (None | str | Unset):
+        source (GetFleetLogInfoSourceType0 | None | Unset):
+        follow (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetLogResponse, RequestValidationProblem]
+        BoundedErrorResponse | FleetLogResponse | RequestValidationProblem
      """
 
 

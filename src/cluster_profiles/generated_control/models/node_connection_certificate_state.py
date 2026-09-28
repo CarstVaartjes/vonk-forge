@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 NodeConnectionCertificateState = Literal['expired', 'inactive', 'missing', 'not-yet-valid', 'revoked', 'valid']
 
@@ -6,5 +6,5 @@ NODE_CONNECTION_CERTIFICATE_STATE_VALUES: set[NodeConnectionCertificateState] = 
 
 def check_node_connection_certificate_state(value: str) -> NodeConnectionCertificateState:
     if value in NODE_CONNECTION_CERTIFICATE_STATE_VALUES:
-        return cast(NodeConnectionCertificateState, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {NODE_CONNECTION_CERTIFICATE_STATE_VALUES!r}")

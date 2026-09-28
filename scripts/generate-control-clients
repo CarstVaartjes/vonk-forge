@@ -2,7 +2,7 @@
 """Generate the admin-only OpenAPI and pinned upstream language clients.
 
 Generator provenance:
-- openapi-python-client==0.26.2 from control/uv.lock
+- openapi-python-client==0.29.1 from control/uv.lock
 - openapi-typescript==7.13.0 from tools/openapi-client/package-lock.json
 
 The TypeScript client transport is intentionally supplied by the separately
@@ -100,7 +100,8 @@ def _generated_client_schema(
         if not path_item:
             del paths[path]
     if python_compatibility:
-        # openapi-python-client 0.26.2 cannot parse recursive anyOf unions.
+        # openapi-python-client (still as of 0.29.1) cannot parse recursive
+        # anyOf unions.
         # Keep the server and TypeScript schemas exact while making these
         # JSON-shaped values Any in the generated Python client.  An empty
         # schema is openapi-python-client's supported spelling for Any and
@@ -145,6 +146,19 @@ def _normalize_generated_text(path: Path) -> None:
             "\n".join(normalized) + "\n",
             encoding="utf-8",
             newline="\n",
+        )
+
+
+def _use_httpx2(path: Path) -> None:
+    """Point the generated Python client at httpx2, the maintained httpx fork.
+
+    openapi-python-client still emits ``httpx`` (0.29.1); drop this rewrite once
+    it generates httpx2 itself (openapi-generators/openapi-python-client#1461).
+    """
+    for generated_file in sorted(path.rglob("*.py")):
+        text = generated_file.read_text(encoding="utf-8")
+        generated_file.write_text(
+            re.sub(r"\bhttpx\b", "httpx2", text), encoding="utf-8", newline="\n"
         )
 
 
@@ -197,6 +211,7 @@ def main() -> None:
                 "--fail-on-warning",
             ],
         )
+        _use_httpx2(PYTHON_OUTPUT)
         _normalize_generated_text(PYTHON_OUTPUT)
 
         browser_schema = _schema(include_browser_auth=True)

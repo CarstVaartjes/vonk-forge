@@ -10,14 +10,26 @@ from datetime import UTC, datetime
 from typing import Any, get_args
 
 from fastapi import FastAPI
-from fastapi.dependencies.utils import get_flat_dependant
-from fastapi.routing import APIRoute
+from fastapi.dependencies.models import Dependant
+from fastapi.routing import APIRoute, iter_route_contexts
 from pydantic import BaseModel
 from starlette.routing import Mount, Route
+
+from .strict_json import route_endpoint
 
 
 class ContractGraphError(ValueError):
     pass
+
+
+def _declared_parameters(dependant: Dependant, location: str):
+    """Yield one location's parameters from a route and all its dependencies."""
+
+    pending = [dependant]
+    while pending:
+        current = pending.pop()
+        yield from getattr(current, f"{location}_params")
+        pending.extend(current.dependencies)
 
 
 def raw_json_body(model: type[BaseModel]):
@@ -60,7 +72,7 @@ def _models(annotation: Any) -> set[type[BaseModel]]:
     return set().union(*(_models(arg) for arg in get_args(annotation)))
 
 
-def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, APIRoute, dict]]:
+def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, Any, dict]]:
     schema = app.openapi()
     framework_paths = {
         app.openapi_url,
@@ -68,7 +80,10 @@ def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, APIRoute, dic
         app.redoc_url,
         app.swagger_ui_oauth2_redirect_url,
     }
-    for route in app.routes:
+    # Included routers are resolved to their effective routes: the context
+    # carries the path, dependencies and body FastAPI actually serves.
+    for context in iter_route_contexts(app.routes):
+        route = context.original_route
         if isinstance(route, Mount):
             if not isinstance(route.app, FastAPI):
                 raise ContractGraphError(
@@ -76,20 +91,19 @@ def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, APIRoute, dic
                 )
             yield from _routes(route.app, prefix + route.path)
         elif isinstance(route, APIRoute):
-            path = prefix + route.path_format
-            if not route.include_in_schema:
+            path_format = context.path_format or route.path_format
+            path = prefix + path_format
+            if not context.include_in_schema:
                 raise ContractGraphError(f"Unregistered hidden route: {path}")
-            for method in route.methods:
+            for method in context.methods or ():
                 operation = (
-                    schema.get("paths", {})
-                    .get(route.path_format, {})
-                    .get(method.lower())
+                    schema.get("paths", {}).get(path_format, {}).get(method.lower())
                 )
                 if not operation:
                     raise ContractGraphError(
                         f"Missing OpenAPI operation: {method} {path}"
                     )
-            yield path, route, schema
+            yield path, context, schema
         elif isinstance(route, Route):
             if not (
                 route.path in framework_paths
@@ -152,12 +166,14 @@ def discover_contracts(
     for path, route, schema in _routes(app):
         models = _models(route.response_model)
         if route.body_field is not None:
-            models |= _models(route.body_field.type_)
-        raw_model = getattr(route.endpoint, "__vonk_raw_json_model__", None)
+            models |= _models(route.body_field.field_info.annotation)
+        raw_model = getattr(
+            route_endpoint(route.endpoint), "__vonk_raw_json_model__", None
+        )
         if raw_model is not None:
             models.add(raw_model)
         for field in route.response_fields.values():
-            models |= _models(field.type_)
+            models |= _models(field.field_info.annotation)
         if path.startswith("/agent/"):
             agent_models |= models
         for method in sorted(route.methods):
@@ -168,18 +184,12 @@ def discover_contracts(
                 )
             identities.add(identity)
             operation = schema["paths"][route.path_format][method.lower()]
-            flat = get_flat_dependant(route.dependant, skip_repeats=True)
             declared_parameters = {
                 (value.get("in"), value.get("name")): value
                 for value in operation.get("parameters", [])
             }
-            for location, fields in (
-                ("path", flat.path_params),
-                ("query", flat.query_params),
-                ("header", flat.header_params),
-                ("cookie", flat.cookie_params),
-            ):
-                for field in fields:
+            for location in ("path", "query", "header", "cookie"):
+                for field in _declared_parameters(route.dependant, location):
                     declared = declared_parameters.get((location, field.alias))
                     if declared is None or not declared.get("schema"):
                         raise ContractGraphError(
@@ -198,7 +208,7 @@ def discover_contracts(
             if (
                 route.body_field is not None
                 or raw_model is not None
-                or _reads_raw_body(route.endpoint)
+                or _reads_raw_body(route_endpoint(route.endpoint))
             ) and not body:
                 raise ContractGraphError(f"Undeclared request body: {method} {path}")
             if body:

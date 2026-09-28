@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,9 +14,7 @@ from ..models.run_switch_uninstall_result_subphase_type_0 import check_run_switc
 from ..models.run_switch_uninstall_result_subphase_type_0 import RunSwitchUninstallResultSubphaseType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 
 
@@ -32,16 +32,16 @@ class RunSwitchUninstallResult:
         Attributes:
             installation_id (str):
             phase (Literal['uninstall']):
-            disposition (Union[Unset, RunSwitchUninstallResultDisposition]):  Default: 'uninstalled'.
-            reason (Union[None, Unset, str]):
-            subphase (Union[None, RunSwitchUninstallResultSubphaseType0, Unset]):
+            disposition (RunSwitchUninstallResultDisposition | Unset):  Default: 'uninstalled'.
+            reason (None | str | Unset):
+            subphase (None | RunSwitchUninstallResultSubphaseType0 | Unset):
      """
 
     installation_id: str
     phase: Literal['uninstall']
-    disposition: Union[Unset, RunSwitchUninstallResultDisposition] = 'uninstalled'
-    reason: Union[None, Unset, str] = UNSET
-    subphase: Union[None, RunSwitchUninstallResultSubphaseType0, Unset] = UNSET
+    disposition: RunSwitchUninstallResultDisposition | Unset = 'uninstalled'
+    reason: None | str | Unset = UNSET
+    subphase: None | RunSwitchUninstallResultSubphaseType0 | Unset = UNSET
 
 
 
@@ -52,18 +52,18 @@ class RunSwitchUninstallResult:
 
         phase = self.phase
 
-        disposition: Union[Unset, str] = UNSET
+        disposition: str | Unset = UNSET
         if not isinstance(self.disposition, Unset):
             disposition = self.disposition
 
 
-        reason: Union[None, Unset, str]
+        reason: None | str | Unset
         if isinstance(self.reason, Unset):
             reason = UNSET
         else:
             reason = self.reason
 
-        subphase: Union[None, Unset, str]
+        subphase: None | str | Unset
         if isinstance(self.subphase, Unset):
             subphase = UNSET
         elif isinstance(self.subphase, str):
@@ -99,7 +99,7 @@ class RunSwitchUninstallResult:
             raise ValueError(f"phase must match const 'uninstall', got '{phase}'")
 
         _disposition = d.pop("disposition", UNSET)
-        disposition: Union[Unset, RunSwitchUninstallResultDisposition]
+        disposition: RunSwitchUninstallResultDisposition | Unset
         if isinstance(_disposition,  Unset):
             disposition = UNSET
         else:
@@ -108,17 +108,17 @@ class RunSwitchUninstallResult:
 
 
 
-        def _parse_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         reason = _parse_reason(d.pop("reason", UNSET))
 
 
-        def _parse_subphase(data: object) -> Union[None, RunSwitchUninstallResultSubphaseType0, Unset]:
+        def _parse_subphase(data: object) -> None | RunSwitchUninstallResultSubphaseType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -131,9 +131,9 @@ class RunSwitchUninstallResult:
 
 
                 return subphase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchUninstallResultSubphaseType0, Unset], data)
+            return cast(None | RunSwitchUninstallResultSubphaseType0 | Unset, data)
 
         subphase = _parse_subphase(d.pop("subphase", UNSET))
 

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,8 +14,6 @@ from ..models.error_context_response_source import check_error_context_response_
 from ..models.error_context_response_source import ErrorContextResponseSource
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -33,20 +33,20 @@ class ErrorContextResponse:
             decision (ErrorContextResponseDecision):
             operation (str):
             source (ErrorContextResponseSource):
-            endpoint (Union[None, Unset, str]):
-            http_status (Union[None, Unset, int]):
-            request_id (Union[None, Unset, str]):
-            retryable (Union[Unset, bool]):  Default: False.
+            endpoint (None | str | Unset):
+            http_status (int | None | Unset):
+            request_id (None | str | Unset):
+            retryable (bool | Unset):  Default: False.
      """
 
     code: str
     decision: ErrorContextResponseDecision
     operation: str
     source: ErrorContextResponseSource
-    endpoint: Union[None, Unset, str] = UNSET
-    http_status: Union[None, Unset, int] = UNSET
-    request_id: Union[None, Unset, str] = UNSET
-    retryable: Union[Unset, bool] = False
+    endpoint: None | str | Unset = UNSET
+    http_status: int | None | Unset = UNSET
+    request_id: None | str | Unset = UNSET
+    retryable: bool | Unset = False
 
 
 
@@ -61,19 +61,19 @@ class ErrorContextResponse:
 
         source: str = self.source
 
-        endpoint: Union[None, Unset, str]
+        endpoint: None | str | Unset
         if isinstance(self.endpoint, Unset):
             endpoint = UNSET
         else:
             endpoint = self.endpoint
 
-        http_status: Union[None, Unset, int]
+        http_status: int | None | Unset
         if isinstance(self.http_status, Unset):
             http_status = UNSET
         else:
             http_status = self.http_status
 
-        request_id: Union[None, Unset, str]
+        request_id: None | str | Unset
         if isinstance(self.request_id, Unset):
             request_id = UNSET
         else:
@@ -120,32 +120,32 @@ class ErrorContextResponse:
 
 
 
-        def _parse_endpoint(data: object) -> Union[None, Unset, str]:
+        def _parse_endpoint(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         endpoint = _parse_endpoint(d.pop("endpoint", UNSET))
 
 
-        def _parse_http_status(data: object) -> Union[None, Unset, int]:
+        def _parse_http_status(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         http_status = _parse_http_status(d.pop("http_status", UNSET))
 
 
-        def _parse_request_id(data: object) -> Union[None, Unset, str]:
+        def _parse_request_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         request_id = _parse_request_id(d.pop("request_id", UNSET))
 

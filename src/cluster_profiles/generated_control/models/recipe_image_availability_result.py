@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 
 
@@ -32,14 +32,14 @@ class RecipeImageAvailabilityResult:
             platform_manifest_digest (str):
             recipe_content_sha256 (str):
             source (str):
-            artifact_set_sha256 (Union[None, Unset, str]):
-            build_id (Union[None, Unset, str]):
-            build_input_sha256 (Union[None, Unset, str]):
-            local_image_config_id (Union[None, Unset, str]):
-            model_child_id (Union[None, Unset, str]):
-            model_digest (Union[None, Unset, str]):
-            registry_manifest_digest (Union[None, Unset, str]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            artifact_set_sha256 (None | str | Unset):
+            build_id (None | str | Unset):
+            build_input_sha256 (None | str | Unset):
+            local_image_config_id (None | str | Unset):
+            model_child_id (None | str | Unset):
+            model_digest (None | str | Unset):
+            registry_manifest_digest (None | str | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     image_bytes: int
@@ -49,14 +49,14 @@ class RecipeImageAvailabilityResult:
     platform_manifest_digest: str
     recipe_content_sha256: str
     source: str
-    artifact_set_sha256: Union[None, Unset, str] = UNSET
-    build_id: Union[None, Unset, str] = UNSET
-    build_input_sha256: Union[None, Unset, str] = UNSET
-    local_image_config_id: Union[None, Unset, str] = UNSET
-    model_child_id: Union[None, Unset, str] = UNSET
-    model_digest: Union[None, Unset, str] = UNSET
-    registry_manifest_digest: Union[None, Unset, str] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    artifact_set_sha256: None | str | Unset = UNSET
+    build_id: None | str | Unset = UNSET
+    build_input_sha256: None | str | Unset = UNSET
+    local_image_config_id: None | str | Unset = UNSET
+    model_child_id: None | str | Unset = UNSET
+    model_digest: None | str | Unset = UNSET
+    registry_manifest_digest: None | str | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -79,43 +79,43 @@ class RecipeImageAvailabilityResult:
 
         source = self.source
 
-        artifact_set_sha256: Union[None, Unset, str]
+        artifact_set_sha256: None | str | Unset
         if isinstance(self.artifact_set_sha256, Unset):
             artifact_set_sha256 = UNSET
         else:
             artifact_set_sha256 = self.artifact_set_sha256
 
-        build_id: Union[None, Unset, str]
+        build_id: None | str | Unset
         if isinstance(self.build_id, Unset):
             build_id = UNSET
         else:
             build_id = self.build_id
 
-        build_input_sha256: Union[None, Unset, str]
+        build_input_sha256: None | str | Unset
         if isinstance(self.build_input_sha256, Unset):
             build_input_sha256 = UNSET
         else:
             build_input_sha256 = self.build_input_sha256
 
-        local_image_config_id: Union[None, Unset, str]
+        local_image_config_id: None | str | Unset
         if isinstance(self.local_image_config_id, Unset):
             local_image_config_id = UNSET
         else:
             local_image_config_id = self.local_image_config_id
 
-        model_child_id: Union[None, Unset, str]
+        model_child_id: None | str | Unset
         if isinstance(self.model_child_id, Unset):
             model_child_id = UNSET
         else:
             model_child_id = self.model_child_id
 
-        model_digest: Union[None, Unset, str]
+        model_digest: None | str | Unset
         if isinstance(self.model_digest, Unset):
             model_digest = UNSET
         else:
             model_digest = self.model_digest
 
-        registry_manifest_digest: Union[None, Unset, str]
+        registry_manifest_digest: None | str | Unset
         if isinstance(self.registry_manifest_digest, Unset):
             registry_manifest_digest = UNSET
         else:
@@ -174,77 +174,77 @@ class RecipeImageAvailabilityResult:
 
         source = d.pop("source")
 
-        def _parse_artifact_set_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_artifact_set_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         artifact_set_sha256 = _parse_artifact_set_sha256(d.pop("artifact_set_sha256", UNSET))
 
 
-        def _parse_build_id(data: object) -> Union[None, Unset, str]:
+        def _parse_build_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         build_id = _parse_build_id(d.pop("build_id", UNSET))
 
 
-        def _parse_build_input_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_build_input_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         build_input_sha256 = _parse_build_input_sha256(d.pop("build_input_sha256", UNSET))
 
 
-        def _parse_local_image_config_id(data: object) -> Union[None, Unset, str]:
+        def _parse_local_image_config_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         local_image_config_id = _parse_local_image_config_id(d.pop("local_image_config_id", UNSET))
 
 
-        def _parse_model_child_id(data: object) -> Union[None, Unset, str]:
+        def _parse_model_child_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_child_id = _parse_model_child_id(d.pop("model_child_id", UNSET))
 
 
-        def _parse_model_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_model_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_digest = _parse_model_digest(d.pop("model_digest", UNSET))
 
 
-        def _parse_registry_manifest_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_registry_manifest_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         registry_manifest_digest = _parse_registry_manifest_digest(d.pop("registry_manifest_digest", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

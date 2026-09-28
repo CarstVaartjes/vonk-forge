@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,9 +12,7 @@ from ..models.run_switch_installation_verify_result_subphase_type_0 import check
 from ..models.run_switch_installation_verify_result_subphase_type_0 import RunSwitchInstallationVerifyResultSubphaseType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.run_switch_rank_receipt import RunSwitchRankReceipt
@@ -35,9 +35,9 @@ class RunSwitchInstallationVerifyResult:
             installation_id (str):
             installation_state (str):
             phase (Literal['final_verify']):
-            ranks (list['RunSwitchRankReceipt']):
+            ranks (list[RunSwitchRankReceipt]):
             unwithdrawn_routes (int):
-            subphase (Union[None, RunSwitchInstallationVerifyResultSubphaseType0, Unset]):
+            subphase (None | RunSwitchInstallationVerifyResultSubphaseType0 | Unset):
      """
 
     active_runs: int
@@ -45,16 +45,16 @@ class RunSwitchInstallationVerifyResult:
     installation_id: str
     installation_state: str
     phase: Literal['final_verify']
-    ranks: list['RunSwitchRankReceipt']
+    ranks: list[RunSwitchRankReceipt]
     unwithdrawn_routes: int
-    subphase: Union[None, RunSwitchInstallationVerifyResultSubphaseType0, Unset] = UNSET
+    subphase: None | RunSwitchInstallationVerifyResultSubphaseType0 | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_rank_receipt import RunSwitchRankReceipt
+        from ..models.run_switch_rank_receipt import RunSwitchRankReceipt # noqa: PLC0415
         active_runs = self.active_runs
 
         final_verified = self.final_verified
@@ -74,7 +74,7 @@ class RunSwitchInstallationVerifyResult:
 
         unwithdrawn_routes = self.unwithdrawn_routes
 
-        subphase: Union[None, Unset, str]
+        subphase: None | str | Unset
         if isinstance(self.subphase, Unset):
             subphase = UNSET
         elif isinstance(self.subphase, str):
@@ -103,7 +103,7 @@ class RunSwitchInstallationVerifyResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_rank_receipt import RunSwitchRankReceipt
+        from ..models.run_switch_rank_receipt import RunSwitchRankReceipt # noqa: PLC0415
         d = dict(src_dict)
         active_runs = d.pop("active_runs")
 
@@ -129,7 +129,7 @@ class RunSwitchInstallationVerifyResult:
 
         unwithdrawn_routes = d.pop("unwithdrawn_routes")
 
-        def _parse_subphase(data: object) -> Union[None, RunSwitchInstallationVerifyResultSubphaseType0, Unset]:
+        def _parse_subphase(data: object) -> None | RunSwitchInstallationVerifyResultSubphaseType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -142,9 +142,9 @@ class RunSwitchInstallationVerifyResult:
 
 
                 return subphase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchInstallationVerifyResultSubphaseType0, Unset], data)
+            return cast(None | RunSwitchInstallationVerifyResultSubphaseType0 | Unset, data)
 
         subphase = _parse_subphase(d.pop("subphase", UNSET))
 

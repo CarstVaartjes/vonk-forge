@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,9 +12,7 @@ from ..models.agent_deployment_evidence_connectivity import AgentDeploymentEvide
 from ..models.agent_deployment_evidence_connectivity import check_agent_deployment_evidence_connectivity
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.evidence_age import EvidenceAge
@@ -35,31 +35,31 @@ class AgentDeploymentEvidence:
             node_id (str):
             package_evidence (EvidenceAge):
             state (str):
-            binary_sha256 (Union[None, Unset, str]):
-            boundary (Union[Literal['agent_deployment'], Unset]):  Default: 'agent_deployment'.
-            build_digest (Union[None, Unset, str]):
-            package_sha256 (Union[None, Unset, str]):
-            semantic_version (Union[None, Unset, str]):
+            binary_sha256 (None | str | Unset):
+            boundary (Literal['agent_deployment'] | Unset):  Default: 'agent_deployment'.
+            build_digest (None | str | Unset):
+            package_sha256 (None | str | Unset):
+            semantic_version (None | str | Unset):
      """
 
     connectivity: AgentDeploymentEvidenceConnectivity
     display_name: str
-    evidence: 'EvidenceAge'
+    evidence: EvidenceAge
     node_id: str
-    package_evidence: 'EvidenceAge'
+    package_evidence: EvidenceAge
     state: str
-    binary_sha256: Union[None, Unset, str] = UNSET
-    boundary: Union[Literal['agent_deployment'], Unset] = 'agent_deployment'
-    build_digest: Union[None, Unset, str] = UNSET
-    package_sha256: Union[None, Unset, str] = UNSET
-    semantic_version: Union[None, Unset, str] = UNSET
+    binary_sha256: None | str | Unset = UNSET
+    boundary: Literal['agent_deployment'] | Unset = 'agent_deployment'
+    build_digest: None | str | Unset = UNSET
+    package_sha256: None | str | Unset = UNSET
+    semantic_version: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.evidence_age import EvidenceAge
+        from ..models.evidence_age import EvidenceAge # noqa: PLC0415
         connectivity: str = self.connectivity
 
         display_name = self.display_name
@@ -72,7 +72,7 @@ class AgentDeploymentEvidence:
 
         state = self.state
 
-        binary_sha256: Union[None, Unset, str]
+        binary_sha256: None | str | Unset
         if isinstance(self.binary_sha256, Unset):
             binary_sha256 = UNSET
         else:
@@ -80,19 +80,19 @@ class AgentDeploymentEvidence:
 
         boundary = self.boundary
 
-        build_digest: Union[None, Unset, str]
+        build_digest: None | str | Unset
         if isinstance(self.build_digest, Unset):
             build_digest = UNSET
         else:
             build_digest = self.build_digest
 
-        package_sha256: Union[None, Unset, str]
+        package_sha256: None | str | Unset
         if isinstance(self.package_sha256, Unset):
             package_sha256 = UNSET
         else:
             package_sha256 = self.package_sha256
 
-        semantic_version: Union[None, Unset, str]
+        semantic_version: None | str | Unset
         if isinstance(self.semantic_version, Unset):
             semantic_version = UNSET
         else:
@@ -126,7 +126,7 @@ class AgentDeploymentEvidence:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.evidence_age import EvidenceAge
+        from ..models.evidence_age import EvidenceAge # noqa: PLC0415
         d = dict(src_dict)
         connectivity = check_agent_deployment_evidence_connectivity(d.pop("connectivity"))
 
@@ -149,46 +149,46 @@ class AgentDeploymentEvidence:
 
         state = d.pop("state")
 
-        def _parse_binary_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_binary_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         binary_sha256 = _parse_binary_sha256(d.pop("binary_sha256", UNSET))
 
 
-        boundary = cast(Union[Literal['agent_deployment'], Unset] , d.pop("boundary", UNSET))
+        boundary = cast(Literal['agent_deployment'] | Unset , d.pop("boundary", UNSET))
         if boundary != 'agent_deployment' and not isinstance(boundary, Unset):
             raise ValueError(f"boundary must match const 'agent_deployment', got '{boundary}'")
 
-        def _parse_build_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_build_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         build_digest = _parse_build_digest(d.pop("build_digest", UNSET))
 
 
-        def _parse_package_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_package_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         package_sha256 = _parse_package_sha256(d.pop("package_sha256", UNSET))
 
 
-        def _parse_semantic_version(data: object) -> Union[None, Unset, str]:
+        def _parse_semantic_version(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         semantic_version = _parse_semantic_version(d.pop("semantic_version", UNSET))
 

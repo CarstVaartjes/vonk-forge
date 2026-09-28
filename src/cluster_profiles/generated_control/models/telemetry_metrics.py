@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,8 @@ from typing import cast
 from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.telemetry_provenance import TelemetryProvenance
   from ..models.telemetry_capability import TelemetryCapability
+  from ..models.telemetry_provenance import TelemetryProvenance
   from ..models.telemetry_runtime import TelemetryRuntime
   from ..models.telemetry_series import TelemetrySeries
   from ..models.telemetry_workload import TelemetryWorkload
@@ -28,31 +30,31 @@ T = TypeVar("T", bound="TelemetryMetrics")
 class TelemetryMetrics:
     """
         Attributes:
-            capabilities (list['TelemetryCapability']):
+            capabilities (list[TelemetryCapability]):
             provenance (TelemetryProvenance):
-            runtimes (list['TelemetryRuntime']):
+            runtimes (list[TelemetryRuntime]):
             schema_version (Literal[2]):
-            series (list['TelemetrySeries']):
-            workloads (list['TelemetryWorkload']):
+            series (list[TelemetrySeries]):
+            workloads (list[TelemetryWorkload]):
      """
 
-    capabilities: list['TelemetryCapability']
-    provenance: 'TelemetryProvenance'
-    runtimes: list['TelemetryRuntime']
+    capabilities: list[TelemetryCapability]
+    provenance: TelemetryProvenance
+    runtimes: list[TelemetryRuntime]
     schema_version: Literal[2]
-    series: list['TelemetrySeries']
-    workloads: list['TelemetryWorkload']
+    series: list[TelemetrySeries]
+    workloads: list[TelemetryWorkload]
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.telemetry_provenance import TelemetryProvenance
-        from ..models.telemetry_capability import TelemetryCapability
-        from ..models.telemetry_runtime import TelemetryRuntime
-        from ..models.telemetry_series import TelemetrySeries
-        from ..models.telemetry_workload import TelemetryWorkload
+        from ..models.telemetry_capability import TelemetryCapability # noqa: PLC0415
+        from ..models.telemetry_provenance import TelemetryProvenance # noqa: PLC0415
+        from ..models.telemetry_runtime import TelemetryRuntime # noqa: PLC0415
+        from ..models.telemetry_series import TelemetrySeries # noqa: PLC0415
+        from ..models.telemetry_workload import TelemetryWorkload # noqa: PLC0415
         capabilities = []
         for capabilities_item_data in self.capabilities:
             capabilities_item = capabilities_item_data.to_dict()
@@ -103,11 +105,11 @@ class TelemetryMetrics:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.telemetry_provenance import TelemetryProvenance
-        from ..models.telemetry_capability import TelemetryCapability
-        from ..models.telemetry_runtime import TelemetryRuntime
-        from ..models.telemetry_series import TelemetrySeries
-        from ..models.telemetry_workload import TelemetryWorkload
+        from ..models.telemetry_capability import TelemetryCapability # noqa: PLC0415
+        from ..models.telemetry_provenance import TelemetryProvenance # noqa: PLC0415
+        from ..models.telemetry_runtime import TelemetryRuntime # noqa: PLC0415
+        from ..models.telemetry_series import TelemetrySeries # noqa: PLC0415
+        from ..models.telemetry_workload import TelemetryWorkload # noqa: PLC0415
         d = dict(src_dict)
         capabilities = []
         _capabilities = d.pop("capabilities")

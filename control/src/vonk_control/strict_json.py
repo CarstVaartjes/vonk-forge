@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
-from collections.abc import Mapping, Sequence
-from copy import copy
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, overload
 
 from fastapi import Response
@@ -108,62 +108,104 @@ def serialize_json_value(value: object, *, by_alias: bool = True) -> object:
     return value
 
 
+_CONTROLLER_RESPONSE = "_controller_response"
+
+
+def _presence_policy_endpoint(
+    endpoint: Callable[..., Any], route: Callable[[], APIRoute]
+) -> Callable[..., Any]:
+    """Wrap an endpoint so its validated result is encoded with the presence policy.
+
+    The wrapper carries the endpoint's own resolved signature, plus an injected
+    ``Response`` when the endpoint does not declare one, so FastAPI analyses it
+    exactly like the endpoint however the route is later included or mounted.
+    """
+
+    signature = inspect.signature(endpoint, eval_str=True)
+    response_param_name = next(
+        (
+            name
+            for name, parameter in signature.parameters.items()
+            if isinstance(parameter.annotation, type)
+            and issubclass(parameter.annotation, Response)
+        ),
+        None,
+    )
+    parameters = list(signature.parameters.values())
+    if response_param_name is None:
+        injected = inspect.Parameter(
+            _CONTROLLER_RESPONSE, inspect.Parameter.KEYWORD_ONLY, annotation=Response
+        )
+        position = next(
+            (
+                index
+                for index, parameter in enumerate(parameters)
+                if parameter.kind is inspect.Parameter.VAR_KEYWORD
+            ),
+            len(parameters),
+        )
+        parameters.insert(position, injected)
+
+    async def policy_endpoint(**values: Any) -> Any:
+        injected_response = values.get(response_param_name or _CONTROLLER_RESPONSE)
+        if response_param_name is None:
+            values.pop(_CONTROLLER_RESPONSE, None)
+        if inspect.iscoroutinefunction(endpoint):
+            result = await endpoint(**values)
+        else:
+            result = await run_in_threadpool(endpoint, **values)
+        current = route()
+        response_field = current.response_field
+        if isinstance(result, Response) or response_field is None:
+            return result
+        value, errors = response_field.validate(result, {}, loc=("response",))
+        if errors:
+            return result
+        status_code = current.status_code or 200
+        if isinstance(injected_response, Response) and injected_response.status_code:
+            status_code = injected_response.status_code
+        response_class = current.response_class
+        if isinstance(response_class, DefaultPlaceholder):
+            response_class = response_class.value
+        response = response_class(
+            content=serialize_json_value(
+                value, by_alias=current.response_model_by_alias
+            ),
+            status_code=status_code,
+        )
+        if isinstance(injected_response, Response):
+            response.headers.raw.extend(injected_response.headers.raw)
+        return response
+
+    # Copy the identity FastAPI derives names, operation ids and descriptions
+    # from, but no ``__wrapped__``: FastAPI must see an async endpoint.
+    functools.update_wrapper(policy_endpoint, endpoint, updated=("__dict__",))
+    del policy_endpoint.__wrapped__
+    policy_endpoint.__signature__ = signature.replace(parameters=parameters)  # type: ignore[attr-defined]
+    policy_endpoint.__vonk_endpoint__ = endpoint  # type: ignore[attr-defined]
+    return policy_endpoint
+
+
 class ControllerAPIRoute(APIRoute):
     """Apply the presence policy after response validation for every JSON route."""
 
-    def get_route_handler(self):
-        original_dependant = self.dependant
-        original_call = original_dependant.call
-        assert original_call is not None
-        original_response_param_name = original_dependant.response_param_name
-        response_param_name = original_response_param_name or "__controller_response"
-        response_field = self.secure_cloned_response_field
-        by_alias = self.response_model_by_alias
-        response_class = self.response_class
-        if isinstance(response_class, DefaultPlaceholder):
-            response_class = response_class.value
+    def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs: Any) -> None:
+        if not hasattr(endpoint, "__vonk_endpoint__"):
+            endpoint = _presence_policy_endpoint(endpoint, lambda: self)
+        super().__init__(path, endpoint, **kwargs)
 
-        async def policy_endpoint(**values: Any) -> Any:
-            injected_response = values.get(response_param_name)
-            if original_response_param_name is None:
-                values.pop(response_param_name, None)
-            if inspect.iscoroutinefunction(original_call):
-                result = await original_call(**values)
-            else:
-                result = await run_in_threadpool(original_call, **values)
-            if isinstance(result, Response) or response_field is None:
-                return result
-            value, errors = response_field.validate(result, {}, loc=("response",))
-            if errors:
-                return result
-            status_code = self.status_code or 200
-            if (
-                isinstance(injected_response, Response)
-                and injected_response.status_code
-            ):
-                status_code = injected_response.status_code
-            response = response_class(
-                content=serialize_json_value(value, by_alias=by_alias),
-                status_code=status_code,
-            )
-            if isinstance(injected_response, Response):
-                response.headers.raw.extend(injected_response.headers.raw)
-            return response
 
-        dependant = copy(original_dependant)
-        dependant.call = policy_endpoint
-        dependant.response_param_name = response_param_name
-        self.dependant = dependant
-        try:
-            return super().get_route_handler()
-        finally:
-            self.dependant = original_dependant
+def route_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
+    """Return the handwritten endpoint behind a Controller route."""
+
+    return getattr(endpoint, "__vonk_endpoint__", endpoint)
 
 
 __all__ = [
     "ControllerAPIRoute",
     "StrictJSONModel",
     "apply_optional_none_policy",
+    "route_endpoint",
     "serialize_json_value",
 ]
 

@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 ModelCacheOperatorResponseAction = Literal['download', 'remove']
 
@@ -6,5 +6,5 @@ MODEL_CACHE_OPERATOR_RESPONSE_ACTION_VALUES: set[ModelCacheOperatorResponseActio
 
 def check_model_cache_operator_response_action(value: str) -> ModelCacheOperatorResponseAction:
     if value in MODEL_CACHE_OPERATOR_RESPONSE_ACTION_VALUES:
-        return cast(ModelCacheOperatorResponseAction, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {MODEL_CACHE_OPERATOR_RESPONSE_ACTION_VALUES!r}")

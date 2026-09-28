@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,10 +11,7 @@ from ..types import UNSET, Unset
 from ..models.inventory_state_freshness import check_inventory_state_freshness
 from ..models.inventory_state_freshness import InventoryStateFreshness
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
@@ -43,8 +42,8 @@ class InventoryState:
             nvidia_driver_version (str):
             observed_at (datetime.datetime):
             received_at (datetime.datetime):
-            fabric_address (Union[None, Unset, str]):
-            fabric_bandwidth_mbps (Union[None, Unset, int]):
+            fabric_address (None | str | Unset):
+            fabric_bandwidth_mbps (int | None | Unset):
      """
 
     age_seconds: float
@@ -62,8 +61,8 @@ class InventoryState:
     nvidia_driver_version: str
     observed_at: datetime.datetime
     received_at: datetime.datetime
-    fabric_address: Union[None, Unset, str] = UNSET
-    fabric_bandwidth_mbps: Union[None, Unset, int] = UNSET
+    fabric_address: None | str | Unset = UNSET
+    fabric_bandwidth_mbps: int | None | Unset = UNSET
 
 
 
@@ -102,13 +101,13 @@ class InventoryState:
 
         received_at = self.received_at.isoformat()
 
-        fabric_address: Union[None, Unset, str]
+        fabric_address: None | str | Unset
         if isinstance(self.fabric_address, Unset):
             fabric_address = UNSET
         else:
             fabric_address = self.fabric_address
 
-        fabric_bandwidth_mbps: Union[None, Unset, int]
+        fabric_bandwidth_mbps: int | None | Unset
         if isinstance(self.fabric_bandwidth_mbps, Unset):
             fabric_bandwidth_mbps = UNSET
         else:
@@ -176,32 +175,32 @@ class InventoryState:
 
         nvidia_driver_version = d.pop("nvidia_driver_version")
 
-        observed_at = isoparse(d.pop("observed_at"))
+        observed_at = datetime.datetime.fromisoformat(d.pop("observed_at"))
 
 
 
 
-        received_at = isoparse(d.pop("received_at"))
+        received_at = datetime.datetime.fromisoformat(d.pop("received_at"))
 
 
 
 
-        def _parse_fabric_address(data: object) -> Union[None, Unset, str]:
+        def _parse_fabric_address(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         fabric_address = _parse_fabric_address(d.pop("fabric_address", UNSET))
 
 
-        def _parse_fabric_bandwidth_mbps(data: object) -> Union[None, Unset, int]:
+        def _parse_fabric_bandwidth_mbps(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         fabric_bandwidth_mbps = _parse_fabric_bandwidth_mbps(d.pop("fabric_bandwidth_mbps", UNSET))
 

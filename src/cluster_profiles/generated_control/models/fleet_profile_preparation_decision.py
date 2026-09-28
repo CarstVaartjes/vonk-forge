@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,8 +13,8 @@ from typing import cast
 if TYPE_CHECKING:
   from ..models.fleet_profile_compatibility_decision import FleetProfileCompatibilityDecision
   from ..models.model_artifact_identity import ModelArtifactIdentity
-  from ..models.runtime_image_identity import RuntimeImageIdentity
   from ..models.preparation_reason import PreparationReason
+  from ..models.runtime_image_identity import RuntimeImageIdentity
 
 
 
@@ -28,8 +30,8 @@ class FleetProfilePreparationDecision:
 
         Attributes:
             assignment_id (str):
-            blockers (list['PreparationReason']):
-            exceptions (list['FleetProfileCompatibilityDecision']):
+            blockers (list[PreparationReason]):
+            exceptions (list[FleetProfileCompatibilityDecision]):
             image_controller_ready (bool):
             image_reuse_node_ids (list[str]):
             model (ModelArtifactIdentity): Exact model set, independent of transfer progress and verification time.
@@ -40,25 +42,25 @@ class FleetProfilePreparationDecision:
      """
 
     assignment_id: str
-    blockers: list['PreparationReason']
-    exceptions: list['FleetProfileCompatibilityDecision']
+    blockers: list[PreparationReason]
+    exceptions: list[FleetProfileCompatibilityDecision]
     image_controller_ready: bool
     image_reuse_node_ids: list[str]
-    model: 'ModelArtifactIdentity'
+    model: ModelArtifactIdentity
     model_complete: bool
     model_controller_ready: bool
     model_reuse_node_ids: list[str]
-    runtime_image: 'RuntimeImageIdentity'
+    runtime_image: RuntimeImageIdentity
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_compatibility_decision import FleetProfileCompatibilityDecision
-        from ..models.model_artifact_identity import ModelArtifactIdentity
-        from ..models.runtime_image_identity import RuntimeImageIdentity
-        from ..models.preparation_reason import PreparationReason
+        from ..models.fleet_profile_compatibility_decision import FleetProfileCompatibilityDecision # noqa: PLC0415
+        from ..models.model_artifact_identity import ModelArtifactIdentity # noqa: PLC0415
+        from ..models.preparation_reason import PreparationReason # noqa: PLC0415
+        from ..models.runtime_image_identity import RuntimeImageIdentity # noqa: PLC0415
         assignment_id = self.assignment_id
 
         blockers = []
@@ -115,10 +117,10 @@ class FleetProfilePreparationDecision:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_compatibility_decision import FleetProfileCompatibilityDecision
-        from ..models.model_artifact_identity import ModelArtifactIdentity
-        from ..models.runtime_image_identity import RuntimeImageIdentity
-        from ..models.preparation_reason import PreparationReason
+        from ..models.fleet_profile_compatibility_decision import FleetProfileCompatibilityDecision # noqa: PLC0415
+        from ..models.model_artifact_identity import ModelArtifactIdentity # noqa: PLC0415
+        from ..models.preparation_reason import PreparationReason # noqa: PLC0415
+        from ..models.runtime_image_identity import RuntimeImageIdentity # noqa: PLC0415
         d = dict(src_dict)
         assignment_id = d.pop("assignment_id")
 

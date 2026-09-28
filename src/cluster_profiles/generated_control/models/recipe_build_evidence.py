@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -34,14 +36,14 @@ class RecipeBuildEvidence:
     image_bytes: int
     image_digest: str
     oci_layout_sha256: str
-    policy: 'RecipeBuildPolicy'
+    policy: RecipeBuildPolicy
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_build_policy import RecipeBuildPolicy
+        from ..models.recipe_build_policy import RecipeBuildPolicy # noqa: PLC0415
         build_input_sha256 = self.build_input_sha256
 
         image_bytes = self.image_bytes
@@ -69,7 +71,7 @@ class RecipeBuildEvidence:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_build_policy import RecipeBuildPolicy
+        from ..models.recipe_build_policy import RecipeBuildPolicy # noqa: PLC0415
         d = dict(src_dict)
         build_input_sha256 = d.pop("build_input_sha256")
 

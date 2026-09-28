@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Union
 
 
 
@@ -27,18 +28,18 @@ class LibraryFacetValues:
             quantization (list[str]):
             usage (list[str]):
             version (list[str]):
-            alignment (Union[Unset, list[str]]):
-            publisher (Union[Unset, list[str]]):
-            sparks (Union[Unset, list[int]]):
+            alignment (list[str] | Unset):
+            publisher (list[str] | Unset):
+            sparks (list[int] | Unset):
      """
 
     family: list[str]
     quantization: list[str]
     usage: list[str]
     version: list[str]
-    alignment: Union[Unset, list[str]] = UNSET
-    publisher: Union[Unset, list[str]] = UNSET
-    sparks: Union[Unset, list[int]] = UNSET
+    alignment: list[str] | Unset = UNSET
+    publisher: list[str] | Unset = UNSET
+    sparks: list[int] | Unset = UNSET
 
 
 
@@ -61,19 +62,19 @@ class LibraryFacetValues:
 
 
 
-        alignment: Union[Unset, list[str]] = UNSET
+        alignment: list[str] | Unset = UNSET
         if not isinstance(self.alignment, Unset):
             alignment = self.alignment
 
 
 
-        publisher: Union[Unset, list[str]] = UNSET
+        publisher: list[str] | Unset = UNSET
         if not isinstance(self.publisher, Unset):
             publisher = self.publisher
 
 
 
-        sparks: Union[Unset, list[int]] = UNSET
+        sparks: list[int] | Unset = UNSET
         if not isinstance(self.sparks, Unset):
             sparks = self.sparks
 

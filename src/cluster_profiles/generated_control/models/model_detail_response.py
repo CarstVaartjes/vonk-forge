@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,17 +9,15 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.model_definition import ModelDefinition
   from ..models.library_local_state import LibraryLocalState
   from ..models.library_model_identity import LibraryModelIdentity
   from ..models.library_resource_projection import LibraryResourceProjection
+  from ..models.model_definition import ModelDefinition
 
 
 
@@ -42,33 +42,33 @@ class ModelDetailResponse:
             usage (list[str]):
             variant (str):
             version (str):
-            alignment (Union[Unset, list[str]]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            alignment (list[str] | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    document: 'ModelDefinition'
+    document: ModelDefinition
     family: str
-    identity: 'LibraryModelIdentity'
-    local: 'LibraryLocalState'
+    identity: LibraryModelIdentity
+    local: LibraryLocalState
     quantization: str
-    resources: 'LibraryResourceProjection'
+    resources: LibraryResourceProjection
     selector: str
     updated_at: datetime.datetime
     usage: list[str]
     variant: str
     version: str
-    alignment: Union[Unset, list[str]] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    alignment: list[str] | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.model_definition import ModelDefinition
-        from ..models.library_local_state import LibraryLocalState
-        from ..models.library_model_identity import LibraryModelIdentity
-        from ..models.library_resource_projection import LibraryResourceProjection
+        from ..models.library_local_state import LibraryLocalState # noqa: PLC0415
+        from ..models.library_model_identity import LibraryModelIdentity # noqa: PLC0415
+        from ..models.library_resource_projection import LibraryResourceProjection # noqa: PLC0415
+        from ..models.model_definition import ModelDefinition # noqa: PLC0415
         document = self.document.to_dict()
 
         family = self.family
@@ -93,7 +93,7 @@ class ModelDetailResponse:
 
         version = self.version
 
-        alignment: Union[Unset, list[str]] = UNSET
+        alignment: list[str] | Unset = UNSET
         if not isinstance(self.alignment, Unset):
             alignment = self.alignment
 
@@ -128,10 +128,10 @@ class ModelDetailResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.model_definition import ModelDefinition
-        from ..models.library_local_state import LibraryLocalState
-        from ..models.library_model_identity import LibraryModelIdentity
-        from ..models.library_resource_projection import LibraryResourceProjection
+        from ..models.library_local_state import LibraryLocalState # noqa: PLC0415
+        from ..models.library_model_identity import LibraryModelIdentity # noqa: PLC0415
+        from ..models.library_resource_projection import LibraryResourceProjection # noqa: PLC0415
+        from ..models.model_definition import ModelDefinition # noqa: PLC0415
         d = dict(src_dict)
         document = ModelDefinition.from_dict(d.pop("document"))
 
@@ -159,7 +159,7 @@ class ModelDetailResponse:
 
         selector = d.pop("selector")
 
-        updated_at = isoparse(d.pop("updated_at"))
+        updated_at = datetime.datetime.fromisoformat(d.pop("updated_at"))
 
 
 
@@ -174,7 +174,7 @@ class ModelDetailResponse:
         alignment = cast(list[str], d.pop("alignment", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,12 +10,12 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.evidence_context import EvidenceContext
-  from ..models.operation_failure_evidence import OperationFailureEvidence
   from ..models.failure_diagnostics import FailureDiagnostics
+  from ..models.operation_failure_evidence import OperationFailureEvidence
 
 
 
@@ -33,25 +35,25 @@ class FailureEvidenceBundle:
             diagnostics (FailureDiagnostics):
             receipt (OperationFailureEvidence): Small, sanitized operator evidence safe to expose in status responses.
             summary (str):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     collected_at: str
     collector_errors: list[str]
-    context: 'EvidenceContext'
-    diagnostics: 'FailureDiagnostics'
-    receipt: 'OperationFailureEvidence'
+    context: EvidenceContext
+    diagnostics: FailureDiagnostics
+    receipt: OperationFailureEvidence
     summary: str
-    schema_version: Union[Literal[2], Unset] = 2
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.evidence_context import EvidenceContext
-        from ..models.operation_failure_evidence import OperationFailureEvidence
-        from ..models.failure_diagnostics import FailureDiagnostics
+        from ..models.evidence_context import EvidenceContext # noqa: PLC0415
+        from ..models.failure_diagnostics import FailureDiagnostics # noqa: PLC0415
+        from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         collected_at = self.collected_at
 
         collector_errors = self.collector_errors
@@ -88,9 +90,9 @@ class FailureEvidenceBundle:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.evidence_context import EvidenceContext
-        from ..models.operation_failure_evidence import OperationFailureEvidence
-        from ..models.failure_diagnostics import FailureDiagnostics
+        from ..models.evidence_context import EvidenceContext # noqa: PLC0415
+        from ..models.failure_diagnostics import FailureDiagnostics # noqa: PLC0415
+        from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         d = dict(src_dict)
         collected_at = d.pop("collected_at")
 
@@ -114,7 +116,7 @@ class FailureEvidenceBundle:
 
         summary = d.pop("summary")
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

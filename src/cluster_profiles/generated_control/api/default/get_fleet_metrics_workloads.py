@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -12,16 +13,14 @@ from ...models.request_validation_problem import RequestValidationProblem
 from ...models.telemetry_workloads_response import TelemetryWorkloadsResponse
 from ...types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
 def _get_kwargs(
     selector: str,
     *,
-    run_id: Union[None, Unset, str] = UNSET,
-    state: Union[None, Unset, str] = UNSET,
+    run_id: None | str | Unset = UNSET,
+    state: None | str | Unset = UNSET,
 
 ) -> dict[str, Any]:
 
@@ -30,14 +29,14 @@ def _get_kwargs(
 
     params: dict[str, Any] = {}
 
-    json_run_id: Union[None, Unset, str]
+    json_run_id: None | str | Unset
     if isinstance(run_id, Unset):
         json_run_id = UNSET
     else:
         json_run_id = run_id
     params["run_id"] = json_run_id
 
-    json_state: Union[None, Unset, str]
+    json_state: None | str | Unset
     if isinstance(state, Unset):
         json_state = UNSET
     else:
@@ -50,7 +49,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/fleet/{selector}/metrics/workloads".format(selector=selector,),
+        "url": "/api/fleet/{selector}/metrics/workloads".format(selector=quote(str(selector), safe=""),),
         "params": params,
     }
 
@@ -59,7 +58,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse | None:
     if response.status_code == 200:
         response_200 = TelemetryWorkloadsResponse.from_dict(response.json())
 
@@ -101,7 +100,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -114,23 +113,23 @@ def sync_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
-    run_id: Union[None, Unset, str] = UNSET,
-    state: Union[None, Unset, str] = UNSET,
+    run_id: None | str | Unset = UNSET,
+    state: None | str | Unset = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]]:
+) -> Response[BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse]:
     """ Fleet Metrics Workloads
 
     Args:
         selector (str):
-        run_id (Union[None, Unset, str]):
-        state (Union[None, Unset, str]):
+        run_id (None | str | Unset):
+        state (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]]
+        Response[BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse]
      """
 
 
@@ -151,23 +150,23 @@ def sync(
     selector: str,
     *,
     client: AuthenticatedClient,
-    run_id: Union[None, Unset, str] = UNSET,
-    state: Union[None, Unset, str] = UNSET,
+    run_id: None | str | Unset = UNSET,
+    state: None | str | Unset = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]]:
+) -> BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse | None:
     """ Fleet Metrics Workloads
 
     Args:
         selector (str):
-        run_id (Union[None, Unset, str]):
-        state (Union[None, Unset, str]):
+        run_id (None | str | Unset):
+        state (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]
+        BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse
      """
 
 
@@ -183,23 +182,23 @@ async def asyncio_detailed(
     selector: str,
     *,
     client: AuthenticatedClient,
-    run_id: Union[None, Unset, str] = UNSET,
-    state: Union[None, Unset, str] = UNSET,
+    run_id: None | str | Unset = UNSET,
+    state: None | str | Unset = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]]:
+) -> Response[BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse]:
     """ Fleet Metrics Workloads
 
     Args:
         selector (str):
-        run_id (Union[None, Unset, str]):
-        state (Union[None, Unset, str]):
+        run_id (None | str | Unset):
+        state (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]]
+        Response[BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse]
      """
 
 
@@ -220,23 +219,23 @@ async def asyncio(
     selector: str,
     *,
     client: AuthenticatedClient,
-    run_id: Union[None, Unset, str] = UNSET,
-    state: Union[None, Unset, str] = UNSET,
+    run_id: None | str | Unset = UNSET,
+    state: None | str | Unset = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]]:
+) -> BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse | None:
     """ Fleet Metrics Workloads
 
     Args:
         selector (str):
-        run_id (Union[None, Unset, str]):
-        state (Union[None, Unset, str]):
+        run_id (None | str | Unset):
+        state (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RequestValidationProblem, TelemetryWorkloadsResponse]
+        BoundedErrorResponse | RequestValidationProblem | TelemetryWorkloadsResponse
      """
 
 

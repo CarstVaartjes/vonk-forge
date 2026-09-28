@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RunSwitchCleanupApplyRequestCleanupMode = Literal['reconcile', 'uninstall']
 
@@ -6,5 +6,5 @@ RUN_SWITCH_CLEANUP_APPLY_REQUEST_CLEANUP_MODE_VALUES: set[RunSwitchCleanupApplyR
 
 def check_run_switch_cleanup_apply_request_cleanup_mode(value: str) -> RunSwitchCleanupApplyRequestCleanupMode:
     if value in RUN_SWITCH_CLEANUP_APPLY_REQUEST_CLEANUP_MODE_VALUES:
-        return cast(RunSwitchCleanupApplyRequestCleanupMode, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RUN_SWITCH_CLEANUP_APPLY_REQUEST_CLEANUP_MODE_VALUES!r}")

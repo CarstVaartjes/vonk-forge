@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,7 @@ from ..models.run_switch_cleanup_preview_request_cleanup_mode import check_run_s
 from ..models.run_switch_cleanup_preview_request_cleanup_mode import RunSwitchCleanupPreviewRequestCleanupMode
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.invocation_metadata import InvocationMetadata
@@ -35,31 +36,30 @@ class RunSwitchCleanupPreviewRequest:
 
         Attributes:
             installation_id (str):
-            cleanup_mode (Union[Unset, RunSwitchCleanupPreviewRequestCleanupMode]):  Default: 'uninstall'.
-            invocation (Union[Unset, InvocationMetadata]): Context for audit and tracing which has no decision-making
-                authority.
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            cleanup_mode (RunSwitchCleanupPreviewRequestCleanupMode | Unset):  Default: 'uninstall'.
+            invocation (InvocationMetadata | Unset): Context for audit and tracing which has no decision-making authority.
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     installation_id: str
-    cleanup_mode: Union[Unset, RunSwitchCleanupPreviewRequestCleanupMode] = 'uninstall'
-    invocation: Union[Unset, 'InvocationMetadata'] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    cleanup_mode: RunSwitchCleanupPreviewRequestCleanupMode | Unset = 'uninstall'
+    invocation: InvocationMetadata | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.invocation_metadata import InvocationMetadata
+        from ..models.invocation_metadata import InvocationMetadata # noqa: PLC0415
         installation_id = self.installation_id
 
-        cleanup_mode: Union[Unset, str] = UNSET
+        cleanup_mode: str | Unset = UNSET
         if not isinstance(self.cleanup_mode, Unset):
             cleanup_mode = self.cleanup_mode
 
 
-        invocation: Union[Unset, dict[str, Any]] = UNSET
+        invocation: dict[str, Any] | Unset = UNSET
         if not isinstance(self.invocation, Unset):
             invocation = self.invocation.to_dict()
 
@@ -84,12 +84,12 @@ class RunSwitchCleanupPreviewRequest:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.invocation_metadata import InvocationMetadata
+        from ..models.invocation_metadata import InvocationMetadata # noqa: PLC0415
         d = dict(src_dict)
         installation_id = d.pop("installation_id")
 
         _cleanup_mode = d.pop("cleanup_mode", UNSET)
-        cleanup_mode: Union[Unset, RunSwitchCleanupPreviewRequestCleanupMode]
+        cleanup_mode: RunSwitchCleanupPreviewRequestCleanupMode | Unset
         if isinstance(_cleanup_mode,  Unset):
             cleanup_mode = UNSET
         else:
@@ -99,7 +99,7 @@ class RunSwitchCleanupPreviewRequest:
 
 
         _invocation = d.pop("invocation", UNSET)
-        invocation: Union[Unset, InvocationMetadata]
+        invocation: InvocationMetadata | Unset
         if isinstance(_invocation,  Unset):
             invocation = UNSET
         else:
@@ -108,7 +108,7 @@ class RunSwitchCleanupPreviewRequest:
 
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

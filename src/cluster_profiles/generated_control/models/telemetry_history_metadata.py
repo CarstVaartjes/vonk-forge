@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,11 +13,8 @@ from ..models.telemetry_history_metadata_actual_resolution import TelemetryHisto
 from ..models.telemetry_history_metadata_requested_resolution import check_telemetry_history_metadata_requested_resolution
 from ..models.telemetry_history_metadata_requested_resolution import TelemetryHistoryMetadataRequestedResolution
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 import datetime
 
 
@@ -40,9 +39,9 @@ class TelemetryHistoryMetadata:
             requested_end (datetime.datetime):
             requested_resolution (TelemetryHistoryMetadataRequestedResolution):
             requested_start (datetime.datetime):
-            actual_end (Union[None, Unset, datetime.datetime]):
-            actual_start (Union[None, Unset, datetime.datetime]):
-            timezone (Union[Literal['UTC'], Unset]):  Default: 'UTC'.
+            actual_end (datetime.datetime | None | Unset):
+            actual_start (datetime.datetime | None | Unset):
+            timezone (Literal['UTC'] | Unset):  Default: 'UTC'.
      """
 
     actual_resolution: TelemetryHistoryMetadataActualResolution
@@ -53,9 +52,9 @@ class TelemetryHistoryMetadata:
     requested_end: datetime.datetime
     requested_resolution: TelemetryHistoryMetadataRequestedResolution
     requested_start: datetime.datetime
-    actual_end: Union[None, Unset, datetime.datetime] = UNSET
-    actual_start: Union[None, Unset, datetime.datetime] = UNSET
-    timezone: Union[Literal['UTC'], Unset] = 'UTC'
+    actual_end: datetime.datetime | None | Unset = UNSET
+    actual_start: datetime.datetime | None | Unset = UNSET
+    timezone: Literal['UTC'] | Unset = 'UTC'
 
 
 
@@ -78,7 +77,7 @@ class TelemetryHistoryMetadata:
 
         requested_start = self.requested_start.isoformat()
 
-        actual_end: Union[None, Unset, str]
+        actual_end: None | str | Unset
         if isinstance(self.actual_end, Unset):
             actual_end = UNSET
         elif isinstance(self.actual_end, datetime.datetime):
@@ -86,7 +85,7 @@ class TelemetryHistoryMetadata:
         else:
             actual_end = self.actual_end
 
-        actual_start: Union[None, Unset, str]
+        actual_start: None | str | Unset
         if isinstance(self.actual_start, Unset):
             actual_start = UNSET
         elif isinstance(self.actual_start, datetime.datetime):
@@ -136,7 +135,7 @@ class TelemetryHistoryMetadata:
 
         point_count = d.pop("point_count")
 
-        requested_end = isoparse(d.pop("requested_end"))
+        requested_end = datetime.datetime.fromisoformat(d.pop("requested_end"))
 
 
 
@@ -146,12 +145,12 @@ class TelemetryHistoryMetadata:
 
 
 
-        requested_start = isoparse(d.pop("requested_start"))
+        requested_start = datetime.datetime.fromisoformat(d.pop("requested_start"))
 
 
 
 
-        def _parse_actual_end(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_actual_end(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -159,19 +158,19 @@ class TelemetryHistoryMetadata:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                actual_end_type_0 = isoparse(data)
+                actual_end_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return actual_end_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         actual_end = _parse_actual_end(d.pop("actual_end", UNSET))
 
 
-        def _parse_actual_start(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_actual_start(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -179,19 +178,19 @@ class TelemetryHistoryMetadata:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                actual_start_type_0 = isoparse(data)
+                actual_start_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return actual_start_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         actual_start = _parse_actual_start(d.pop("actual_start", UNSET))
 
 
-        timezone = cast(Union[Literal['UTC'], Unset] , d.pop("timezone", UNSET))
+        timezone = cast(Literal['UTC'] | Unset , d.pop("timezone", UNSET))
         if timezone != 'UTC' and not isinstance(timezone, Unset):
             raise ValueError(f"timezone must match const 'UTC', got '{timezone}'")
 

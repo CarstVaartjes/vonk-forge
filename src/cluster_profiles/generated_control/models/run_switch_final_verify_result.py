@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,9 +12,7 @@ from ..models.run_switch_final_verify_result_subphase_type_0 import check_run_sw
 from ..models.run_switch_final_verify_result_subphase_type_0 import RunSwitchFinalVerifyResultSubphaseType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.run_switch_rank_receipt import RunSwitchRankReceipt
@@ -32,28 +32,28 @@ class RunSwitchFinalVerifyResult:
             final_verified (bool):
             healthy (bool):
             phase (Literal['final_verify']):
-            ranks (list['RunSwitchRankReceipt']):
+            ranks (list[RunSwitchRankReceipt]):
             route_state (str):
             run_id (str):
             state (str):
-            subphase (Union[None, RunSwitchFinalVerifyResultSubphaseType0, Unset]):
+            subphase (None | RunSwitchFinalVerifyResultSubphaseType0 | Unset):
      """
 
     final_verified: bool
     healthy: bool
     phase: Literal['final_verify']
-    ranks: list['RunSwitchRankReceipt']
+    ranks: list[RunSwitchRankReceipt]
     route_state: str
     run_id: str
     state: str
-    subphase: Union[None, RunSwitchFinalVerifyResultSubphaseType0, Unset] = UNSET
+    subphase: None | RunSwitchFinalVerifyResultSubphaseType0 | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_rank_receipt import RunSwitchRankReceipt
+        from ..models.run_switch_rank_receipt import RunSwitchRankReceipt # noqa: PLC0415
         final_verified = self.final_verified
 
         healthy = self.healthy
@@ -73,7 +73,7 @@ class RunSwitchFinalVerifyResult:
 
         state = self.state
 
-        subphase: Union[None, Unset, str]
+        subphase: None | str | Unset
         if isinstance(self.subphase, Unset):
             subphase = UNSET
         elif isinstance(self.subphase, str):
@@ -102,7 +102,7 @@ class RunSwitchFinalVerifyResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_rank_receipt import RunSwitchRankReceipt
+        from ..models.run_switch_rank_receipt import RunSwitchRankReceipt # noqa: PLC0415
         d = dict(src_dict)
         final_verified = d.pop("final_verified")
 
@@ -128,7 +128,7 @@ class RunSwitchFinalVerifyResult:
 
         state = d.pop("state")
 
-        def _parse_subphase(data: object) -> Union[None, RunSwitchFinalVerifyResultSubphaseType0, Unset]:
+        def _parse_subphase(data: object) -> None | RunSwitchFinalVerifyResultSubphaseType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -141,9 +141,9 @@ class RunSwitchFinalVerifyResult:
 
 
                 return subphase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchFinalVerifyResultSubphaseType0, Unset], data)
+            return cast(None | RunSwitchFinalVerifyResultSubphaseType0 | Unset, data)
 
         subphase = _parse_subphase(d.pop("subphase", UNSET))
 

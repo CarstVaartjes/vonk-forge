@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,7 +11,6 @@ from ..types import UNSET, Unset
 from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
-from typing import Union
 
 
 
@@ -27,13 +28,13 @@ class ModelCacheRemovalResult:
             reclaimed_bytes (int):
             removed_entries (list[str]):
             schema_version (Literal[2]):
-            cancelled_operations (Union[Unset, list[str]]):
+            cancelled_operations (list[str] | Unset):
      """
 
     reclaimed_bytes: int
     removed_entries: list[str]
     schema_version: Literal[2]
-    cancelled_operations: Union[Unset, list[str]] = UNSET
+    cancelled_operations: list[str] | Unset = UNSET
 
 
 
@@ -48,7 +49,7 @@ class ModelCacheRemovalResult:
 
         schema_version = self.schema_version
 
-        cancelled_operations: Union[Unset, list[str]] = UNSET
+        cancelled_operations: list[str] | Unset = UNSET
         if not isinstance(self.cancelled_operations, Unset):
             cancelled_operations = self.cancelled_operations
 

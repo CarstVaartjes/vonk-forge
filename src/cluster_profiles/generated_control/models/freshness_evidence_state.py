@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FreshnessEvidenceState = Literal['fresh', 'stale', 'unknown']
 
@@ -6,5 +6,5 @@ FRESHNESS_EVIDENCE_STATE_VALUES: set[FreshnessEvidenceState] = { 'fresh', 'stale
 
 def check_freshness_evidence_state(value: str) -> FreshnessEvidenceState:
     if value in FRESHNESS_EVIDENCE_STATE_VALUES:
-        return cast(FreshnessEvidenceState, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FRESHNESS_EVIDENCE_STATE_VALUES!r}")

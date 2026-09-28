@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,18 +10,16 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.recipe_presence import RecipePresence
-  from ..models.projection_reason import ProjectionReason
-  from ..models.fleet_node_labels import FleetNodeLabels
   from ..models.capacity_reservations import CapacityReservations
+  from ..models.fleet_node_labels import FleetNodeLabels
   from ..models.inventory_state import InventoryState
+  from ..models.node_connection import NodeConnection
+  from ..models.projection_reason import ProjectionReason
+  from ..models.recipe_presence import RecipePresence
   from ..models.run_presence import RunPresence
   from ..models.telemetry_state import TelemetryState
-  from ..models.node_connection import NodeConnection
 
 
 
@@ -37,44 +37,44 @@ class FleetNode:
             display_name (str):
             hostname (str):
             id (str):
-            installed (list['RecipePresence']):
-            inventory (Union['InventoryState', None]):
+            installed (list[RecipePresence]):
+            inventory (InventoryState | None):
             labels (FleetNodeLabels):
             lifecycle (str):
-            loaded (list['RunPresence']):
+            loaded (list[RunPresence]):
             reservations (CapacityReservations):
-            telemetry (Union['TelemetryState', None]):
-            warnings (list['ProjectionReason']):
-            ip_address (Union[None, Unset, str]):
+            telemetry (None | TelemetryState):
+            warnings (list[ProjectionReason]):
+            ip_address (None | str | Unset):
      """
 
-    connection: 'NodeConnection'
+    connection: NodeConnection
     display_name: str
     hostname: str
     id: str
-    installed: list['RecipePresence']
-    inventory: Union['InventoryState', None]
-    labels: 'FleetNodeLabels'
+    installed: list[RecipePresence]
+    inventory: InventoryState | None
+    labels: FleetNodeLabels
     lifecycle: str
-    loaded: list['RunPresence']
-    reservations: 'CapacityReservations'
-    telemetry: Union['TelemetryState', None]
-    warnings: list['ProjectionReason']
-    ip_address: Union[None, Unset, str] = UNSET
+    loaded: list[RunPresence]
+    reservations: CapacityReservations
+    telemetry: None | TelemetryState
+    warnings: list[ProjectionReason]
+    ip_address: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_presence import RecipePresence
-        from ..models.projection_reason import ProjectionReason
-        from ..models.fleet_node_labels import FleetNodeLabels
-        from ..models.capacity_reservations import CapacityReservations
-        from ..models.inventory_state import InventoryState
-        from ..models.run_presence import RunPresence
-        from ..models.telemetry_state import TelemetryState
-        from ..models.node_connection import NodeConnection
+        from ..models.capacity_reservations import CapacityReservations # noqa: PLC0415
+        from ..models.fleet_node_labels import FleetNodeLabels # noqa: PLC0415
+        from ..models.inventory_state import InventoryState # noqa: PLC0415
+        from ..models.node_connection import NodeConnection # noqa: PLC0415
+        from ..models.projection_reason import ProjectionReason # noqa: PLC0415
+        from ..models.recipe_presence import RecipePresence # noqa: PLC0415
+        from ..models.run_presence import RunPresence # noqa: PLC0415
+        from ..models.telemetry_state import TelemetryState # noqa: PLC0415
         connection = self.connection.to_dict()
 
         display_name = self.display_name
@@ -90,7 +90,7 @@ class FleetNode:
 
 
 
-        inventory: Union[None, dict[str, Any]]
+        inventory: dict[str, Any] | None
         if isinstance(self.inventory, InventoryState):
             inventory = self.inventory.to_dict()
         else:
@@ -109,7 +109,7 @@ class FleetNode:
 
         reservations = self.reservations.to_dict()
 
-        telemetry: Union[None, dict[str, Any]]
+        telemetry: dict[str, Any] | None
         if isinstance(self.telemetry, TelemetryState):
             telemetry = self.telemetry.to_dict()
         else:
@@ -122,7 +122,7 @@ class FleetNode:
 
 
 
-        ip_address: Union[None, Unset, str]
+        ip_address: None | str | Unset
         if isinstance(self.ip_address, Unset):
             ip_address = UNSET
         else:
@@ -154,14 +154,14 @@ class FleetNode:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_presence import RecipePresence
-        from ..models.projection_reason import ProjectionReason
-        from ..models.fleet_node_labels import FleetNodeLabels
-        from ..models.capacity_reservations import CapacityReservations
-        from ..models.inventory_state import InventoryState
-        from ..models.run_presence import RunPresence
-        from ..models.telemetry_state import TelemetryState
-        from ..models.node_connection import NodeConnection
+        from ..models.capacity_reservations import CapacityReservations # noqa: PLC0415
+        from ..models.fleet_node_labels import FleetNodeLabels # noqa: PLC0415
+        from ..models.inventory_state import InventoryState # noqa: PLC0415
+        from ..models.node_connection import NodeConnection # noqa: PLC0415
+        from ..models.projection_reason import ProjectionReason # noqa: PLC0415
+        from ..models.recipe_presence import RecipePresence # noqa: PLC0415
+        from ..models.run_presence import RunPresence # noqa: PLC0415
+        from ..models.telemetry_state import TelemetryState # noqa: PLC0415
         d = dict(src_dict)
         connection = NodeConnection.from_dict(d.pop("connection"))
 
@@ -184,7 +184,7 @@ class FleetNode:
             installed.append(installed_item)
 
 
-        def _parse_inventory(data: object) -> Union['InventoryState', None]:
+        def _parse_inventory(data: object) -> InventoryState | None:
             if data is None:
                 return data
             try:
@@ -195,9 +195,9 @@ class FleetNode:
 
 
                 return inventory_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['InventoryState', None], data)
+            return cast(InventoryState | None, data)
 
         inventory = _parse_inventory(d.pop("inventory"))
 
@@ -224,7 +224,7 @@ class FleetNode:
 
 
 
-        def _parse_telemetry(data: object) -> Union['TelemetryState', None]:
+        def _parse_telemetry(data: object) -> None | TelemetryState:
             if data is None:
                 return data
             try:
@@ -235,9 +235,9 @@ class FleetNode:
 
 
                 return telemetry_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['TelemetryState', None], data)
+            return cast(None | TelemetryState, data)
 
         telemetry = _parse_telemetry(d.pop("telemetry"))
 
@@ -252,12 +252,12 @@ class FleetNode:
             warnings.append(warnings_item)
 
 
-        def _parse_ip_address(data: object) -> Union[None, Unset, str]:
+        def _parse_ip_address(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         ip_address = _parse_ip_address(d.pop("ip_address", UNSET))
 

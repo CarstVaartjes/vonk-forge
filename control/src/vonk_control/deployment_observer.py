@@ -10,7 +10,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Literal
 
-import httpx
+import httpx2
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -58,7 +58,7 @@ class DeploymentObserver:
         self.sessions = sessions
         self.channel = channel
         self.clock = clock or (lambda: datetime.now(UTC))
-        self.client = httpx.Client(
+        self.client = httpx2.Client(
             transport=transport, timeout=5, follow_redirects=False, trust_env=False
         )
         self.pool = ThreadPoolExecutor(
@@ -103,7 +103,7 @@ class DeploymentObserver:
                         session.add(row)
                     row.payload = value.model_dump(mode="json")
                     row.observed_at = value.observed_at
-            except (httpx.HTTPError, ValueError, KeyError, TypeError, SQLAlchemyError):
+            except (httpx2.HTTPError, ValueError, KeyError, TypeError, SQLAlchemyError):
                 continue
 
     def repository(self) -> PlatformObservation:

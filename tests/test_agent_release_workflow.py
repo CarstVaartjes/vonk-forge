@@ -420,7 +420,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "scripts/verify-agent-systemd" in text
     assert "scripts/materialize-agent-tools --output-root target" in text
     materializer = (ROOT / "scripts/materialize-agent-tools").read_text()
-    assert 'ORAS_VERSION = "1.3.2"' in materializer
+    assert 'ORAS_VERSION = "1.3.4"' in materializer
     assert materializer.count('"archive_sha256":') == 2
     assert materializer.count('"binary_sha256":') == 2
     assert "scripts/test-agent-package-native-lifecycle" in text

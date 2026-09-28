@@ -5,7 +5,7 @@ root=$(git rev-parse --show-toplevel)
 cd "$root"
 export UV_CACHE_DIR=${UV_CACHE_DIR:-/private/tmp/vonk-forge-hook-uv-cache}
 export UV_TOOL_DIR=${UV_TOOL_DIR:-/private/tmp/vonk-forge-hook-uv-tools}
-protocol_wheel=inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl
+protocol_wheel=inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl
 generated_protocol_wheel=false
 cleanup_generated_wheel() {
     if [ "$generated_protocol_wheel" = true ]; then
@@ -24,8 +24,8 @@ fi
 scripts/verify-supply-chain --json
 changed_python=$(git diff --cached --name-only -- '*.py')
 if [ -n "$changed_python" ]; then
-    printf '%s\n' "$changed_python" | xargs uvx --from ruff==0.16.1 ruff check --force-exclude
-    printf '%s\n' "$changed_python" | xargs uvx --from ruff==0.16.1 ruff format --check --force-exclude
+    printf '%s\n' "$changed_python" | xargs uvx --from ruff==0.16.9 ruff check --force-exclude
+    printf '%s\n' "$changed_python" | xargs uvx --from ruff==0.16.9 ruff format --check --force-exclude
 fi
 uv sync --project control --frozen
 scripts/check-python-types

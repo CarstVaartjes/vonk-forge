@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,8 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.operation_progress import OperationProgress
@@ -30,21 +30,21 @@ class JobProgress:
             failed (int):
             running (int):
             total (int):
-            operation (Union['OperationProgress', None, Unset]):
+            operation (None | OperationProgress | Unset):
      """
 
     completed: int
     failed: int
     running: int
     total: int
-    operation: Union['OperationProgress', None, Unset] = UNSET
+    operation: None | OperationProgress | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.operation_progress import OperationProgress
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
         completed = self.completed
 
         failed = self.failed
@@ -53,7 +53,7 @@ class JobProgress:
 
         total = self.total
 
-        operation: Union[None, Unset, dict[str, Any]]
+        operation: dict[str, Any] | None | Unset
         if isinstance(self.operation, Unset):
             operation = UNSET
         elif isinstance(self.operation, OperationProgress):
@@ -79,7 +79,7 @@ class JobProgress:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.operation_progress import OperationProgress
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
         d = dict(src_dict)
         completed = d.pop("completed")
 
@@ -89,7 +89,7 @@ class JobProgress:
 
         total = d.pop("total")
 
-        def _parse_operation(data: object) -> Union['OperationProgress', None, Unset]:
+        def _parse_operation(data: object) -> None | OperationProgress | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -102,9 +102,9 @@ class JobProgress:
 
 
                 return operation_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['OperationProgress', None, Unset], data)
+            return cast(None | OperationProgress | Unset, data)
 
         operation = _parse_operation(d.pop("operation", UNSET))
 

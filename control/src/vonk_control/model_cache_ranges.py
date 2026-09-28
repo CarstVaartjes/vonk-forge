@@ -13,14 +13,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Event, Lock
 
-import httpx
+import httpx2
 
 
 class RangeResponseError(ValueError):
     """A range response does not describe the requested object bytes."""
 
 
-class RangeTruncatedError(httpx.RemoteProtocolError):
+class RangeTruncatedError(httpx2.RemoteProtocolError):
     """A valid range ended early; retry may resume its retained prefix."""
 
 
@@ -66,7 +66,7 @@ def cleanup_ranges(target: Path, expected_bytes: int, *, workers: int = 4) -> No
 def download_ranges(
     target: Path,
     expected_bytes: int,
-    open_range: Callable[[int, int], httpx.Response],
+    open_range: Callable[[int, int], httpx2.Response],
     stop_event: Event,
     on_progress: Callable[[int], None],
     *,

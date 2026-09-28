@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 EnrollmentGrantResponsePurpose = Literal['new-node', 're-enroll']
 
@@ -6,5 +6,5 @@ ENROLLMENT_GRANT_RESPONSE_PURPOSE_VALUES: set[EnrollmentGrantResponsePurpose] = 
 
 def check_enrollment_grant_response_purpose(value: str) -> EnrollmentGrantResponsePurpose:
     if value in ENROLLMENT_GRANT_RESPONSE_PURPOSE_VALUES:
-        return cast(EnrollmentGrantResponsePurpose, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {ENROLLMENT_GRANT_RESPONSE_PURPOSE_VALUES!r}")

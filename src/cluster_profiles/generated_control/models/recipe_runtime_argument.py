@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -24,13 +25,13 @@ class RecipeRuntimeArgument:
     """
         Attributes:
             name (str):
-            setting (Union[None, Unset, str]):
-            value (Union[Any, None, Unset]): A literal process value; null is reserved for the setting-bound placeholder.
+            setting (None | str | Unset):
+            value (Any | None | Unset): A literal process value; null is reserved for the setting-bound placeholder.
      """
 
     name: str
-    setting: Union[None, Unset, str] = UNSET
-    value: Union[Any, None, Unset] = UNSET
+    setting: None | str | Unset = UNSET
+    value: Any | None | Unset = UNSET
 
 
 
@@ -39,13 +40,13 @@ class RecipeRuntimeArgument:
     def to_dict(self) -> dict[str, Any]:
         name = self.name
 
-        setting: Union[None, Unset, str]
+        setting: None | str | Unset
         if isinstance(self.setting, Unset):
             setting = UNSET
         else:
             setting = self.setting
 
-        value: Union[Any, None, Unset]
+        value: Any | None | Unset
         if isinstance(self.value, Unset):
             value = UNSET
         else:
@@ -71,22 +72,22 @@ class RecipeRuntimeArgument:
         d = dict(src_dict)
         name = d.pop("name")
 
-        def _parse_setting(data: object) -> Union[None, Unset, str]:
+        def _parse_setting(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         setting = _parse_setting(d.pop("setting", UNSET))
 
 
-        def _parse_value(data: object) -> Union[Any, None, Unset]:
+        def _parse_value(data: object) -> Any | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[Any, None, Unset], data)
+            return cast(Any | None | Unset, data)
 
         value = _parse_value(d.pop("value", UNSET))
 

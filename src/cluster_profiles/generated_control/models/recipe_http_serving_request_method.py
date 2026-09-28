@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RecipeHttpServingRequestMethod = Literal['GET', 'POST']
 
@@ -6,5 +6,5 @@ RECIPE_HTTP_SERVING_REQUEST_METHOD_VALUES: set[RecipeHttpServingRequestMethod] =
 
 def check_recipe_http_serving_request_method(value: str) -> RecipeHttpServingRequestMethod:
     if value in RECIPE_HTTP_SERVING_REQUEST_METHOD_VALUES:
-        return cast(RecipeHttpServingRequestMethod, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RECIPE_HTTP_SERVING_REQUEST_METHOD_VALUES!r}")

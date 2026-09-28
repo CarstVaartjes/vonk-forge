@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -29,7 +30,7 @@ class DeploymentModelIdentity:
             revision (str):
             selection_id (str):
             slug (str):
-            artifact_key (Union[None, Unset, str]):
+            artifact_key (None | str | Unset):
      """
 
     content_sha256: str
@@ -38,7 +39,7 @@ class DeploymentModelIdentity:
     revision: str
     selection_id: str
     slug: str
-    artifact_key: Union[None, Unset, str] = UNSET
+    artifact_key: None | str | Unset = UNSET
 
 
 
@@ -57,7 +58,7 @@ class DeploymentModelIdentity:
 
         slug = self.slug
 
-        artifact_key: Union[None, Unset, str]
+        artifact_key: None | str | Unset
         if isinstance(self.artifact_key, Unset):
             artifact_key = UNSET
         else:
@@ -96,12 +97,12 @@ class DeploymentModelIdentity:
 
         slug = d.pop("slug")
 
-        def _parse_artifact_key(data: object) -> Union[None, Unset, str]:
+        def _parse_artifact_key(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         artifact_key = _parse_artifact_key(d.pop("artifact_key", UNSET))
 

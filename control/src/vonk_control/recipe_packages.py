@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 from urllib.parse import urljoin, urlsplit
 
-import httpx
+import httpx2
 from pydantic import BaseModel, ConfigDict, ValidationError
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.resolver import validate_recipe_models
@@ -184,7 +184,7 @@ class RecipePackageClient:
         base_url: str | None = None,
         *,
         cache_root: Path,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx2.BaseTransport | None = None,
         timeout_seconds: float = 8.0,
         publication_commit: str | None = None,
         api_url: str = PACKAGE_API_ORIGIN,
@@ -241,9 +241,9 @@ class RecipePackageClient:
                 "recipe_package.commit_invalid", "publication commit is invalid"
             )
         self._publication_commit = publication_commit
-        self._client = httpx.Client(
+        self._client = httpx2.Client(
             base_url=self._base_url,
-            timeout=httpx.Timeout(timeout_seconds),
+            timeout=httpx2.Timeout(timeout_seconds),
             follow_redirects=False,
             trust_env=False,
             transport=transport,
@@ -274,7 +274,7 @@ class RecipePackageClient:
                 else PACKAGE_INDEX_PATH
             )
             response = self._client.get(index_path)
-        except (httpx.HTTPError, OSError) as error:
+        except (httpx2.HTTPError, OSError) as error:
             persisted = self._read_persisted_snapshot()
             if persisted is not None:
                 return persisted
@@ -337,7 +337,7 @@ class RecipePackageClient:
                 f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/git/ref/heads/main",
                 headers={"Accept": "application/vnd.github+json"},
             )
-        except (httpx.HTTPError, OSError) as error:
+        except (httpx2.HTTPError, OSError) as error:
             raise RecipePackageError(
                 "recipe_package.unavailable", "recipe publication is unavailable"
             ) from error
@@ -761,7 +761,7 @@ class RecipePackageClient:
                 else urljoin(self._base_url + "/", location)
             )
             response = self._client.get(download_url)
-        except (httpx.HTTPError, OSError) as error:
+        except (httpx2.HTTPError, OSError) as error:
             raise RecipePackageError(
                 "recipe_package.unavailable", "recipe package is unavailable"
             ) from error

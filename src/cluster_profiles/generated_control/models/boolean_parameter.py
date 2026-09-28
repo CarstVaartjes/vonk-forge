@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 
 
@@ -28,19 +28,19 @@ class BooleanParameter:
             default (bool):
             name (str):
             type_ (Literal['boolean']):
-            allowed_values (Union[Unset, list[Union[bool, float, int, str]]]):
-            maximum (Union[Unset, None]):
-            minimum (Union[Unset, None]):
-            pattern (Union[None, Unset, str]):
+            allowed_values (list[bool | float | int | str] | Unset):
+            maximum (None | Unset):
+            minimum (None | Unset):
+            pattern (None | str | Unset):
      """
 
     default: bool
     name: str
     type_: Literal['boolean']
-    allowed_values: Union[Unset, list[Union[bool, float, int, str]]] = UNSET
-    maximum: Union[Unset, None] = UNSET
-    minimum: Union[Unset, None] = UNSET
-    pattern: Union[None, Unset, str] = UNSET
+    allowed_values: list[bool | float | int | str] | Unset = UNSET
+    maximum: None | Unset = UNSET
+    minimum: None | Unset = UNSET
+    pattern: None | str | Unset = UNSET
 
 
 
@@ -53,11 +53,11 @@ class BooleanParameter:
 
         type_ = self.type_
 
-        allowed_values: Union[Unset, list[Union[bool, float, int, str]]] = UNSET
+        allowed_values: list[bool | float | int | str] | Unset = UNSET
         if not isinstance(self.allowed_values, Unset):
             allowed_values = []
             for allowed_values_item_data in self.allowed_values:
-                allowed_values_item: Union[bool, float, int, str]
+                allowed_values_item: bool | float | int | str
                 allowed_values_item = allowed_values_item_data
                 allowed_values.append(allowed_values_item)
 
@@ -67,7 +67,7 @@ class BooleanParameter:
 
         minimum = self.minimum
 
-        pattern: Union[None, Unset, str]
+        pattern: None | str | Unset
         if isinstance(self.pattern, Unset):
             pattern = UNSET
         else:
@@ -105,27 +105,29 @@ class BooleanParameter:
         if type_ != 'boolean':
             raise ValueError(f"type must match const 'boolean', got '{type_}'")
 
-        allowed_values = []
         _allowed_values = d.pop("allowed_values", UNSET)
-        for allowed_values_item_data in (_allowed_values or []):
-            def _parse_allowed_values_item(data: object) -> Union[bool, float, int, str]:
-                return cast(Union[bool, float, int, str], data)
+        allowed_values: list[bool | float | int | str] | Unset = UNSET
+        if _allowed_values is not UNSET:
+            allowed_values = []
+            for allowed_values_item_data in _allowed_values:
+                def _parse_allowed_values_item(data: object) -> bool | float | int | str:
+                    return cast(bool | float | int | str, data)
 
-            allowed_values_item = _parse_allowed_values_item(allowed_values_item_data)
+                allowed_values_item = _parse_allowed_values_item(allowed_values_item_data)
 
-            allowed_values.append(allowed_values_item)
+                allowed_values.append(allowed_values_item)
 
 
         maximum = d.pop("maximum", UNSET)
 
         minimum = d.pop("minimum", UNSET)
 
-        def _parse_pattern(data: object) -> Union[None, Unset, str]:
+        def _parse_pattern(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         pattern = _parse_pattern(d.pop("pattern", UNSET))
 

@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
 
-import httpx
+import httpx2
 import pytest
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, update
@@ -3456,16 +3456,16 @@ def test_typed_transient_child_failure_is_retried_automatically(
 def test_run_switch_retry_classification_rejects_terminal_http_and_storage_errors() -> (
     None
 ):
-    request = httpx.Request("GET", "https://example.invalid/artifact")
+    request = httpx2.Request("GET", "https://example.invalid/artifact")
     for status in (401, 403, 404):
-        response = httpx.Response(status, request=request)
-        error = httpx.HTTPStatusError(
+        response = httpx2.Response(status, request=request)
+        error = httpx2.HTTPStatusError(
             "request failed", request=request, response=response
         )
         assert _transient_distribution_exception(error) is False
     for status in (429, 500, 503):
-        response = httpx.Response(status, request=request)
-        error = httpx.HTTPStatusError(
+        response = httpx2.Response(status, request=request)
+        error = httpx2.HTTPStatusError(
             "request failed", request=request, response=response
         )
         assert _transient_distribution_exception(error) is True
@@ -5514,7 +5514,7 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
             if phase.kind == "transfer":
                 self.identities.append((plan.plan_digest, kwargs["request_key"]))
                 if self.unavailable:
-                    raise httpx.ConnectError("NAS temporarily disconnected")
+                    raise httpx2.ConnectError("NAS temporarily disconnected")
             return super().execute(plan, phase, **kwargs)
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)

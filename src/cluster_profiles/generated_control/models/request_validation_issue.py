@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,7 +9,6 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from typing import cast
-from typing import cast, Union
 
 
 
@@ -23,12 +24,12 @@ class RequestValidationIssue:
     """ A structural input error without the submitted input or validator context.
 
         Attributes:
-            loc (list[Union[int, str]]):
+            loc (list[int | str]):
             msg (str):
             type_ (str):
      """
 
-    loc: list[Union[int, str]]
+    loc: list[int | str]
     msg: str
     type_: str
 
@@ -39,7 +40,7 @@ class RequestValidationIssue:
     def to_dict(self) -> dict[str, Any]:
         loc = []
         for loc_item_data in self.loc:
-            loc_item: Union[int, str]
+            loc_item: int | str
             loc_item = loc_item_data
             loc.append(loc_item)
 
@@ -68,8 +69,8 @@ class RequestValidationIssue:
         loc = []
         _loc = d.pop("loc")
         for loc_item_data in (_loc):
-            def _parse_loc_item(data: object) -> Union[int, str]:
-                return cast(Union[int, str], data)
+            def _parse_loc_item(data: object) -> int | str:
+                return cast(int | str, data)
 
             loc_item = _parse_loc_item(loc_item_data)
 

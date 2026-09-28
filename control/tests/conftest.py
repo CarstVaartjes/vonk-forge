@@ -37,7 +37,7 @@ from .api_response_witness import (
     pytest_sessionfinish as _api_response_sessionfinish,
 )
 
-POSTGRES_IMAGE = "postgres:18.3"
+POSTGRES_IMAGE = "postgres:18.6"
 _POSTGRES_PASSWORD = "postgres"
 _POSTGRES_OWNER_LABEL = "dev.vonk-forge.control-tests.owner"
 _POSTGRES_NAME_PREFIX = "vonk-control-tests-"

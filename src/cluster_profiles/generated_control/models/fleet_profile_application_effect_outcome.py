@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FleetProfileApplicationEffectOutcome = Literal['cancelled', 'failed', 'not-issued', 'pending', 'succeeded']
 
@@ -6,5 +6,5 @@ FLEET_PROFILE_APPLICATION_EFFECT_OUTCOME_VALUES: set[FleetProfileApplicationEffe
 
 def check_fleet_profile_application_effect_outcome(value: str) -> FleetProfileApplicationEffectOutcome:
     if value in FLEET_PROFILE_APPLICATION_EFFECT_OUTCOME_VALUES:
-        return cast(FleetProfileApplicationEffectOutcome, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FLEET_PROFILE_APPLICATION_EFFECT_OUTCOME_VALUES!r}")

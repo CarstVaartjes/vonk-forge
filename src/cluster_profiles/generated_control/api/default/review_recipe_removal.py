@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -34,7 +35,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/recipe/{selector}/remove-review".format(selector=selector,),
+        "url": "/api/recipe/{selector}/remove-review".format(selector=quote(str(selector), safe=""),),
         "params": params,
     }
 
@@ -43,7 +44,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = CacheRemovalReview.from_dict(response.json())
 
@@ -99,7 +100,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -114,7 +115,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     with_model: bool,
 
-) -> Response[Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem]:
     """ Review Remove
 
     Args:
@@ -123,10 +124,10 @@ def sync_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]]
+        Response[BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem]
      """
 
 
@@ -148,7 +149,7 @@ def sync(
     client: AuthenticatedClient,
     with_model: bool,
 
-) -> Optional[Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]]:
+) -> BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem | None:
     """ Review Remove
 
     Args:
@@ -157,10 +158,10 @@ def sync(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]
+        BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem
      """
 
 
@@ -177,7 +178,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     with_model: bool,
 
-) -> Response[Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem]:
     """ Review Remove
 
     Args:
@@ -186,10 +187,10 @@ async def asyncio_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]]
+        Response[BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem]
      """
 
 
@@ -211,7 +212,7 @@ async def asyncio(
     client: AuthenticatedClient,
     with_model: bool,
 
-) -> Optional[Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]]:
+) -> BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem | None:
     """ Review Remove
 
     Args:
@@ -220,10 +221,10 @@ async def asyncio(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, CacheRemovalReview, RequestValidationProblem]
+        BoundedErrorResponse | CacheRemovalReview | RequestValidationProblem
      """
 
 

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -28,7 +30,7 @@ class RecipeBuildExecution:
             mode (Literal['build']):
      """
 
-    build: 'RecipeBuildDefinition'
+    build: RecipeBuildDefinition
     mode: Literal['build']
 
 
@@ -36,7 +38,7 @@ class RecipeBuildExecution:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_build_definition import RecipeBuildDefinition
+        from ..models.recipe_build_definition import RecipeBuildDefinition # noqa: PLC0415
         build = self.build.to_dict()
 
         mode = self.mode
@@ -55,7 +57,7 @@ class RecipeBuildExecution:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_build_definition import RecipeBuildDefinition
+        from ..models.recipe_build_definition import RecipeBuildDefinition # noqa: PLC0415
         d = dict(src_dict)
         build = RecipeBuildDefinition.from_dict(d.pop("build"))
 

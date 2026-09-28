@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -26,20 +28,20 @@ class ArtifactInputContract:
             max_bytes (int):
             media_types (list[str]):
             required (bool):
-            slots (list['ArtifactSlotContract']):
+            slots (list[ArtifactSlotContract]):
      """
 
     max_bytes: int
     media_types: list[str]
     required: bool
-    slots: list['ArtifactSlotContract']
+    slots: list[ArtifactSlotContract]
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.artifact_slot_contract import ArtifactSlotContract
+        from ..models.artifact_slot_contract import ArtifactSlotContract # noqa: PLC0415
         max_bytes = self.max_bytes
 
         media_types = self.media_types
@@ -71,7 +73,7 @@ class ArtifactInputContract:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.artifact_slot_contract import ArtifactSlotContract
+        from ..models.artifact_slot_contract import ArtifactSlotContract # noqa: PLC0415
         d = dict(src_dict)
         max_bytes = d.pop("max_bytes")
 

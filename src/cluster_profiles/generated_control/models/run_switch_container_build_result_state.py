@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RunSwitchContainerBuildResultState = Literal['building', 'failed', 'planned', 'succeeded']
 
@@ -6,5 +6,5 @@ RUN_SWITCH_CONTAINER_BUILD_RESULT_STATE_VALUES: set[RunSwitchContainerBuildResul
 
 def check_run_switch_container_build_result_state(value: str) -> RunSwitchContainerBuildResultState:
     if value in RUN_SWITCH_CONTAINER_BUILD_RESULT_STATE_VALUES:
-        return cast(RunSwitchContainerBuildResultState, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RUN_SWITCH_CONTAINER_BUILD_RESULT_STATE_VALUES!r}")

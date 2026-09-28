@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 LibraryFilterValuesSortType0 = Literal['name', 'updated']
 
@@ -6,5 +6,5 @@ LIBRARY_FILTER_VALUES_SORT_TYPE_0_VALUES: set[LibraryFilterValuesSortType0] = { 
 
 def check_library_filter_values_sort_type_0(value: str) -> LibraryFilterValuesSortType0:
     if value in LIBRARY_FILTER_VALUES_SORT_TYPE_0_VALUES:
-        return cast(LibraryFilterValuesSortType0, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {LIBRARY_FILTER_VALUES_SORT_TYPE_0_VALUES!r}")

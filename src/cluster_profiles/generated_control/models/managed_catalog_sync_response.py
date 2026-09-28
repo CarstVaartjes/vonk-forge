@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,14 +14,12 @@ from ..models.managed_catalog_sync_response_trigger import check_managed_catalog
 from ..models.managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 if TYPE_CHECKING:
+  from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
   from ..models.managed_catalog_sync_problem import ManagedCatalogSyncProblem
   from ..models.managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
-  from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
 
 
 
@@ -33,15 +33,15 @@ T = TypeVar("T", bound="ManagedCatalogSyncResponse")
 class ManagedCatalogSyncResponse:
     """
         Attributes:
-            completed_at (Union[None, str]):
+            completed_at (None | str):
             created_at (str):
             imported_count (int):
-            problems (list['ManagedCatalogSyncProblem']):
+            problems (list[ManagedCatalogSyncProblem]):
             processed_count (int):
             repository (str):
             request_key (str):
             skipped_count (int):
-            stale_recipes (list['ManagedCatalogStaleRecipe']):
+            stale_recipes (list[ManagedCatalogStaleRecipe]):
             state (ManagedCatalogSyncResponseState):
             sync_id (str):
             total_count (int):
@@ -49,21 +49,21 @@ class ManagedCatalogSyncResponse:
             unchanged_count (int):
             updated_count (int):
             withdrawn_count (int):
-            withdrawn_recipes (list['ManagedCatalogWithdrawnRecipe']):
-            commit (Union[None, Unset, str]):
-            expected_commit (Union[None, Unset, str]):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            withdrawn_recipes (list[ManagedCatalogWithdrawnRecipe]):
+            commit (None | str | Unset):
+            expected_commit (None | str | Unset):
+            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
-    completed_at: Union[None, str]
+    completed_at: None | str
     created_at: str
     imported_count: int
-    problems: list['ManagedCatalogSyncProblem']
+    problems: list[ManagedCatalogSyncProblem]
     processed_count: int
     repository: str
     request_key: str
     skipped_count: int
-    stale_recipes: list['ManagedCatalogStaleRecipe']
+    stale_recipes: list[ManagedCatalogStaleRecipe]
     state: ManagedCatalogSyncResponseState
     sync_id: str
     total_count: int
@@ -71,20 +71,20 @@ class ManagedCatalogSyncResponse:
     unchanged_count: int
     updated_count: int
     withdrawn_count: int
-    withdrawn_recipes: list['ManagedCatalogWithdrawnRecipe']
-    commit: Union[None, Unset, str] = UNSET
-    expected_commit: Union[None, Unset, str] = UNSET
-    schema_version: Union[Literal[1], Unset] = 1
+    withdrawn_recipes: list[ManagedCatalogWithdrawnRecipe]
+    commit: None | str | Unset = UNSET
+    expected_commit: None | str | Unset = UNSET
+    schema_version: Literal[1] | Unset = 1
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.managed_catalog_sync_problem import ManagedCatalogSyncProblem
-        from ..models.managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
-        from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
-        completed_at: Union[None, str]
+        from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe # noqa: PLC0415
+        from ..models.managed_catalog_sync_problem import ManagedCatalogSyncProblem # noqa: PLC0415
+        from ..models.managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe # noqa: PLC0415
+        completed_at: None | str
         completed_at = self.completed_at
 
         created_at = self.created_at
@@ -134,13 +134,13 @@ class ManagedCatalogSyncResponse:
 
 
 
-        commit: Union[None, Unset, str]
+        commit: None | str | Unset
         if isinstance(self.commit, Unset):
             commit = UNSET
         else:
             commit = self.commit
 
-        expected_commit: Union[None, Unset, str]
+        expected_commit: None | str | Unset
         if isinstance(self.expected_commit, Unset):
             expected_commit = UNSET
         else:
@@ -183,14 +183,14 @@ class ManagedCatalogSyncResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.managed_catalog_sync_problem import ManagedCatalogSyncProblem
-        from ..models.managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
-        from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
+        from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe # noqa: PLC0415
+        from ..models.managed_catalog_sync_problem import ManagedCatalogSyncProblem # noqa: PLC0415
+        from ..models.managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_completed_at(data: object) -> Union[None, str]:
+        def _parse_completed_at(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         completed_at = _parse_completed_at(d.pop("completed_at"))
 
@@ -257,27 +257,27 @@ class ManagedCatalogSyncResponse:
             withdrawn_recipes.append(withdrawn_recipes_item)
 
 
-        def _parse_commit(data: object) -> Union[None, Unset, str]:
+        def _parse_commit(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         commit = _parse_commit(d.pop("commit", UNSET))
 
 
-        def _parse_expected_commit(data: object) -> Union[None, Unset, str]:
+        def _parse_expected_commit(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         expected_commit = _parse_expected_commit(d.pop("expected_commit", UNSET))
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 

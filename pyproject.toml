@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.31.0"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,14 +8,13 @@ version = "0.1.1"
 description = "Vonk Forge cluster workload-profile contracts"
 requires-python = ">=3.14"
 dependencies = [
-  "argon2-cffi==25.1.0",
-  "attrs==26.1.0",
-  "httpx==0.28.1",
+  "argon2-cffi>=25.1.0",
+  "attrs>=26.1.0",
+  "httpx2>=2.13.1",
   "jsonschema>=4.23",
-  "pillow==12.3.0",
-  "python-dateutil==2.9.0.post0",
-  "securesystemslib[crypto]==1.4.0",
-  "tuf==7.0.0",
+  "pillow>=12.3.0",
+  "securesystemslib[crypto]>=1.5.1",
+  "tuf>=7.0.1",
 ]
 
 [project.scripts]
@@ -24,12 +23,12 @@ vonk-fleet-qualify-campaign = "cluster_profiles.fleet_qualification_campaign_cli
 
 [dependency-groups]
 dev = [
-    "hatchling==1.31.0",
-    "pytest==9.1.1",
-    "pytest-timeout==2.4.0",
-    "pytest-xdist==3.8.0",
-    "pyyaml==6.0.3",
-    "ruff==0.16.1",
+    "hatchling>=1.32.4",
+    "pytest>=9.1.1",
+    "pytest-timeout>=2.4.0",
+    "pytest-xdist>=3.8.0",
+    "pyyaml>=6.0.3",
+    "ruff>=0.16.9",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -52,7 +51,7 @@ path = "tools/hatch_build.py"
 "src/cluster_profiles/schemas/control-openapi.json" = "cluster_profiles/schemas/control-openapi.json"
 
 [tool.ruff]
-required-version = "==0.16.1"
+required-version = "==0.16.9"
 target-version = "py312"
 extend-exclude = [
     "src/cluster_profiles/generated_control",

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.recipe_release_change_kind import check_recipe_release_change_kind
 from ..models.recipe_release_change_kind import RecipeReleaseChangeKind
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -28,14 +28,14 @@ class RecipeReleaseChange:
         Attributes:
             kind (RecipeReleaseChangeKind):
             summary (str):
-            details (Union[None, Unset, str]):
-            references (Union[Unset, list[str]]):
+            details (None | str | Unset):
+            references (list[str] | Unset):
      """
 
     kind: RecipeReleaseChangeKind
     summary: str
-    details: Union[None, Unset, str] = UNSET
-    references: Union[Unset, list[str]] = UNSET
+    details: None | str | Unset = UNSET
+    references: list[str] | Unset = UNSET
 
 
 
@@ -46,13 +46,13 @@ class RecipeReleaseChange:
 
         summary = self.summary
 
-        details: Union[None, Unset, str]
+        details: None | str | Unset
         if isinstance(self.details, Unset):
             details = UNSET
         else:
             details = self.details
 
-        references: Union[Unset, list[str]] = UNSET
+        references: list[str] | Unset = UNSET
         if not isinstance(self.references, Unset):
             references = self.references
 
@@ -84,12 +84,12 @@ class RecipeReleaseChange:
 
         summary = d.pop("summary")
 
-        def _parse_details(data: object) -> Union[None, Unset, str]:
+        def _parse_details(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         details = _parse_details(d.pop("details", UNSET))
 

@@ -9,7 +9,7 @@ import tarfile
 from copy import deepcopy
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from vonk_control.bounded_json import require_mapping
 from vonk_control.recipe_packages import (
@@ -353,29 +353,29 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(
     publication = "2" * 40
     requests: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(str(request.url))
         if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(
+            return httpx2.Response(
                 200, json={"object": {"sha": publication, "type": "commit"}}
             )
         if request.url.path.endswith("/catalog-index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200, headers={"content-type": "text/plain"}, content=index
             )
         if request.url.path.endswith("tiny-recipe.tar.gz"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/octet-stream"},
                 content=package,
             )
-        return httpx.Response(404)
+        return httpx2.Response(404)
 
     client = RecipePackageClient(
         None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     snapshot = client.list()
     item = client.fetch(
@@ -410,34 +410,34 @@ def test_production_reader_can_pin_through_the_internal_raw_relay(
     publication = "3" * 40
     requests: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(str(request.url))
         if request.url.port == 8083 and request.url.path.endswith(
             "/git/ref/heads/main"
         ):
-            return httpx.Response(
+            return httpx2.Response(
                 200, json={"object": {"sha": publication, "type": "commit"}}
             )
         if request.url.port == 8085 and request.url.path.endswith(
             "/catalog-index.json"
         ):
-            return httpx.Response(
+            return httpx2.Response(
                 200, headers={"content-type": "text/plain"}, content=index
             )
         if request.url.port == 8085 and request.url.path.endswith("tiny-recipe.tar.gz"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/octet-stream"},
                 content=package,
             )
-        return httpx.Response(404)
+        return httpx2.Response(404)
 
     client = RecipePackageClient(
         None,
         api_url="http://127.0.0.1:8083",
         raw_url="http://127.0.0.1:8085",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     snapshot = client.list()
     item = client.fetch(
@@ -469,10 +469,10 @@ def test_publication_ref_uses_nested_commit_object_for_large_github_responses(
     publication = "4" * 40
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(str(request.url))
         if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 json={
                     "ref": "refs/heads/main",
@@ -486,22 +486,22 @@ def test_publication_ref_uses_nested_commit_object_for_large_github_responses(
                 },
             )
         if request.url.path.endswith("/catalog-index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200, headers={"content-type": "application/json"}, content=index
             )
         if request.url.path.endswith("tiny-recipe.tar.gz"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/octet-stream"},
                 content=package,
             )
-        return httpx.Response(404)
+        return httpx2.Response(404)
 
     client = RecipePackageClient(
         None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     snapshot = client.list()
     item = client.fetch(
@@ -562,17 +562,17 @@ def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(
     index, _, package = _canonical_package_fixture()
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(str(request.url))
         if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(
+            return httpx2.Response(
                 200, json={"object": {"sha": "2" * 40, "type": "commit"}}
             )
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(
+            return httpx2.Response(
                 200, headers={"content-type": "text/plain"}, content=index
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": "application/octet-stream"}, content=package
         )
 
@@ -580,7 +580,7 @@ def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(
         None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     client.list()
     candidate = client.list()
@@ -606,19 +606,19 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
     state = {"index": index, "package": package}
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(str(request.url))
         if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(
+            return httpx2.Response(
                 200, json={"object": {"sha": "2" * 40, "type": "commit"}}
             )
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/json"},
                 content=state["index"],
             )
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"content-type": "application/octet-stream"},
             content=state["package"],
@@ -628,7 +628,7 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
         None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     client.prepare(client.list())
     calls.clear()
@@ -654,14 +654,14 @@ def test_failed_candidate_can_retry_against_previous_good_snapshot(
     bad_index["recipes"] = [bad_row]
     state = {"index": index, "package": package}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/json"},
                 content=state["index"],
             )
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"content-type": "application/octet-stream"},
             content=state["package"],
@@ -670,7 +670,7 @@ def test_failed_candidate_can_retry_against_previous_good_snapshot(
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     client.prepare(client.list())
     state["index"] = _canonical(bad_index) + b"\n"
@@ -688,27 +688,27 @@ def test_restart_offline_reuses_promoted_snapshot_and_package_closure(
 ) -> None:
     index, _, package = _canonical_package_fixture()
 
-    def online(request: httpx.Request) -> httpx.Response:
+    def online(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(
+            return httpx2.Response(
                 200, headers={"content-type": "application/json"}, content=index
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": "application/octet-stream"}, content=package
         )
 
     cache = tmp_path / "packages"
     first = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(online)
+        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(online)
     )
     first.prepare(first.list())
     first.close()
 
-    def offline(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("offline", request=request)
+    def offline(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("offline", request=request)
 
     restarted = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(offline)
+        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(offline)
     )
     snapshot = restarted.list()
     restarted.prepare(snapshot)

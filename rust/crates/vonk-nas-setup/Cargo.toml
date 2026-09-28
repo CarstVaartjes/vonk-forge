@@ -12,7 +12,6 @@ ed25519-dalek.workspace = true
 hex.workspace = true
 p256.workspace = true
 pkcs8.workspace = true
-rand_core.workspace = true
 rcgen.workspace = true
 ring.workspace = true
 rpassword.workspace = true

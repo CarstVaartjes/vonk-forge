@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -24,12 +26,12 @@ class RecipeBuildPolicy:
     """
         Attributes:
             dockerfile (str):
-            findings (list['RecipeBuildPolicyFinding']):
+            findings (list[RecipeBuildPolicyFinding]):
             passed (bool):
      """
 
     dockerfile: str
-    findings: list['RecipeBuildPolicyFinding']
+    findings: list[RecipeBuildPolicyFinding]
     passed: bool
 
 
@@ -37,7 +39,7 @@ class RecipeBuildPolicy:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_build_policy_finding import RecipeBuildPolicyFinding
+        from ..models.recipe_build_policy_finding import RecipeBuildPolicyFinding # noqa: PLC0415
         dockerfile = self.dockerfile
 
         findings = []
@@ -64,7 +66,7 @@ class RecipeBuildPolicy:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_build_policy_finding import RecipeBuildPolicyFinding
+        from ..models.recipe_build_policy_finding import RecipeBuildPolicyFinding # noqa: PLC0415
         d = dict(src_dict)
         dockerfile = d.pop("dockerfile")
 

@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -11,15 +12,15 @@ from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.job_resume_request import JobResumeRequest
 from ...models.job_resume_response import JobResumeResponse
 from ...models.request_validation_problem import RequestValidationProblem
+from ...types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 
 
 
 def _get_kwargs(
     job_id: str,
     *,
-    body: Union['JobResumeRequest', None],
+    body: JobResumeRequest | None | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -31,15 +32,14 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/jobs/{job_id}/resume".format(job_id=job_id,),
+        "url": "/api/jobs/{job_id}/resume".format(job_id=quote(str(job_id), safe=""),),
     }
 
-    _kwargs["json"]: Union[None, dict[str, Any]]
+
     if isinstance(body, JobResumeRequest):
         _kwargs["json"] = body.to_dict()
     else:
         _kwargs["json"] = body
-
 
     headers["Content-Type"] = "application/json"
 
@@ -48,7 +48,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | JobResumeResponse | RequestValidationProblem | None:
     if response.status_code == 202:
         response_202 = JobResumeResponse.from_dict(response.json())
 
@@ -104,7 +104,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | JobResumeResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -117,21 +117,21 @@ def sync_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    body: Union['JobResumeRequest', None],
+    body: JobResumeRequest | None | Unset = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | JobResumeResponse | RequestValidationProblem]:
     """ Resume Job
 
     Args:
         job_id (str):
-        body (Union['JobResumeRequest', None]):
+        body (JobResumeRequest | None | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | JobResumeResponse | RequestValidationProblem]
      """
 
 
@@ -151,21 +151,21 @@ def sync(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    body: Union['JobResumeRequest', None],
+    body: JobResumeRequest | None | Unset = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | JobResumeResponse | RequestValidationProblem | None:
     """ Resume Job
 
     Args:
         job_id (str):
-        body (Union['JobResumeRequest', None]):
+        body (JobResumeRequest | None | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]
+        BoundedErrorResponse | JobResumeResponse | RequestValidationProblem
      """
 
 
@@ -180,21 +180,21 @@ async def asyncio_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    body: Union['JobResumeRequest', None],
+    body: JobResumeRequest | None | Unset = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | JobResumeResponse | RequestValidationProblem]:
     """ Resume Job
 
     Args:
         job_id (str):
-        body (Union['JobResumeRequest', None]):
+        body (JobResumeRequest | None | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | JobResumeResponse | RequestValidationProblem]
      """
 
 
@@ -214,21 +214,21 @@ async def asyncio(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    body: Union['JobResumeRequest', None],
+    body: JobResumeRequest | None | Unset = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | JobResumeResponse | RequestValidationProblem | None:
     """ Resume Job
 
     Args:
         job_id (str):
-        body (Union['JobResumeRequest', None]):
+        body (JobResumeRequest | None | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, JobResumeResponse, RequestValidationProblem]
+        BoundedErrorResponse | JobResumeResponse | RequestValidationProblem
      """
 
 

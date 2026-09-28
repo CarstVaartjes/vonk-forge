@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -26,7 +28,7 @@ class RuntimePreflightResult:
         Attributes:
             cached (bool):
             duration_ms (int):
-            findings (list['RuntimePreflightFinding']):
+            findings (list[RuntimePreflightFinding]):
             fingerprint (str):
             observed_at (int):
             request_sha256 (str):
@@ -35,7 +37,7 @@ class RuntimePreflightResult:
 
     cached: bool
     duration_ms: int
-    findings: list['RuntimePreflightFinding']
+    findings: list[RuntimePreflightFinding]
     fingerprint: str
     observed_at: int
     request_sha256: str
@@ -46,7 +48,7 @@ class RuntimePreflightResult:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.runtime_preflight_finding import RuntimePreflightFinding
+        from ..models.runtime_preflight_finding import RuntimePreflightFinding # noqa: PLC0415
         cached = self.cached
 
         duration_ms = self.duration_ms
@@ -85,7 +87,7 @@ class RuntimePreflightResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.runtime_preflight_finding import RuntimePreflightFinding
+        from ..models.runtime_preflight_finding import RuntimePreflightFinding # noqa: PLC0415
         d = dict(src_dict)
         cached = d.pop("cached")
 

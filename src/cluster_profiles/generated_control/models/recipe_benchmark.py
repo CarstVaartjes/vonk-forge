@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -28,7 +30,7 @@ class RecipeBenchmark:
             name (str):
      """
 
-    configuration: 'RecipeBenchmarkConfiguration'
+    configuration: RecipeBenchmarkConfiguration
     framework: str
     name: str
 
@@ -37,7 +39,7 @@ class RecipeBenchmark:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_benchmark_configuration import RecipeBenchmarkConfiguration
+        from ..models.recipe_benchmark_configuration import RecipeBenchmarkConfiguration # noqa: PLC0415
         configuration = self.configuration.to_dict()
 
         framework = self.framework
@@ -59,7 +61,7 @@ class RecipeBenchmark:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_benchmark_configuration import RecipeBenchmarkConfiguration
+        from ..models.recipe_benchmark_configuration import RecipeBenchmarkConfiguration # noqa: PLC0415
         d = dict(src_dict)
         configuration = RecipeBenchmarkConfiguration.from_dict(d.pop("configuration"))
 

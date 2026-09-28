@@ -12,7 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose"
-TAILSCALE_IMAGE = "tailscale/tailscale:v1.102.3"
+TAILSCALE_IMAGE = "tailscale/tailscale:v1.102.5"
 
 
 @pytest.fixture

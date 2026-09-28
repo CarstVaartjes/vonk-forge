@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -14,7 +15,6 @@ from ...models.recipe_operator_response import RecipeOperatorResponse
 from ...models.recipe_update_response import RecipeUpdateResponse
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
-from typing import cast, Union
 
 
 
@@ -33,11 +33,10 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/recipe/operations/{operation_id}/cancel".format(operation_id=operation_id,),
+        "url": "/api/recipe/operations/{operation_id}/cancel".format(operation_id=quote(str(operation_id), safe=""),),
     }
 
     _kwargs["json"] = body.to_dict()
-
 
     headers["Content-Type"] = "application/json"
 
@@ -46,9 +45,9 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem | None:
     if response.status_code == 202:
-        def _parse_response_202(data: object) -> Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']:
+        def _parse_response_202(data: object) -> RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -57,7 +56,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
 
                 return response_202_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -67,7 +66,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
 
                 return response_202_type_1
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             if not isinstance(data, dict):
                 raise TypeError()
@@ -129,7 +128,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -144,7 +143,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: RecipeCancellationRequest,
 
-) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]]:
+) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]:
     """ Cancel Operation
 
     Args:
@@ -153,10 +152,10 @@ def sync_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]]
+        Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]
      """
 
 
@@ -178,7 +177,7 @@ def sync(
     client: AuthenticatedClient,
     body: RecipeCancellationRequest,
 
-) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]]:
+) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem | None:
     """ Cancel Operation
 
     Args:
@@ -187,10 +186,10 @@ def sync(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]
+        BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem
      """
 
 
@@ -207,7 +206,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: RecipeCancellationRequest,
 
-) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]]:
+) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]:
     """ Cancel Operation
 
     Args:
@@ -216,10 +215,10 @@ async def asyncio_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]]
+        Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem]
      """
 
 
@@ -241,7 +240,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: RecipeCancellationRequest,
 
-) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]]:
+) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem | None:
     """ Cancel Operation
 
     Args:
@@ -250,10 +249,10 @@ async def asyncio(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RequestValidationProblem, Union['RecipeImageAvailabilityResponse', 'RecipeOperatorResponse', 'RecipeUpdateResponse']]
+        BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeUpdateResponse | RequestValidationProblem
      """
 
 
