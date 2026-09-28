@@ -432,9 +432,9 @@ def test_exhausted_profile_retry_keeps_an_automatic_due_time(
         row.progress = FleetProfileApplicationProgress.model_validate_json(
             canonical_message(progress), strict=True
         ).model_dump(mode="json")
-        row.state = "queued"
 
     assert service._automatic_profile_recovery(lifecycle._clock()) is None
     candidate = service._automatic_profile_recovery(due + timedelta(seconds=1))
     assert candidate == (first.id, "admin")
-    assert service.application(first.id).state == "queued"
+    # Scheduling recovery does not rewrite the parked row into a new state.
+    assert service.application(first.id).state == "waiting-for-operator"

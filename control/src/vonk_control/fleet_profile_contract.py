@@ -950,6 +950,11 @@ class FleetProfileSwitchAdapter(Protocol):
 
         ...
 
+    def recovery_refused(self, application_id: str, *, session: Session) -> bool:
+        """Whether a failed child must not be replayed by profile recovery."""
+
+        ...
+
     def request_cancellation(
         self,
         application_id: str,

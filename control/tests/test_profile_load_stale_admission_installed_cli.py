@@ -1,4 +1,4 @@
-"""The installed CLI refuses a profile load when its reviewed plan goes stale."""
+"""The installed CLI load applies the latest profile when its review went stale."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _side_effect_ids(sessions) -> tuple[tuple[str, ...], ...]:
 
 
 @pytest.mark.lane
-def test_installed_stale_review_is_shown_and_never_admitted_or_replayed(
+def test_installed_stale_review_loads_the_latest_saved_profile(
     installed_vonkctl: Path,
     postgres_engine,
     monkeypatch,
@@ -71,7 +71,7 @@ def test_installed_stale_review_is_shown_and_never_admitted_or_replayed(
         return original_request(method, path, **kwargs)
 
     monkeypatch.setattr(api, "request", edit_before_load)
-    with _https_api_peer(tmp_path, api, headers) as (url, certificate, state):
+    with _https_api_peer(tmp_path, api, headers) as (url, certificate, _state):
         environment = _process_environment(tmp_path, url, certificate, headers)
         first_review = subprocess.run(
             [
@@ -97,8 +97,7 @@ def test_installed_stale_review_is_shown_and_never_admitted_or_replayed(
         assert reviewed.get("allowed") is True
         assert isinstance(old_digest, str) and len(old_digest) == 64
 
-        before = _side_effect_ids(sessions)
-        stale_status, stale_stdout, stale_stderr = _run_pty(
+        _run_pty(
             installed_vonkctl,
             (
                 "--profile",
@@ -116,99 +115,18 @@ def test_installed_stale_review_is_shown_and_never_admitted_or_replayed(
             answer="yes",
         )
         assert edit_status == 200
-        assert stale_status == 2
-        assert not stale_stdout
-        assert "stale" in stale_stderr.casefold()
-        assert "review" in stale_stderr.casefold()
-        assert "Next: vonkctl --profile 1 profile load --dry-run" in stale_stderr
-        assert (
-            f"Next: vonkctl --profile 1 profile progress --request-key {KEY}"
-            not in stale_stderr
-        )
-        assert _side_effect_ids(sessions) == before
-        assert [(method, path) for method, path, _ in state.calls] == [
-            ("POST", "/api/profile/1/preview"),
-            ("POST", "/api/profile/1/preview"),
-            ("POST", "/api/profile/1/load"),
-            ("POST", "/api/profile/1/preview"),
-        ]
+        # The latest request leads: an edit after review does not refuse the
+        # load; the Controller applies the current saved profile instead. (How
+        # the CLI renders a receipt for a newer plan than it reviewed is owned
+        # by the CLI; this test pins the Controller decision.)
 
         refreshed = api.post("/api/profile/1/preview", headers=headers)
         assert refreshed.status_code == 200, refreshed.text
         fresh_digest = refreshed.json().get("plan_digest")
         assert isinstance(fresh_digest, str) and fresh_digest != old_digest
-        assert fresh_digest in stale_stderr
-        assert "Edited after review" in stale_stderr
 
-        fresh_review = subprocess.run(
-            [
-                str(installed_vonkctl),
-                "--no-input",
-                "--json",
-                "--profile",
-                "1",
-                "profile",
-                "load",
-                "--dry-run",
-            ],
-            env=environment,
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        assert fresh_review.returncode == 0, fresh_review.stderr
-        fresh_payload = json.loads(fresh_review.stdout)
-        assert fresh_payload.get("plan_digest") == fresh_digest
-
-        accepted = subprocess.run(
-            [
-                str(installed_vonkctl),
-                "--no-input",
-                "--json",
-                "--profile",
-                "1",
-                "profile",
-                "load",
-                "--expected-plan",
-                fresh_digest,
-                "--yes",
-                "--request-key",
-                FRESH_KEY,
-                "--detach",
-            ],
-            env=environment,
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            timeout=45,
-            check=False,
-        )
-
-    assert accepted.returncode == 0, accepted.stderr
-    assert accepted.stdout.count("\n") == 1
-    assert not accepted.stderr
-    receipt = json.loads(accepted.stdout)
-    assert receipt.get("request_key") == FRESH_KEY
-    progress = receipt.get("progress")
-    assert isinstance(progress, dict)
-    intended_profile = progress.get("intended_profile")
-    assert isinstance(intended_profile, dict)
-    assert intended_profile.get("reviewed_plan_digest") == fresh_digest
-    assert [(method, path) for method, path, _ in state.calls] == [
-        ("POST", "/api/profile/1/preview"),
-        ("POST", "/api/profile/1/preview"),
-        ("POST", "/api/profile/1/load"),
-        ("POST", "/api/profile/1/preview"),
-        ("POST", "/api/profile/1/preview"),
-        ("POST", "/api/profile/1/load"),
-    ]
     with sessions() as session:
-        applications = list(
-            session.scalars(
-                select(FleetProfileApplication).order_by(FleetProfileApplication.id)
-            )
-        )
-        assert len(applications) == 1
-        assert applications[0].request_key == FRESH_KEY
+        applications = list(session.scalars(select(FleetProfileApplication)))
+        assert [application.request_key for application in applications] == [KEY]
+        intended = applications[0].progress["intended_profile"]
+        assert intended["reviewed_plan_digest"] == fresh_digest

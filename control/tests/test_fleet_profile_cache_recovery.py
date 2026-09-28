@@ -334,9 +334,13 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         recovery_review = service.preview(profile.id, allow_pending_cache_rebuild=True)
         assert not recovery_review.allowed
         assert recovery_review.assessments[0].assessment.blockers
-        assert service.tick() is False
+        # A blocked recovery admits no replacement intent and changes no build;
+        # the accepted intent keeps retrying with a visible next attempt.
+        service.tick()
         with sessions() as session:
-            assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
+            applications = tuple(session.scalars(select(FleetProfileApplication)))
+            assert len(applications) == 1
+            assert "next attempt" in (applications[0].status_reason or "")
             build = session.get(RecipeBuild, build_plan.build_id)
             assert build is not None and build.state == before[0]
         return

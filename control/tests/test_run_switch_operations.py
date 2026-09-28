@@ -96,7 +96,6 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationProvider,
     RunSwitchOperationService,
     _phase_result,
-    _security_failure_code,
     _transient_distribution_exception,
     effective_build_receipt,
 )
@@ -786,12 +785,45 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         actor="admin",
     )
     assert operation.state == "waiting"
+    old_installation_id = str(uuid.uuid4())
     with sessions.begin() as session:
         job = session.get(Job, operation.operation_id)
         assert job is not None
         progress = dict(job.result or {})
-        progress.update({"phase_index": 1, "phase": "final_verify"})
+        first_due = datetime.fromisoformat(str(progress["observation_due_at"]))
+        # Work attributed to the old plan must never be adopted by the new one.
+        progress.update(
+            {
+                "phase_index": 1,
+                "item_index": 1,
+                "phase": "final_verify",
+                "completed_phases": ["prepare"],
+                "child_operation_id": str(uuid.uuid4()),
+                "phase_results": [
+                    {
+                        "phase": "prepare",
+                        "subphase": "runtime-install",
+                        "installation_id": old_installation_id,
+                    }
+                ],
+            }
+        )
         job.result = progress
+    # While blockers remain, re-plans back off exponentially.
+    now[0] = first_due + timedelta(seconds=1)
+    assert service._advance(operation.operation_id) is True
+    with sessions() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None and isinstance(job.result, dict)
+        second_due = datetime.fromisoformat(str(job.result["observation_due_at"]))
+        assert job.result["retry_attempt"] == 3
+    assert second_due - now[0] > first_due - NOW
+    # Nothing is re-planned before the next due time.
+    assert service._advance(operation.operation_id) is False
+    with sessions() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None and isinstance(job.result, dict)
+        assert job.result["retry_attempt"] == 3
     with sessions.begin() as session:
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
@@ -800,7 +832,7 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         )
         assert snapshot is not None
         snapshot.observed_at = NOW
-    now[0] = NOW + timedelta(seconds=16)
+    now[0] = second_due + timedelta(seconds=1)
     assert service._advance(operation.operation_id) is True
     refreshed = service.get(operation.operation_id)
     assert refreshed.state == "queued"
@@ -809,6 +841,14 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         assert job is not None
         assert isinstance(job.result, dict)
         assert job.result.get("phase_index") == 0
+        assert job.result.get("item_index") == 0
+        assert job.result.get("completed_phases") == []
+        assert job.result.get("phase_results") == []
+        assert job.result.get("child_operation_id") is None
+        assert job.result.get("retry_attempt") is None
+        # A new child identity generation: no Start or installation adopted
+        # under the old plan's request keys can be reused.
+        assert job.result.get("phase_retry_generation") == 1
         refreshed_plan = job.payload.get("plan")
         assert isinstance(refreshed_plan, dict)
         authority_revision = refreshed_plan.get(
@@ -3753,27 +3793,6 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
 
 
 @pytest.mark.parametrize(
-    ("code", "detail", "terminal"),
-    [
-        ("permission_denied", "authorization denied", True),
-        (401, "credential rejected", True),
-        (403, "insufficient authority", True),
-        ("identity_mismatch", "stale workload identity", True),
-        ("node_revoked", "node was revoked", True),
-        ("signature_invalid", "package signature failed", True),
-        (None, "run plan is invalid under current authority", False),
-        (None, "runtime_image.digest_mismatch", False),
-        (None, "downloaded bytes failed integrity verification", False),
-        (None, "run-switch.stale_plan", False),
-    ],
-)
-def test_security_failure_requires_explicit_terminal_code(
-    code: object | None, detail: str, terminal: bool
-) -> None:
-    assert _security_failure_code(code, detail) is terminal
-
-
-@pytest.mark.parametrize(
     "invalid_result", [[], "broken", {"phase_index": "0"}, {"phase": "old-phase"}]
 )
 def test_operation_read_rejects_malformed_persisted_result(
@@ -4046,6 +4065,41 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
         assert installed.state == "installed"
 
 
+def test_succeeded_child_with_invalid_receipt_fails_without_reissue(tmp_path):
+    """A receipt that does not validate never re-issues its child's effects."""
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    executor = RecordingArtifactExecutor(child_transfer=True)
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    service.tick()
+    child_id = _child_operation_id(service.get(operation.operation_id))
+    child = executor.children[child_id]
+    child.state = "succeeded"
+    child.result = {"evidence": [{"phase": "transfer", "unexpected": True}]}
+    for _ in range(3):
+        service.tick()
+    failed = service.get(operation.operation_id)
+    assert failed.state == "failed", failed.status_reason
+    assert _result(failed).failure_code == "run-switch.receipt_invalid"
+    assert _result(failed).retryable is False
+    assert list(executor.children) == [child_id]
+    assert executor.calls.count("transfer") == 1
+
+
 def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_path):
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(
@@ -4087,11 +4141,38 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
         ),
         actor="admin",
     )
+    # A different intent under a reused request key is a conflict, not a replay.
+    with pytest.raises(RunSwitchOperationConflict, match="reused_differently"):
+        service.apply(
+            RunSwitchApplyRequest(
+                **{**request.model_dump(), "alias": "another-endpoint"},
+                request_key=request_key,
+            ),
+            actor="admin",
+        )
     service.tick()
+    stop_key = str(uuid.uuid4())
+    original_apply_stop = service.apply_stop
+
+    def unavailable_stop(*_args, **_kwargs):
+        raise RunSwitchOperationConflict("run-switch.stop_unavailable")
+
+    # Cancellation is committed only together with an accepted Stop: a Stop
+    # that cannot be admitted leaves the operation active and cancellable.
+    service.apply_stop = unavailable_stop  # type: ignore[method-assign]
+    with pytest.raises(RunSwitchOperationConflict, match="stop_unavailable"):
+        service.cancel(
+            active.operation_id,
+            actor="admin",
+            request_key=stop_key,
+            reason="Stop running",
+        )
+    assert service.get(active.operation_id).state != "cancelled"
+    service.apply_stop = original_apply_stop  # type: ignore[method-assign]
     stopped = service.cancel(
         active.operation_id,
         actor="admin",
-        request_key=str(uuid.uuid4()),
+        request_key=stop_key,
         reason="Stop running",
     )
     assert stopped.kind == "recipe.stop.v2"

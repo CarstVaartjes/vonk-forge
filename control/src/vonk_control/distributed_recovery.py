@@ -952,8 +952,11 @@ def _validate_singleton_recovery_start_origin(
             "singleton recovery Stop did not complete under its recovery actor"
         )
     if (
-        stop.targets != targets
+        stop.authority_revision != run.plan_digest
+        or stop.targets != targets
         or stop.payload.get("workload_intent_ordinal") != workload_intent_ordinal
+        or stop.payload_digest
+        != hashlib.sha256(canonical_message(stop.payload)).hexdigest()
     ):
         raise DistributedLifecycleError(
             "singleton recovery Stop has stale exact run authority"
@@ -1028,8 +1031,12 @@ def _validate_distributed_recovery_start_origin(
         or stop.state != "succeeded"
         or stop.actor != "system:distributed-recovery"
         or start.actor != "system:distributed-recovery"
+        or stop.authority_revision != run.plan_digest.removeprefix("sha256:")
         or stop.targets != list(targets)
+        or stop.payload.get("plan_digest") != run.plan_digest
         or stop.payload.get("workload_intent_ordinal") != workload_intent_ordinal
+        or stop.payload_digest
+        != hashlib.sha256(canonical_message(stop.payload)).hexdigest()
         or (
             isinstance(stop.result, Mapping)
             and stop.result.get("cancel_requested") is True

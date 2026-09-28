@@ -1118,7 +1118,7 @@ def test_direct_run_switch_accepts_the_receipt_recorded_by_availability(
         assert launch_row.oci_archive_sha256 is not None
 
 
-def test_direct_run_switch_rejects_filesystem_only_receipt_before_compile(
+def test_direct_run_switch_waits_on_filesystem_only_receipt_before_compile(
     tmp_path: Path,
 ) -> None:
     service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, _events = (
@@ -1136,15 +1136,14 @@ def test_direct_run_switch_rejects_filesystem_only_receipt_before_compile(
     )
     for _ in range(10):
         service._advance(operation.operation_id)
-        with sessions() as session:
-            row = session.get(Job, operation.operation_id)
-            assert row is not None
-            if row.state == "failed":
-                break
     with sessions() as session:
         row = session.get(Job, operation.operation_id)
-        assert row is not None and row.state == "failed"
+        # A receipt missing from the durable store is not a security boundary:
+        # the accepted intent waits with a visible next attempt instead of
+        # failing, and nothing is compiled from the filesystem-only receipt.
+        assert row is not None and row.state == "running"
         assert "install-preparation-failed" in (row.status_reason or "")
+        assert "next attempt at" in (row.status_reason or "")
         assert session.query(RuntimeImageAuthorization).count() == 0
         assert session.query(RecipeInstallation).count() == 0
         assert session.query(RecipeBuild).count() == 0
