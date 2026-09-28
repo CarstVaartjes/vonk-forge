@@ -19,9 +19,6 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.bounded_json import require_mapping
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocument, Job, User
-from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityService,
-)
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 

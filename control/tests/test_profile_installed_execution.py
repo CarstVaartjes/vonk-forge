@@ -298,9 +298,7 @@ def test_running_to_installed_stops_and_reuses_the_existing_installation(
     assert review.summary.installs == 0
     application = _apply(service, profile)
     stop_id = _drive_to_job(service, planner, sessions, "recipe.stop")
-    lifecycle.record_node_result(
-        stop_id, nodes[0], succeeded=True, evidence={}
-    )
+    lifecycle.record_node_result(stop_id, nodes[0], succeeded=True, evidence={})
     for _ in range(12):
         planner.tick()
         service.tick()

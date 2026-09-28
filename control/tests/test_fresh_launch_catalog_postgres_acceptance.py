@@ -391,7 +391,9 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
             item.identity.content_sha256,
         ): item.document
         for item in library_models
-    } == {key: read_model(document) for key, document in expected_model_documents.items()}
+    } == {
+        key: read_model(document) for key, document in expected_model_documents.items()
+    }
 
     library_recipes = _library_recipes(api)
     by_digest = {item.identity.content_sha256: item for item in library_recipes}

@@ -355,9 +355,7 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
     operations.record_node_result(
         original.id, node_id, succeeded=True, evidence=_evidence(plan)
     )
-    operations.record_node_result(
-        cleanup_id, node_id, succeeded=True, evidence={}
-    )
+    operations.record_node_result(cleanup_id, node_id, succeeded=True, evidence={})
     assert operations.get(original.id).state == "cancelled"
     assert operations.get(cleanup_id).state == "succeeded"
     assert _active_claims(sessions, plan.build_id) == fresh_claims

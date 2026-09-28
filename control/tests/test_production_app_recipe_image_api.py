@@ -18,9 +18,13 @@ from vonk_control.models import (
     CatalogDocumentRevision,
 )
 from vonk_control.settings import Settings
-from vonk_control.source_bundles import DatabaseSourceBundleStore, generate_source_bundle
-from .test_recipe_image_availability import _recipe_projection
+from vonk_control.source_bundles import (
+    DatabaseSourceBundleStore,
+    generate_source_bundle,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from .test_recipe_image_availability import _recipe_projection
 
 
 def test_production_app_recipe_download_auth_and_status(

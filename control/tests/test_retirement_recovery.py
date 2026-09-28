@@ -392,7 +392,9 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
             _required(session.get(RecipeInstallation, install.owner_id)).state
             != "uninstalled"
         )
-        child = _required(session.get(AgentOperation, fenced_operation(sessions, cleanup).id))
+        child = _required(
+            session.get(AgentOperation, fenced_operation(sessions, cleanup).id)
+        )
         assert child.state == "failed" and child.retry_due_at is None
         assert (
             session.scalar(

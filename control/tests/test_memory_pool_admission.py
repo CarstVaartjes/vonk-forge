@@ -26,7 +26,6 @@ from vonk_control.resource_planning import (
 from vonk_control.run_admission import (
     RunAdmissionBusy,
     RunAdmissionService,
-    RunPlanConflict,
 )
 
 from .test_profile_capacity_admission import _capacity_profile

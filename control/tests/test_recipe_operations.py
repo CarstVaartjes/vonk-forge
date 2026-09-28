@@ -3722,9 +3722,7 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         actor="admin",
         request_id="8" * 36,
     )
-    service.record_node_result(
-        uninstall.id, nodes[0], succeeded=True, evidence={}
-    )
+    service.record_node_result(uninstall.id, nodes[0], succeeded=True, evidence={})
     with sessions() as session:
         installation = session.get(RecipeInstallation, install.owner_id)
         assert installation is not None
