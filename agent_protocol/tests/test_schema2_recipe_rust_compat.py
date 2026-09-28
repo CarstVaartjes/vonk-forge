@@ -468,17 +468,31 @@ def test_canonical_pydantic_schema_is_exercised_by_rust_serde(
     wire_probe: Path,
 ) -> None:
     checked_paths: set[tuple[AgentOperation, tuple[str | int, ...]]] = set()
+    # Every claim is answered by one probe process, as in the tests below.
+    cases: list[tuple[AgentOperation, dict[str, Any]]] = []
+    expectations: list[bool] = []
+    labels: list[object] = []
     for operation, model, payload in _plans_and_models():
         schema = model.model_json_schema()
         model.model_validate(payload)
-        assert _rust_accepts(wire_probe, operation, payload)
+        cases.append((operation, payload))
+        expectations.append(True)
+        labels.append(operation.value)
         for path, object_schema in _object_paths(schema, schema, payload):
             unknown = _with_unknown(payload, path)
             with pytest.raises(ValueError):
                 model.model_validate(unknown)
-            assert not _rust_accepts(wire_probe, operation, unknown), path
+            cases.append((operation, unknown))
+            expectations.append(False)
+            labels.append(path)
             checked_paths.add((operation, path))
             assert object_schema.get("additionalProperties") is False
+    verdicts = _rust_accepts_many(wire_probe, cases)
+    assert [
+        label
+        for label, verdict, expected in zip(labels, verdicts, expectations, strict=True)
+        if verdict is not expected
+    ] == []
     assert (
         AgentOperation.RECIPE_INSTALL,
         ("compiled_execution_plan", "runtime", "placement"),
@@ -497,6 +511,9 @@ def test_canonical_pydantic_schema_is_exercised_by_rust_serde(
     ) in checked_paths
 
 
+# Slow by design: well over a thousand claims, each a trip through the
+# debug-built production Rust parser (one probe process, about 4 ms a claim).
+@pytest.mark.slow(30)
 def test_required_and_exact_type_fields_are_rejected_by_both_models(
     wire_probe: Path,
 ) -> None:
@@ -592,10 +609,15 @@ def test_required_and_exact_type_fields_are_rejected_by_both_models(
 def test_enum_and_const_vocabulary_is_rejected_by_both_models(
     wire_probe: Path,
 ) -> None:
+    cases: list[tuple[AgentOperation, dict[str, Any]]] = []
+    expectations: list[bool] = []
+    labels: list[object] = []
     for operation, model, payload in _plans_and_models():
         schema = model.model_json_schema()
         model.model_validate(payload)
-        assert _rust_accepts(wire_probe, operation, payload)
+        cases.append((operation, payload))
+        expectations.append(True)
+        labels.append(operation.value)
         for path, object_schema in _object_paths(schema, schema, payload):
             for name, field_schema in object_schema.get("properties", {}).items():
                 if name not in _at(payload, path):
@@ -610,9 +632,20 @@ def test_enum_and_const_vocabulary_is_rejected_by_both_models(
                 _at(changed, path)[name] = changed_value
                 with pytest.raises(ValueError):
                     model.model_validate(changed)
-                assert not _rust_accepts(wire_probe, operation, changed), (*path, name)
+                cases.append((operation, changed))
+                expectations.append(False)
+                labels.append((*path, name))
+    verdicts = _rust_accepts_many(wire_probe, cases)
+    assert [
+        label
+        for label, verdict, expected in zip(labels, verdicts, expectations, strict=True)
+        if verdict is not expected
+    ] == []
 
 
+# Slow by design: well over a thousand claims, each a trip through the
+# debug-built production Rust parser (one probe process, about 4 ms a claim).
+@pytest.mark.slow(30)
 def test_every_canonical_enum_value_is_accepted_by_both_models(
     wire_probe: Path,
 ) -> None:

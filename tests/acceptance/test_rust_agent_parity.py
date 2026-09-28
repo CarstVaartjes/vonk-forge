@@ -2,6 +2,7 @@
 
 import ast
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -15,18 +16,23 @@ def _source(relative: str) -> str:
 
 
 def _rust_claim_capabilities() -> tuple[str, ...]:
-    """Ask the compiled agent for the exact list used by its claim lane."""
+    """Ask the compiled agent for the exact list used by its claim lane.
+
+    scripts/tests/run_agent_wire_contracts.py builds the agent with the wire
+    probes and exports its path; compiling it inside this test took minutes
+    on a runner without a warm Cargo cache.
+    """
+    binary = os.environ.get("VONK_AGENT_BINARY")
+    if not binary:
+        message = (
+            "VONK_AGENT_BINARY is unset; run "
+            "scripts/tests/run_agent_wire_contracts.py to build the agent"
+        )
+        if os.environ.get("CI", "").lower() == "true":
+            pytest.fail(f"CI prerequisite missing: {message}", pytrace=False)
+        pytest.skip(message)
     result = subprocess.run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "--locked",
-            "-p",
-            "vonk-agent",
-            "--",
-            "capabilities",
-        ],
+        [binary, "capabilities"],
         cwd=ROOT,
         capture_output=True,
         check=False,
@@ -103,7 +109,6 @@ def _controller_known_capabilities() -> frozenset[str]:
 
 
 @pytest.mark.linux_only
-@pytest.mark.needs_cargo
 def test_rust_claim_capabilities_cover_current_controller_contract() -> None:
     """Every current Controller operation must be advertised by the Rust agent."""
     advertised = set(_rust_claim_capabilities())

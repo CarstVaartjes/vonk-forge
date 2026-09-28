@@ -32,6 +32,10 @@ PROBES = {
     "VONK_COMPILED_PLAN_WIRE_PROBE": ("vonk-agent", "compiled_plan_wire_probe"),
     "VONK_RESTART_RECOVERY_PROBE": ("vonk-agent", "restart_recovery_probe"),
 }
+# Whole binaries the boundary tests run, built in the same Cargo invocation.
+BINARIES = {
+    "VONK_AGENT_BINARY": ("vonk-agent", "vonk-agent"),
+}
 
 
 def main() -> int:
@@ -60,7 +64,12 @@ def main() -> int:
         for key, (package, name) in PROBES.items():
             if key not in environment:
                 packages.setdefault(package, []).append(name)
-        if packages:
+        binaries = [
+            (package, name)
+            for key, (package, name) in BINARIES.items()
+            if key not in environment
+        ]
+        if packages or binaries:
             # Resolve one Cargo feature graph for every probe. Separate builds
             # compiled the shared protocol/jsonschema dependencies repeatedly
             # with different feature sets, even after restoring the CI cache.
@@ -80,12 +89,24 @@ def main() -> int:
                         for name in names
                         for argument in ("--example", name)
                     ],
+                    *[
+                        argument
+                        for package, name in binaries
+                        for argument in ("--package", package, "--bin", name)
+                    ],
                 ],
                 cwd=repository,
                 check=True,
             )
     if args.build_only:
         return 0
+    for key, (_, name) in BINARIES.items():
+        binary = Path(environment.get(key, target_root / "debug" / name))
+        if not binary.is_absolute():
+            binary = repository / binary
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            raise SystemExit(f"{name} is not executable: {binary}")
+        environment[key] = str(binary.resolve())
     for key, (_, name) in PROBES.items():
         probe = Path(environment.get(key, probe_directory / name))
         if not probe.is_absolute():
@@ -108,7 +129,8 @@ def main() -> int:
             *[str(path.relative_to(repository)) for path in bridges],
         ],
         [
-            "tests/scripts/test_install_release_publication.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary"
+            "tests/scripts/test_install_release_publication.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary",
+            "tests/acceptance/test_rust_agent_parity.py::test_rust_claim_capabilities_cover_current_controller_contract",
         ],
     ]
     for selection in selections:

@@ -713,10 +713,13 @@ jobs:
                 --index "$SHARD_INDEX" --total "$SHARD_TOTAL"
           )
           ((${#shard_files[@]} > 0))
+          # The Rust claim-capability parity test runs in the wire-contract
+          # job, which builds the agent once with its Cargo cache.
           uv run --python 3.14 --frozen --with pytest==9.1.1 \
             --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
             pytest -q -n auto --dist loadfile -o junit_family=xunit1 \
             --junitxml="$RUNNER_TEMP/repository-junit.xml" --basetemp="$RUNNER_TEMP/repository-pytest" \
+            --deselect tests/acceptance/test_rust_agent_parity.py::test_rust_claim_capabilities_cover_current_controller_contract \
             "${shard_files[@]}"
 
       - name: Collect measured file durations
