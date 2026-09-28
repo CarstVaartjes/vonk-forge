@@ -518,8 +518,6 @@ def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -529,7 +527,7 @@ def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
     )
 
     assert status == 2
-    assert "plan changed" in str(result["error"]).lower()
+    assert "unavailable" in str(result["error"]).lower()
     assert all(call[1] != apply for call in client.calls)
 
     client.responses[("POST", preview)] = _reconciliation_plan(
@@ -541,8 +539,6 @@ def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -576,8 +572,6 @@ def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -646,8 +640,6 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -674,8 +666,6 @@ def test_recipe_installation_reconcile_does_not_replay_after_uncertain_lookup() 
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -716,8 +706,6 @@ def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identit
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -1239,8 +1227,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
             "model",
             "remove",
             "qwen",
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--yes",
             "--detach",
             "--json",
@@ -1265,8 +1251,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "remove",
                 "vision",
                 "--with-model",
-                "--review-digest",
-                _REVIEW_DIGEST,
                 "--yes",
                 "--json",
             ),
@@ -1413,8 +1397,6 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
             selector,
             "--keep-model",
             "--yes",
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             request_key,
             "--detach",
@@ -3458,7 +3440,7 @@ def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() 
     status, payload = run(("model", "remove", "qwen", "--json"), model)
     removal_error = payload["error"]
     assert isinstance(removal_error, str)
-    assert status == 2 and "--review-digest SHA256 --yes" in removal_error
+    assert status == 2 and "--yes" in removal_error
     assert model.calls == []
 
     recipe = FakeClient({})

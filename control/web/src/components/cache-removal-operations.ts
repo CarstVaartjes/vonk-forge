@@ -34,7 +34,6 @@ export function validateRemovalReview(
     review.resource_kind !== target.kind
     || !sameSelector(review.selector, target.selector)
     || review.action !== "remove"
-    || !/^[0-9a-f]{64}$/.test(review.review_digest)
   ) {
     throw new Error("Cache removal review identifies another selector or resource.");
   }
@@ -76,7 +75,6 @@ export function validateRemovalReceipt(
     && typeof value.selector === "string"
     && sameSelector(value.selector, intent.selector)
     && value.request_key === intent.requestKey
-    && value.review_digest === intent.review.review_digest
     && typeof value.operation_id === "string"
     && value.operation_id.length > 0;
   const targetMatches = intent.kind === "model"
@@ -116,23 +114,26 @@ export async function submitReviewedRemoval(
   signal?: AbortSignal,
 ): Promise<CacheRemovalReceipt> {
   try {
-    const result = intent.kind === "model"
-      ? await api.removeModelCache(
-          intent.selector,
-          intent.review.target_identity,
-          intent.requestKey,
-          intent.review.review_digest,
-          signal,
-        )
-      : await api.removeRecipe(
-          intent.selector,
-          intent.requestKey,
-          intent.review.with_model as boolean,
-          intent.review.review_digest,
-          signal,
-        );
+    const result = await postRemoval(api, intent, signal);
     return validateRemovalReceipt(intent, result);
   } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error instanceof ApiError && error.status === 409) {
+      const accepted = await findRemovalRequest(api, intent, signal);
+      if (accepted) return accepted;
+      const current = intent.kind === "model"
+        ? await api.modelRemovalReview(intent.selector, signal)
+        : await api.recipeRemovalReview(
+            intent.selector,
+            intent.review.with_model as boolean,
+            signal,
+          );
+      validateRemovalReview(current, intent.kind === "model"
+        ? {kind: "model", selector: intent.selector, modelContentSha256: intent.review.target_identity}
+        : {kind: "recipe", selector: intent.selector, withModel: intent.review.with_model as boolean});
+      const resumed = {...intent, review: current};
+      return validateRemovalReceipt(resumed, await postRemoval(api, resumed, signal));
+    }
     if (signal?.aborted || isDefiniteRemovalRefusal(error)) throw error;
     try {
       const accepted = await findRemovalRequest(api, intent, signal);
@@ -144,6 +145,28 @@ export async function submitReviewedRemoval(
       "The removal receipt could not be confirmed. Keep this request and check its status before starting another removal.",
     );
   }
+}
+
+function postRemoval(
+  api: ControlApi,
+  intent: CacheRemovalIntent,
+  signal?: AbortSignal,
+): Promise<CacheRemovalReceipt> {
+  return intent.kind === "model"
+    ? api.removeModelCache(
+        intent.selector,
+        intent.review.target_identity,
+        intent.requestKey,
+        intent.review.review_digest,
+        signal,
+      )
+    : api.removeRecipe(
+        intent.selector,
+        intent.requestKey,
+        intent.review.with_model as boolean,
+        intent.review.review_digest,
+        signal,
+      );
 }
 
 export async function retryReviewedRemoval(

@@ -151,6 +151,20 @@ class FailOnceReader(Reader):
         return super().fetch(uri)
 
 
+class UntypedFailOnceReader(Reader):
+    def __init__(self, snapshot: RecipeLibrarySnapshot, failing_uri: str) -> None:
+        super().__init__(snapshot)
+        self._failing_uri = failing_uri
+        self._failed = False
+
+    def fetch(self, uri: str) -> RecipeLibraryItem:
+        if uri == self._failing_uri and not self._failed:
+            self.fetches.append(uri)
+            self._failed = True
+            raise RuntimeError("temporary package transport failure")
+        return super().fetch(uri)
+
+
 class FailingListReader(Reader):
     def list(self) -> RecipeLibrarySnapshot:
         raise RecipeLibraryError(
@@ -185,6 +199,33 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
             reader.snapshot.catalog_entities
         )
         assert len([row for row in revisions if row.kind == "recipe"]) == 1
+
+
+def test_invalid_model_document_does_not_block_other_catalog_items(
+    tmp_path: Path,
+) -> None:
+    sessions, service, reader, _item = _fixture(tmp_path)
+    reader.snapshot = replace(
+        reader.snapshot,
+        catalog_entities=(*reader.snapshot.catalog_entities, {"invalid": True}),
+    )
+
+    result = _sync(sessions, service, reader).sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit=reader.snapshot.commit,
+    )
+
+    assert result.state == "partial"
+    assert result.skipped_count == 1
+    with sessions() as session:
+        revisions = session.scalars(select(CatalogDocumentRevision)).all()
+        assert any(row.kind == "recipe" for row in revisions)
+        assert (
+            len([row for row in revisions if row.kind == "model"])
+            == len(reader.snapshot.catalog_entities) - 1
+        )
 
 
 @pytest.mark.parametrize("malformed", [False, True])
@@ -589,6 +630,35 @@ def test_automatic_sync_retries_partial_same_commit_without_refetching_successes
     assert recovered.imported_count == 1
     assert recovered.unchanged_count == 1
     assert reader.fetches == [reader.snapshot.items[0].uri, second.uri, second.uri]
+
+
+def test_automatic_sync_retries_untyped_fetch_failure_and_keeps_other_items(
+    tmp_path: Path,
+) -> None:
+    sessions, service, reader, item = _fixture(tmp_path)
+    second_document = deepcopy(item.document)
+    second_slug = f"{item.slug}-untyped-retry"
+    second_document["identity"]["slug"] = second_slug  # type: ignore[index]
+    second = _item_with_document(
+        replace(item, slug=second_slug, source_path=f"recipes/{second_slug}.json"),
+        second_document,
+    )
+    flaky_reader = UntypedFailOnceReader(
+        replace(reader.snapshot, items=(reader.snapshot.items[0], second)),
+        second.uri,
+    )
+    sync = _sync(sessions, service, flaky_reader)
+
+    partial = sync.automatic()
+    assert partial.state == "partial"
+    assert partial.skipped_count == 1
+    assert partial.imported_count == 1
+
+    recovered = sync.automatic()
+    assert recovered.state == "current"
+    assert recovered.unchanged_count == 1
+    assert recovered.imported_count == 1
+    assert flaky_reader.fetches.count(second.uri) == 2
 
 
 def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(
