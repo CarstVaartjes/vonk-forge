@@ -824,19 +824,6 @@ where
     }
 }
 
-fn evidence_with_digest(mut evidence: Value) -> (Value, String) {
-    let evidence_digest = canonical_json(&evidence)
-        .map(|value| hex_sha256(&value))
-        .unwrap_or_default();
-    if let Some(document) = evidence.as_object_mut() {
-        document.insert(
-            "evidence_digest".to_owned(),
-            Value::String(evidence_digest.clone()),
-        );
-    }
-    (evidence, evidence_digest)
-}
-
 /// Build the exact runtime argument vector used for start, inspection, and a
 /// pre-start hook. The caller supplies the complete command slice because
 /// `RuntimeStartPlan::pre_start` already contains a complete hook invocation.
@@ -975,30 +962,20 @@ pub fn recipe_start_success_body(
                 "master_address": request.master_address,
                 "master_port": request.master_port,
             });
-            let (evidence, evidence_digest) = evidence_with_digest(evidence);
-            return Ok(json!({
-                "endpoint": endpoint,
-                "evidence": evidence,
-                "evidence_digest": evidence_digest,
-            }));
+            return Ok(json!({"endpoint": endpoint, "evidence": evidence}));
         }
     };
-    let (evidence, evidence_digest) = evidence_with_digest(evidence);
     Ok(match request.phase {
-        Some(RecipeStartPhase::CollectiveReadiness) => json!({
-            "endpoint": endpoint,
-            "evidence": evidence,
-            "evidence_digest": evidence_digest,
-        }),
-        Some(RecipeStartPhase::RankLaunch) => {
-            json!({"evidence": evidence, "evidence_digest": evidence_digest})
+        Some(RecipeStartPhase::CollectiveReadiness) => {
+            json!({"endpoint": endpoint, "evidence": evidence})
         }
+        Some(RecipeStartPhase::RankLaunch) => json!({"evidence": evidence}),
         None => unreachable!("single-node result returned above"),
     })
 }
 
 pub fn distribution_success_evidence(evidence: DistributionDownloadEvidence) -> Value {
-    evidence_with_digest(json!({
+    json!({
         "assignment_id": evidence.assignment_id,
         "model_artifact_set_sha256": evidence.model_artifact_set_sha256,
         "verified": true,
@@ -1008,8 +985,7 @@ pub fn distribution_success_evidence(evidence: DistributionDownloadEvidence) -> 
         "verified_oci_layout_sha256": evidence.oci_archive_sha256,
         "oci_image_digest": evidence.oci_image_digest,
         "downloaded_bytes": evidence.downloaded_bytes,
-    }))
-    .0
+    })
 }
 
 fn before_phase_deadline(
@@ -4188,7 +4164,7 @@ mod tests {
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
     #[test]
-    fn readiness_identity_uses_controller_evidence_digest_forms() {
+    fn readiness_identity_uses_controller_digest_forms() {
         let value: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../control/tests/fixtures/compiled_workload_v2.json"
         ))
@@ -4893,7 +4869,7 @@ mod tests {
     }
 
     #[test]
-    fn distribution_result_is_digest_bound_and_controller_safe() {
+    fn distribution_result_is_controller_safe() {
         let archive_digest = "a".repeat(64);
         let image_digest = format!("sha256:{}", "b".repeat(64));
         let body = distribution_success_evidence(DistributionDownloadEvidence {
@@ -4907,16 +4883,6 @@ mod tests {
             oci_image_digest: image_digest.clone(),
             downloaded_bytes: 456,
         });
-        let evidence_digest = body["evidence_digest"].as_str().unwrap();
-        let mut without_digest = body.clone();
-        without_digest
-            .as_object_mut()
-            .unwrap()
-            .remove("evidence_digest");
-        assert_eq!(
-            evidence_digest,
-            hex_sha256(&canonical_json(&without_digest).unwrap())
-        );
         assert!(body.get("model_files").is_none());
         assert!(body.get("oci_archive").is_none());
         assert_eq!(body["verified_oci_layout_sha256"], archive_digest);
