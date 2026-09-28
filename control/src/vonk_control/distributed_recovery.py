@@ -681,7 +681,6 @@ def _singleton_recovery_authority(
             accepted_placement.port,
             accepted_placement.reserved_memory_bytes,
             accepted_placement.memory_floor_bytes,
-            accepted_placement.memory_kind,
             accepted_placement.world_size,
         )
         != (
@@ -690,7 +689,6 @@ def _singleton_recovery_authority(
             run_node.port,
             run_node.reserved_memory_bytes,
             memory_floor,
-            memory_kind,
             1,
         )
         or accepted_start.phase is not None
