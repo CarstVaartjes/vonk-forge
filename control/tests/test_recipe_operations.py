@@ -782,7 +782,6 @@ def _issue_exact_stop_grant(
         canonical_message(claim.payload), strict=True
     )
     request = HostRuntimeRequest(
-        schema_version=1,
         action="stop",
         fence=claim.fence,
         arguments=[],

@@ -57,6 +57,7 @@ from .test_recipe_operations import (
     RecordingQueue,
     _issue_exact_stop_grant,
     bind_route_publications,
+    fenced_operation,
     installed_recipe,
     setup_services,
 )
@@ -663,7 +664,7 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         assert claims and all(claim.state == "active" for claim in claims)
 
     bound_service.record_node_result(
-        stop.id, node_ids[0], succeeded=True, evidence={"stopped": True}
+        stop.id, node_ids[0], succeeded=True, evidence={}
     )
     with sessions() as session:
         completed_stop = session.get(Job, stop.id)
@@ -705,8 +706,6 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         for field in (
             "installation_id",
             "recipe_revision_id",
-            "recipe_content_sha256",
-            "image_digest",
             "plan_digest",
             "compiled_execution_plan",
         ):
@@ -880,7 +879,7 @@ def test_singleton_recovery_stop_grant_survives_start_deadline(
         parent = session.get(Job, stop.id)
         run = session.get(RecipeRun, run_id)
         assert parent is not None and run is not None
-        assert claim.job_id == parent.id
+        assert fenced_operation(sessions, claim).parent_job_id == parent.id
         assert payload.run_generation + 1 == run.run_generation
         assert parent.actor == "system:singleton-recovery"
         assert parent.payload["plan_digest"] != run.plan_digest
