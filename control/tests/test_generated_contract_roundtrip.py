@@ -9,15 +9,9 @@ import pytest
 
 def test_generated_telemetry_models_consume_current_pydantic_documents() -> None:
     from vonk_control.fleet_projection import (
-        TelemetryHistoryResponse as HistoryProducer,
-    )
-    from vonk_control.fleet_projection import (
         TelemetryPoint as PointProducer,
     )
 
-    from cluster_profiles.generated_control.models.telemetry_history_response import (
-        TelemetryHistoryResponse,
-    )
     from cluster_profiles.generated_control.models.telemetry_point import TelemetryPoint
 
     incomplete_document = {
@@ -68,40 +62,3 @@ def test_generated_telemetry_models_consume_current_pydantic_documents() -> None
     assert rich.metrics is not None
     assert rich.metrics.schema_version == 2
     assert rich.metrics.series[0].key == "gpu.utilization_percent"
-
-    history_producer = HistoryProducer.model_validate_json(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "node_id": rich.node_id,
-                "start": "2026-09-05T00:00:00Z",
-                "end": "2026-09-05T00:01:00Z",
-                "resolution": "raw",
-                "maximum_points": 2,
-                "points": [rich.to_dict()],
-                "metadata": {
-                    "requested_start": "2026-09-05T00:00:00Z",
-                    "requested_end": "2026-09-05T00:01:00Z",
-                    "actual_start": "2026-09-05T00:00:00Z",
-                    "actual_end": "2026-09-05T00:00:00Z",
-                    "requested_resolution": "raw",
-                    "actual_resolution": "raw",
-                    "point_count": 1,
-                    "coverage_seconds": 0.0,
-                    "gap_samples": 0,
-                    "downsampled": False,
-                },
-            }
-        )
-    )
-    history = TelemetryHistoryResponse.from_dict(
-        json.loads(history_producer.model_dump_json())
-    )
-    assert history.schema_version == 1
-    assert isinstance(history.points[0], TelemetryPoint)
-    assert history.points[0].metrics is not None
-    assert history.metadata.point_count == 1
-    assert (
-        HistoryProducer.model_validate_json(json.dumps(history.to_dict()))
-        == history_producer
-    )

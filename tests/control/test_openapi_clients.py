@@ -291,7 +291,6 @@ def test_admin_schema_is_secret_free() -> None:
         "/api/jobs/{job_id}",
         "/api/jobs/{job_id}/logs",
         "/api/jobs/{job_id}/resume",
-        "/api/fleet/{selector}/metrics/history",
     }
     assert "/api/nodes/status" not in schema["paths"]
     assert all(path.startswith("/api/") for path in schema["paths"])
@@ -342,7 +341,6 @@ def test_admin_schema_is_secret_free() -> None:
     for operation_id in (
         "getFleetStatus",
         "getJob",
-        "getFleetMetricsHistory",
         "getPublishedEndpoint",
         "listJobLogs",
         "listJobs",
@@ -566,19 +564,12 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
     for name in (
         "TelemetryCapability",
         "TelemetryDetails-Output",
-        "TelemetryMetricSummary",
         "TelemetryMetrics",
         "TelemetryPoint",
         "TelemetryProvenance",
-        "TelemetryRollupPoint",
         "TelemetryRuntime",
         "TelemetrySeries",
-        "TelemetryHistoryMetadata",
-        "TelemetryHistoryResponse",
         "TelemetryWorkload",
-        "TelemetryCurrentResponse",
-        "TelemetryCapabilitiesResponse",
-        "TelemetryWorkloadsResponse",
     ):
         assert schema[name]["type"] == "object"
         assert schema[name]["additionalProperties"] is False
@@ -591,32 +582,10 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
         "$ref": "#/components/schemas/TelemetryMetrics"
     }
     assert "metrics" in point["required"]
-    history = schema["TelemetryHistoryResponse"]
-    assert history["properties"]["points"]["items"]["anyOf"] == [
-        {"$ref": "#/components/schemas/TelemetryPoint"},
-        {"$ref": "#/components/schemas/TelemetryRollupPoint"},
-    ]
-    assert history["properties"]["metadata"] == {
-        "$ref": "#/components/schemas/TelemetryHistoryMetadata"
-    }
-    assert "metadata" in history["required"]
-    assert (
-        schema["TelemetryCurrentResponse"]["properties"]["schema_version"]["const"] == 2
-    )
-    assert (
-        schema["TelemetryCapabilitiesResponse"]["properties"]["schema_version"]["const"]
-        == 2
-    )
-    assert (
-        schema["TelemetryWorkloadsResponse"]["properties"]["schema_version"]["const"]
-        == 2
-    )
 
     typescript = TYPESCRIPT_CLIENT.read_text()
     assert "TelemetryPoint: {" in typescript
-    assert "TelemetryHistoryResponse: {" in typescript
     assert "TelemetryPoint: {[key: string]: unknown};" not in typescript
-    assert "TelemetryHistoryResponse: {[key: string]: unknown};" not in typescript
 
 
 def test_generated_python_client_parses_documented_operation_errors() -> None:

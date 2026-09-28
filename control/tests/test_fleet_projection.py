@@ -19,7 +19,6 @@ from vonk_control.fleet_projection import (
     RecipePresence,
     TelemetryDetails,
     TelemetryPoint,
-    TelemetryRollupPoint,
     telemetry_point,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
@@ -59,13 +58,6 @@ NODE_C = "spk_" + "3" * 32
 NODE_D = "spk_" + "4" * 32
 EXTRA_NODE = "spk_" + "f" * 32
 NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
-
-
-def _raw_point(point: TelemetryPoint | TelemetryRollupPoint) -> TelemetryPoint:
-    """A ``raw`` history request can only return ``TelemetryPoint`` samples."""
-
-    assert isinstance(point, TelemetryPoint)
-    return point
 
 
 def _canonical_catalog_documents(
@@ -1771,133 +1763,6 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
         projection.read()
 
 
-def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronological() -> (
-    None
-):
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    repository = Repository(
-        {
-            NODE_A: {
-                "display_name": "Alpha",
-                "hostname": "alpha.internal",
-                "lifecycle": "managed",
-                "labels": {},
-            }
-        }
-    )
-    with sessions.begin() as session:
-        session.add(
-            AgentNode(
-                node_id=NODE_A,
-                state="active",
-                architecture="linux-arm64",
-                capabilities=[],
-            )
-        )
-        session.add_all(
-            [
-                _telemetry(
-                    NODE_A,
-                    "00000000-0000-4000-8000-000000000201",
-                    NOW - timedelta(minutes=50),
-                    sequence=1,
-                    cpu=1.0,
-                ),
-                _telemetry(
-                    NODE_A,
-                    "00000000-0000-4000-8000-000000000202",
-                    NOW - timedelta(minutes=20),
-                    sequence=2,
-                    cpu=2.0,
-                ),
-                _telemetry(
-                    NODE_A,
-                    "00000000-0000-4000-8000-000000000203",
-                    NOW - timedelta(minutes=10),
-                    sequence=3,
-                    cpu=3.0,
-                ),
-            ]
-        )
-    projection = FleetProjection(repository, sessions, clock=lambda: NOW)
-
-    history = projection.telemetry_history(
-        NODE_A,
-        start=NOW - timedelta(hours=1),
-        end=NOW,
-        maximum_points=2,
-        resolution="raw",
-    )
-
-    document = history.model_dump(mode="json")
-    assert {key: value for key, value in document.items() if key != "points"} == {
-        "schema_version": 1,
-        "node_id": NODE_A,
-        "start": "2026-08-15T11:00:00Z",
-        "end": "2026-08-15T12:00:00Z",
-        "resolution": "raw",
-        "maximum_points": 2,
-        "metadata": {
-            "requested_start": "2026-08-15T11:00:00Z",
-            "requested_end": "2026-08-15T12:00:00Z",
-            "actual_start": "2026-08-15T11:40:00Z",
-            "actual_end": "2026-08-15T11:50:00Z",
-            "requested_resolution": "raw",
-            "actual_resolution": "raw",
-            "timezone": "UTC",
-            "point_count": 2,
-            "coverage_seconds": 600.0,
-            "gap_samples": 4,
-            "downsampled": False,
-        },
-    }
-    assert [
-        (
-            point["id"],
-            point["observed_at"],
-            point["cpu_utilization_percent"],
-        )
-        for point in document["points"]
-    ] == [
-        (
-            "00000000-0000-4000-8000-000000000202",
-            "2026-08-15T11:40:00Z",
-            2.0,
-        ),
-        (
-            "00000000-0000-4000-8000-000000000203",
-            "2026-08-15T11:50:00Z",
-            3.0,
-        ),
-    ]
-    with pytest.raises(KeyError, match=EXTRA_NODE):
-        projection.telemetry_history(
-            EXTRA_NODE,
-            start=NOW - timedelta(hours=1),
-            end=NOW,
-            maximum_points=2,
-            resolution="raw",
-        )
-    with pytest.raises(ValueError, match="maximum points"):
-        projection.telemetry_history(
-            NODE_A,
-            start=NOW - timedelta(hours=1),
-            end=NOW,
-            maximum_points=3_001,
-            resolution="raw",
-        )
-    with pytest.raises(ValueError, match="raw window"):
-        projection.telemetry_history(
-            NODE_A,
-            start=NOW - timedelta(hours=24, microseconds=1),
-            end=NOW,
-            maximum_points=2,
-            resolution="raw",
-        )
-
-
 @pytest.mark.parametrize("producer_node_id", [None, NODE_B])
 def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
     producer_node_id: str | None,
@@ -1947,14 +1812,7 @@ def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
     node_telemetry = projection.read().nodes[0].telemetry
     assert node_telemetry is not None
     point = node_telemetry.sample
-    history = projection.telemetry_history(
-        NODE_A,
-        start=NOW - timedelta(minutes=1),
-        end=NOW,
-        maximum_points=1,
-        resolution="raw",
-    )
-    for projected in (direct_point, point, _raw_point(history.points[0])):
+    for projected in (direct_point, point):
         series = projected.metrics.series[0]
         assert series.node_id == NODE_A
         assert series.received_at == sample.received_at
@@ -1967,7 +1825,7 @@ def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
         assert stored.metrics == source_document
 
 
-def test_non_rfc_non_nil_boot_id_flows_through_snapshot_and_history() -> None:
+def test_non_rfc_non_nil_boot_id_flows_through_snapshot() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1997,18 +1855,10 @@ def test_non_rfc_non_nil_boot_id_flows_through_snapshot_and_history() -> None:
 
     projection = FleetProjection(repository, sessions, clock=lambda: NOW)
     snapshot = projection.read()
-    history = projection.telemetry_history(
-        NODE_A,
-        start=NOW - timedelta(minutes=1),
-        end=NOW,
-        maximum_points=1,
-        resolution="raw",
-    )
 
     node_telemetry = snapshot.nodes[0].telemetry
     assert node_telemetry is not None
     assert node_telemetry.sample.boot_id == NON_RFC_BOOT_ID
-    assert [_raw_point(point).boot_id for point in history.points] == [NON_RFC_BOOT_ID]
 
 
 def test_projection_selects_only_the_latest_512_current_installation_groups() -> None:
