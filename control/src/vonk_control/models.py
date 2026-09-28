@@ -280,10 +280,6 @@ class RoutePublication(Base):
             name="ck_route_publications_plan_digest_length",
         ),
         CheckConstraint(
-            "evidence_digest IS NULL OR length(evidence_digest) = 64",
-            name="ck_route_publications_evidence_digest_length",
-        ),
-        CheckConstraint(
             "route_digest IS NULL OR length(route_digest) = 64",
             name="ck_route_publications_route_digest_length",
         ),
@@ -312,7 +308,6 @@ class RoutePublication(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     generation: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
     plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    evidence_digest: Mapped[str | None] = mapped_column(String(64))
     route_digest: Mapped[str | None] = mapped_column(String(64))
     litellm_digest: Mapped[str | None] = mapped_column(String(64))
     bundle_digest: Mapped[str | None] = mapped_column(String(64))
@@ -595,52 +590,6 @@ class FleetProfileSelection(Base):
         nullable=False,
     )
     roster_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class NodeMutationLease(Base):
-    """Exclusive durable ownership of one node's mutations and route state."""
-
-    __tablename__ = "node_mutation_leases"
-    __table_args__ = (
-        CheckConstraint(
-            "owner_kind = 'reconciliation'",
-            name="ck_node_mutation_leases_owner_kind",
-        ),
-        CheckConstraint(
-            "state IN ('held', 'releasing')",
-            name="ck_node_mutation_leases_state",
-        ),
-        CheckConstraint(
-            _uuid_shape("owner_id"),
-            name="ck_node_mutation_leases_owner_id_shape",
-        ),
-        CheckConstraint(
-            _uuid_shape("fence"),
-            name="ck_node_mutation_leases_fence_shape",
-        ),
-        CheckConstraint(
-            "updated_at >= acquired_at",
-            name="ck_node_mutation_leases_timestamp_order",
-        ),
-        Index(
-            "ix_node_mutation_leases_owner",
-            "owner_kind",
-            "owner_id",
-        ),
-    )
-    node_id: Mapped[str] = mapped_column(
-        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
-    )
-    owner_kind: Mapped[str] = mapped_column(String(32), nullable=False)
-    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    fence: Mapped[str] = mapped_column(String(36), nullable=False)
-    state: Mapped[str] = mapped_column(String(24), nullable=False)
-    acquired_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

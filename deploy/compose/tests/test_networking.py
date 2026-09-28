@@ -228,8 +228,6 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
     assert "step-ca" not in api["depends_on"]
     api_secrets = {secret["source"] for secret in api["secrets"]}
     assert {
-        "package-helper-grant-private-key",
-        "package-helper-receipt-private-key",
         "host-runtime-grant-private-key",
         "database-url",
         "hf-token",

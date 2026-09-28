@@ -313,11 +313,6 @@ def build_agent_services(
     )
     from .presence import AgentPresenceService, ManagementAddressPolicy
     from .step_ca import StepCertificateAuthority
-    from .workload_helper_authority import (
-        WorkloadHelperAuthorityService,
-        WorkloadHelperGrantIssuer,
-        WorkloadObjectReceiptIssuer,
-    )
 
     if distribution is None and model_cache is not None:
         from .distribution import build_distribution_service_from_components
@@ -354,8 +349,6 @@ def build_agent_services(
             presence=presence,
             artifact_root=settings.agent_artifact_root,
             source_bundles=DatabaseSourceBundleStore(sessions),
-            workload_tuf_metadata_root=settings.workload_tuf_metadata_root,
-            workload_tuf_target_root=settings.workload_tuf_target_root,
             distribution=distribution,
         )
 
@@ -383,14 +376,7 @@ def build_agent_services(
         provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
         certificate_lifetime_seconds=settings.agent_ca_certificate_lifetime_seconds,
     )
-    workload_tuf_metadata_root = settings.workload_tuf_metadata_root
-    workload_tuf_target_root = settings.workload_tuf_target_root
-    for root in (
-        settings.agent_artifact_root,
-        workload_tuf_metadata_root,
-        workload_tuf_target_root,
-    ):
-        root.mkdir(mode=0o750, parents=True, exist_ok=True)
+    settings.agent_artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
     presence = AgentPresenceService(
         sessions,
         ManagementAddressPolicy.parse(
@@ -408,17 +394,6 @@ def build_agent_services(
         presence.observe_in_session(session, source)
 
     operations.set_contact_consumer(observe_contact)
-    grant_key_path = settings.package_helper_grant_private_key_path
-    receipt_key_path = settings.package_helper_receipt_private_key_path
-    if grant_key_path is None or receipt_key_path is None:
-        raise RuntimeError("workload helper authority keys are unavailable")
-    helper_authority = WorkloadHelperAuthorityService(
-        sessions,
-        WorkloadHelperGrantIssuer.from_private_key_file(grant_key_path, clock=clock),
-        WorkloadObjectReceiptIssuer.from_private_key_file(receipt_key_path),
-        workload_target_root=workload_tuf_target_root,
-        clock=clock,
-    )
     host_runtime_key_path = settings.host_runtime_grant_private_key_path
     if host_runtime_key_path is None:
         raise RuntimeError("host runtime authority key is unavailable")
@@ -435,10 +410,7 @@ def build_agent_services(
         presence=presence,
         artifact_root=settings.agent_artifact_root,
         source_bundles=DatabaseSourceBundleStore(sessions),
-        workload_tuf_metadata_root=workload_tuf_metadata_root,
-        workload_tuf_target_root=workload_tuf_target_root,
         distribution=distribution,
-        workload_helper_authority=helper_authority,
         host_runtime_authority=host_runtime_authority,
         fabric_policy=(
             ManagementAddressPolicy.parse(

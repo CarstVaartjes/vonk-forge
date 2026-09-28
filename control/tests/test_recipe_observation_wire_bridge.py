@@ -330,10 +330,7 @@ def _production_controller_app(
         sessions, ManagementAddressPolicy.parse("10.0.0.0/24"), clock=clock
     )
     operations = AgentJobService(sessions, clock=clock)
-    roots = {
-        name: tmp_path / name
-        for name in ("artifacts", "source-bundles", "tuf-metadata", "tuf-targets")
-    }
+    roots = {name: tmp_path / name for name in ("artifacts", "source-bundles")}
     for root in roots.values():
         root.mkdir()
     services = AgentApiServices(
@@ -344,8 +341,6 @@ def _production_controller_app(
         presence=presence,
         artifact_root=roots["artifacts"],
         source_bundles=SourceBundleStore(roots["source-bundles"]),
-        workload_tuf_metadata_root=roots["tuf-metadata"],
-        workload_tuf_target_root=roots["tuf-targets"],
         fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
         host_runtime_authority=authority,
     )
