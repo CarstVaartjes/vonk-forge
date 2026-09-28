@@ -4385,6 +4385,10 @@ export interface components {
             attempts?: {
                 [key: string]: number;
             };
+            /** Last Failure Code */
+            last_failure_code?: string | null;
+            /** Last Failure Detail */
+            last_failure_detail?: string | null;
             /** Next Check At */
             next_check_at?: string | null;
             /** Pending Job Id */
