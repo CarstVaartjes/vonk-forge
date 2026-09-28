@@ -27,11 +27,11 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 from .test_model_cache import _artifact, _canonical_model, _download
 from .test_model_removal_reference_lifecycle import _register_model
 from .test_recipe_image_availability import (
-    Transport,
     _add_revision,
     _recipe,
     _runtime,
 )
+from .test_recipe_image_availability import _service as _availability_service
 from .test_recipe_model_child_cancel_integration import _hold_model_worker
 
 
@@ -156,11 +156,10 @@ def _service(
     image_root: Path,
     now: datetime,
 ) -> RecipeImageAvailabilityService:
-    return RecipeImageAvailabilityService(
+    return _availability_service(
         sessions,
         storage=FilesystemRuntimeImageStorage(image_root),
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
-        transport=Transport(),
         clock=lambda: now,
         model_cache=_cache_adapter(
             cache,

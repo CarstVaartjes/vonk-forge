@@ -969,7 +969,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                     id=operation_id,
                     request_id=operation_id,
                     kind="recipe.image.availability.v2",
-                    state="running",
+                    state="queued",
                     actor="operator",
                     authority_revision="revision-builder",
                     targets=["revision-builder"],
@@ -983,7 +983,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                         "build_input_sha256": None,
                     },
                     result=None,
-                    current_attempt=1,
+                    current_attempt=0,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1100,6 +1100,8 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         recipe_builds=builds,
         recipe_operations=Operations(),
         clock=lambda: now,
+        # Both builds must run at once to contend for the same builder nodes.
+        max_parallel_builds=2,
     )
 
     claims = {

@@ -152,7 +152,7 @@ def test_dual_node_active_attempts_share_the_same_lock_order(
             return services[index].heartbeat(
                 claims[index].fence, {"phase": "stopping"}, 30
             )
-        return services[index].succeed(claims[index].fence, {"stopped": True})
+        return services[index].succeed(claims[index].fence, {})
 
     _concurrent_node_lock_calls(
         postgres_engine, [lambda: complete(0), lambda: complete(1)]

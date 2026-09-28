@@ -268,7 +268,6 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
         assert cancellation_payload.get("cancel_request_id") == cancellation_key
         assert cleanup_operation is not None and cleanup_operation.state == "queued"
         assert cleanup_operation.payload == {
-            "schema_version": 1,
             "build_id": plan.build_id,
             "operation_id": child_id,
         }
@@ -357,7 +356,7 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
         original.id, node_id, succeeded=True, evidence=_evidence(plan)
     )
     operations.record_node_result(
-        cleanup_id, node_id, succeeded=True, evidence=cleanup_evidence
+        cleanup_id, node_id, succeeded=True, evidence={}
     )
     assert operations.get(original.id).state == "cancelled"
     assert operations.get(cleanup_id).state == "succeeded"

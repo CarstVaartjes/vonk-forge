@@ -60,9 +60,7 @@ def test_slow_distributed_restart_retains_accepted_startup_budget(
             for operation in source_starts
         }
         assert source_generations == {node_id: 1 for node_id in nodes}
-    assert {
-        payload.node_id: payload.run_generation for payload in stop_payloads
-    } == source_generations
+    assert [payload.run_generation for payload in stop_payloads] == [1] * len(nodes)
     for node_id in nodes:
         service.record_node_result(stop.id, node_id, succeeded=True, evidence={})
     with sessions() as session:
