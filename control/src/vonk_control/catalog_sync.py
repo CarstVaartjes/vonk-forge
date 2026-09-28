@@ -220,7 +220,20 @@ class ManagedRecipeCatalogSyncService:
     ) -> dict[str, object]:
         result = _empty_result()
         self._catalog.refresh_build_policy()
-        self._catalog.import_catalog_models(actor, snapshot.catalog_entities)
+        # Catalog index entries are independent immutable documents. Import each
+        # in its own transaction so one malformed model cannot hold up recipes
+        # and models that are otherwise ready to apply.
+        for model_document in snapshot.catalog_entities:
+            try:
+                self._catalog.import_catalog_models(actor, [model_document])
+            except Exception as error:  # noqa: BLE001 - isolate document failures; cancellation still propagates
+                self._record_problem_values(
+                    result,
+                    uri=None,
+                    code=str(getattr(error, "code", "catalog.sync_model_failed")),
+                    detail=str(getattr(error, "detail", str(error))),
+                )
+            self._progress(run_id, result)
         local = self._catalog.recipe_catalog_local_revisions(
             [(item.publisher, item.slug) for item in snapshot.items]
         )
@@ -284,7 +297,7 @@ class ManagedRecipeCatalogSyncService:
                         )
                         + 1
                     )
-                except (CatalogError, RecipeLibraryError, CatalogSyncError) as error:
+                except Exception as error:  # noqa: BLE001 - isolate untyped fetch failures per recipe
                     self._record_problem(
                         result,
                         item,
@@ -306,6 +319,16 @@ class ManagedRecipeCatalogSyncService:
     def _record_problem(
         self, result: dict[str, object], item: RecipeLibraryItem, code: str, detail: str
     ) -> None:
+        self._record_problem_values(result, uri=item.uri, code=code, detail=detail)
+
+    def _record_problem_values(
+        self,
+        result: dict[str, object],
+        *,
+        uri: str | None,
+        code: str,
+        detail: str,
+    ) -> None:
         result["skipped_count"] = (
             require_integer(
                 result["skipped_count"], "stored catalog sync skipped_count is invalid"
@@ -319,7 +342,7 @@ class ManagedRecipeCatalogSyncService:
         )
         if len(problems) < _MAX_RESULT_ITEMS:
             problems.append(
-                {"recipe_uri": item.uri, "code": code[:128], "detail": detail[:256]}
+                {"recipe_uri": uri, "code": code[:128], "detail": detail[:256]}
             )
         result["problems"] = problems
 
@@ -331,7 +354,7 @@ class ManagedRecipeCatalogSyncService:
                     "catalog.sync_state_invalid", "managed catalog sync state changed"
                 )
             run.observed_commit = snapshot.commit
-            run.total_count = len(snapshot.items)
+            run.total_count = len(snapshot.items) + len(snapshot.catalog_entities)
 
     def _progress(self, run_id: str, result: Mapping[str, object]) -> None:
         with self._sessions.begin() as session:

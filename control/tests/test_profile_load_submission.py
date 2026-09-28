@@ -174,6 +174,8 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
             headers=dict(request.header_items()),
             content=request.data,
         )
+        if method == "POST" and request.full_url.endswith("/preview"):
+            return Response(response)
         if method == "POST":
             assert response.status_code == 202, response.text
             accepted = response.json()
@@ -196,8 +198,6 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            preview["plan_digest"],
             "--yes",
             "--request-key",
             key,
@@ -208,12 +208,12 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
     captured = capsys.readouterr()
     assert code == 0, captured.out
     assert json.loads(captured.out) == accepted
-    assert [method for method, _, _ in calls] == ["POST", "GET"]
-    assert calls[0][2] == {
+    assert [method for method, _, _ in calls] == ["POST", "POST", "GET"]
+    assert calls[1][2] == {
         "request_key": key,
         "plan_digest": preview["plan_digest"],
     }
-    assert calls[1][1].endswith(f"/api/profile/1/requests/{key}")
+    assert calls[2][1].endswith(f"/api/profile/1/requests/{key}")
     with sessions() as session:
         assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
 
