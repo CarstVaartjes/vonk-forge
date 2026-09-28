@@ -120,7 +120,6 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     lifecycle = _module()
     bundle = tmp_path / "bundle"
     (bundle / "secrets/step-ca").mkdir(parents=True)
-    (bundle / "secrets/runtime-configs").mkdir()
     (bundle / "secrets/step-ca/ca.json").write_text(
         json.dumps(
             {
@@ -147,17 +146,8 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         + "\n    environment:\n      VONK_DEPLOYMENT_MODE: production\n"
         + "  caddy:\n    image: caddy:acceptance\n    networks: [ingress]\n    ports:\n"
         + "      - target: 8443\n        published: 8443\n"
-        + "    configs:\n      - source: vonk_runtime_0123456789abcdef\n"
-        + "        target: /etc/caddy/Caddyfile\n"
+        + "    volumes:\n      - caddy-data:/data\n"
         + "networks:\n  ingress: {}\n  cluster-egress: {}\n"
-        + "configs:\n  vonk_runtime_0123456789abcdef:\n"
-        + "    file: ./secrets/runtime-configs/vonk_runtime_0123456789abcdef\n"
-    )
-    caddy_path = bundle / "secrets/runtime-configs/vonk_runtime_0123456789abcdef"
-    caddy_path.write_text(
-        "reverse_proxy control-api:8443 {\n"
-        "\theader_up X-Vonk-Agent-Source {http.request.remote.host}\n"
-        "}\n"
     )
 
     lifecycle._configure_acceptance_renewal(
@@ -180,8 +170,10 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     assert "CERTIFICATE_LIFETIME" not in compose
     assert "127.0.0.1::8080" in compose
     assert "- cluster-egress" in compose
-    assert "header_up X-Vonk-Agent-Source 172.31.42.1" in caddy_path.read_text()
-    assert "{http.request.remote.host}" not in caddy_path.read_text()
+    assert "./acceptance-Caddyfile:/etc/caddy/Caddyfile:ro" in compose
+    caddyfile = (bundle / "acceptance-Caddyfile").read_text()
+    assert "header_up X-Vonk-Agent-Source 172.31.42.1" in caddyfile
+    assert "X-Vonk-Agent-Source {http.request.remote.host}" not in caddyfile
 
 
 def test_synthetic_device_fixture_supports_the_arm64_spark_runner() -> None:

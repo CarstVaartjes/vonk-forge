@@ -53,7 +53,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify exact current main tip
+      - name: Verify the commit is on main
         shell: bash
         run: |
           set -euo pipefail
@@ -61,8 +61,7 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           git fetch --no-tags --prune origin \
             +refs/heads/main:refs/remotes/origin/main
-          main_sha=$(git rev-parse --verify refs/remotes/origin/main^{commit})
-          test "$GITHUB_SHA" = "$main_sha"
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
       - name: Derive immutable development package metadata
         id: metadata
         shell: bash
@@ -214,7 +213,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Revalidate exact current main security source
+      - name: Revalidate main security source
         shell: bash
         run: |
           set -euo pipefail
@@ -222,8 +221,7 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
-          test "$GITHUB_SHA" = \
-            "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
       - name: Install uv and Python
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -260,7 +258,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Revalidate exact current main ARM64 acceptance source
+      - name: Revalidate main ARM64 acceptance source
         shell: bash
         run: |
           set -euo pipefail
@@ -268,8 +266,7 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
-          test "$GITHUB_SHA" = \
-            "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
       - name: Install pinned Rust toolchain for the historical helper fixture
         shell: bash
         run: |

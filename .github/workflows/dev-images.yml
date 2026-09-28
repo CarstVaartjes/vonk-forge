@@ -37,10 +37,13 @@ jobs:
     name: Build once and publish accepted main images
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # A newer main push that changes image inputs starts a run that replaces
+    # this one; a newer commit that does not leaves these images current, and
+    # the installer reuses them for that commit. Either way the newest main is
+    # published without failing a superseded run.
     concurrency:
       group: vonk-forge-development-image-publication
-      cancel-in-progress: false
-      queue: max
+      cancel-in-progress: true
     permissions:
       actions: read
       attestations: write
@@ -55,16 +58,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify exact main before building
+      - name: Verify the main commit before building
         id: metadata
         shell: bash
         run: |
           set -euo pipefail
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
-          scripts/dev-image-metadata \
-            "$GITHUB_REF" "$GITHUB_SHA" \
-            "$(git rev-parse --verify refs/remotes/origin/main^{commit})" \
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          scripts/dev-image-metadata "$GITHUB_REF" "$GITHUB_SHA" \
             >> "$GITHUB_OUTPUT"
 
       - name: Install uv and build protocol wheel
@@ -489,7 +491,7 @@ jobs:
           test -f "$RUNNER_TEMP/accepted/docker-compose.dev.yml"
           command -v skopeo >/dev/null
 
-      - name: Verify receipt and recheck exact main before publication
+      - name: Verify receipt and recheck main before publication
         id: accepted
         shell: bash
         run: |
@@ -513,8 +515,7 @@ jobs:
           done
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
-          [[ "$GITHUB_SHA" == \
-            "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
 
       - name: Log in to publish accepted image tags
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -614,14 +615,13 @@ jobs:
               IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: scripts/verify-published-image litellm "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
 
-      - name: Recheck exact main before signing
+      - name: Recheck main before signing
         shell: bash
         run: |
           set -euo pipefail
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
-          [[ "$GITHUB_SHA" == \
-            "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
 
       - parallel:
           - name: Sign accepted API image provenance

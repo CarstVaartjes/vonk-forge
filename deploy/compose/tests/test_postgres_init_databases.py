@@ -144,7 +144,7 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(
                 "-e",
                 "POSTGRES_PASSWORD=control-password",
                 "-v",
-                f"{init_asset}:/run/vonk-source-assets/postgres/init-databases.sh:ro",
+                f"{init_asset}:/run/vonk-runtime-assets/postgres/init-databases.sh:ro",
                 "-v",
                 f"{password_file}:/run/secrets/litellm-database-password:ro",
                 "-v",

@@ -246,7 +246,7 @@ def _entrypoint_result(
     command.extend(
         (
             "-v",
-            f"{ROOT / 'deploy/compose/caddy/entrypoint.sh'}:/usr/local/bin/vonk-caddy-entrypoint:ro",
+            f"{ROOT / 'deploy/compose/caddy/entrypoint.sh'}:/run/vonk-runtime-assets/caddy/entrypoint.sh:ro",
             "-v",
             "/etc/hostname:/run/secrets/controller-server-certificate:ro",
             "-v",
@@ -261,7 +261,7 @@ def _entrypoint_result(
         (
             DEV_CADDY_IMAGE,
             "/bin/sh",
-            "/usr/local/bin/vonk-caddy-entrypoint",
+            "/run/vonk-runtime-assets/caddy/entrypoint.sh",
         )
     )
     command.extend(entrypoint_arguments)
@@ -352,9 +352,11 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
         "litellm-edge",
     }
     assert services["litellm"].get("ports") in (None, [])
+    # Caddy waits for its staged Caddyfile, never for a healthy Controller.
     assert caddy["depends_on"]["control-api"] == {
-        "condition": "service_healthy",
-        "required": True,
+        "condition": "service_started",
+        "required": False,
+        "restart": True,
     }
 
 

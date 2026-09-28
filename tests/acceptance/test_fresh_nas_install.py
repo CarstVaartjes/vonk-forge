@@ -616,7 +616,7 @@ def secret_snapshot(bundle: Path) -> dict[Path, bytes]:
     return {
         path.relative_to(secrets): path.read_bytes()
         for path in secrets.rglob("*")
-        if path.is_file() and path.relative_to(secrets).parts[0] != "runtime-configs"
+        if path.is_file()
     }
 
 

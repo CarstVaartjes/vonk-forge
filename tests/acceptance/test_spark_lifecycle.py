@@ -567,36 +567,21 @@ def _configure_acceptance_renewal(
     try:
         caddy_service = compose["services"]["caddy"]
         caddy_ports = caddy_service["ports"]
-        caddy_mounts = caddy_service["configs"]
-        caddy_source = next(
-            value["source"]
-            for value in caddy_mounts
-            if value.get("target") == "/etc/caddy/Caddyfile"
-        )
-        caddy_definition = compose["configs"][caddy_source]
+        caddy_volumes = caddy_service["volumes"]
     except (KeyError, TypeError) as error:
         raise LifecycleError("Compose browser boundary is invalid") from error
-    except StopIteration as error:
-        raise LifecycleError("Caddy acceptance boundary is invalid") from error
-    if re.fullmatch(
-        r"vonk_runtime_[0-9a-f]{16}", caddy_source
-    ) is None or caddy_definition != {
-        "file": f"./secrets/runtime-configs/{caddy_source}"
-    }:
-        raise LifecycleError("Caddy acceptance boundary is invalid")
-    caddy_path = bundle / "secrets/runtime-configs" / caddy_source
+    # The release Caddyfile ships in the Controller image. Acceptance runs a
+    # copy that names the fixed agent source address instead.
     try:
-        caddy_metadata = caddy_path.lstat()
-        caddy = caddy_path.read_text(encoding="utf-8")
+        caddy = (REPOSITORY_ROOT / "deploy/compose/Caddyfile").read_text(
+            encoding="utf-8"
+        )
     except (OSError, UnicodeDecodeError) as error:
         raise LifecycleError("Caddy acceptance boundary is invalid") from error
     source_directive = "header_up X-Vonk-Agent-Source {http.request.remote.host}"
-    if (
-        caddy_path.is_symlink()
-        or not stat.S_ISREG(caddy_metadata.st_mode)
-        or caddy.count(source_directive) != 1
-    ):
+    if not isinstance(caddy_volumes, list) or caddy.count(source_directive) != 1:
         raise LifecycleError("Caddy acceptance boundary is invalid")
+    caddy_path = bundle / "acceptance-Caddyfile"
     caddy_path.write_text(
         caddy.replace(
             source_directive,
@@ -605,6 +590,15 @@ def _configure_acceptance_renewal(
         encoding="utf-8",
     )
     os.chmod(caddy_path, 0o644)
+    caddy_volumes.append("./acceptance-Caddyfile:/etc/caddy/Caddyfile:ro")
+    caddy_service["command"] = [
+        "caddy",
+        "run",
+        "--config",
+        "/etc/caddy/Caddyfile",
+        "--adapter",
+        "caddyfile",
+    ]
     if not isinstance(caddy_ports, list) or "127.0.0.1::8080" in caddy_ports:
         raise LifecycleError("Compose browser boundary is invalid")
     caddy_ports.append("127.0.0.1::8080")

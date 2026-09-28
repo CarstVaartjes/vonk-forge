@@ -239,9 +239,9 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
         "--env",
         f"VONK_CONTROL_HOSTNAME={CONTROL_HOSTNAME}",
         "--volume",
-        f"{ROOT / 'deploy/compose/Caddyfile'}:/etc/caddy/Caddyfile:ro",
+        f"{ROOT / 'deploy/compose/Caddyfile'}:/run/vonk-runtime-assets/caddy/Caddyfile:ro",
         "--volume",
-        f"{ROOT / 'deploy/compose/caddy/entrypoint.sh'}:/usr/local/bin/vonk-caddy-entrypoint:ro",
+        f"{ROOT / 'deploy/compose/caddy/entrypoint.sh'}:/run/vonk-runtime-assets/caddy/entrypoint.sh:ro",
         "--volume",
         f"{material['server-certificate']}:/run/secrets/controller-server-certificate:ro",
         "--volume",
@@ -253,7 +253,7 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
         "--entrypoint",
         "/bin/sh",
         CADDY_IMAGE,
-        "/usr/local/bin/vonk-caddy-entrypoint",
+        "/run/vonk-runtime-assets/caddy/entrypoint.sh",
     ]
     subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)
     try:

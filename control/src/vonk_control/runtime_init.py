@@ -188,39 +188,39 @@ def _is_null_device(source: Path) -> bool:
 
 
 def stage_runtime_assets(
-    source_root: Path = Path("/run/vonk-source-assets"),
-    destination_root: Path = Path("/normalized/runtime-assets"),
+    source_root: Path = Path("/usr/local/share/vonk-forge/runtime-assets"),
+    destination_root: Path = Path("/runtime-assets"),
 ) -> None:
-    """Project NAS-hosted public configs into the Docker-owned runtime volume."""
+    """Publish this release's public runtime configs to the shared volume.
+
+    Every consumer (Caddy, PostgreSQL, LiteLLM, Prometheus, Grafana, the
+    registry, the Tailscale configurator and the Hermes key reconciler) reads
+    its configuration from this volume, so a pulled Controller image is the
+    whole configuration rollout. Files a release no longer ships are removed.
+    """
     source_root = Path(source_root)
     destination_root = Path(destination_root)
-    consumers = {
-        (10002, 10001): (
-            "litellm/bootstrap-config.json",
-            "litellm/entrypoint.sh",
-            "litellm/config_supervisor.py",
-        ),
-        (65534, 65534): (
-            "prometheus/prometheus.yml",
-            "prometheus/alerts.yaml",
-        ),
-        (472, 472): (
-            "grafana/provisioning/datasources/prometheus.yaml",
-            "grafana/provisioning/dashboards/default.yaml",
-            "grafana/dashboards/jobs.json",
-            "grafana/dashboards/fleet.json",
-        ),
+    shipped = {
+        path.relative_to(source_root)
+        for path in source_root.rglob("*")
+        if path.is_file() and not path.is_symlink()
     }
-    for (owner_uid, owner_gid), files in consumers.items():
-        for relative in files:
-            stage_runtime_file(
-                source_root / relative,
-                destination_root / relative,
-                owner_uid=owner_uid,
-                owner_gid=owner_gid,
-                mode=0o400,
-                maximum_bytes=_MAX_RUNTIME_FILE_BYTES,
-            )
+    if not shipped:
+        raise RuntimeSecretError("runtime assets are missing from the image")
+    for relative in sorted(shipped):
+        stage_runtime_file(
+            source_root / relative,
+            destination_root / relative,
+            mode=0o444,
+            maximum_bytes=_MAX_RUNTIME_FILE_BYTES,
+        )
+    for path in sorted(destination_root.rglob("*"), reverse=True):
+        relative = path.relative_to(destination_root)
+        if path.is_dir() and not path.is_symlink():
+            if not any(path.iterdir()):
+                path.rmdir()
+        elif relative not in shipped:
+            path.unlink()
 
 
 def stage_compose_secrets(

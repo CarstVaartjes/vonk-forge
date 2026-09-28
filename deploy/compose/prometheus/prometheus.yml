@@ -3,7 +3,7 @@ global:
   evaluation_interval: 15s
 
 rule_files:
-  - /run/vonk-normalized-secrets/runtime-assets/prometheus/alerts.yaml
+  - /run/vonk-runtime-assets/prometheus/alerts.yaml
 
 scrape_configs:
   - job_name: vonk-control

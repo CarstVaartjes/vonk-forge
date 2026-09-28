@@ -97,7 +97,11 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
 
 
 def test_health_dependencies_are_acyclic_and_wait_only_for_readiness() -> None:
-    """Catches service-started/completed dependencies and readiness cycles."""
+    """Catches service-started/completed dependencies and readiness cycles.
+
+    The one exception: consumers of the Controller-staged runtime assets depend
+    on the Controller only to restart with it, never to wait for its health.
+    """
     services = _rendered()["services"]
     assert isinstance(services, dict)
     graph: dict[str, set[str]] = {}
@@ -106,8 +110,17 @@ def test_health_dependencies_are_acyclic_and_wait_only_for_readiness() -> None:
         dependencies = service.get("depends_on", {})
         assert isinstance(dependencies, dict)
         graph[name] = set(dependencies)
-        for dependency in dependencies.values():
+        for dependency_name, dependency in dependencies.items():
             assert isinstance(dependency, dict)
+            if dependency_name == "control-api" and dependency["condition"] != (
+                "service_healthy"
+            ):
+                assert dependency == {
+                    "condition": "service_started",
+                    "required": False,
+                    "restart": True,
+                }, name
+                continue
             assert dependency["condition"] == "service_healthy"
 
     def visit(name: str, path: tuple[str, ...]) -> None:
@@ -146,4 +159,8 @@ def test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurat
         )
     secure_remote = _rendered()["services"]
     configurator = secure_remote["tailscale-configurator"]
-    assert set(configurator["depends_on"]) == {"caddy", "tailscale-gateway"}
+    assert set(configurator["depends_on"]) == {
+        "caddy",
+        "control-api",
+        "tailscale-gateway",
+    }

@@ -5,4 +5,4 @@ providers:
     disableDeletion: true
     editable: false
     options:
-      path: /run/vonk-normalized-secrets/runtime-assets/grafana/dashboards
+      path: /run/vonk-runtime-assets/grafana/dashboards

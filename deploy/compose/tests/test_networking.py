@@ -132,10 +132,13 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
 def test_litellm_runs_the_docker_staged_entrypoint_through_shell() -> None:
     litellm = _rendered()["services"]["litellm"]
 
-    assert litellm["entrypoint"] == [
-        "/bin/sh",
-        "/run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh",
-    ]
+    # Wait for the staged entrypoint, then run it through the shell.
+    assert litellm["entrypoint"][:2] == ["/bin/sh", "-c"]
+    assert litellm["entrypoint"][2] == (
+        "until [ -f /run/vonk-runtime-assets/litellm/entrypoint.sh ]; "
+        "do sleep 1; done; "
+        "exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh"
+    )
 
 
 def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
@@ -221,11 +224,9 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
 
     assert "control-secret-init" not in services
     assert "control-bootstrap" not in services
-    assert api["depends_on"]["postgres"] == {
-        "condition": "service_healthy",
-        "required": True,
-    }
-    assert "step-ca" not in api["depends_on"]
+    # PostgreSQL waits for the entrypoint the API stages, so the API starts
+    # without waiting for it and retries the database instead.
+    assert "depends_on" not in api
     api_secrets = {secret["source"] for secret in api["secrets"]}
     assert {
         "host-runtime-grant-private-key",
@@ -255,11 +256,10 @@ def test_retired_runtime_signer_and_agent_update_surfaces_are_absent() -> None:
 def test_former_bootstrap_dependants_wait_for_real_service_health() -> None:
     services = _rendered()["services"]
 
-    for name in ("control-worker", "litellm", "step-ca"):
-        assert services[name]["depends_on"]["control-api"] == {
-            "condition": "service_healthy",
-            "required": True,
-        }
+    for name in ("control-worker", "step-ca"):
+        dependency = services[name]["depends_on"]["control-api"]
+        assert dependency["condition"] == "service_healthy"
+        assert dependency["required"] is True
 
 
 def test_caddy_has_readiness_checks() -> None:

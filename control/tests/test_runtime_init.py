@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -200,46 +201,33 @@ def test_optional_huggingface_secret_handles_bind_mounted_dev_null_in_container(
     assert not destination.exists()
 
 
-def test_runtime_assets_are_staged_for_their_unprivileged_consumers(
+def test_runtime_assets_follow_the_shipped_release_exactly(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    staged: list[tuple[Path, Path, int, int, int, int]] = []
-
-    def record(
-        source: Path,
-        destination: Path,
-        *,
-        owner_uid: int = 0,
-        owner_gid: int = 0,
-        mode: int = 0o444,
-        maximum_bytes: int,
-    ) -> Path:
-        staged.append((source, destination, owner_uid, owner_gid, mode, maximum_bytes))
-        return destination
-
-    monkeypatch.setattr(runtime_init, "stage_runtime_file", record)
-    source = tmp_path / "nas-files"
-    destination = tmp_path / "docker-volume"
+    # Ownership is root's in the container; the test process may not chown.
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+    source = tmp_path / "image"
+    (source / "grafana/dashboards").mkdir(parents=True)
+    (source / "caddy").mkdir()
+    (source / "caddy/Caddyfile").write_text("new relay\n")
+    (source / "grafana/dashboards/fleet.json").write_text("{}\n")
+    destination = tmp_path / "volume"
+    (destination / "caddy").mkdir(parents=True)
+    (destination / "caddy/Caddyfile").write_text("old relay\n")
+    (destination / "retired").mkdir()
+    (destination / "retired/old.yml").write_text("gone\n")
 
     stage_runtime_assets(source, destination)
 
-    assert len(staged) == 9
-    assert {
-        (item[0].relative_to(source).as_posix(), item[2], item[3], item[4])
-        for item in staged
-    } == {
-        ("litellm/bootstrap-config.json", 10002, 10001, 0o400),
-        ("litellm/entrypoint.sh", 10002, 10001, 0o400),
-        ("litellm/config_supervisor.py", 10002, 10001, 0o400),
-        ("prometheus/prometheus.yml", 65534, 65534, 0o400),
-        ("prometheus/alerts.yaml", 65534, 65534, 0o400),
-        ("grafana/provisioning/datasources/prometheus.yaml", 472, 472, 0o400),
-        ("grafana/provisioning/dashboards/default.yaml", 472, 472, 0o400),
-        ("grafana/dashboards/jobs.json", 472, 472, 0o400),
-        ("grafana/dashboards/fleet.json", 472, 472, 0o400),
+    staged = {
+        path.relative_to(destination).as_posix(): path
+        for path in destination.rglob("*")
+        if path.is_file()
     }
-    assert all(item[1] == destination / item[0].relative_to(source) for item in staged)
-    assert len({item[5] for item in staged}) == 1
+    assert set(staged) == {"caddy/Caddyfile", "grafana/dashboards/fleet.json"}
+    assert staged["caddy/Caddyfile"].read_text() == "new relay\n"
+    assert all(stat.S_IMODE(path.stat().st_mode) == 0o444 for path in staged.values())
+    assert not (destination / "retired").exists()
 
 
 def test_shared_volume_preparation_preserves_each_consumer_boundary(
