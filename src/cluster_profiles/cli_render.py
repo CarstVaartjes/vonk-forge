@@ -146,7 +146,7 @@ def _width(value: str) -> int:
 
 
 def _table(labels: Sequence[str], rows: Sequence[Sequence[object]]) -> None:
-    """Use a table only when all values fit; otherwise preserve stacked values."""
+    """Use a table when all values fit; otherwise preserve stacked values."""
     rendered = [[_text(value) for value in row] for row in rows]
     if not rendered:
         return
@@ -154,8 +154,12 @@ def _table(labels: Sequence[str], rows: Sequence[Sequence[object]]) -> None:
         max(_width(label), *(_width(row[i]) for row in rendered))
         for i, label in enumerate(labels)
     ]
+    # A terminal too narrow for the table gets stacked records; a pipe gets
+    # the table, one line per row, whatever its width.
     columns = shutil.get_terminal_size((80, 24)).columns
-    if columns < 80 or sum(widths) + 2 * (len(labels) - 1) > columns:
+    if sys.stdout.isatty() and (
+        columns < 80 or sum(widths) + 2 * (len(labels) - 1) > columns
+    ):
         for row in rendered:
             for label, value in zip(labels, row, strict=True):
                 _field(label, value)
@@ -212,7 +216,7 @@ def _failure(value: object) -> None:
     _actions(failure.get("recovery_actions"))
 
 
-def _node(node: Mapping[str, object], *, detail: bool, placements: bool = True) -> None:
+def _node(node: Mapping[str, object], *, detail: bool) -> None:
     name = node.get("display_name")
     _field("Spark", name)
     _field("ID", node.get("id"))
@@ -228,11 +232,9 @@ def _node(node: Mapping[str, object], *, detail: bool, placements: bool = True) 
     _field("Memory free", _bytes(inventory.get("host_memory_free_bytes")))
     _field("Disk free", _bytes(inventory.get("disk_free_bytes")))
     loaded = _records(node, "loaded")
-    if not placements:
-        _field("Run IDs", _words([run.get("run_id") for run in loaded]))
-    elif not loaded:
+    if not loaded:
         print("Running workloads: none")
-    for run in loaded if placements else []:
+    for run in loaded:
         _field("Workload", run.get("title"))
         _field("Run", run.get("run_id"))
         _field("State", run.get("run_state"))
@@ -257,14 +259,9 @@ def _node(node: Mapping[str, object], *, detail: bool, placements: bool = True) 
         for key, value in _object(node.get("labels", {}), "labels").items():
             _field("Label", f"{key}={_text(value)}")
         installed = _records(node, "installed")
-        if not placements:
-            _field(
-                "Installation IDs",
-                _words([item.get("installation_id") for item in installed]),
-            )
-        elif not installed:
+        if not installed:
             print("Installed recipes: none")
-        for recipe in installed if placements else []:
+        for recipe in installed:
             _field("Installed recipe", recipe.get("title"))
             _field("Installation", recipe.get("installation_id"))
             _field("Installation state", recipe.get("group_state"))
@@ -272,77 +269,238 @@ def _node(node: Mapping[str, object], *, detail: bool, placements: bool = True) 
     _reasons(node.get("warnings"), subject=name)
 
 
-def _fleet_placements(
-    nodes: Sequence[Mapping[str, object]], *, installed: bool = False
-) -> None:
-    """Group presentation by the owner's identity, preserving its health decisions."""
-    field = "installed" if installed else "loaded"
-    identity = "installation_id" if installed else "run_id"
-    grouped: dict[str, list[tuple[Mapping[str, object], Mapping[str, object]]]] = {}
-    for node in nodes:
-        for presence in _records(node, field):
-            identifier = presence.get(identity)
-            if not isinstance(identifier, str) or not identifier:
-                raise ValueError(f"placement lacks its canonical {identity}")
-            grouped.setdefault(identifier, []).append((node, presence))
-    print(
-        f"Installations: {len(grouped)} distinct placements"
-        if installed
-        else f"Workloads: {len(grouped)} distinct runs"
+def _size(value: object) -> str:
+    """A short human size for tables; the exact byte count stays in --json."""
+    if type(value) is not int or value < 0:
+        return "unavailable"
+    for unit, divisor in (("TiB", 1 << 40), ("GiB", 1 << 30), ("MiB", 1 << 20)):
+        if value >= divisor:
+            return f"{value / divisor:.1f} {unit}"
+    return f"{value} B"
+
+
+def _memory(node: Mapping[str, object]) -> str:
+    """Used share of the Spark's memory, preferring the live telemetry sample."""
+    telemetry = _optional(node.get("telemetry"), "telemetry")
+    sample = _optional(telemetry.get("sample"), "telemetry sample")
+    inventory = _optional(node.get("inventory"), "inventory")
+    total, free = (
+        (sample.get("memory_total_bytes"), sample.get("memory_available_bytes"))
+        if telemetry.get("freshness") == "live"
+        else (
+            inventory.get("host_memory_total_bytes"),
+            inventory.get("host_memory_free_bytes"),
+        )
     )
-    for identifier, members in sorted(grouped.items()):
+    if type(total) is not int or type(free) is not int or total <= 0:
+        return "unavailable"
+    return f"{round(100 * (total - free) / total)}% of {_size(total)}"
 
-        def rank_order(value: tuple[Mapping[str, object], Mapping[str, object]]) -> int:
-            rank = value[1].get("rank")
-            if type(rank) is not int:
-                raise ValueError("placement lacks its canonical rank")
-            return rank
 
-        members.sort(key=rank_order)
-        presence = members[0][1]
-        _field("Installed recipe" if installed else "Workload", presence.get("title"))
-        _field("Installation" if installed else "Run", identifier)
-        if installed:
-            _field("Installation state", presence.get("group_state"))
-            _field("Complete", presence.get("complete"))
+def _cpu(node: Mapping[str, object]) -> str:
+    telemetry = _optional(node.get("telemetry"), "telemetry")
+    sample = _optional(telemetry.get("sample"), "telemetry sample")
+    value = sample.get("cpu_utilization_percent")
+    if telemetry.get("freshness") != "live" or not isinstance(value, (int, float)):
+        return "unavailable"
+    return f"{round(value)}%"
+
+
+def _status(node: Mapping[str, object]) -> str:
+    connection = _object(node.get("connection"), "connection")
+    state = _text(connection.get("online_state"))
+    telemetry = _optional(node.get("telemetry"), "telemetry").get("freshness")
+    if connection.get("online_state") == "online" and telemetry not in {None, "live"}:
+        return f"{state}, telemetry {_text(telemetry)}"
+    return state
+
+
+def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
+    """Collect what the owners report as not healthy, in their own terms."""
+    notes: list[str] = []
+    for node in nodes:
+        name = _text(node.get("display_name"))
+        connection = _object(node.get("connection"), "connection")
+        if connection.get("online_state") != "online":
+            reason = connection.get("offline_reason")
+            notes.append(
+                f"{name} is {_text(connection.get('online_state'))}"
+                + (f" ({_text(reason)})" if reason is not None else "")
+                + f"; last seen {_time(connection.get('last_seen_at'))}"
+            )
         else:
-            _field("Alias", presence.get("alias"))
-            _field("Controller run state", presence.get("run_state"))
-            _field("Observed group", presence.get("group_state"))
-            _field("Route", presence.get("route_state"))
-        _field("Expected ranks", presence.get("expected_rank_count"))
-        _field("Reported ranks", _words(presence.get("present_ranks")))
-        _field("Reported member Sparks", _words(presence.get("member_node_ids")))
-        labels = ["SPARK", "RANK", "ROLE", "OBSERVED"]
-        if not installed:
-            labels.extend(["FRESH", "AGE (s)"])
-        rows = []
-        for node, member in members:
-            row = [
-                node.get("display_name"),
-                member.get("rank"),
-                member.get("role"),
-                member.get("rank_state"),
-            ]
-            if not installed:
-                row.extend([member.get("rank_fresh"), member.get("rank_age_seconds")])
-            rows.append(row)
-        _table(labels, rows)
-        for node, _ in members:
-            _field(
-                "Member ID",
-                f"{_text(node.get('display_name'))}: {_text(node.get('id'))}",
+            telemetry = _optional(node.get("telemetry"), "telemetry").get("freshness")
+            if telemetry not in {None, "live"}:
+                notes.append(f"{name} telemetry is {_text(telemetry)}")
+            inventory = _optional(node.get("inventory"), "inventory").get("freshness")
+            if inventory not in {None, "fresh"}:
+                notes.append(f"{name} inventory is {_text(inventory)}")
+        if node.get("lifecycle") not in {None, "ready"}:
+            notes.append(f"{name} is {_text(node.get('lifecycle'))}")
+        warnings = node.get("warnings")
+        if not isinstance(warnings, list):
+            warnings = []
+        for warning in warnings:
+            if isinstance(warning, Mapping):
+                notes.append(
+                    f"{name}: {_text(warning.get('detail') or warning.get('code'))}"
+                )
+            else:
+                notes.append(f"{name}: {_text(warning)}")
+    return notes
+
+
+def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> list[str]:
+    """Show each run once, its members by name, and return its problems."""
+    names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
+    runs: dict[str, list[tuple[str, Mapping[str, object]]]] = {}
+    for node in nodes:
+        for presence in _records(node, "loaded"):
+            identifier = presence.get("run_id")
+            if not isinstance(identifier, str) or not identifier:
+                raise ValueError("placement lacks its canonical run_id")
+            runs.setdefault(identifier, []).append(
+                (_text(node.get("display_name")), presence)
             )
-        reported = presence.get("member_node_ids")
-        if isinstance(reported, list) and set(reported) - {
-            node.get("id") for node, _ in members
-        }:
-            print(
-                "Member details cover the selected Sparks; other reported members are outside this view."
-            )
-        if presence.get("degraded_reason") is not None:
-            _reasons([presence["degraded_reason"]], subject=identifier)
+    notes: list[str] = []
+    if runs:
+        print("Workloads")
+    for identifier, members in sorted(runs.items()):
+        members.sort(key=lambda member: str(member[1].get("rank")))
+        first = members[0][1]
+        title = _text(first.get("title"))
+        expected = first.get("expected_rank_count")
+        present = first.get("present_ranks")
+        ranks = (
+            f"{len(present)}/{expected} ranks"
+            if isinstance(present, list) and type(expected) is int
+            else "ranks unavailable"
+        )
+        print(f"  {title}")
+        print(
+            f"    {_text(first.get('run_state'))}, group {_text(first.get('group_state'))}, "
+            f"route {_text(first.get('route_state'))}, {ranks}"
+        )
+        print(f"    Model name: {_text(first.get('alias'))}")
+        sparks = ", ".join(
+            f"{name} (rank {_text(member.get('rank'))}, {_text(member.get('role'))})"
+            for name, member in members
+        )
+        reported = first.get("member_node_ids")
+        outside = [
+            _text(member_id)
+            for member_id in (reported if isinstance(reported, list) else [])
+            if member_id not in names
+        ]
+        print(
+            f"    Sparks: {sparks}"
+            + (f"; also {', '.join(outside)}" if outside else "")
+        )
+        if wide:
+            print(f"    Run: {_text(identifier)}")
+            print(f"    Installation: {_text(first.get('installation_id'))}")
+        if first.get("run_state") != "running":
+            notes.append(f"{title} is {_text(first.get('run_state'))}")
+        if first.get("group_state") != "healthy":
+            notes.append(f"{title} group is {_text(first.get('group_state'))}")
+        if first.get("route_state") != "published":
+            notes.append(f"{title} route is {_text(first.get('route_state'))}")
+        if (
+            isinstance(present, list)
+            and type(expected) is int
+            and len(present) < expected
+        ):
+            notes.append(f"{title} reports {ranks}")
+        stale = [name for name, member in members if member.get("rank_fresh") is False]
+        if stale:
+            notes.append(f"{title} has stale rank reports from {', '.join(stale)}")
+        for _, member in members:
+            if member.get("degraded_reason") is not None:
+                reason = member["degraded_reason"]
+                detail = (
+                    reason.get("detail") or reason.get("code")
+                    if isinstance(reason, Mapping)
+                    else reason
+                )
+                notes.append(f"{title}: {_text(detail)}")
+                break
+    loaded = {
+        member.get("installation_id")
+        for members in runs.values()
+        for _, member in members
+    }
+    stopped: dict[str, tuple[str, list[str]]] = {}
+    for node in nodes:
+        for presence in _records(node, "installed"):
+            installation = presence.get("installation_id")
+            if not isinstance(installation, str) or installation in loaded:
+                continue
+            entry = stopped.setdefault(installation, (_text(presence.get("title")), []))
+            entry[1].append(_text(node.get("display_name")))
+    if stopped:
+        print("Installed, not running")
+        for installation, (title, sparks) in sorted(stopped.items()):
+            print(f"  {title} on {', '.join(sparks)}")
+            if wide:
+                print(f"    Installation: {_text(installation)}")
+    if runs or stopped:
         print()
+    return notes
+
+
+def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
+    nodes = _records(payload, "nodes")
+    if not nodes:
+        print("No Sparks are enrolled.")
+        print("Next: vonkctl fleet enroll <name> --output <file>")
+        return
+    online = sum(
+        1
+        for node in nodes
+        if _object(node.get("connection"), "connection").get("online_state") == "online"
+    )
+    run_ids = {
+        presence.get("run_id")
+        for node in nodes
+        for presence in _records(node, "loaded")
+    }
+    plural = "" if len(nodes) == 1 else "s"
+    workloads = "1 workload" if len(run_ids) == 1 else f"{len(run_ids)} workloads"
+    print(f"Fleet: {len(nodes)} Spark{plural}, {online} online, {workloads} running")
+    print()
+    labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "CPU", "RUNNING"]
+    if wide:
+        labels.append("ID")
+    rows = []
+    for node in nodes:
+        inventory = _optional(node.get("inventory"), "inventory")
+        loaded = _records(node, "loaded")
+        row: list[object] = [
+            node.get("display_name"),
+            _status(node),
+            _memory(node),
+            _size(inventory.get("disk_free_bytes")),
+            _cpu(node),
+            "idle"
+            if not loaded
+            else f"{len(loaded)} workload" + ("s" if len(loaded) > 1 else ""),
+        ]
+        if wide:
+            row.append(node.get("id"))
+        rows.append(row)
+    _table(labels, rows)
+    print()
+    notes = _fleet_attention(nodes) + _fleet_workloads(nodes, wide=wide)
+    if notes:
+        print("Needs attention")
+        for note in notes:
+            print(f"  {note}")
+    else:
+        print("Nothing needs attention.")
+    if wide:
+        _field("Observed", _time(payload.get("generated_at")))
+    print()
+    print("Next: vonkctl fleet detail <spark>  |  vonkctl profile endpoint")
 
 
 def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> None:
@@ -419,6 +577,33 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
             _field("Quantization", item.get("quantization"))
 
 
+_ACTIVE_PREPARATION = {"queued", "running", "pending", "preparing"}
+
+
+def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
+    local = _object(item.get("local"), "local")
+    resources = _object(item.get("resources"), "resources")
+    preparation = _optional(local.get("preparation"), "preparation")
+    cache = _text(local.get("controller"))
+    if preparation.get("state") in _ACTIVE_PREPARATION:
+        cache = progress_line({"progress": preparation}).replace(" | ", ": ")
+    running = local.get("running_on")
+    row: list[object] = [
+        item.get("selector"),
+        cache,
+        _size(resources.get("disk_bytes")),
+        f"{len(running)} Spark{'s' if len(running) != 1 else ''}"
+        if isinstance(running, list) and running
+        else "no",
+    ]
+    if noun == "recipe":
+        assessment = _optional(item.get("assessment"), "assessment")
+        readiness = _optional(assessment.get("readiness"), "readiness")
+        row.insert(1, item.get("node_count"))
+        row.append(readiness.get("state") if readiness else "not assessed")
+    return row
+
+
 def _library(
     payload: Mapping[str, object], noun: str, *, detail: bool, wide: bool
 ) -> None:
@@ -426,21 +611,36 @@ def _library(
         _library_item(payload, noun, detail=True)
         return
     rows = _records(payload, "models" if noun == "model" else "recipes")
-    print(f"{noun.title()}s: {len(rows)} on this page")
-    if not rows:
-        print(f"No {noun}s match this page's filters.")
-    for item in rows:
-        _library_item(item, noun, detail=wide)
-        print()
-    if payload.get("generated_at") is not None:
-        _field("Observed", _time(payload["generated_at"]))
     cursor = payload.get("next_cursor")
-    if isinstance(cursor, str):
-        print("Page incomplete: more results are available.")
-        _field("Next cursor", cursor)
-        print(f"Continue with --cursor {shlex.quote(cursor)} and the same filters.")
+    more = " (more available)" if isinstance(cursor, str) else ""
+    print(f"{noun.title()}s: {len(rows)}{more}")
+    if not rows:
+        print(f"No {noun}s match these filters.")
+    elif wide:
+        for item in rows:
+            print()
+            _library_item(item, noun, detail=True)
     else:
-        print("End of results for these filters.")
+        print()
+        labels = [noun.upper(), "CACHE", "DISK", "RUNNING"]
+        if noun == "recipe":
+            labels.insert(1, "SPARKS")
+            labels.append("READY")
+        _table(labels, [_library_row(item, noun) for item in rows])
+        for item in rows:
+            preparation = _optional(
+                _object(item.get("local"), "local").get("preparation"), "preparation"
+            )
+            operation = preparation.get("operation_id")
+            if preparation.get("state") in _ACTIVE_PREPARATION and operation:
+                _field(
+                    "Follow",
+                    f"vonkctl {noun} progress {shlex.quote(str(operation))} --follow",
+                )
+    print()
+    if isinstance(cursor, str):
+        print(f"Next page: add --cursor {shlex.quote(cursor)} with the same filters.")
+    print(f"Next: vonkctl {noun} detail <{noun}>  (--wide shows every field here)")
 
 
 def _profile(payload: Mapping[str, object]) -> None:
@@ -1140,6 +1340,8 @@ def _enrollment(payload: Mapping[str, object]) -> None:
 
 def _error(payload: Mapping[str, object]) -> None:
     _field("Error", payload.get("error"))
+    if payload.get("usage") is not None:
+        _field("Usage", payload["usage"])
     candidates = payload.get("candidates")
     if isinstance(candidates, (list, tuple)):
         for candidate in candidates:
@@ -1215,15 +1417,7 @@ def render_payload(
         _field("CLI version", client.get("version"))
     elif noun == "fleet":
         if action is None:
-            nodes = _records(payload, "nodes")
-            print(f"Fleet: {len(nodes)} Sparks" if nodes else "No Sparks are enrolled.")
-            for node in nodes:
-                _node(node, detail=wide, placements=False)
-                print()
-            _fleet_placements(nodes)
-            if wide:
-                _fleet_placements(nodes, installed=True)
-            _field("Observed", _time(payload.get("generated_at")))
+            _fleet_overview(payload, wide=wide)
         elif action == "node-profile":
             for key, label in (
                 ("display_name", "Spark"),

@@ -1066,7 +1066,7 @@ def test_fleet_loginfo_line_count_is_bounded_without_enumerating_choices() -> No
         assert json.loads(output.getvalue())["error_type"] == "arguments"
 
     help_text = loginfo.format_help()
-    assert "--lines 1-1000" in help_text
+    assert "--lines <1-1000>" in help_text
     assert "{1,2," not in help_text
 
 
@@ -1210,7 +1210,11 @@ def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None
     with redirect_stdout(output):
         assert cli.main(("model",), control_client=detail) == 0
     text = output.getvalue()
-    assert "cached" in text and "Atlas" in text and "42 B" in text
+    assert "cached" in text and "42 B" in text
+    output = StringIO()
+    with redirect_stdout(output):
+        assert cli.main(("model", "--wide"), control_client=detail) == 0
+    assert "Atlas" in output.getvalue()
 
 
 def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
@@ -3198,8 +3202,7 @@ def test_plain_output_is_adaptive_and_keeps_identity_before_optional_columns() -
     with redirect_stdout(output):
         assert cli.main(("model",), control_client=client) == 0
     text = output.getvalue()
-    assert "MODEL" in text and "USE qwen-3.8-nvfp4" in text
-    assert "Qwen 3.8" in text
+    assert text.index("qwen-3.8-nvfp4") < text.index("cached")
 
 
 def test_async_mutations_follow_the_noun_operation_until_terminal() -> None:

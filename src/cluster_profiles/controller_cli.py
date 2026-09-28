@@ -57,9 +57,10 @@ if TYPE_CHECKING:
         FleetProfileEndpointsView,
     )
 
-FLEET_HEALTH = ("live", "delayed", "stale", "offline")
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
 MAX_PAGE_LIMIT = 512
+# An enrollment grant lives for the longest time the Controller allows.
+_ENROLLMENT_TTL_SECONDS = 900
 MAX_LOG_LINES = 1000
 
 
@@ -113,13 +114,23 @@ def _log_since(value: str) -> str:
 
 
 def _add_output(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    parser.add_argument("--wide", action="store_true", default=argparse.SUPPRESS)
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Print one JSON document instead of text",
+    )
+    parser.add_argument(
+        "--wide",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Show every field and identifier",
+    )
     parser.add_argument(
         "--no-input",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Never prompt; this does not grant consent",
+        help="Never prompt; changes then need --yes",
     )
 
 
@@ -216,8 +227,8 @@ def _activity_cursor(value: str) -> str:
     return value
 
 
-def _selector(parser: argparse.ArgumentParser, name: str, *, help: str) -> None:
-    parser.add_argument(name, metavar=name.upper(), help=help)
+def _selector(parser: argparse.ArgumentParser, metavar: str, *, help: str) -> None:
+    parser.add_argument("selector", metavar=metavar.upper(), help=help)
 
 
 def _filters(parser: argparse.ArgumentParser) -> None:
@@ -244,12 +255,21 @@ def _filters(parser: argparse.ArgumentParser) -> None:
 
 
 def _detail_filters(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--metrics", choices=("glance", "all"), default="glance")
-    parser.add_argument("--range", choices=TELEMETRY_RANGES, default="1h")
-    parser.add_argument("--device")
-    parser.add_argument("--interface")
-    parser.add_argument("--run")
-    parser.add_argument("--capabilities", action="store_true")
+    parser.add_argument(
+        "--metrics",
+        choices=("glance", "all"),
+        default="glance",
+        help="Show the key metrics or all of them",
+    )
+    parser.add_argument(
+        "--range", choices=TELEMETRY_RANGES, default="1h", help="Metrics history window"
+    )
+    parser.add_argument("--device", help="Only metrics of this device")
+    parser.add_argument("--interface", help="Only metrics of this network interface")
+    parser.add_argument("--run", help="Only metrics of this run")
+    parser.add_argument(
+        "--capabilities", action="store_true", help="Include the agent capabilities"
+    )
 
 
 def _watch_controls(parser: argparse.ArgumentParser) -> None:
@@ -257,13 +277,15 @@ def _watch_controls(parser: argparse.ArgumentParser) -> None:
         "--timeout-seconds",
         type=_timeout_seconds,
         default=30,
-        help="Observation deadline, 0–300 seconds (default: 30); remote work continues",
+        metavar="SECONDS",
+        help="Stop watching after this long, 0–300 (default: 30); the work continues",
     )
     parser.add_argument(
         "--interval-seconds",
         type=_interval_seconds,
         default=1.0,
-        help="Poll interval, 0.01–30 seconds (default: 1)",
+        metavar="SECONDS",
+        help="Time between refreshes, 0.01–30 (default: 1)",
     )
 
 
@@ -272,7 +294,8 @@ def _selection_controls(parser: argparse.ArgumentParser) -> None:
         "--timeout-seconds",
         type=_timeout_seconds,
         default=30,
-        help="Selection deadline across all pages, 0–300 seconds (default: 30)",
+        metavar="SECONDS",
+        help="Give up choosing after this long, 0–300 (default: 30)",
     )
 
 
@@ -311,10 +334,14 @@ def _action_flags(
         help="Original request UUID; supply and retain it to reconnect after process death",
     )
     if followable:
-        parser.add_argument("--detach", action="store_true")
+        parser.add_argument(
+            "--detach",
+            action="store_true",
+            help="Return once accepted instead of following",
+        )
         _watch_controls(parser)
     if destructive:
-        parser.add_argument("--yes", action="store_true")
+        parser.add_argument("--yes", action="store_true", help="Confirm without asking")
     if recipe_remove:
         model_choice = parser.add_mutually_exclusive_group()
         model_choice.add_argument("--with-model", action="store_true")
@@ -327,7 +354,11 @@ def _profile_edit_flags(
 ) -> None:
     parser.set_defaults(outcome_context="mutation", requires_profile=True)
     parser.add_argument(
-        "--expected-revision", type=_revision, required=require_revision
+        "--expected-revision",
+        type=_revision,
+        required=require_revision,
+        metavar="N",
+        help="Refuse the edit unless the saved profile is at revision N",
     )
     _add_output(parser)
 
@@ -360,31 +391,35 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     commands: argparse._SubParsersAction[ControllerParserT],
 ) -> None:
     """Register only Fleet, Model, Recipe and Profile command namespaces."""
-    fleet = commands.add_parser("fleet", help="Show and operate enrolled Sparks")
-    fleet.add_argument("--watch", action="store_true")
-    _watch_controls(fleet)
-    fleet.add_argument("--search", default="")
-    fleet.add_argument("--health", action="append", choices=FLEET_HEALTH, default=[])
-    fleet.add_argument("--warnings-only", action="store_true")
-    fleet.add_argument("--sort", choices=("attention", "name"), default="attention")
+    fleet = commands.add_parser(
+        "fleet",
+        help="Sparks, their health, and what they run",
+        description="Enrolled Sparks: their health, memory, and the workloads "
+        "they run.",
+        epilog="Without a command, shows the fleet overview.",
+    )
     _add_output(fleet)
     fleet_actions = fleet.add_subparsers(dest="fleet_action", parser_class=type(fleet))
 
     detail = fleet_actions.add_parser("detail", help="Show one Spark")
-    _selector(detail, "selector", help="Exact Spark selector or friendly name")
+    _selector(detail, "spark", help="Exact Spark selector or friendly name")
     _detail_filters(detail)
-    detail.add_argument("--watch", action="store_true")
+    detail.add_argument(
+        "--watch", action="store_true", help="Keep refreshing until it settles"
+    )
     _watch_controls(detail)
-    detail.add_argument("--technical", action="store_true")
+    detail.add_argument(
+        "--technical", action="store_true", help="Include the canonical definition"
+    )
     _add_output(detail)
     node_profile = fleet_actions.add_parser(
         "node-profile", help="Show one Spark's identity, labels, and lifecycle"
     )
-    _selector(node_profile, "selector", help="Exact Spark ID or friendly name")
+    _selector(node_profile, "spark", help="Exact Spark ID or friendly name")
     _selection_controls(node_profile)
     _add_output(node_profile)
-    rename = fleet_actions.add_parser("rename", help="Change a Spark friendly name")
-    _selector(rename, "selector", help="Exact Spark selector or friendly name")
+    rename = fleet_actions.add_parser("rename", help="Change a Spark's friendly name")
+    _selector(rename, "spark", help="Exact Spark selector or friendly name")
     rename.add_argument("new_name")
     _action_flags(rename)
     enroll = fleet_actions.add_parser(
@@ -392,8 +427,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     enroll.set_defaults(outcome_context="mutation")
     enroll.add_argument("name")
-    enroll.add_argument("--ttl-seconds", type=int, default=900)
-    enroll.add_argument("--output", type=Path, required=True)
+    enroll.add_argument("--output", type=Path, required=True, metavar="FILE")
     enroll.add_argument("--request-key", type=_uuid_argument)
     _add_output(enroll)
     for action_name, help_text in (
@@ -402,45 +436,58 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     ):
         action = fleet_actions.add_parser(action_name, help=help_text)
         action.set_defaults(outcome_context="mutation")
-        _selector(action, "selector", help="Exact Spark selector or friendly name")
+        _selector(action, "spark", help="Exact Spark selector or friendly name")
         _add_output(action)
         if action_name == "remove":
-            action.add_argument("--yes", action="store_true")
+            action.add_argument(
+                "--yes", action="store_true", help="Confirm without asking"
+            )
         else:
-            action.add_argument("--output", type=Path, required=True)
+            action.add_argument("--output", type=Path, required=True, metavar="FILE")
             action.add_argument("--request-key", type=_uuid_argument)
-            action.add_argument("--yes", action="store_true")
+            action.add_argument(
+                "--yes", action="store_true", help="Confirm without asking"
+            )
     enrollment = fleet_actions.add_parser(
-        "enrollment", help="Inspect or revoke a bootstrap grant"
+        "enrollment",
+        help="Inspect or revoke an enrollment grant",
+        description="One-time grants that let a new Spark enroll.",
     )
     enrollment_actions = enrollment.add_subparsers(
-        dest="enrollment_action", required=True, parser_class=type(fleet)
+        dest="enrollment_action", parser_class=type(fleet)
     )
-    for action_name in ("status", "revoke"):
-        action = enrollment_actions.add_parser(action_name)
+    for action_name, action_help in (
+        ("status", "Show whether a grant is pending, used, expired, or revoked"),
+        ("revoke", "Revoke an unused grant"),
+    ):
+        action = enrollment_actions.add_parser(action_name, help=action_help)
         action.add_argument("grant_id", type=_uuid_argument)
         _add_output(action)
         if action_name == "revoke":
             action.set_defaults(outcome_context="mutation")
-            action.add_argument("--yes", action="store_true")
+            action.add_argument(
+                "--yes", action="store_true", help="Confirm without asking"
+            )
     upgrade = fleet_actions.add_parser(
-        "upgrade", help="Roll out the signed Spark agent package through Controller"
+        "upgrade", help="Upgrade the Spark agent, one Spark at a time"
     )
     upgrade.set_defaults(outcome_context="mutation")
-    upgrade.add_argument("selector", nargs="?")
+    upgrade.add_argument("selector", nargs="?", metavar="SPARK")
     upgrade.add_argument("--all", action="store_true")
     upgrade.add_argument(
         "--strategy", choices=("one-at-a-time",), default="one-at-a-time"
     )
     upgrade.add_argument("--request-key", type=_uuid_argument)
-    upgrade.add_argument("--detach", action="store_true")
-    upgrade.add_argument("--yes", action="store_true")
+    upgrade.add_argument(
+        "--detach",
+        action="store_true",
+        help="Return once accepted instead of following",
+    )
+    upgrade.add_argument("--yes", action="store_true", help="Confirm without asking")
     _watch_controls(upgrade)
     _add_output(upgrade)
-    loginfo = fleet_actions.add_parser(
-        "loginfo", help="Read bounded Controller-collected logs"
-    )
-    _selector(loginfo, "selector", help="Exact Spark selector or friendly name")
+    loginfo = fleet_actions.add_parser("loginfo", help="Recent logs of one Spark")
+    _selector(loginfo, "spark", help="Exact Spark selector or friendly name")
     loginfo.add_argument("--since", default="15m")
     loginfo.add_argument(
         "--lines",
@@ -451,20 +498,24 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     loginfo.add_argument("--recipe")
     loginfo.add_argument("--source", choices=("client", "monitor", "runtime", "job"))
-    loginfo.add_argument("--follow", action="store_true")
+    loginfo.add_argument(
+        "--follow", action="store_true", help="Keep following until it finishes"
+    )
     _watch_controls(loginfo)
     _add_output(loginfo)
 
     fleet_progress = fleet_actions.add_parser(
-        "progress", help="Inspect or follow one fleet job"
+        "progress", help="Show or follow one fleet job"
     )
     fleet_progress.add_argument("job_id")
-    fleet_progress.add_argument("--follow", action="store_true")
+    fleet_progress.add_argument(
+        "--follow", action="store_true", help="Keep following until it finishes"
+    )
     _watch_controls(fleet_progress)
     _add_output(fleet_progress)
 
     activity = fleet_actions.add_parser(
-        "activity", help="List durable operation history across owners"
+        "activity", help="Recent operations and their state"
     )
     activity.add_argument("--limit", type=_activity_limit, default=20)
     activity.add_argument("--cursor", type=_activity_cursor)
@@ -474,16 +525,19 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(activity)
 
     resume = fleet_actions.add_parser(
-        "resume", help="Resume one job only when its owner advertises permission"
+        "resume", help="Resume a job that waits for an operator"
     )
     resume.set_defaults(outcome_context="mutation")
     resume.add_argument("job_id")
     resume.add_argument("--yes", action="store_true", required=True)
     _add_output(resume)
 
-    model = commands.add_parser("model", help="Browse and manage model cache")
-    model.add_argument("--watch", action="store_true")
-    _watch_controls(model)
+    model = commands.add_parser(
+        "model",
+        help="Model library and the NAS model cache",
+        description="Published models and the copies cached on the NAS.",
+        epilog="Without a command, lists cached models.",
+    )
     _add_output(model)
     model_actions = model.add_subparsers(dest="model_action", parser_class=type(model))
     model_library = model_actions.add_parser(
@@ -494,18 +548,22 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     model_detail = model_actions.add_parser(
         "detail", help="Show an exact model variant"
     )
-    _selector(model_detail, "selector", help="Exact model selector or friendly name")
-    model_detail.add_argument("--watch", action="store_true")
+    _selector(model_detail, "model", help="Exact model selector or friendly name")
+    model_detail.add_argument(
+        "--watch", action="store_true", help="Keep refreshing until it settles"
+    )
     _watch_controls(model_detail)
-    model_detail.add_argument("--technical", action="store_true")
+    model_detail.add_argument(
+        "--technical", action="store_true", help="Include the canonical definition"
+    )
     _add_output(model_detail)
     model_download = model_actions.add_parser("download", help="Cache a model variant")
-    _selector(model_download, "selector", help="Exact model selector or friendly name")
+    _selector(model_download, "model", help="Exact model selector or friendly name")
     _action_flags(model_download, followable=True)
     model_remove = model_actions.add_parser(
         "remove", help="Review and remove Controller model cache assets"
     )
-    _selector(model_remove, "selector", help="Exact model selector or friendly name")
+    _selector(model_remove, "model", help="Exact model selector or friendly name")
     _action_flags(model_remove, destructive=True, followable=True)
     model_remove.add_argument(
         "--review",
@@ -523,9 +581,12 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Short reason retained with the durable cancellation request",
     )
 
-    recipe = commands.add_parser("recipe", help="Browse and manage runnable recipes")
-    recipe.add_argument("--watch", action="store_true")
-    _watch_controls(recipe)
+    recipe = commands.add_parser(
+        "recipe",
+        help="Runnable recipes, their cache, and their outputs",
+        description="Recipes say how to run a model on one or more Sparks.",
+        epilog="Without a command, lists cached recipes.",
+    )
     _add_output(recipe)
     recipe_actions = recipe.add_subparsers(
         dest="recipe_action", parser_class=type(recipe)
@@ -557,28 +618,30 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _add_output(recipe_library)
     recipe_detail = recipe_actions.add_parser("detail", help="Show an exact recipe")
-    _selector(recipe_detail, "selector", help="Exact recipe selector or friendly name")
-    recipe_detail.add_argument("--watch", action="store_true")
+    _selector(recipe_detail, "recipe", help="Exact recipe selector or friendly name")
+    recipe_detail.add_argument(
+        "--watch", action="store_true", help="Keep refreshing until it settles"
+    )
     _watch_controls(recipe_detail)
-    recipe_detail.add_argument("--technical", action="store_true")
+    recipe_detail.add_argument(
+        "--technical", action="store_true", help="Include the canonical definition"
+    )
     _add_output(recipe_detail)
     recipe_download = recipe_actions.add_parser(
         "download", help="Cache a recipe and missing model"
     )
-    _selector(
-        recipe_download, "selector", help="Exact recipe selector or friendly name"
-    )
+    _selector(recipe_download, "recipe", help="Exact recipe selector or friendly name")
     _action_flags(recipe_download, followable=True)
     recipe_update = recipe_actions.add_parser(
         "update", help="Refresh an exact recipe or all currently cached recipes"
     )
-    recipe_update.add_argument("selector", nargs="?")
+    recipe_update.add_argument("selector", nargs="?", metavar="RECIPE")
     recipe_update.add_argument("--all", action="store_true")
     _action_flags(recipe_update, followable=True)
     recipe_remove = recipe_actions.add_parser(
         "remove", help="Review and remove Controller recipe cache assets"
     )
-    _selector(recipe_remove, "selector", help="Exact recipe selector or friendly name")
+    _selector(recipe_remove, "recipe", help="Exact recipe selector or friendly name")
     _action_flags(recipe_remove, destructive=True, recipe_remove=True, followable=True)
     recipe_remove.add_argument(
         "--review",
@@ -595,9 +658,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     recipe_installation = recipe_actions.add_parser(
         "installation",
         help="Inspect and reconcile one installed recipe identity",
+        description="Repair an installed recipe that no longer matches its record.",
     )
     installation_actions = recipe_installation.add_subparsers(
-        dest="installation_action", required=True, parser_class=type(recipe)
+        dest="installation_action", parser_class=type(recipe)
     )
     installation_reconcile = installation_actions.add_parser(
         "reconcile",
@@ -627,11 +691,20 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
             "--request-key",
             help="Original request UUID; resolves once before following",
         )
-        progress.add_argument("--follow", action="store_true")
+        progress.add_argument(
+            "--follow", action="store_true", help="Keep following until it finishes"
+        )
         _watch_controls(progress)
         _add_output(progress)
 
-    profile = commands.add_parser("profile", help="Edit and load a whole-fleet profile")
+    profile = commands.add_parser(
+        "profile",
+        help="Whole-fleet profiles: edit, load, and endpoints",
+        description="A profile is the saved set of recipes the whole fleet "
+        "should run. Commands act on profile 1 unless you pass "
+        "vonkctl --profile N.",
+        epilog="Without a command, shows the selected profile.",
+    )
     _add_output(profile)
     profile_actions = profile.add_subparsers(
         dest="profile_action", parser_class=type(profile)
@@ -646,10 +719,14 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     profile_add = profile_actions.add_parser(
         "add", help="Assign a recipe to Sparks and autosave"
     )
-    profile_add.add_argument("recipe_selector")
-    profile_add.add_argument("--spark", action="append", required=True)
-    profile_add.add_argument("--as", dest="assignment_name")
-    profile_add.add_argument("--model-variant")
+    profile_add.add_argument("recipe_selector", metavar="RECIPE")
+    profile_add.add_argument(
+        "--spark", action="append", required=True, help="Spark to assign"
+    )
+    profile_add.add_argument(
+        "--as", dest="assignment_name", metavar="NAME", help="Name in the profile"
+    )
+    profile_add.add_argument("--model-variant", help="Exact model variant to serve")
     profile_add.add_argument(
         "--state", dest="desired_state", choices=("installed", "running")
     )
@@ -691,10 +768,18 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "load", help="Apply the entire profile to the fleet"
     )
     profile_load.set_defaults(outcome_context="mutation", requires_profile=True)
-    profile_load.add_argument("--dry-run", action="store_true")
-    profile_load.add_argument("--yes", action="store_true")
+    profile_load.add_argument(
+        "--dry-run", action="store_true", help="Review the plan without applying it"
+    )
+    profile_load.add_argument(
+        "--yes", action="store_true", help="Confirm without asking"
+    )
     profile_load.add_argument("--request-key")
-    profile_load.add_argument("--detach", action="store_true")
+    profile_load.add_argument(
+        "--detach",
+        action="store_true",
+        help="Return once accepted instead of following",
+    )
     _watch_controls(profile_load)
     _add_output(profile_load)
     profile_cancel = profile_actions.add_parser(
@@ -702,15 +787,23 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     profile_cancel.set_defaults(outcome_context="mutation", requires_profile=True)
     profile_cancel.add_argument("application_id", type=_uuid_selector)
-    profile_cancel.add_argument("--yes", action="store_true")
+    profile_cancel.add_argument(
+        "--yes", action="store_true", help="Confirm without asking"
+    )
     profile_cancel.add_argument("--request-key", type=_uuid_selector)
-    profile_cancel.add_argument("--detach", action="store_true")
+    profile_cancel.add_argument(
+        "--detach",
+        action="store_true",
+        help="Return once accepted instead of following",
+    )
     _watch_controls(profile_cancel)
     _add_output(profile_cancel)
     profile_progress = profile_actions.add_parser(
         "progress", help="Show the latest profile load"
     )
-    profile_progress.add_argument("--follow", action="store_true")
+    profile_progress.add_argument(
+        "--follow", action="store_true", help="Keep following until it finishes"
+    )
     profile_progress_selectors = profile_progress.add_mutually_exclusive_group()
     profile_progress_selectors.add_argument("--application", type=_uuid_selector)
     profile_progress_selectors.add_argument("--request-key", type=_uuid_selector)
@@ -726,14 +819,28 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(profile_endpoint)
 
     run = commands.add_parser(
-        "run", help="Prepare a catalog recipe, review it, and start it"
+        "run",
+        help="Prepare a recipe, review it, and start it",
+        description="Prepare a recipe, review the plan, and start it on the fleet.",
     )
     run.set_defaults(outcome_context="mutation")
-    run.add_argument("selector", help="Recipe name or exact model/recipe selector")
-    run.add_argument("--spark", action="append", default=[])
-    run.add_argument("--as", dest="assignment_name")
-    run.add_argument("--yes", action="store_true")
-    run.add_argument("--request-key")
+    run.add_argument(
+        "selector", metavar="RECIPE", help="Recipe name or exact model/recipe selector"
+    )
+    run.add_argument(
+        "--spark",
+        action="append",
+        default=[],
+        help="Spark to run on; repeatable (default: every Spark)",
+    )
+    run.add_argument(
+        "--as", dest="assignment_name", metavar="NAME", help="Name in the profile"
+    )
+    run.add_argument("--yes", action="store_true", help="Confirm without asking")
+    run.add_argument(
+        "--request-key",
+        help="Original request UUID; supply and retain it to reconnect after process death",
+    )
     _watch_controls(run)
     _add_output(run)
 
@@ -2010,28 +2117,12 @@ def _overview(
     client: ControllerClient, noun: str, args: argparse.Namespace
 ) -> dict[str, object]:
     if noun == "fleet":
-        return client.request(
-            "GET",
-            "/api/fleet",
-            query=_fleet_query(args),
-        )
+        return client.request("GET", "/api/fleet")
     if noun == "model":
         return client.request("GET", "/api/model")
     if noun == "recipe":
         return client.request("GET", "/api/recipe")
     return client.request("GET", f"/api/profile/{_profile_number(args)}")
-
-
-def _fleet_query(args: argparse.Namespace) -> Mapping[str, object] | None:
-    return (
-        _query(
-            search=args.search,
-            health=args.health,
-            warnings_only=args.warnings_only,
-            sort=args.sort,
-        )
-        or None
-    )
 
 
 def _fleet_selector(args: argparse.Namespace) -> str:
@@ -2068,7 +2159,7 @@ def _deliver_enrollment(
     payload: dict[str, object] = {"request_key": identity}
     target: dict[str, object]
     if args.fleet_action == "enroll":
-        payload.update(name=args.name, ttl_seconds=args.ttl_seconds)
+        payload.update(name=args.name, ttl_seconds=_ENROLLMENT_TTL_SECONDS)
         validate_control_document("FleetEnrollRequest", payload)
         path = "/api/fleet/enroll"
         target = {"display_name": args.name}
@@ -2277,13 +2368,7 @@ def _fleet(
             )
         return accepted
     if action is None:
-        return _watch_resource(
-            client,
-            "/api/fleet",
-            _overview(client, "fleet", args),
-            args,
-            query=_fleet_query(args),
-        )
+        return _overview(client, "fleet", args)
     if action == "node-profile":
         deadline = time.monotonic() + args.timeout_seconds
         node_id = _resolve_spark_selectors(client, [args.selector], deadline=deadline)[
@@ -2505,9 +2590,7 @@ def _model(
         result = _submit_model_cancellation(client, args, factory)
         return _follow_mutation(client, "model", result, args)
     if action is None:
-        return _watch_resource(
-            client, "/api/model", _overview(client, "model", args), args
-        )
+        return _overview(client, "model", args)
     if action == "library":
         return client.request(
             "GET",
@@ -2897,9 +2980,7 @@ def _recipe(
             poll=_poll_path,
         )
     if action is None:
-        return _watch_resource(
-            client, "/api/recipe", _overview(client, "recipe", args), args
-        )
+        return _overview(client, "recipe", args)
     if action == "library":
         return client.request(
             "GET",
