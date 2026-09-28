@@ -217,7 +217,7 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
                 & 0o777,
             0o700
         );
-        for directory in ["backups", "backups-offhost"] {
+        for directory in ["backups", "backups-offhost", "secrets/gateway"] {
             assert_eq!(
                 std::fs::metadata(result.root.join(directory))
                     .expect("backup metadata")
@@ -578,6 +578,18 @@ fn upgrade_adds_private_backup_directories_to_an_existing_bundle() {
         );
     }
 
+    // The gateway mount is created if missing, keeps the mode the Controller
+    // gave it, and its Controller-owned contents are not validated as secrets.
+    let gateway = installed.root.join("secrets/gateway");
+    assert!(gateway.is_dir());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&gateway, std::fs::Permissions::from_mode(0o770))
+            .expect("controller mode");
+    }
+    std::fs::create_dir(gateway.join("nested")).expect("controller-owned entry");
+
     // A bundle that already has both directories upgrades again.
     prepare(
         &compose_payload("services: {}\n"),
@@ -586,6 +598,18 @@ fn upgrade_adds_private_backup_directories_to_an_existing_bundle() {
         &FixedSecretGenerator,
     )
     .expect("repeat upgrade accepts the backup directories");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&gateway)
+                .expect("gateway")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o770
+        );
+    }
 }
 
 fn write_existing_bundle(root: &Path) {

@@ -258,7 +258,7 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         (10001, 10001),
         (10001, 10001),
         (10002, 10001),
-        (10001, 10001),
+        (-1, 10001),
     ]
     expected_paths = (
         roots["state"],
@@ -277,7 +277,7 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
         "routes": 0o750,
         "routes/generations": 0o750,
         "supervisor": 0o750,
-        "gateway": 0o700,
+        "gateway": 0o770,
     }
 
 
