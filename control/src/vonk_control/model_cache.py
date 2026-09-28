@@ -68,6 +68,7 @@ from .cache_removal_review import (
     CacheRemovalFinding,
     CacheRemovalReview,
     CacheRemovalReviewContent,
+    refusing_removal_blockers,
     seal_cache_removal_review,
 )
 from .cached_file_verification import verified_files
@@ -1960,11 +1961,7 @@ class ModelCacheService:
                 )
 
         reviewed = self.review_model_removal(normalized_selector)
-        blockers = [
-            item
-            for item in reviewed.blockers
-            if item.code != "model_cache.removal_referenced"
-        ]
+        blockers = refusing_removal_blockers(reviewed)
         if blockers:
             first = blockers[0]
             raise ModelCacheConflict(

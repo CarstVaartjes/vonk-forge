@@ -65,6 +65,7 @@ from .cache_removal_review import (
     CacheRemovalFinding,
     CacheRemovalReview,
     CacheRemovalReviewContent,
+    refusing_removal_blockers,
     seal_cache_removal_review,
 )
 from .catalog_queries import active_head_revision
@@ -164,19 +165,6 @@ _TERMINAL_FAILURE_CODES = frozenset(
     }
 )
 _MAX_RETRY_SECONDS = 900
-
-
-_IN_USE_REMOVAL_CODES = frozenset(
-    {"recipe_image.removal_referenced", "model_cache.removal_referenced"}
-)
-
-
-def _refusing_removal_blockers(
-    blockers: Sequence[CacheRemovalBlocker],
-) -> list[CacheRemovalBlocker]:
-    """In-use assets do not refuse a removal: the accepted removal waits."""
-
-    return [item for item in blockers if item.code not in _IN_USE_REMOVAL_CODES]
 
 
 def _removal_retry_is_due(
@@ -1676,7 +1664,7 @@ class RecipeImageAvailabilityService:
                 )
 
         observed_review = self.review_removal(selector, with_model=with_model)
-        observed_blockers = _refusing_removal_blockers(observed_review.blockers)
+        observed_blockers = refusing_removal_blockers(observed_review)
         if observed_blockers:
             first_blocker = observed_blockers[0]
             raise RecipeImageAvailabilityError(
@@ -1776,7 +1764,7 @@ class RecipeImageAvailabilityService:
                     assets=current_assets,
                     now=now,
                 )
-                current_blockers = _refusing_removal_blockers(current_review.blockers)
+                current_blockers = refusing_removal_blockers(current_review)
                 if current_blockers:
                     first_blocker = current_blockers[0]
                     raise RecipeImageAvailabilityError(
