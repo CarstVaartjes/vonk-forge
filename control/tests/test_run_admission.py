@@ -40,7 +40,6 @@ def setup(
     free_memory=300,
     port_reserved=False,
     system_reserve=0,
-    memory_kind="unified",
     memory_pool: MemoryPool = "shared",
     denied_jurisdictions=(),
     github_release_source=False,
@@ -79,10 +78,7 @@ def setup(
             "notice": "Use is prohibited in the configured territories.",
         }
     model = ModelDefinition.model_validate(model_document)
-    model_document = model.model_dump(mode="json")
-    document["models"][0]["model"]["content_sha256"] = document_sha256(
-        model.model_dump(mode="json")
-    )
+    document["models"][0]["model"]["content_sha256"] = document_sha256(model_document)
     memory = document["topology"]["roles"][0]["resources"]["memory"]
     memory.update({"peak_bytes": 225, "reserve_bytes": system_reserve})
     with sessions.begin() as session:
@@ -114,16 +110,15 @@ def setup(
                 schema_version=2,
                 state="active",
                 document=model_document,
-                content_digest=document_sha256(model.model_dump(mode="json")),
+                content_digest=document_sha256(model_document),
                 artifact_key="a" * 64,
                 projected={},
                 created_by="admin",
                 created_at=now,
             )
         )
-        recipe_document = RecipeDefinition.model_validate(document).model_dump(
-            mode="json"
-        )
+        RecipeDefinition.model_validate(document)
+        recipe_document = document
         recipe = CatalogDocument(
             kind="recipe",
             publisher=recipe_document["identity"]["publisher"],

@@ -97,8 +97,7 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
             ).read_text(encoding="utf-8")
         )
     )
-    plan["topology"].update(name="dual", mode="distributed", node_count=2, backend="mp")
-    plan["security"]["devices"] = ["nvidia.com/gpu=all"]
+    plan["topology"].update(name="dual", node_count=2)
     compiled = _bind_compiled_execution_plan(
         plan,
         placement=RecipeStartPlacement(
@@ -794,8 +793,6 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
     build_id = "00000000-0000-4000-8000-000000000009"
     revision_id = "00000000-0000-4000-8000-000000000001"
     payload = {
-        "schema_version": 1,
-        "kind": "recipe.build.v1",
         "adapter": _BUILD_ADAPTER,
         "build_id": build_id,
         "recipe_revision_id": revision_id,
@@ -807,9 +804,7 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         "capabilities": [],
         "build_input_sha256": "c" * 64,
         "dockerfile": "Dockerfile",
-        "platform": "linux/arm64",
-        "arguments": [],
-        "network": {"mode": "none", "hosts": []},
+        "network": {"hosts": []},
         "options": {
             "additional_contexts": [],
             "annotations": [],
@@ -834,7 +829,6 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
             "unset_environment": [],
             "unset_labels": [],
         },
-        "target": None,
         "limits": {
             "cpu_cores": 8,
             "memory_bytes": 1024,
@@ -842,10 +836,6 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
             "processes": 64,
             "timeout_seconds": 600,
             "output_bytes": 2048,
-            "gpu": 0,
-            "privileged": False,
-            "host_mounts": False,
-            "container_socket": False,
         },
     }
     parent_job = parent(sessions, clock)
@@ -914,7 +904,6 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
             "build_digest": "sha256:" + "e" * 64,
             "binary_digest": "e" * 64,
             "semantic_version": "1.2.3",
-            "observation_receipt_public_key": "d" * 64,
         },
     )
 
@@ -939,8 +928,6 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
     build_id = "00000000-0000-4000-8000-000000000019"
     revision_id = "00000000-0000-4000-8000-000000000011"
     payload = {
-        "schema_version": 1,
-        "kind": "recipe.build.v1",
         "adapter": _BUILD_ADAPTER,
         "build_id": build_id,
         "recipe_revision_id": revision_id,
@@ -952,9 +939,7 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
         "capabilities": [],
         "build_input_sha256": "c" * 64,
         "dockerfile": "Dockerfile",
-        "platform": "linux/arm64",
-        "arguments": [],
-        "network": {"mode": "none", "hosts": []},
+        "network": {"hosts": []},
         "options": {
             "additional_contexts": [],
             "annotations": [],
@@ -979,7 +964,6 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
             "unset_environment": [],
             "unset_labels": [],
         },
-        "target": None,
         "limits": {
             "cpu_cores": 8,
             "memory_bytes": 1024,
@@ -987,10 +971,6 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
             "processes": 64,
             "timeout_seconds": 600,
             "output_bytes": 2048,
-            "gpu": 0,
-            "privileged": False,
-            "host_mounts": False,
-            "container_socket": False,
         },
     }
     with sessions.begin() as session:
