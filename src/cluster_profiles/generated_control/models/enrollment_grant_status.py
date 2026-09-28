@@ -12,9 +12,7 @@ from ..models.enrollment_grant_status_purpose import check_enrollment_grant_stat
 from ..models.enrollment_grant_status_purpose import EnrollmentGrantStatusPurpose
 from ..models.enrollment_grant_status_state import check_enrollment_grant_status_state
 from ..models.enrollment_grant_status_state import EnrollmentGrantStatusState
-from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 import datetime
 
 
@@ -38,7 +36,6 @@ class EnrollmentGrantStatus:
             purpose (EnrollmentGrantStatusPurpose):
             revoked_at (datetime.datetime | None):
             state (EnrollmentGrantStatusState):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     consumed_at: datetime.datetime | None
@@ -49,7 +46,6 @@ class EnrollmentGrantStatus:
     purpose: EnrollmentGrantStatusPurpose
     revoked_at: datetime.datetime | None
     state: EnrollmentGrantStatusState
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -82,8 +78,6 @@ class EnrollmentGrantStatus:
 
         state: str = self.state
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -97,8 +91,6 @@ class EnrollmentGrantStatus:
             "revoked_at": revoked_at,
             "state": state,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -176,10 +168,6 @@ class EnrollmentGrantStatus:
 
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         enrollment_grant_status = cls(
             consumed_at=consumed_at,
             display_name=display_name,
@@ -189,7 +177,6 @@ class EnrollmentGrantStatus:
             purpose=purpose,
             revoked_at=revoked_at,
             state=state,
-            schema_version=schema_version,
         )
 
         return enrollment_grant_status

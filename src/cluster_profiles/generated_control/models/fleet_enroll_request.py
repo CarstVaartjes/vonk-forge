@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 
 
 
@@ -25,12 +24,10 @@ class FleetEnrollRequest:
         Attributes:
             name (str):
             request_key (str):
-            ttl_seconds (int | Unset):  Default: 900.
      """
 
     name: str
     request_key: str
-    ttl_seconds: int | Unset = 900
 
 
 
@@ -41,8 +38,6 @@ class FleetEnrollRequest:
 
         request_key = self.request_key
 
-        ttl_seconds = self.ttl_seconds
-
 
         field_dict: dict[str, Any] = {}
 
@@ -50,8 +45,6 @@ class FleetEnrollRequest:
             "name": name,
             "request_key": request_key,
         })
-        if ttl_seconds is not UNSET:
-            field_dict["ttl_seconds"] = ttl_seconds
 
         return field_dict
 
@@ -64,12 +57,9 @@ class FleetEnrollRequest:
 
         request_key = d.pop("request_key")
 
-        ttl_seconds = d.pop("ttl_seconds", UNSET)
-
         fleet_enroll_request = cls(
             name=name,
             request_key=request_key,
-            ttl_seconds=ttl_seconds,
         )
 
         return fleet_enroll_request

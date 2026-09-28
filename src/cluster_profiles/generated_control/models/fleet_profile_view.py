@@ -12,7 +12,6 @@ from ..models.fleet_profile_view_installation_policy import check_fleet_profile_
 from ..models.fleet_profile_view_installation_policy import FleetProfileViewInstallationPolicy
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -52,7 +51,6 @@ class FleetProfileView:
             fleet (list[FleetProfileViewFleetItem] | Unset):
             loaded_revision (int | None | Unset):
             next_actions (list[str] | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
             status (str | Unset):  Default: 'draft'.
             warnings (list[str] | Unset):
      """
@@ -75,7 +73,6 @@ class FleetProfileView:
     fleet: list[FleetProfileViewFleetItem] | Unset = UNSET
     loaded_revision: int | None | Unset = UNSET
     next_actions: list[str] | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
     status: str | Unset = 'draft'
     warnings: list[str] | Unset = UNSET
 
@@ -147,8 +144,6 @@ class FleetProfileView:
 
 
 
-        schema_version = self.schema_version
-
         status = self.status
 
         warnings: list[str] | Unset = UNSET
@@ -184,8 +179,6 @@ class FleetProfileView:
             field_dict["loaded_revision"] = loaded_revision
         if next_actions is not UNSET:
             field_dict["next_actions"] = next_actions
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
         if status is not UNSET:
             field_dict["status"] = status
         if warnings is not UNSET:
@@ -289,10 +282,6 @@ class FleetProfileView:
         next_actions = cast(list[str], d.pop("next_actions", UNSET))
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         status = d.pop("status", UNSET)
 
         warnings = cast(list[str], d.pop("warnings", UNSET))
@@ -317,7 +306,6 @@ class FleetProfileView:
             fleet=fleet,
             loaded_revision=loaded_revision,
             next_actions=next_actions,
-            schema_version=schema_version,
             status=status,
             warnings=warnings,
         )

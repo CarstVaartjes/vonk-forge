@@ -8,9 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
-from typing import cast
-from typing import Literal, cast
 
 
 
@@ -27,14 +24,10 @@ class RecipeOperatorRequest:
         Attributes:
             request_key (str):
             with_model (bool):
-            review_digest (None | str | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     request_key: str
     with_model: bool
-    review_digest: None | str | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -45,14 +38,6 @@ class RecipeOperatorRequest:
 
         with_model = self.with_model
 
-        review_digest: None | str | Unset
-        if isinstance(self.review_digest, Unset):
-            review_digest = UNSET
-        else:
-            review_digest = self.review_digest
-
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -60,10 +45,6 @@ class RecipeOperatorRequest:
             "request_key": request_key,
             "with_model": with_model,
         })
-        if review_digest is not UNSET:
-            field_dict["review_digest"] = review_digest
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -76,25 +57,9 @@ class RecipeOperatorRequest:
 
         with_model = d.pop("with_model")
 
-        def _parse_review_digest(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        review_digest = _parse_review_digest(d.pop("review_digest", UNSET))
-
-
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         recipe_operator_request = cls(
             request_key=request_key,
             with_model=with_model,
-            review_digest=review_digest,
-            schema_version=schema_version,
         )
 
         return recipe_operator_request

@@ -53,7 +53,6 @@ class RecipeImageAvailabilityResponse:
             children (list[RecipeImageAvailabilityChild] | Unset):
             failure (AvailabilityOperationFailure | None | Unset):
             result (None | RecipeImageAvailabilityResult | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     attempt: int
@@ -72,7 +71,6 @@ class RecipeImageAvailabilityResponse:
     children: list[RecipeImageAvailabilityChild] | Unset = UNSET
     failure: AvailabilityOperationFailure | None | Unset = UNSET
     result: None | RecipeImageAvailabilityResult | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -159,8 +157,6 @@ class RecipeImageAvailabilityResponse:
         else:
             result = self.result
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -187,8 +183,6 @@ class RecipeImageAvailabilityResponse:
             field_dict["failure"] = failure
         if result is not UNSET:
             field_dict["result"] = result
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -350,10 +344,6 @@ class RecipeImageAvailabilityResponse:
         result = _parse_result(d.pop("result", UNSET))
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         recipe_image_availability_response = cls(
             attempt=attempt,
             created_at=created_at,
@@ -371,7 +361,6 @@ class RecipeImageAvailabilityResponse:
             children=children,
             failure=failure,
             result=result,
-            schema_version=schema_version,
         )
 
         return recipe_image_availability_response

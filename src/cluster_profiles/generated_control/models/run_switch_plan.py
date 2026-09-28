@@ -21,7 +21,6 @@ import datetime
 
 if TYPE_CHECKING:
   from ..models.artifact_storage_impact import ArtifactStorageImpact
-  from ..models.capability_evidence import CapabilityEvidence
   from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
   from ..models.effective_settings_selection import EffectiveSettingsSelection
   from ..models.freshness_evidence import FreshnessEvidence
@@ -65,12 +64,10 @@ class RunSwitchPlan:
             installation_state (None | str):
             invocation (InvocationMetadata): Context for audit and tracing which has no decision-making authority.
             mapping (MappingSelection | None):
-            model_capabilities (list[CapabilityEvidence]):
             model_content_sha256 (None | str):
             phases (list[RunSwitchPhase]):
             plan_digest (str):
             recipe_build_id (None | str):
-            recipe_capabilities (list[CapabilityEvidence]):
             recipe_content_sha256 (None | str):
             recipe_revision_id (None | str):
             reclaimed_bytes (int):
@@ -109,12 +106,10 @@ class RunSwitchPlan:
     installation_state: None | str
     invocation: InvocationMetadata
     mapping: MappingSelection | None
-    model_capabilities: list[CapabilityEvidence]
     model_content_sha256: None | str
     phases: list[RunSwitchPhase]
     plan_digest: str
     recipe_build_id: None | str
-    recipe_capabilities: list[CapabilityEvidence]
     recipe_content_sha256: None | str
     recipe_revision_id: None | str
     reclaimed_bytes: int
@@ -143,7 +138,6 @@ class RunSwitchPlan:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.artifact_storage_impact import ArtifactStorageImpact # noqa: PLC0415
-        from ..models.capability_evidence import CapabilityEvidence # noqa: PLC0415
         from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck # noqa: PLC0415
         from ..models.effective_settings_selection import EffectiveSettingsSelection # noqa: PLC0415
         from ..models.freshness_evidence import FreshnessEvidence # noqa: PLC0415
@@ -211,13 +205,6 @@ class RunSwitchPlan:
         else:
             mapping = self.mapping
 
-        model_capabilities = []
-        for model_capabilities_item_data in self.model_capabilities:
-            model_capabilities_item = model_capabilities_item_data.to_dict()
-            model_capabilities.append(model_capabilities_item)
-
-
-
         model_content_sha256: None | str
         model_content_sha256 = self.model_content_sha256
 
@@ -232,13 +219,6 @@ class RunSwitchPlan:
 
         recipe_build_id: None | str
         recipe_build_id = self.recipe_build_id
-
-        recipe_capabilities = []
-        for recipe_capabilities_item_data in self.recipe_capabilities:
-            recipe_capabilities_item = recipe_capabilities_item_data.to_dict()
-            recipe_capabilities.append(recipe_capabilities_item)
-
-
 
         recipe_content_sha256: None | str
         recipe_content_sha256 = self.recipe_content_sha256
@@ -358,12 +338,10 @@ class RunSwitchPlan:
             "installation_state": installation_state,
             "invocation": invocation,
             "mapping": mapping,
-            "model_capabilities": model_capabilities,
             "model_content_sha256": model_content_sha256,
             "phases": phases,
             "plan_digest": plan_digest,
             "recipe_build_id": recipe_build_id,
-            "recipe_capabilities": recipe_capabilities,
             "recipe_content_sha256": recipe_content_sha256,
             "recipe_revision_id": recipe_revision_id,
             "reclaimed_bytes": reclaimed_bytes,
@@ -405,7 +383,6 @@ class RunSwitchPlan:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.artifact_storage_impact import ArtifactStorageImpact # noqa: PLC0415
-        from ..models.capability_evidence import CapabilityEvidence # noqa: PLC0415
         from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck # noqa: PLC0415
         from ..models.effective_settings_selection import EffectiveSettingsSelection # noqa: PLC0415
         from ..models.freshness_evidence import FreshnessEvidence # noqa: PLC0415
@@ -542,16 +519,6 @@ class RunSwitchPlan:
         mapping = _parse_mapping(d.pop("mapping"))
 
 
-        model_capabilities = []
-        _model_capabilities = d.pop("model_capabilities")
-        for model_capabilities_item_data in (_model_capabilities):
-            model_capabilities_item = CapabilityEvidence.from_dict(model_capabilities_item_data)
-
-
-
-            model_capabilities.append(model_capabilities_item)
-
-
         def _parse_model_content_sha256(data: object) -> None | str:
             if data is None:
                 return data
@@ -578,16 +545,6 @@ class RunSwitchPlan:
             return cast(None | str, data)
 
         recipe_build_id = _parse_recipe_build_id(d.pop("recipe_build_id"))
-
-
-        recipe_capabilities = []
-        _recipe_capabilities = d.pop("recipe_capabilities")
-        for recipe_capabilities_item_data in (_recipe_capabilities):
-            recipe_capabilities_item = CapabilityEvidence.from_dict(recipe_capabilities_item_data)
-
-
-
-            recipe_capabilities.append(recipe_capabilities_item)
 
 
         def _parse_recipe_content_sha256(data: object) -> None | str:
@@ -815,12 +772,10 @@ class RunSwitchPlan:
             installation_state=installation_state,
             invocation=invocation,
             mapping=mapping,
-            model_capabilities=model_capabilities,
             model_content_sha256=model_content_sha256,
             phases=phases,
             plan_digest=plan_digest,
             recipe_build_id=recipe_build_id,
-            recipe_capabilities=recipe_capabilities,
             recipe_content_sha256=recipe_content_sha256,
             recipe_revision_id=recipe_revision_id,
             reclaimed_bytes=reclaimed_bytes,

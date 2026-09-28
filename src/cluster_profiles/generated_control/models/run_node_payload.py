@@ -34,7 +34,6 @@ class RunNodePayload:
             run_id (str):
             state (str):
             observed_memory_bytes (int | None | Unset):
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     entity_id: str
@@ -46,7 +45,6 @@ class RunNodePayload:
     run_id: str
     state: str
     observed_memory_bytes: int | None | Unset = UNSET
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -75,8 +73,6 @@ class RunNodePayload:
         else:
             observed_memory_bytes = self.observed_memory_bytes
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -92,8 +88,6 @@ class RunNodePayload:
         })
         if observed_memory_bytes is not UNSET:
             field_dict["observed_memory_bytes"] = observed_memory_bytes
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -130,10 +124,6 @@ class RunNodePayload:
         observed_memory_bytes = _parse_observed_memory_bytes(d.pop("observed_memory_bytes", UNSET))
 
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         run_node_payload = cls(
             entity_id=entity_id,
             entity_kind=entity_kind,
@@ -144,7 +134,6 @@ class RunNodePayload:
             run_id=run_id,
             state=state,
             observed_memory_bytes=observed_memory_bytes,
-            schema_version=schema_version,
         )
 
         return run_node_payload

@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -44,7 +43,6 @@ class LibraryModelProjection:
             variant (str):
             version (str):
             alignment (list[str] | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     document: ModelDefinition
@@ -59,7 +57,6 @@ class LibraryModelProjection:
     variant: str
     version: str
     alignment: list[str] | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -100,8 +97,6 @@ class LibraryModelProjection:
 
 
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -120,8 +115,6 @@ class LibraryModelProjection:
         })
         if alignment is not UNSET:
             field_dict["alignment"] = alignment
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -175,10 +168,6 @@ class LibraryModelProjection:
         alignment = cast(list[str], d.pop("alignment", UNSET))
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         library_model_projection = cls(
             document=document,
             family=family,
@@ -192,7 +181,6 @@ class LibraryModelProjection:
             variant=variant,
             version=version,
             alignment=alignment,
-            schema_version=schema_version,
         )
 
         return library_model_projection

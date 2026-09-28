@@ -14,7 +14,6 @@ from ..models.managed_catalog_sync_response_trigger import check_managed_catalog
 from ..models.managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
@@ -54,7 +53,6 @@ class ManagedCatalogSyncResponse:
             commit (None | str | Unset):
             expected_commit (None | str | Unset):
             last_error (ManagedCatalogSyncFailure | None | Unset):
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     completed_at: None | str
@@ -77,7 +75,6 @@ class ManagedCatalogSyncResponse:
     commit: None | str | Unset = UNSET
     expected_commit: None | str | Unset = UNSET
     last_error: ManagedCatalogSyncFailure | None | Unset = UNSET
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -158,8 +155,6 @@ class ManagedCatalogSyncResponse:
         else:
             last_error = self.last_error
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -188,8 +183,6 @@ class ManagedCatalogSyncResponse:
             field_dict["expected_commit"] = expected_commit
         if last_error is not UNSET:
             field_dict["last_error"] = last_error
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -312,10 +305,6 @@ class ManagedCatalogSyncResponse:
         last_error = _parse_last_error(d.pop("last_error", UNSET))
 
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         managed_catalog_sync_response = cls(
             completed_at=completed_at,
             created_at=created_at,
@@ -337,7 +326,6 @@ class ManagedCatalogSyncResponse:
             commit=commit,
             expected_commit=expected_commit,
             last_error=last_error,
-            schema_version=schema_version,
         )
 
         return managed_catalog_sync_response

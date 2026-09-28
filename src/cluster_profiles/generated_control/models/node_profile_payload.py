@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 
 
@@ -28,13 +27,11 @@ class NodeProfilePayload:
             node_id (str):
             display_name_changed (bool | None | Unset):
             profile_changed (bool | None | Unset):
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     node_id: str
     display_name_changed: bool | None | Unset = UNSET
     profile_changed: bool | None | Unset = UNSET
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -55,8 +52,6 @@ class NodeProfilePayload:
         else:
             profile_changed = self.profile_changed
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -67,8 +62,6 @@ class NodeProfilePayload:
             field_dict["display_name_changed"] = display_name_changed
         if profile_changed is not UNSET:
             field_dict["profile_changed"] = profile_changed
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -99,15 +92,10 @@ class NodeProfilePayload:
         profile_changed = _parse_profile_changed(d.pop("profile_changed", UNSET))
 
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         node_profile_payload = cls(
             node_id=node_id,
             display_name_changed=display_name_changed,
             profile_changed=profile_changed,
-            schema_version=schema_version,
         )
 
         return node_profile_payload

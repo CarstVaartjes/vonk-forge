@@ -23,11 +23,9 @@ class GatewayKeyRevoked:
     """
         Attributes:
             name (str):
-            revoked (bool):
      """
 
     name: str
-    revoked: bool
 
 
 
@@ -36,14 +34,11 @@ class GatewayKeyRevoked:
     def to_dict(self) -> dict[str, Any]:
         name = self.name
 
-        revoked = self.revoked
-
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
             "name": name,
-            "revoked": revoked,
         })
 
         return field_dict
@@ -55,11 +50,8 @@ class GatewayKeyRevoked:
         d = dict(src_dict)
         name = d.pop("name")
 
-        revoked = d.pop("revoked")
-
         gateway_key_revoked = cls(
             name=name,
-            revoked=revoked,
         )
 
         return gateway_key_revoked

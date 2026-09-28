@@ -32,10 +32,6 @@ class EvidenceContext:
             operation_id (str):
             source (EvidenceContextSource):
             updated_at (str):
-            authority_revision (None | str | Unset):
-            omitted_node_count (int | Unset):  Default: 0.
-            payload_digest (None | str | Unset):
-            plan_digest (None | str | Unset):
             rank (int | None | Unset):
      """
 
@@ -45,10 +41,6 @@ class EvidenceContext:
     operation_id: str
     source: EvidenceContextSource
     updated_at: str
-    authority_revision: None | str | Unset = UNSET
-    omitted_node_count: int | Unset = 0
-    payload_digest: None | str | Unset = UNSET
-    plan_digest: None | str | Unset = UNSET
     rank: int | None | Unset = UNSET
 
 
@@ -70,26 +62,6 @@ class EvidenceContext:
 
         updated_at = self.updated_at
 
-        authority_revision: None | str | Unset
-        if isinstance(self.authority_revision, Unset):
-            authority_revision = UNSET
-        else:
-            authority_revision = self.authority_revision
-
-        omitted_node_count = self.omitted_node_count
-
-        payload_digest: None | str | Unset
-        if isinstance(self.payload_digest, Unset):
-            payload_digest = UNSET
-        else:
-            payload_digest = self.payload_digest
-
-        plan_digest: None | str | Unset
-        if isinstance(self.plan_digest, Unset):
-            plan_digest = UNSET
-        else:
-            plan_digest = self.plan_digest
-
         rank: int | None | Unset
         if isinstance(self.rank, Unset):
             rank = UNSET
@@ -107,14 +79,6 @@ class EvidenceContext:
             "source": source,
             "updated_at": updated_at,
         })
-        if authority_revision is not UNSET:
-            field_dict["authority_revision"] = authority_revision
-        if omitted_node_count is not UNSET:
-            field_dict["omitted_node_count"] = omitted_node_count
-        if payload_digest is not UNSET:
-            field_dict["payload_digest"] = payload_digest
-        if plan_digest is not UNSET:
-            field_dict["plan_digest"] = plan_digest
         if rank is not UNSET:
             field_dict["rank"] = rank
 
@@ -141,38 +105,6 @@ class EvidenceContext:
 
         updated_at = d.pop("updated_at")
 
-        def _parse_authority_revision(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        authority_revision = _parse_authority_revision(d.pop("authority_revision", UNSET))
-
-
-        omitted_node_count = d.pop("omitted_node_count", UNSET)
-
-        def _parse_payload_digest(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        payload_digest = _parse_payload_digest(d.pop("payload_digest", UNSET))
-
-
-        def _parse_plan_digest(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        plan_digest = _parse_plan_digest(d.pop("plan_digest", UNSET))
-
-
         def _parse_rank(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -190,10 +122,6 @@ class EvidenceContext:
             operation_id=operation_id,
             source=source,
             updated_at=updated_at,
-            authority_revision=authority_revision,
-            omitted_node_count=omitted_node_count,
-            payload_digest=payload_digest,
-            plan_digest=plan_digest,
             rank=rank,
         )
 

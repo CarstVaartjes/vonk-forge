@@ -8,9 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_definition import FleetProfileDefinition
@@ -31,14 +29,12 @@ class FleetProfileDefinitionView:
             id (None | str):
             number (int):
             revision (int):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     definition: FleetProfileDefinition
     id: None | str
     number: int
     revision: int
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -55,8 +51,6 @@ class FleetProfileDefinitionView:
 
         revision = self.revision
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -66,8 +60,6 @@ class FleetProfileDefinitionView:
             "number": number,
             "revision": revision,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -94,16 +86,11 @@ class FleetProfileDefinitionView:
 
         revision = d.pop("revision")
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         fleet_profile_definition_view = cls(
             definition=definition,
             id=id,
             number=number,
             revision=revision,
-            schema_version=schema_version,
         )
 
         return fleet_profile_definition_view

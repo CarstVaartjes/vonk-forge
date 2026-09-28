@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -41,7 +40,6 @@ class RecipeLibraryResponse:
                 This is a typed echo rather than a free-form map so the request and the
                 response describe the same vocabulary. Every field is optional, so a page
                 that applied no filter stays valid without inventing values.
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     facets: LibraryFacetValues
@@ -50,7 +48,6 @@ class RecipeLibraryResponse:
     next_cursor: None | str
     recipes: list[LibraryRecipeProjection]
     filters: LibraryFilterValues | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -81,8 +78,6 @@ class RecipeLibraryResponse:
         if not isinstance(self.filters, Unset):
             filters = self.filters.to_dict()
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -95,8 +90,6 @@ class RecipeLibraryResponse:
         })
         if filters is not UNSET:
             field_dict["filters"] = filters
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -152,10 +145,6 @@ class RecipeLibraryResponse:
 
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         recipe_library_response = cls(
             facets=facets,
             freshness_policy=freshness_policy,
@@ -163,7 +152,6 @@ class RecipeLibraryResponse:
             next_cursor=next_cursor,
             recipes=recipes,
             filters=filters,
-            schema_version=schema_version,
         )
 
         return recipe_library_response

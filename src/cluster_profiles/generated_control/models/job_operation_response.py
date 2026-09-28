@@ -15,7 +15,6 @@ if TYPE_CHECKING:
   from ..models.agent_failure_result import AgentFailureResult
   from ..models.availability_operation_failure import AvailabilityOperationFailure
   from ..models.operation_evidence_download import OperationEvidenceDownload
-  from ..models.operation_evidence_provenance import OperationEvidenceProvenance
   from ..models.operation_failure_evidence import OperationFailureEvidence
   from ..models.operation_progress import OperationProgress
   from ..models.operation_recovery import OperationRecovery
@@ -40,7 +39,6 @@ class JobOperationResponse:
             evidence_download (None | OperationEvidenceDownload | Unset):
             failure (AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset):
             progress (None | OperationProgress | Unset):
-            provenance (None | OperationEvidenceProvenance | Unset):
             recovery (None | OperationRecovery | Unset):
             updated_at (None | str | Unset):
      """
@@ -53,7 +51,6 @@ class JobOperationResponse:
     evidence_download: None | OperationEvidenceDownload | Unset = UNSET
     failure: AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset = UNSET
     progress: None | OperationProgress | Unset = UNSET
-    provenance: None | OperationEvidenceProvenance | Unset = UNSET
     recovery: None | OperationRecovery | Unset = UNSET
     updated_at: None | str | Unset = UNSET
 
@@ -65,7 +62,6 @@ class JobOperationResponse:
         from ..models.agent_failure_result import AgentFailureResult # noqa: PLC0415
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
         from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
-        from ..models.operation_evidence_provenance import OperationEvidenceProvenance # noqa: PLC0415
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
         from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
@@ -107,14 +103,6 @@ class JobOperationResponse:
         else:
             progress = self.progress
 
-        provenance: dict[str, Any] | None | Unset
-        if isinstance(self.provenance, Unset):
-            provenance = UNSET
-        elif isinstance(self.provenance, OperationEvidenceProvenance):
-            provenance = self.provenance.to_dict()
-        else:
-            provenance = self.provenance
-
         recovery: dict[str, Any] | None | Unset
         if isinstance(self.recovery, Unset):
             recovery = UNSET
@@ -145,8 +133,6 @@ class JobOperationResponse:
             field_dict["failure"] = failure
         if progress is not UNSET:
             field_dict["progress"] = progress
-        if provenance is not UNSET:
-            field_dict["provenance"] = provenance
         if recovery is not UNSET:
             field_dict["recovery"] = recovery
         if updated_at is not UNSET:
@@ -161,7 +147,6 @@ class JobOperationResponse:
         from ..models.agent_failure_result import AgentFailureResult # noqa: PLC0415
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
         from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
-        from ..models.operation_evidence_provenance import OperationEvidenceProvenance # noqa: PLC0415
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
         from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
@@ -256,26 +241,6 @@ class JobOperationResponse:
         progress = _parse_progress(d.pop("progress", UNSET))
 
 
-        def _parse_provenance(data: object) -> None | OperationEvidenceProvenance | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                provenance_type_0 = OperationEvidenceProvenance.from_dict(data)
-
-
-
-                return provenance_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(None | OperationEvidenceProvenance | Unset, data)
-
-        provenance = _parse_provenance(d.pop("provenance", UNSET))
-
-
         def _parse_recovery(data: object) -> None | OperationRecovery | Unset:
             if data is None:
                 return data
@@ -315,7 +280,6 @@ class JobOperationResponse:
             evidence_download=evidence_download,
             failure=failure,
             progress=progress,
-            provenance=provenance,
             recovery=recovery,
             updated_at=updated_at,
         )

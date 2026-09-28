@@ -10,14 +10,12 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.agent_failure_result import AgentFailureResult
   from ..models.availability_operation_failure import AvailabilityOperationFailure
   from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
   from ..models.operation_evidence_download import OperationEvidenceDownload
-  from ..models.operation_evidence_provenance import OperationEvidenceProvenance
   from ..models.operation_failure_evidence import OperationFailureEvidence
   from ..models.operation_owner_reference import OperationOwnerReference
   from ..models.operation_progress import OperationProgress
@@ -47,9 +45,7 @@ class OperationDetailResponse:
             owner (None | OperationOwnerReference | Unset):
             parent_id (None | str | Unset):
             progress (None | OperationProgress | Unset):
-            provenance (None | OperationEvidenceProvenance | Unset):
             recovery (None | OperationRecovery | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
             status_reason (None | str | Unset):
             updated_at (None | str | Unset):
      """
@@ -66,9 +62,7 @@ class OperationDetailResponse:
     owner: None | OperationOwnerReference | Unset = UNSET
     parent_id: None | str | Unset = UNSET
     progress: None | OperationProgress | Unset = UNSET
-    provenance: None | OperationEvidenceProvenance | Unset = UNSET
     recovery: None | OperationRecovery | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
     status_reason: None | str | Unset = UNSET
     updated_at: None | str | Unset = UNSET
 
@@ -81,7 +75,6 @@ class OperationDetailResponse:
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
         from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
-        from ..models.operation_evidence_provenance import OperationEvidenceProvenance # noqa: PLC0415
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         from ..models.operation_owner_reference import OperationOwnerReference # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
@@ -150,14 +143,6 @@ class OperationDetailResponse:
         else:
             progress = self.progress
 
-        provenance: dict[str, Any] | None | Unset
-        if isinstance(self.provenance, Unset):
-            provenance = UNSET
-        elif isinstance(self.provenance, OperationEvidenceProvenance):
-            provenance = self.provenance.to_dict()
-        else:
-            provenance = self.provenance
-
         recovery: dict[str, Any] | None | Unset
         if isinstance(self.recovery, Unset):
             recovery = UNSET
@@ -165,8 +150,6 @@ class OperationDetailResponse:
             recovery = self.recovery.to_dict()
         else:
             recovery = self.recovery
-
-        schema_version = self.schema_version
 
         status_reason: None | str | Unset
         if isinstance(self.status_reason, Unset):
@@ -203,12 +186,8 @@ class OperationDetailResponse:
             field_dict["parent_id"] = parent_id
         if progress is not UNSET:
             field_dict["progress"] = progress
-        if provenance is not UNSET:
-            field_dict["provenance"] = provenance
         if recovery is not UNSET:
             field_dict["recovery"] = recovery
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
         if status_reason is not UNSET:
             field_dict["status_reason"] = status_reason
         if updated_at is not UNSET:
@@ -224,7 +203,6 @@ class OperationDetailResponse:
         from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
         from ..models.operation_evidence_download import OperationEvidenceDownload # noqa: PLC0415
-        from ..models.operation_evidence_provenance import OperationEvidenceProvenance # noqa: PLC0415
         from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         from ..models.operation_owner_reference import OperationOwnerReference # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
@@ -373,26 +351,6 @@ class OperationDetailResponse:
         progress = _parse_progress(d.pop("progress", UNSET))
 
 
-        def _parse_provenance(data: object) -> None | OperationEvidenceProvenance | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                provenance_type_0 = OperationEvidenceProvenance.from_dict(data)
-
-
-
-                return provenance_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(None | OperationEvidenceProvenance | Unset, data)
-
-        provenance = _parse_provenance(d.pop("provenance", UNSET))
-
-
         def _parse_recovery(data: object) -> None | OperationRecovery | Unset:
             if data is None:
                 return data
@@ -412,10 +370,6 @@ class OperationDetailResponse:
 
         recovery = _parse_recovery(d.pop("recovery", UNSET))
 
-
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
         def _parse_status_reason(data: object) -> None | str | Unset:
             if data is None:
@@ -450,9 +404,7 @@ class OperationDetailResponse:
             owner=owner,
             parent_id=parent_id,
             progress=progress,
-            provenance=provenance,
             recovery=recovery,
-            schema_version=schema_version,
             status_reason=status_reason,
             updated_at=updated_at,
         )

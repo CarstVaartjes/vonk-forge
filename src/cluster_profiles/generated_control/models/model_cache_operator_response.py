@@ -14,7 +14,6 @@ from ..models.model_cache_operator_response_state import check_model_cache_opera
 from ..models.model_cache_operator_response_state import ModelCacheOperatorResponseState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.availability_operation_failure import AvailabilityOperationFailure
@@ -52,8 +51,6 @@ class ModelCacheOperatorResponse:
             operation_id (None | str | Unset):
             preserved (list[str] | Unset):
             result (ModelCacheDownloadResult | ModelCacheRemovalResult | None | Unset):
-            review_digest (None | str | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
             total_bytes (int | None | Unset):
      """
 
@@ -73,8 +70,6 @@ class ModelCacheOperatorResponse:
     operation_id: None | str | Unset = UNSET
     preserved: list[str] | Unset = UNSET
     result: ModelCacheDownloadResult | ModelCacheRemovalResult | None | Unset = UNSET
-    review_digest: None | str | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
     total_bytes: int | None | Unset = UNSET
 
 
@@ -163,14 +158,6 @@ class ModelCacheOperatorResponse:
         else:
             result = self.result
 
-        review_digest: None | str | Unset
-        if isinstance(self.review_digest, Unset):
-            review_digest = UNSET
-        else:
-            review_digest = self.review_digest
-
-        schema_version = self.schema_version
-
         total_bytes: int | None | Unset
         if isinstance(self.total_bytes, Unset):
             total_bytes = UNSET
@@ -207,10 +194,6 @@ class ModelCacheOperatorResponse:
             field_dict["preserved"] = preserved
         if result is not UNSET:
             field_dict["result"] = result
-        if review_digest is not UNSET:
-            field_dict["review_digest"] = review_digest
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
         if total_bytes is not UNSET:
             field_dict["total_bytes"] = total_bytes
 
@@ -358,20 +341,6 @@ class ModelCacheOperatorResponse:
         result = _parse_result(d.pop("result", UNSET))
 
 
-        def _parse_review_digest(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        review_digest = _parse_review_digest(d.pop("review_digest", UNSET))
-
-
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         def _parse_total_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -399,8 +368,6 @@ class ModelCacheOperatorResponse:
             operation_id=operation_id,
             preserved=preserved,
             result=result,
-            review_digest=review_digest,
-            schema_version=schema_version,
             total_bytes=total_bytes,
         )
 

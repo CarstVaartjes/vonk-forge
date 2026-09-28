@@ -8,9 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -30,12 +28,10 @@ class FleetProfileList:
         Attributes:
             generated_at (datetime.datetime):
             profiles (list[FleetProfileView]):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     generated_at: datetime.datetime
     profiles: list[FleetProfileView]
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -52,8 +48,6 @@ class FleetProfileList:
 
 
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -61,8 +55,6 @@ class FleetProfileList:
             "generated_at": generated_at,
             "profiles": profiles,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -87,14 +79,9 @@ class FleetProfileList:
             profiles.append(profiles_item)
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         fleet_profile_list = cls(
             generated_at=generated_at,
             profiles=profiles,
-            schema_version=schema_version,
         )
 
         return fleet_profile_list

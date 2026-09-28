@@ -9,7 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
-from ...models.fleet_node_detail_response import FleetNodeDetailResponse
+from ...models.fleet_node import FleetNode
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
@@ -35,9 +35,9 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | FleetNode | RequestValidationProblem | None:
     if response.status_code == 200:
-        response_200 = FleetNodeDetailResponse.from_dict(response.json())
+        response_200 = FleetNode.from_dict(response.json())
 
 
 
@@ -77,7 +77,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | FleetNode | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -91,7 +91,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | FleetNode | RequestValidationProblem]:
     """ Fleet Detail
 
     Args:
@@ -102,7 +102,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | FleetNode | RequestValidationProblem]
      """
 
 
@@ -122,7 +122,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | FleetNode | RequestValidationProblem | None:
     """ Fleet Detail
 
     Args:
@@ -133,7 +133,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem
+        BoundedErrorResponse | FleetNode | RequestValidationProblem
      """
 
 
@@ -148,7 +148,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | FleetNode | RequestValidationProblem]:
     """ Fleet Detail
 
     Args:
@@ -159,7 +159,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | FleetNode | RequestValidationProblem]
      """
 
 
@@ -179,7 +179,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | FleetNode | RequestValidationProblem | None:
     """ Fleet Detail
 
     Args:
@@ -190,7 +190,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | FleetNodeDetailResponse | RequestValidationProblem
+        BoundedErrorResponse | FleetNode | RequestValidationProblem
      """
 
 

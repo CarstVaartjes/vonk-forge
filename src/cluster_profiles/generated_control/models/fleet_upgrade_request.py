@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 
 
@@ -28,13 +27,11 @@ class FleetUpgradeRequest:
             request_key (str):
             all_ (bool | Unset):  Default: False.
             selectors (list[str] | None | Unset):
-            strategy (Literal['one-at-a-time'] | Unset):  Default: 'one-at-a-time'.
      """
 
     request_key: str
     all_: bool | Unset = False
     selectors: list[str] | None | Unset = UNSET
-    strategy: Literal['one-at-a-time'] | Unset = 'one-at-a-time'
 
 
 
@@ -55,8 +52,6 @@ class FleetUpgradeRequest:
         else:
             selectors = self.selectors
 
-        strategy = self.strategy
-
 
         field_dict: dict[str, Any] = {}
 
@@ -67,8 +62,6 @@ class FleetUpgradeRequest:
             field_dict["all"] = all_
         if selectors is not UNSET:
             field_dict["selectors"] = selectors
-        if strategy is not UNSET:
-            field_dict["strategy"] = strategy
 
         return field_dict
 
@@ -99,15 +92,10 @@ class FleetUpgradeRequest:
         selectors = _parse_selectors(d.pop("selectors", UNSET))
 
 
-        strategy = cast(Literal['one-at-a-time'] | Unset , d.pop("strategy", UNSET))
-        if strategy != 'one-at-a-time' and not isinstance(strategy, Unset):
-            raise ValueError(f"strategy must match const 'one-at-a-time', got '{strategy}'")
-
         fleet_upgrade_request = cls(
             request_key=request_key,
             all_=all_,
             selectors=selectors,
-            strategy=strategy,
         )
 
         return fleet_upgrade_request

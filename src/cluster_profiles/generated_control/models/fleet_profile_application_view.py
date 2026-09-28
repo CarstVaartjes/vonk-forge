@@ -12,7 +12,6 @@ from ..models.fleet_profile_application_view_state import check_fleet_profile_ap
 from ..models.fleet_profile_application_view_state import FleetProfileApplicationViewState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -49,7 +48,6 @@ class FleetProfileApplicationView:
             attempt (int | Unset):  Default: 1.
             cancellation (FleetProfileApplicationCancellationView | None | Unset):
             retry_of_application_id (None | str | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     created_at: datetime.datetime
@@ -69,7 +67,6 @@ class FleetProfileApplicationView:
     attempt: int | Unset = 1
     cancellation: FleetProfileApplicationCancellationView | None | Unset = UNSET
     retry_of_application_id: None | str | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -129,8 +126,6 @@ class FleetProfileApplicationView:
         else:
             retry_of_application_id = self.retry_of_application_id
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -156,8 +151,6 @@ class FleetProfileApplicationView:
             field_dict["cancellation"] = cancellation
         if retry_of_application_id is not UNSET:
             field_dict["retry_of_application_id"] = retry_of_application_id
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -269,10 +262,6 @@ class FleetProfileApplicationView:
         retry_of_application_id = _parse_retry_of_application_id(d.pop("retry_of_application_id", UNSET))
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         fleet_profile_application_view = cls(
             created_at=created_at,
             current_operation_id=current_operation_id,
@@ -291,7 +280,6 @@ class FleetProfileApplicationView:
             attempt=attempt,
             cancellation=cancellation,
             retry_of_application_id=retry_of_application_id,
-            schema_version=schema_version,
         )
 
         return fleet_profile_application_view

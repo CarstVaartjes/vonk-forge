@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 
 
@@ -27,13 +26,11 @@ class RecipeUpdateRequest:
         Attributes:
             request_key (str):
             all_ (bool | Unset):  Default: False.
-            schema_version (Literal[2] | Unset):  Default: 2.
             selectors (list[str] | Unset):
      """
 
     request_key: str
     all_: bool | Unset = False
-    schema_version: Literal[2] | Unset = 2
     selectors: list[str] | Unset = UNSET
 
 
@@ -44,8 +41,6 @@ class RecipeUpdateRequest:
         request_key = self.request_key
 
         all_ = self.all_
-
-        schema_version = self.schema_version
 
         selectors: list[str] | Unset = UNSET
         if not isinstance(self.selectors, Unset):
@@ -61,8 +56,6 @@ class RecipeUpdateRequest:
         })
         if all_ is not UNSET:
             field_dict["all"] = all_
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
         if selectors is not UNSET:
             field_dict["selectors"] = selectors
 
@@ -77,17 +70,12 @@ class RecipeUpdateRequest:
 
         all_ = d.pop("all", UNSET)
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         selectors = cast(list[str], d.pop("selectors", UNSET))
 
 
         recipe_update_request = cls(
             request_key=request_key,
             all_=all_,
-            schema_version=schema_version,
             selectors=selectors,
         )
 

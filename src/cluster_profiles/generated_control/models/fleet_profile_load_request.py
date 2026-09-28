@@ -22,11 +22,9 @@ T = TypeVar("T", bound="FleetProfileLoadRequest")
 class FleetProfileLoadRequest:
     """
         Attributes:
-            plan_digest (str):
             request_key (str):
      """
 
-    plan_digest: str
     request_key: str
 
 
@@ -34,15 +32,12 @@ class FleetProfileLoadRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
-        plan_digest = self.plan_digest
-
         request_key = self.request_key
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "plan_digest": plan_digest,
             "request_key": request_key,
         })
 
@@ -53,12 +48,9 @@ class FleetProfileLoadRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        plan_digest = d.pop("plan_digest")
-
         request_key = d.pop("request_key")
 
         fleet_profile_load_request = cls(
-            plan_digest=plan_digest,
             request_key=request_key,
         )
 

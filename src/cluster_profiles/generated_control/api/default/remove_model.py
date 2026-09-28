@@ -122,9 +122,6 @@ def sync_detailed(
         body (ModelCacheRemovalRequest): Request key for removing the named model against current
             state.
 
-            ``model_content_sha256`` and ``review_digest`` are accepted for clients
-            that show a prior review; they are advisory and never refuse the request.
-
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
@@ -160,9 +157,6 @@ def sync(
         body (ModelCacheRemovalRequest): Request key for removing the named model against current
             state.
 
-            ``model_content_sha256`` and ``review_digest`` are accepted for clients
-            that show a prior review; they are advisory and never refuse the request.
-
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
@@ -192,9 +186,6 @@ async def asyncio_detailed(
         selector (str):
         body (ModelCacheRemovalRequest): Request key for removing the named model against current
             state.
-
-            ``model_content_sha256`` and ``review_digest`` are accepted for clients
-            that show a prior review; they are advisory and never refuse the request.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -230,9 +221,6 @@ async def asyncio(
         selector (str):
         body (ModelCacheRemovalRequest): Request key for removing the named model against current
             state.
-
-            ``model_content_sha256`` and ``review_digest`` are accepted for clients
-            that show a prior review; they are advisory and never refuse the request.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

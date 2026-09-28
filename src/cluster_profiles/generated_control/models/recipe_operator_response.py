@@ -36,7 +36,6 @@ class RecipeOperatorResponse:
             recipe_revision_id (str):
             reclaimed_bytes (int):
             request_key (str):
-            review_digest (str):
             selector (str):
             state (RecipeOperatorResponseState):
             with_model (bool):
@@ -46,7 +45,6 @@ class RecipeOperatorResponse:
             model_removals (list[str] | Unset):
             next_actions (list[str] | Unset):
             preserved (list[str] | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     action: Literal['remove']
@@ -55,7 +53,6 @@ class RecipeOperatorResponse:
     recipe_revision_id: str
     reclaimed_bytes: int
     request_key: str
-    review_digest: str
     selector: str
     state: RecipeOperatorResponseState
     with_model: bool
@@ -65,7 +62,6 @@ class RecipeOperatorResponse:
     model_removals: list[str] | Unset = UNSET
     next_actions: list[str] | Unset = UNSET
     preserved: list[str] | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -85,8 +81,6 @@ class RecipeOperatorResponse:
         reclaimed_bytes = self.reclaimed_bytes
 
         request_key = self.request_key
-
-        review_digest = self.review_digest
 
         selector = self.selector
 
@@ -132,8 +126,6 @@ class RecipeOperatorResponse:
 
 
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -144,7 +136,6 @@ class RecipeOperatorResponse:
             "recipe_revision_id": recipe_revision_id,
             "reclaimed_bytes": reclaimed_bytes,
             "request_key": request_key,
-            "review_digest": review_digest,
             "selector": selector,
             "state": state,
             "with_model": with_model,
@@ -161,8 +152,6 @@ class RecipeOperatorResponse:
             field_dict["next_actions"] = next_actions
         if preserved is not UNSET:
             field_dict["preserved"] = preserved
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -189,8 +178,6 @@ class RecipeOperatorResponse:
         reclaimed_bytes = d.pop("reclaimed_bytes")
 
         request_key = d.pop("request_key")
-
-        review_digest = d.pop("review_digest")
 
         selector = d.pop("selector")
 
@@ -236,10 +223,6 @@ class RecipeOperatorResponse:
         preserved = cast(list[str], d.pop("preserved", UNSET))
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         recipe_operator_response = cls(
             action=action,
             operation_id=operation_id,
@@ -247,7 +230,6 @@ class RecipeOperatorResponse:
             recipe_revision_id=recipe_revision_id,
             reclaimed_bytes=reclaimed_bytes,
             request_key=request_key,
-            review_digest=review_digest,
             selector=selector,
             state=state,
             with_model=with_model,
@@ -257,7 +239,6 @@ class RecipeOperatorResponse:
             model_removals=model_removals,
             next_actions=next_actions,
             preserved=preserved,
-            schema_version=schema_version,
         )
 
         return recipe_operator_response

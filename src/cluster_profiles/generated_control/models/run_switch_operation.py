@@ -22,7 +22,6 @@ from ..models.run_switch_operation_state import check_run_switch_operation_state
 from ..models.run_switch_operation_state import RunSwitchOperationState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.run_switch_operation_result import RunSwitchOperationResult
@@ -53,7 +52,6 @@ class RunSwitchOperation:
             current_phase (None | RunSwitchOperationCurrentPhaseType0 | Unset):
             installation_id (None | str | Unset):
             result (None | RunSwitchOperationResult | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
             status_reason (None | str | Unset):
      """
 
@@ -70,7 +68,6 @@ class RunSwitchOperation:
     current_phase: None | RunSwitchOperationCurrentPhaseType0 | Unset = UNSET
     installation_id: None | str | Unset = UNSET
     result: None | RunSwitchOperationResult | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
     status_reason: None | str | Unset = UNSET
 
 
@@ -135,8 +132,6 @@ class RunSwitchOperation:
         else:
             result = self.result
 
-        schema_version = self.schema_version
-
         status_reason: None | str | Unset
         if isinstance(self.status_reason, Unset):
             status_reason = UNSET
@@ -165,8 +160,6 @@ class RunSwitchOperation:
             field_dict["installation_id"] = installation_id
         if result is not UNSET:
             field_dict["result"] = result
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
         if status_reason is not UNSET:
             field_dict["status_reason"] = status_reason
 
@@ -288,10 +281,6 @@ class RunSwitchOperation:
         result = _parse_result(d.pop("result", UNSET))
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         def _parse_status_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -316,7 +305,6 @@ class RunSwitchOperation:
             current_phase=current_phase,
             installation_id=installation_id,
             result=result,
-            schema_version=schema_version,
             status_reason=status_reason,
         )
 
