@@ -81,6 +81,13 @@ fn prepare_bundle<R: io::BufRead, W: Write, S: vonk_nas_setup::SecretInput<R, W>
         request
     };
     let outcome = prepare(&payload, request, prompt, &OsSecretGenerator)?;
+    if !outcome.dropped_environment.is_empty() {
+        writeln!(
+            status,
+            "Removed obsolete .env keys: {}",
+            outcome.dropped_environment.join(", ")
+        )?;
+    }
     writeln!(status, "Bundle ready at {}", outcome.root.display())?;
     Ok(())
 }

@@ -66,13 +66,15 @@ fn executable_upgrades_a_complete_bundle_with_piped_stdio() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Bundle ready at"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Removed obsolete .env keys: SITE_LOCAL\n"));
+    assert!(stdout.contains("Bundle ready at"));
     assert_eq!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("updated compose"),
         "services:\n  api:\n    image: example.invalid/api@sha256:new\n"
     );
     assert_eq!(
         std::fs::read_to_string(bundle.join(".env")).expect("preserved environment"),
-        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\nSITE_LOCAL=kept\n"
+        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\n"
     );
 }

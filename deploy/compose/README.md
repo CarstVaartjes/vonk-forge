@@ -104,9 +104,10 @@ Run the same workstation command from the directory that already contains
 curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
-Upgrade mode preserves `.env`, `secrets/`, and site identity while atomically
-replacing the release-controlled Compose file and adding any newly required
-inputs. Place the resulting directory over the controller project, pull, and
+Upgrade mode preserves `secrets/`, site identity, and the values of current
+`.env` settings while atomically replacing the release-controlled Compose file
+and adding any newly required inputs. Settings a release no longer uses are
+dropped from `.env` and listed in the installer output. Place the resulting directory over the controller project, pull, and
 redeploy. Keep named volumes during normal upgrades.
 
 Development and production use this exact topology and configuration contract.
