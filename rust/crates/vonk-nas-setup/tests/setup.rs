@@ -223,7 +223,7 @@ fn lab_install_asks_only_for_lan_address_and_optional_hf_token() {
           ],
           "install_modes": {
             "prompt": "Install mode",
-            "default": "lab",
+            "default": "secure-remote",
             "lab_value": "lab",
             "secure_remote_value": "secure-remote",
             "lab_required_values": [
@@ -237,7 +237,7 @@ fn lab_install_asks_only_for_lan_address_and_optional_hf_token() {
     )
     .expect("valid lab fixture");
     let temporary = tempdir().expect("temporary directory");
-    let input = Cursor::new(b"\n192.168.1.22\nhf_test_token\n".to_vec());
+    let input = Cursor::new(b"lab\n192.168.1.22\nhf_test_token\n".to_vec());
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(input, &mut output);
 
@@ -280,7 +280,7 @@ fn secure_remote_selection_keeps_tailscale_profile_when_hermes_is_disabled() {
           "docker_compose_yaml": "services: {}\n",
           "install_modes": {
             "prompt": "Install mode",
-            "default": "lab",
+            "default": "secure-remote",
             "lab_value": "lab",
             "secure_remote_value": "secure-remote",
             "lab_required_values": [],
@@ -310,6 +310,132 @@ fn secure_remote_selection_keeps_tailscale_profile_when_hermes_is_disabled() {
     assert_eq!(
         std::fs::read_to_string(result.root.join(".env")).expect("environment"),
         "COMPOSE_PROFILES=secure-remote\n"
+    );
+}
+
+#[test]
+fn empty_install_mode_answer_selects_secure_remote_by_default() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "install_modes": {
+            "prompt": "Install mode",
+            "lab_value": "lab",
+            "secure_remote_value": "secure-remote",
+            "lab_required_values": [],
+            "lab_values": []
+          },
+          "hermes": {
+            "env": "COMPOSE_PROFILES",
+            "prompt": "Enable Hermes?",
+            "enabled_value": "hermes",
+            "disabled_value": ""
+          }
+        }"#,
+    )
+    .expect("valid install mode fixture without an explicit default");
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(b"\nn\n".to_vec()), &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("default install mode prepared");
+
+    let transcript = String::from_utf8(output).expect("prompt transcript");
+    assert!(
+        transcript.contains("Install mode [secure-remote / lab]: "),
+        "{transcript}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
+        "COMPOSE_PROFILES=secure-remote\n"
+    );
+}
+
+#[test]
+fn secure_remote_bundle_upgrades_and_toggles_hermes_beside_its_profile() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "install_modes": {
+            "prompt": "Install mode",
+            "default": "secure-remote",
+            "lab_value": "lab",
+            "secure_remote_value": "secure-remote",
+            "lab_required_values": [],
+            "lab_values": []
+          },
+          "hermes": {
+            "env": "COMPOSE_PROFILES",
+            "prompt": "Enable Hermes?",
+            "enabled_value": "hermes",
+            "disabled_value": ""
+          }
+        }"#,
+    )
+    .expect("valid secure-remote fixture");
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(b"secure-remote\nn\n".to_vec()), &mut output);
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("secure remote bundle prepared");
+    let environment = result.root.join(".env");
+
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    let upgraded = prepare(
+        &payload,
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("ordinary upgrade of a secure-remote bundle");
+    assert_eq!(upgraded.hermes_enabled, Some(false));
+    assert!(output.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(&environment).expect("environment"),
+        "COMPOSE_PROFILES=secure-remote\n"
+    );
+
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    prepare(
+        &payload,
+        SetupRequest::upgrade(temporary.path()).with_hermes_enabled(true),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("Hermes enabled beside secure-remote");
+    assert_eq!(
+        std::fs::read_to_string(&environment).expect("environment"),
+        "COMPOSE_PROFILES=\"secure-remote,hermes\"\n"
+    );
+
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    let preserved = prepare(
+        &payload,
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("enabled Hermes preserved beside secure-remote");
+    assert_eq!(preserved.hermes_enabled, Some(true));
+    assert_eq!(
+        std::fs::read_to_string(&environment).expect("environment"),
+        "COMPOSE_PROFILES=\"secure-remote,hermes\"\n"
     );
 }
 

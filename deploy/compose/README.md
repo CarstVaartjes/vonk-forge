@@ -2,10 +2,11 @@
 
 The supported controller installation starts on an ordinary Linux or macOS
 workstation. The eventual controller host can be this same laptop or any local
-NAS or server that runs Docker Compose. The installer offers Lab mode for
-LAN-only access and Secure remote for the existing Tailscale gateway. Complete
+NAS or server that runs Docker Compose. The installer defaults to Secure
+remote for the existing Tailscale gateway; Lab mode for LAN-only access is an
+explicit choice (answer `lab` at the install mode prompt). Complete
 the [Tailscale fresh-install preflight](../../docs/runbooks/tailscale.md#fresh-install-preflight)
-only when choosing Secure remote; it covers the canonical unsuffixed names,
+for Secure remote; it covers the canonical unsuffixed names,
 MagicDNS/HTTPS, exact grants and auto-approvals, gateway self-access, and the
 scoped OAuth client. The [Lab quickstart](../../docs/QUICKSTART.md) covers the
 local CA and LAN DNS requirements.

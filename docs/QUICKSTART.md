@@ -1,6 +1,7 @@
 # Lab mode quickstart
 
-Lab mode runs the controller on a LAN without Tailscale. HTTPS uses a local CA
+Lab mode runs the controller on a LAN without Tailscale. It is an explicit
+choice; the installer's default is Secure remote (Tailscale). HTTPS uses a local CA
 created by the installer, and all internal passwords and signing keys are
 generated locally. LiteLLM's upstream provider key and the Hugging Face token
 are optional; without an upstream key, local model routes still work.
@@ -13,7 +14,8 @@ On macOS or Linux, run the signed NAS installer:
 curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
-Choose the default **lab** mode, enter the NAS's reserved LAN IPv4 address, and
+Answer `lab` at the install mode prompt (the default, Secure remote, needs
+Tailscale), enter the NAS's reserved LAN IPv4 address, and
 optionally enter a Hugging Face token for gated models. The project is created
 in `vonk-forge/`. The administrator username is `admin`; its generated password
 is saved in `vonk-forge/secrets/admin-password`.
@@ -49,7 +51,7 @@ to connect to the controller or Spark-facing HTTPS endpoints.
 
 ## Enable secure remote access later
 
-The installer also offers **Secure remote**, which enables the existing
+The installer's default, **Secure remote**, enables the existing
 Tailscale gateway and retains its MagicDNS, scoped OAuth, Services, and grants
 requirements. For a Lab install, do not turn it on by starting Tailscale
 services manually; create a Secure remote project through the installer so its

@@ -157,7 +157,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     assert secret_prompts["tailscale-oauth-client-id"]["secure_remote_only"] is True
     assert secret_prompts["tailscale-oauth-client-secret"]["secure_remote_only"] is True
     assert secret_prompts["litellm-upstream-key"]["secure_remote_only"] is True
-    assert payload["install_modes"]["default"] == "lab"
+    assert payload["install_modes"]["default"] == "secure-remote"
     assert payload["install_modes"]["secure_remote_value"] == "secure-remote"
     assert [
         item["env"] for item in payload["install_modes"]["lab_required_values"]
