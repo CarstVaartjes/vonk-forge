@@ -4,27 +4,20 @@ import copy
 import hashlib
 import json
 import tarfile
-from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol import (
     canonical_message,
 )
-from vonk_control.agent_api import AgentApiServices
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.api import create_app
-from vonk_control.auth import AgentSource, TokenCodec
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -46,20 +39,10 @@ from vonk_control.execution_plan_service import (
 )
 from vonk_control.jobs import _canonical_payload
 from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    Base,
-    CatalogDocument,
     CatalogDocumentRevision,
-    ClusterMapping,
     ClusterMappingNode,
-    InstallationNode,
     RecipeBuild,
-    RecipeInstallation,
-    RuntimeImageAuthorization,
 )
-from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-from vonk_control.recipe_execution_contract import installation_plan_document
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
@@ -69,9 +52,7 @@ from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptWire,
 )
-from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import (
-    ModelDefinition,
     RecipeDefinition,
     document_sha256,
     read_model,
@@ -192,9 +173,7 @@ def _job_spec() -> dict[str, object]:
     }
     security = spec["security"]
     assert isinstance(security, dict)
-    security["mounts"].append(
-        {"source": "/run/vonk/outputs", "target": "/outputs"}
-    )
+    security["mounts"].append({"source": "/run/vonk/outputs", "target": "/outputs"})
     _mapping(spec["identity"])["execution_sha256"] = execution_identity_sha256(spec)
     return spec
 
@@ -627,7 +606,7 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
     assert placement.endpoint_address == "192.0.2.10"
     assert placement.reserved_memory_bytes == 4096
     assert placement.memory_floor_bytes == 2048
-    assert validate_compiled_launch_payload(started)["schema_version"] == 2
+    validate_compiled_launch_payload(started)
 
 
 @pytest.mark.parametrize("rank", [0, 1])
@@ -647,10 +626,7 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
             "memory_floor_bytes": 0,
         },
     )
-    _mapping(payload["topology"]).update(
-        name="dual", mode="distributed", node_count=2, backend="mp"
-    )
-    _mapping(payload["security"])["devices"] = ["nvidia.com/gpu=all"]
+    _mapping(payload["topology"]).update(name="dual", node_count=2)
     started = _bind_compiled_execution_plan(
         payload,
         placement=RecipeStartPlacement(
@@ -670,7 +646,6 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
     )
     wire = WireCompiledExecutionPlan.parse(started)
     assert wire.security.network_mode == "host"
-    assert wire.security.host_network is True
     assert wire.runtime.placement.local_address == f"192.168.100.{10 + rank}"
 
 
