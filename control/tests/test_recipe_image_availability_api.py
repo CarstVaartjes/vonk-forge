@@ -247,7 +247,7 @@ def _operator_client(service: Mock) -> TestClient:
 def _download(service: Mock) -> Response:
     return _operator_client(service).post(
         "/api/recipe/example/download",
-        json={"schema_version": 2, "request_key": _REQUEST_KEY},
+        json={"request_key": _REQUEST_KEY},
     )
 
 
@@ -345,7 +345,6 @@ def test_remove_names_a_terminal_availability_refusal() -> None:
     response = _operator_client(service).post(
         "/api/recipe/example/remove",
         json={
-            "schema_version": 2,
             "request_key": _REQUEST_KEY,
             "with_model": False,
             "review_digest": "a" * 64,
@@ -389,7 +388,6 @@ def test_remove_response_projects_the_stored_model_choice_not_the_request() -> N
     response = _operator_client(service).post(
         "/api/recipe/example/remove",
         json={
-            "schema_version": 2,
             "request_key": _REQUEST_KEY,
             "with_model": True,
             "review_digest": "b" * 64,
@@ -447,7 +445,6 @@ def test_remove_response_preserves_partial_progress_and_failure() -> None:
     response = _operator_client(service).post(
         "/api/recipe/example/remove",
         json={
-            "schema_version": 2,
             "request_key": _REQUEST_KEY,
             "with_model": False,
             "review_digest": "c" * 64,
@@ -582,7 +579,6 @@ def test_recipe_cancel_requires_mutation_role_and_returns_durable_request() -> N
     response = TestClient(app).post(
         f"/api/recipe/operations/{view.id}/cancel",
         json={
-            "schema_version": 2,
             "request_key": cancellation.cancel_request_id,
             "reason": cancellation.reason,
         },
@@ -608,7 +604,6 @@ def test_recipe_cancel_requires_mutation_role_and_returns_durable_request() -> N
     denied = TestClient(app).post(
         f"/api/recipe/operations/{view.id}/cancel",
         json={
-            "schema_version": 2,
             "request_key": cancellation.cancel_request_id,
             "reason": cancellation.reason,
         },

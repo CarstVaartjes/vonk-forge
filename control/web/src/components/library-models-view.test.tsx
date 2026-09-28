@@ -10,7 +10,6 @@ const prepared = {
   action: "download" as const,
   phase: "complete",
   request_key: "request",
-  schema_version: 2 as const,
   selector: "vonk-forge/ling-3-flash",
   state: "succeeded" as const,
   transferred_bytes: 10,
@@ -86,7 +85,6 @@ test("removes a cached model only after an explicit confirmation", async () => {
     review_digest: reviewDigest,
     model_content_sha256: modelContentSha256,
     reclaimed_bytes: 1,
-    schema_version: 2 as const,
     state: "succeeded" as const,
     progress: {phase: "complete"},
   }));

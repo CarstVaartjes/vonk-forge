@@ -1461,7 +1461,6 @@ def _submit_model_removal(
         path=path,
         lookup=lookup,
         body={
-            "schema_version": 2,
             "request_key": key,
             "model_content_sha256": model_content_sha256,
             "review_digest": review_digest,
@@ -1515,7 +1514,6 @@ def _submit_recipe_removal(
         path=path,
         lookup=lookup,
         body={
-            "schema_version": 2,
             "request_key": key,
             "with_model": with_model,
             "review_digest": review_digest,
@@ -1643,7 +1641,7 @@ def _submit_cache_request(
     else:
         path = f"/api/{noun}/{_quoted(args.selector)}/download"
     lookup = f"/api/{noun}/requests/{key}"
-    body: dict[str, object] = {"schema_version": 2, "request_key": key}
+    body: dict[str, object] = {"request_key": key}
     if action == "update":
         body.update(all=args.all, selectors=[args.selector] if args.selector else [])
 
@@ -1715,7 +1713,6 @@ def _submit_model_cancellation(
     path = f"/api/model/operations/{_quoted(operation_id)}/cancel"
     lookup = f"/api/model/operations/{_quoted(operation_id)}"
     body: dict[str, object] = {
-        "schema_version": 2,
         "request_key": key,
         "reason": reason,
     }
@@ -1801,7 +1798,6 @@ def _submit_recipe_cancellation(
     path = f"/api/recipe/operations/{_quoted(operation_id)}/cancel"
     lookup = f"/api/recipe/operations/{_quoted(operation_id)}"
     body: dict[str, object] = {
-        "schema_version": 2,
         "request_key": key,
         "reason": reason,
     }

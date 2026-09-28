@@ -304,7 +304,7 @@ export class ApiClient implements ControlApi {
   async prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
     return resultData(await this.generated.POST("/api/model/{selector}/download", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2},
+      body: {request_key: requestKey},
       signal,
     }));
   }
@@ -319,7 +319,7 @@ export class ApiClient implements ControlApi {
     // Bind removal to the exact revision the operator reviewed.
     return resultData(await this.generated.POST("/api/model/{selector}/remove", {
       params: {path: {selector}},
-      body: {model_content_sha256: modelContentSha256, request_key: requestKey, review_digest: reviewDigest, schema_version: 2},
+      body: {model_content_sha256: modelContentSha256, request_key: requestKey, review_digest: reviewDigest},
       signal,
     }));
   }
@@ -342,7 +342,7 @@ export class ApiClient implements ControlApi {
     // artifacts together, which is what `vonkctl recipe download` documents.
     return resultData(await this.generated.POST("/api/recipe/{selector}/download", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2},
+      body: {request_key: requestKey},
       signal,
     }));
   }
@@ -359,7 +359,7 @@ export class ApiClient implements ControlApi {
     // shared model entry should go too.
     return resultData(await this.generated.POST("/api/recipe/{selector}/remove", {
       params: {path: {selector}},
-      body: {request_key: requestKey, review_digest: reviewDigest, schema_version: 2, with_model: withModel},
+      body: {request_key: requestKey, review_digest: reviewDigest, with_model: withModel},
       signal,
     }));
   }
@@ -369,7 +369,7 @@ export class ApiClient implements ControlApi {
     // or all, and refuses the combination, so the caller states the scope.
     return resultData(await this.generated.POST("/api/recipe/update", {
       params: {},
-      body: {all, selectors, request_key: requestKey, schema_version: 2},
+      body: {all, selectors, request_key: requestKey},
       signal,
     }));
   }
