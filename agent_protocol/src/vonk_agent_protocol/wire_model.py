@@ -104,6 +104,14 @@ class StrictJSONModel(BaseModel):
     def __get_pydantic_core_schema__(
         cls, source_type: Any, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
+        # Once the class is built its stored schema is this hook's own result.
+        # Reuse it, as Pydantic does for models without the hook: otherwise
+        # every route, field and nested reference regenerates and deep-copies
+        # the complete model schema again.
+        # (A class still being built holds a placeholder that is not a dict.)
+        built = cls.__dict__.get("__pydantic_core_schema__")
+        if source_type is cls and isinstance(built, dict):
+            return built
         return _bind_string_enum_values(
             _wrap_numeric_literals(deepcopy(handler(source_type)))
         )

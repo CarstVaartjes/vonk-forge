@@ -3,7 +3,7 @@
 # upstream patch releases. They hold no operator data, run only our own code,
 # and are rebuilt through CI on every change; see docs/image-pin-refresh.md.
 # Third-party bases below stay digest-pinned.
-ARG NODE_IMAGE=node:24-trixie-slim
+ARG NODE_IMAGE=node:26-trixie-slim
 ARG PYTHON_IMAGE=python:3.14-slim-trixie
 ARG SKOPEO_IMAGE=quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
 ARG SKOPEO_INDEX_DIGEST=sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
