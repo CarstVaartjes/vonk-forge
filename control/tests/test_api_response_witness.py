@@ -11,6 +11,12 @@ from vonk_control.contract_graph import schema_application
 
 from .api_response_witness import ResponseWitnesses, install_observer
 
+# Slow by design: every case builds the whole Controller application and has
+# the recorder render its OpenAPI document, which FastAPI (0.137 and later)
+# does by building a type adapter for every model field; that alone takes
+# several seconds on a CI runner.
+pytestmark = pytest.mark.slow(30)
+
 
 @pytest.fixture
 def recorder():
