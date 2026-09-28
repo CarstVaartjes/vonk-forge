@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -1045,7 +1046,7 @@ def test_caddy_compose_requires_distinct_sni_hostnames_before_startup(
     assert absent.returncode != 0
     assert "VONK_AGENT_HOSTNAME" in absent.stderr
 
-    for duplicate in (
+    duplicates = (
         {
             "VONK_CONTROL_HOSTNAME": "same.test.example",
             "VONK_AGENT_ENROLL_HOSTNAME": "same.test.example",
@@ -1061,12 +1062,7 @@ def test_caddy_compose_requires_distinct_sni_hostnames_before_startup(
             "VONK_AGENT_ENROLL_HOSTNAME": "same.test.example",
             "VONK_AGENT_HOSTNAME": "same.test.example",
         },
-    ):
-        result = _entrypoint_result(duplicate)
-        assert result.returncode != 0
-        assert "must be distinct" in result.stderr
-
-    for equivalent in (
+        # Case and a trailing dot do not make a hostname distinct.
         {
             "VONK_CONTROL_HOSTNAME": "CONTROL.test.example",
             "VONK_AGENT_ENROLL_HOSTNAME": "control.test.example.",
@@ -1077,35 +1073,37 @@ def test_caddy_compose_requires_distinct_sni_hostnames_before_startup(
             "VONK_AGENT_ENROLL_HOSTNAME": "ENROLL.test.example",
             "VONK_AGENT_HOSTNAME": "enroll.test.example.",
         },
-    ):
-        result = _entrypoint_result(equivalent)
-        assert result.returncode != 0
-        assert "must be distinct" in result.stderr
-
-    malformed = _entrypoint_result(
-        {
-            "VONK_CONTROL_HOSTNAME": "control test.example",
-            "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
-            "VONK_AGENT_HOSTNAME": "agents.test.example",
-        }
     )
-    assert malformed.returncode != 0
-    assert "invalid" in malformed.stderr
-
+    malformed = {
+        "VONK_CONTROL_HOSTNAME": "control test.example",
+        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
+        "VONK_AGENT_HOSTNAME": "agents.test.example",
+    }
     valid = {
         "VONK_CONTROL_HOSTNAME": "control.test.example",
         "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
         "VONK_AGENT_HOSTNAME": "agents.test.example",
     }
-    for result in (_entrypoint_result(valid), _entrypoint_result(valid, "/dev/null")):
-        assert result.returncode != 0
-        assert "proxy authentication secret" in result.stderr
-
     short_secret = tmp_path / "agent-proxy-auth"
     short_secret.write_text("short-secret")
-    result = _entrypoint_result(valid, str(short_secret))
-    assert result.returncode != 0
-    assert "base64url-like" in result.stderr
+    # (environment, secret source, expected stderr). Each case is an
+    # independent one-shot container, so they run concurrently.
+    cases = [(duplicate, None, "must be distinct") for duplicate in duplicates]
+    cases += [
+        (malformed, None, "invalid"),
+        (valid, None, "proxy authentication secret"),
+        (valid, "/dev/null", "proxy authentication secret"),
+        (valid, str(short_secret), "base64url-like"),
+    ]
+    with ThreadPoolExecutor(max_workers=len(cases)) as pool:
+        results = list(
+            pool.map(lambda case: _entrypoint_result(case[0], case[1]), cases)
+        )
+    for (environment, secret_source, expected), result in zip(
+        cases, results, strict=True
+    ):
+        assert result.returncode != 0, (environment, secret_source)
+        assert expected in result.stderr, (environment, secret_source, result.stderr)
 
 
 def test_caddy_proxy_auth_is_one_canonical_base64url_like_line(tmp_path: Path) -> None:
