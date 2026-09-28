@@ -110,7 +110,7 @@ def test_fleet_overview_names_workload_members_and_what_needs_attention(capsys):
     render_payload(healthy, "fleet")
     output = capsys.readouterr().out
     assert "glm-dual" in output and "75% of 128.0 GiB" in output
-    workload = output[output.index("GLM two Sparks") :]
+    workload = output[output.index("Workloads") :]
     assert "atlas" in workload and "boreas" in workload
     assert "Needs attention" not in output
 
@@ -124,7 +124,7 @@ def test_fleet_overview_names_workload_members_and_what_needs_attention(capsys):
     output = capsys.readouterr().out
     attention = output[output.index("Needs attention") :]
     assert "boreas" in attention and "heartbeat missed" in attention
-    assert "GLM two Sparks" in attention and "degraded" in attention
+    assert "glm-dual" in attention and "degraded" in attention
 
 
 def test_fleet_detail_surfaces_invalid_history_without_hiding_online_state(capsys):
