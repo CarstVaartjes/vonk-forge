@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -57,6 +59,9 @@ def test_python_compatibility_rewrites_qualified_recursive_json_values() -> None
     ] == {"anyOf": []}
 
 
+# Runs the real pinned openapi-python-client through ``uv run`` against the
+# control dev group, then imports the generated package; ~15 s on CI runners.
+@pytest.mark.slow(40)
 def test_pinned_client_generator_round_trips_arbitrary_json_values(
     tmp_path: Path,
 ) -> None:
