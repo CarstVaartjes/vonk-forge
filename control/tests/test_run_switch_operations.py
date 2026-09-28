@@ -81,6 +81,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchRetention,
+    RunSwitchRuntimePlanResult,
     RunSwitchStartResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchUninstallResult,
@@ -751,6 +752,201 @@ def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> Non
     assert service.get(first.operation_id).state == "cancelled"
     assert "superseded" in (service.get(first.operation_id).status_reason or "")
     assert service.get(second.operation_id).state == "queued"
+
+
+def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    with sessions.begin() as session:
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.observed_at = NOW - timedelta(days=1)
+    now = [NOW]
+    executor = RecordingArtifactExecutor()
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(),
+    )
+    service._clock = lambda: now[0]
+    request = _request(sessions, nodes[0])
+    blocked = service.preview(request, actor="admin")
+    assert blocked.allowed is False
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    assert operation.state == "waiting"
+    old_installation_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        progress = dict(job.result or {})
+        first_due = datetime.fromisoformat(str(progress["observation_due_at"]))
+        # Work attributed to the old plan must never be adopted by the new one.
+        progress.update(
+            {
+                "phase_index": 1,
+                "item_index": 1,
+                "phase": "final_verify",
+                "completed_phases": ["prepare"],
+                "child_operation_id": str(uuid.uuid4()),
+                "phase_results": [
+                    {
+                        "phase": "prepare",
+                        "subphase": "runtime-install",
+                        "installation_id": old_installation_id,
+                    }
+                ],
+            }
+        )
+        job.result = progress
+    # While blockers remain, re-plans back off exponentially.
+    now[0] = first_due + timedelta(seconds=1)
+    assert service._advance(operation.operation_id) is True
+    with sessions() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None and isinstance(job.result, dict)
+        second_due = datetime.fromisoformat(str(job.result["observation_due_at"]))
+        assert job.result["retry_attempt"] == 3
+    assert second_due - now[0] > first_due - NOW
+    # Nothing is re-planned before the next due time.
+    assert service._advance(operation.operation_id) is False
+    with sessions() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None and isinstance(job.result, dict)
+        assert job.result["retry_attempt"] == 3
+    with sessions.begin() as session:
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.observed_at = NOW
+    now[0] = second_due + timedelta(seconds=1)
+    assert service._advance(operation.operation_id) is True
+    refreshed = service.get(operation.operation_id)
+    assert refreshed.state == "queued"
+    with sessions() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        assert isinstance(job.result, dict)
+        assert job.result.get("phase_index") == 0
+        assert job.result.get("item_index") == 0
+        assert job.result.get("completed_phases") == []
+        assert job.result.get("phase_results") == []
+        assert job.result.get("child_operation_id") is None
+        assert job.result.get("retry_attempt") is None
+        # A new child identity generation: no Start or installation adopted
+        # under the old plan's request keys can be reused.
+        assert job.result.get("phase_retry_generation") == 1
+        refreshed_plan = job.payload.get("plan")
+        assert isinstance(refreshed_plan, dict)
+        authority_revision = refreshed_plan.get(
+            "recipe_content_sha256"
+        ) or job.payload.get("plan_digest")
+        assert job.authority_revision == authority_revision
+
+
+def test_run_switch_missing_target_is_terminal_with_clear_reason(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        artifacts=CompleteArtifactInspector(),
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        job.targets = ["spk_ffffffffffffffffffffffffffffffff"]
+
+    assert service._advance(operation.operation_id) is True
+    failed = service.get(operation.operation_id)
+    assert failed.state == "failed"
+    assert "target node no longer exists" in (failed.status_reason or "")
+
+
+def test_inactive_target_waits_then_resumes_when_the_spark_returns(
+    tmp_path: Path,
+) -> None:
+    """A Spark that goes inactive parks the switch; its return resumes it."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    now = [NOW]
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        artifacts=CompleteArtifactInspector(),
+    )
+    service._clock = lambda: now[0]
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.state = "failed"
+
+    assert service._advance(operation.operation_id) is True
+    waiting = service.get(operation.operation_id)
+    assert waiting.state == "waiting"
+    assert "return to active state" in (waiting.status_reason or "")
+    assert waiting.result is not None and waiting.result.observation_due_at
+    due = waiting.result.observation_due_at
+    # Nothing happens before the backoff is due.
+    assert service._advance(operation.operation_id) is False
+
+    with sessions.begin() as session:
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.state = "active"
+    now[0] = due + timedelta(seconds=1)
+    assert service._advance(operation.operation_id) is True
+    resumed = service.get(operation.operation_id)
+    assert resumed.state != "waiting"
+    assert "return to active state" not in (resumed.status_reason or "")
+    for _ in range(40):
+        if not service._advance(operation.operation_id):
+            break
+    final = service.get(operation.operation_id)
+    assert final.state not in {"waiting", "failed"}, final.status_reason
 
 
 def test_child_activity_change_persists_without_clock_only_writes(
@@ -1847,6 +2043,14 @@ def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
     assert installations[0].plan_digest == admitted.plan_digest
     assert installations[0].mapping_generation == admitted.mapping_generation
     assert installations[0].plan["compiled_execution_plans"]
+    completed = service.get(switch.operation.operation_id)
+    assert completed.result is not None
+    prepared = next(
+        result
+        for result in completed.result.phase_results
+        if isinstance(result, RunSwitchRuntimePlanResult)
+    )
+    assert prepared.install_plan_digest == installations[0].plan_digest
 
 
 def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
@@ -1877,7 +2081,34 @@ def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
         if switch.executor.events.count("runtime-install") >= 2:
             break
     assert switch.executor.events.count("runtime-install") == 2
-    assert switch.service.get(switch.operation.operation_id).state != "failed"
+    recovered = switch.service.get(switch.operation.operation_id)
+    assert recovered.state != "failed"
+    assert recovered.result is not None and recovered.result.retry_attempt is None
+
+
+def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
+    tmp_path: Path,
+) -> None:
+    switch = _cold_compile_switch(tmp_path)
+    expected_delays = [5, 10, 20, 40, 80, 160, 300, 300, 300]
+    observed_delays: list[int] = []
+    for delay in expected_delays:
+        current = switch.service.get(switch.operation.operation_id)
+        assert current.result is not None
+        assert switch.service._hold_capacity_writer(
+            switch.operation.operation_id,
+            current.result.phase_index,
+            current.result.item_index,
+            reason="install.capacity_busy",
+        )
+        view = switch.service.get(switch.operation.operation_id)
+        assert view.state == "running"
+        assert view.result is not None and view.result.observation_due_at is not None
+        due = view.result.observation_due_at
+        observed_delays.append(int((due - switch.clock.now).total_seconds()))
+        assert observed_delays[-1] == delay
+        assert view.result.retry_attempt == len(observed_delays) + 1
+        switch.clock.now = due
 
 
 def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(
@@ -2994,7 +3225,7 @@ def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
     assert [stop.run_id for stop in plan.stops] == [run_id]
 
 
-def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(
+def test_artifact_child_checkpoint_retries_digest_mismatch_without_accepting_bytes(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -3053,9 +3284,13 @@ def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(
     )
     assert bad_service._advance(bad_operation.operation_id) is True
     assert bad_service._advance(bad_operation.operation_id) is True
-    failed = bad_service.get(bad_operation.operation_id)
-    assert failed.state == "failed"
-    assert failed.status_reason == "run-switch.artifact-digest-verification-mismatch"
+    waiting = bad_service.get(bad_operation.operation_id)
+    assert waiting.state == "running"
+    assert waiting.status_reason is not None
+    assert "artifact-digest-verification-mismatch" in waiting.status_reason
+    assert waiting.result is not None
+    assert waiting.result.retry_attempt is not None
+    assert waiting.result.retry_attempt > 1
 
 
 def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -> None:
@@ -3162,7 +3397,7 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert "verify" in _result(verified).completed_phases
 
 
-def test_transient_distribution_child_is_not_replayed_by_parent(
+def test_typed_transient_child_failure_is_retried_automatically(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -3181,69 +3416,8 @@ def test_transient_distribution_child_is_not_replayed_by_parent(
         artifact_executor,
         artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
-    request = _request(sessions, nodes[0])
-    plan = service.preview(request, actor="admin")
-    operation = service.apply(
-        RunSwitchApplyRequest(
-            **request.model_dump(),
-            plan_digest=plan.plan_digest,
-            request_key=str(uuid.uuid4()),
-        ),
-        actor="admin",
-    )
-    assert service.tick() is True
-    child_id = _child_operation_id(service.get(operation.operation_id))
-    artifact_executor.children[child_id].state = "failed"
-    artifact_executor.children[child_id].result = {
-        "error_code": "agent.copy.timeout",
-        "failure_kind": "temporary-dependency",
-        "progress": {
-            "completed_bytes": 512,
-            "total_bytes": 1024,
-            "members": [
-                {
-                    "node_id": nodes[0],
-                    "state": "unknown",
-                    "completed_bytes": 512,
-                    "total_bytes": 1024,
-                }
-            ],
-        },
-    }
-    assert service.tick() is True
-    failed = service.get(operation.operation_id)
-    assert failed.state == "failed"
-    assert failed.plan_digest == plan.plan_digest
-    assert failed.progress.completed_bytes == 512
-    assert failed.result is not None and failed.result.retryable
-    with sessions() as session:
-        row = session.get(Job, operation.operation_id)
-        assert row is not None
-        assert row.current_attempt <= 1
-        assert row.result is not None
-        assert row.result["child_operation_id"] == child_id
-    assert service.tick() is False
-
-
-def test_operator_retry_uses_a_new_request_after_typed_transient_failure(
-    tmp_path: Path,
-) -> None:
-    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(
-        lifecycle,
-        mapping_id,
-        build_id,
-        nodes,
-        request_id=str(uuid.uuid4()),
-    )
-    artifact_executor = RecordingArtifactExecutor(child_transfer=True)
-    service = _service(
-        sessions,
-        lifecycle._clock(),
-        lifecycle,
-        artifact_executor,
-        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
-    )
+    now = [NOW]
+    service._clock = lambda: now[0]
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
     operation = service.apply(
@@ -3255,51 +3429,28 @@ def test_operator_retry_uses_a_new_request_after_typed_transient_failure(
         actor="admin",
     )
 
-    assert service.tick() is True
+    assert service._advance(operation.operation_id) is True
     child_id = _child_operation_id(service.get(operation.operation_id))
     artifact_executor.children[child_id].state = "failed"
     artifact_executor.children[child_id].result = {
         "error_code": "agent.copy.timeout",
         "failure_kind": "temporary-dependency",
     }
-    assert service.tick() is True
-    exhausted = service.get(operation.operation_id)
-    assert exhausted.state == "failed"
-    retry = service.retry(
-        exhausted.operation_id,
-        actor="operator",
-        request_key=str(uuid.uuid4()),
-    )
-    assert retry.state == "queued"
-    assert retry.plan_digest == plan.plan_digest
-    with sessions() as session:
-        row = session.get(Job, retry.operation_id)
-        assert row is not None
-        assert row.current_attempt == 1
-        retry_payload = row.payload["retry"]
-        assert isinstance(retry_payload, dict)
-        assert retry_payload["operator_retries"] == 1
-
-    assert service.tick() is True
-    retried_child = _child_operation_id(service.get(retry.operation_id))
-    artifact_executor.children[retried_child].state = "succeeded"
-    assert plan.preparation is not None
-    retried_image = plan.preparation.runtime_image
-    assert retried_image is not None
-    artifact_executor.children[retried_child].result = {
-        "copied_bytes": 1024,
-        "evidence": [
-            {
-                "node_id": nodes[0],
-                "verified": True,
-                "verified_digests": [MODEL_ARTIFACT],
-                "verified_image_digest": "sha256:" + "1" * 64,
-                "imported_image_digest": "sha256:" + "1" * 64,
-                "verified_oci_layout_sha256": retried_image.oci_layout_sha256,
-            }
-        ],
-    }
-    assert service.tick() is True
+    assert service._advance(operation.operation_id) is True
+    retrying = service.get(operation.operation_id)
+    assert retrying.state == "running"
+    assert retrying.result is not None
+    assert retrying.result.child_operation_id is None
+    assert retrying.result.retry_attempt is not None
+    assert retrying.result.retry_attempt > 1
+    assert retrying.status_reason is not None
+    assert retrying.result.observation_due_at is not None
+    assert retrying.result.observation_due_at > now[0]
+    now[0] = retrying.result.observation_due_at
+    assert service._advance(operation.operation_id) is True
+    resumed = service.get(operation.operation_id)
+    assert resumed.state == "running"
+    assert _child_operation_id(resumed) != child_id
 
 
 def test_run_switch_retry_classification_rejects_terminal_http_and_storage_errors() -> (
@@ -3422,7 +3573,9 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
     assert len(starts) == 1
 
 
-def test_cleanup_adapter_cannot_evict_nas_or_return_noop(tmp_path: Path) -> None:
+def test_cleanup_adapter_retries_when_executor_reports_nas_eviction(
+    tmp_path: Path,
+) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(
         lifecycle,
@@ -3472,10 +3625,9 @@ def test_cleanup_adapter_cannot_evict_nas_or_return_noop(tmp_path: Path) -> None
         actor="admin",
     )
     assert bad_service.tick() is True
-    assert bad_service.get(operation.operation_id).state == "failed"
-    assert "run-switch.cleanup-scope-invalid" in (
-        bad_service.get(operation.operation_id).status_reason or ""
-    )
+    retried = bad_service.get(operation.operation_id)
+    assert retried.state in {"running", "waiting"}
+    assert retried.status_reason and "next attempt" in retried.status_reason
 
 
 def test_invocation_metadata_does_not_change_plan_digest(tmp_path: Path) -> None:
@@ -3725,7 +3877,10 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
     assert detail.progress.total_bytes_known is False
     if failed:
         assert isinstance(detail.failure, OperationFailureEvidence)
-        assert detail.failure.detail == reason
+        # Failure evidence has a strict byte cap. This repetitive long detail
+        # is dropped instead of exceeding the public operation contract.
+        assert detail.failure.detail in {None, "failure evidence truncated"}
+        assert detail.failure.error_code == "run_switch_failed"
     else:
         assert detail.failure is None
 
@@ -4003,7 +4158,42 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
         assert installed.state == "installed"
 
 
-def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_path):
+def test_succeeded_child_with_invalid_receipt_fails_without_reissue(tmp_path):
+    """A receipt that does not validate never re-issues its child's effects."""
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    executor = RecordingArtifactExecutor(child_transfer=True)
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    service.tick()
+    child_id = _child_operation_id(service.get(operation.operation_id))
+    child = executor.children[child_id]
+    child.state = "succeeded"
+    child.result = {"evidence": [{"phase": "transfer", "unexpected": True}]}
+    for _ in range(3):
+        service.tick()
+    failed = service.get(operation.operation_id)
+    assert failed.state == "failed", failed.status_reason
+    assert _result(failed).failure_code == "run-switch.receipt_invalid"
+    assert _result(failed).retryable is False
+    assert list(executor.children) == [child_id]
+    assert executor.calls.count("transfer") == 1
+
+
+def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_path):
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
@@ -4044,14 +4234,43 @@ def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_
         ),
         actor="admin",
     )
+    # A different intent under a reused request key is a conflict, not a replay.
+    with pytest.raises(RunSwitchOperationConflict, match="reused_differently"):
+        service.apply(
+            RunSwitchApplyRequest(
+                **{**request.model_dump(), "alias": "another-endpoint"},
+                request_key=request_key,
+            ),
+            actor="admin",
+        )
     service.tick()
-    with pytest.raises(RunSwitchOperationConflict, match="explicit Stop"):
+    stop_key = str(uuid.uuid4())
+    original_apply_stop = service.apply_stop
+
+    def unavailable_stop(*_args, **_kwargs):
+        raise RunSwitchOperationConflict("run-switch.stop_unavailable")
+
+    # Cancellation is committed only together with an accepted Stop: a Stop
+    # that cannot be admitted leaves the operation active and cancellable.
+    service.apply_stop = unavailable_stop  # type: ignore[method-assign]
+    with pytest.raises(RunSwitchOperationConflict, match="stop_unavailable"):
         service.cancel(
             active.operation_id,
             actor="admin",
-            request_key=str(uuid.uuid4()),
+            request_key=stop_key,
             reason="Stop running",
         )
+    assert service.get(active.operation_id).state != "cancelled"
+    service.apply_stop = original_apply_stop  # type: ignore[method-assign]
+    stopped = service.cancel(
+        active.operation_id,
+        actor="admin",
+        request_key=stop_key,
+        reason="Stop running",
+    )
+    assert stopped.kind == "recipe.stop.v2"
+    assert stopped.state == "queued"
+    assert service.get(active.operation_id).state == "cancelled"
 
 
 def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
@@ -5023,11 +5242,99 @@ def test_scoped_cleanup_retries_when_uninstall_capacity_writer_is_busy(
     parked = service.get(operation.operation_id)
     assert parked.state == "running"
     assert parked.status_reason is not None
-    assert "admission will retry" in parked.status_reason
+    assert "admission retry 1 in 5s" in parked.status_reason
     assert parked.result is not None
     assert parked.result.retry_reason == RunAdmissionBusy.code
     assert parked.result.phase_index == 0
     assert parked.result.item_index == 0
+
+
+def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
+    tmp_path: Path,
+) -> None:
+    """Capacity waits and checkpoint retries interleave on ``retry_attempt``.
+
+    Each owner backs off from the shared counter, a capacity wait for a new
+    reason starts its own backoff again, and phase progress clears it.
+    """
+
+    from vonk_control.run_switch_operations import _read_progress
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    now = [lifecycle._clock()]
+    service = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
+    service._clock = lambda: now[0]
+    operation = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation.owner_id,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    original_uninstall = lifecycle.uninstall
+
+    def busy(*args, **kwargs):
+        del args, kwargs
+        raise RunAdmissionBusy("run capacity writer is busy")
+
+    def result():
+        view = service.get(operation.operation_id)
+        assert view.result is not None
+        return view, view.result
+
+    def advance_to_due() -> None:
+        _view, current = result()
+        assert current.observation_due_at is not None
+        now[0] = current.observation_due_at + timedelta(seconds=1)
+
+    lifecycle.uninstall = busy  # type: ignore[method-assign]
+    try:
+        assert service.tick() is True
+        view, current = result()
+        assert "admission retry 1 in 5s" in (view.status_reason or "")
+        advance_to_due()
+        assert service.tick() is True
+        view, current = result()
+        assert "admission retry 2 in 10s" in (view.status_reason or "")
+        assert current.retry_attempt == 3
+
+        # A checkpoint retry continues the same counter, bounded by its cap.
+        with sessions.begin() as session:
+            job = session.get(Job, operation.operation_id, with_for_update=True)
+            assert job is not None
+            progress = _read_progress(job.result)
+            RunSwitchOperationService._schedule_checkpoint_retry(
+                job, progress, "artifact.temporarily-unavailable", now[0]
+            )
+        view, current = result()
+        assert view.state == "running"
+        assert current.retry_attempt == 4
+        assert current.retry_reason == "artifact.temporarily-unavailable"
+        assert current.observation_due_at is not None
+        assert (
+            timedelta(0) < current.observation_due_at - now[0] <= timedelta(seconds=75)
+        )
+
+        # A capacity wait after a different reason starts its own backoff.
+        advance_to_due()
+        assert service.tick() is True
+        view, current = result()
+        assert "admission retry 1 in 5s" in (view.status_reason or "")
+        assert current.retry_attempt == 2
+        assert current.retry_reason == RunAdmissionBusy.code
+    finally:
+        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+
+    # Phase progress clears the shared counter.
+    advance_to_due()
+    assert service.tick() is True
+    view, current = result()
+    assert view.state == "running", view.status_reason
+    assert current.retry_attempt is None
+    assert current.phase_index == 0
 
 
 def _planned_installation(tmp_path: Path, *, nodes: int = 2):
@@ -5154,15 +5461,13 @@ def test_scoped_cleanup_refuses_a_planned_row_with_install_evidence(
         and "uninstall.installation_not_uninstallable" in reason.detail
         for reason in preview.blockers
     ), [(reason.code, reason.detail) for reason in preview.blockers]
-    with pytest.raises(
-        RunSwitchOperationConflict, match="run-switch.uninstall-blocked"
-    ):
-        service.apply_cleanup(
-            RunSwitchCleanupApplyRequest(
-                installation_id=installation_id, request_key=str(uuid.uuid4())
-            ),
-            actor="admin",
-        )
+    operation = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation_id, request_key=str(uuid.uuid4())
+        ),
+        actor="admin",
+    )
+    assert operation.state in {"queued", "waiting"}
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None and installation.state == "planned"
@@ -5384,7 +5689,7 @@ def test_shared_admission_contention_preserves_operation_for_retry(
             assert job is not None
             if job.status_reason and "capacity writer" in job.status_reason:
                 assert job.state == "running"
-                assert "retry at" in job.status_reason
+                assert "retry " in job.status_reason and " at " in job.status_reason
                 break
     else:
         pytest.fail("shared admission contention did not schedule a durable retry")

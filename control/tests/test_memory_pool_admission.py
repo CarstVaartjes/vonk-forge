@@ -14,7 +14,6 @@ from vonk_control.models import (
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
 from vonk_control.recipe_operations import (
-    RecipeOperationConflict,
     RecipeOperationService,
 )
 from vonk_control.resource_planning import (
@@ -24,7 +23,11 @@ from vonk_control.resource_planning import (
     memory_capacity_snapshot,
     plan_capacity,
 )
-from vonk_control.run_admission import RunAdmissionService, RunPlanConflict
+from vonk_control.run_admission import (
+    RunAdmissionBusy,
+    RunAdmissionService,
+    RunPlanConflict,
+)
 
 from .test_profile_capacity_admission import _capacity_profile
 from .test_recipe_builds import RecordingQueue
@@ -86,7 +89,7 @@ def test_host_builder_claim_is_visible_to_unified_review_and_runtime(
     node = review.json()["assessments"][0]["assessment"]["fit_current"]["nodes"][0]
     assert node["memory_free_after_bytes"] == runtime.nodes[0].free_after_bytes
     if headroom < 0:
-        with pytest.raises(RecipeOperationConflict, match="stale_or_blocked"):
+        with pytest.raises(RunAdmissionBusy):  # waits for memory; no over-commit
             lifecycle.start(
                 original,
                 plan_digest=original.plan_digest,
@@ -257,7 +260,9 @@ def test_separate_pools_recheck_the_other_constraint_after_a_planned_stop():
     assert plan.nodes[0].after_stop_free_after_bytes == 10
 
 
-def test_changed_physical_pool_requires_a_new_profile_review(tmp_path, postgres_engine):
+def test_changed_physical_pool_loads_against_the_current_plan(
+    tmp_path, postgres_engine
+):
     sessions, _, _, profile, api, headers, reviewed, _ = _capacity_profile(
         tmp_path, postgres_engine
     )
@@ -268,7 +273,7 @@ def test_changed_physical_pool_requires_a_new_profile_review(tmp_path, postgres_
     current = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
     assert current.status_code == 200 and current.json()["allowed"], current.text
     assert current.json()["plan_digest"] != reviewed["plan_digest"]
-    refused = api.post(
+    loaded = api.post(
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
@@ -276,4 +281,7 @@ def test_changed_physical_pool_requires_a_new_profile_review(tmp_path, postgres_
             "request_key": str(uuid4()),
         },
     )
-    assert refused.status_code == 409, refused.text
+    # The stale review digest is advisory; the load binds the current plan.
+    assert loaded.status_code == 202, loaded.text
+    intended = loaded.json()["progress"]["intended_profile"]
+    assert intended["reviewed_plan_digest"] == current.json()["plan_digest"]

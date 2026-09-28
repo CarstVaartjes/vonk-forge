@@ -142,6 +142,12 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         for values in samples[1:]:
             values["observed_at"] = now[0]
             repository.record(InventorySnapshotInput(**values))
+    # Admission retries back off; the fresh evidence is picked up at the
+    # durable wait's next attempt rather than by an immediate re-poll.
+    pending = planner.get(accepted.operation_id)
+    assert pending.result is not None
+    assert pending.result.observation_due_at is not None
+    now[0] = max(now[0], pending.result.observation_due_at)
     resumed = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
     for _ in range(10):
         resumed.tick()

@@ -53,7 +53,8 @@ from .cluster_mappings import (
     validate_mapping_parameters,
 )
 from .disk_reservations import outstanding_disk_reservation_bytes
-from .install_admission import InstallAdmissionBusy
+from .failure_classification import error_code, is_redownload, is_security_failure
+from .install_admission import InstallAdmissionBusy, InstallPreflightExpired
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .logging import log_event, redact_text
@@ -475,7 +476,6 @@ _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _OPERATION_KINDS = frozenset(
     {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
 )
-_MAX_RETRY_ATTEMPTS = 3
 _MEMORY_CAPACITY_REFUSALS = frozenset(
     {
         "run-switch.resource.insufficient_capacity",
@@ -1665,7 +1665,7 @@ class RecipeLifecyclePhaseExecutor:
                     ),
                     workload_intent_ordinal=_bound_workload_intent(progress),
                 )
-            except RecipeInstallPreflightExpired as error:
+            except (RecipeInstallPreflightExpired, InstallPreflightExpired) as error:
                 # Compiling the launch document above can outlast the runtime
                 # preflight window this phase was admitted on.  Nothing else
                 # about the install changed, so ask the caller to rerun the
@@ -1685,11 +1685,27 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     f"run-switch.install-preparation-failed: {error}"
                 ) from error
+            prepared_id = _required_string(installation_id)
+            with self._sessions() as session:
+                installation = session.get(RecipeInstallation, prepared_id)
+                if installation is None:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.install-preparation-unavailable"
+                    )
+                try:
+                    stored_plan = parse_stored_installation_plan(installation.plan)
+                except RecipeExecutionContractError as error:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.installation-identity-unavailable"
+                    ) from error
             return self._prepared_installation_result(
-                _required_string(installation_id),
+                prepared_id,
                 mapping_id,
-                install_plan.plan_digest,
-                install_plan.compiled_plan_by_node,
+                stored_plan.plan_digest,
+                {
+                    node_id: compiled.model_dump(mode="json")
+                    for node_id, compiled in stored_plan.compiled_execution_plans.items()
+                },
             )
         if phase.kind == "prepare" and phase.subphase == "runtime-install":
             ordinal = _bound_workload_intent(progress)
@@ -3119,23 +3135,20 @@ class RunSwitchOperationService:
         workload_intent_ordinal: int | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
+        intent = {
+            "type": "cleanup",
+            **request.model_dump(mode="json", exclude={"plan_digest", "request_key"}),
+        }
         if request.request_key is not None:
             existing = self._existing_request_operation(
                 request.request_key,
                 kind="recipe.cleanup.v2",
-                plan_digest=request.plan_digest,
+                intent=intent,
             )
             if existing is not None:
                 return existing
         preview = self.preview_cleanup(request, actor=actor)
-        if (
-            request.plan_digest is not None
-            and preview.plan_digest != request.plan_digest
-        ):
-            raise RunSwitchOperationConflict(
-                "run-switch.stale_plan: current evidence no longer matches preview"
-            )
-        if not preview.allowed:
+        if not preview.allowed and not _plan_blockers_are_waitable(preview):
             raise RunSwitchOperationConflict(
                 "run-switch.plan_blocked: "
                 + "; ".join(reason.code for reason in preview.blockers[:8])
@@ -3146,6 +3159,7 @@ class RunSwitchOperationService:
             actor=actor,
             kind="recipe.cleanup.v2",
             workload_intent_ordinal=workload_intent_ordinal,
+            intent=intent,
         )
 
     def apply(
@@ -3157,22 +3171,24 @@ class RunSwitchOperationService:
         profile_application_id: str | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
+        intent = {
+            "type": "run",
+            "request": request.model_dump(
+                mode="json", exclude={"plan_digest", "request_key"}
+            ),
+        }
         if request.request_key is not None:
             existing = self._existing_request_operation(
                 request.request_key,
                 kind="recipe.run-switch.v2",
-                plan_digest=request.plan_digest,
+                intent=intent,
             )
             if existing is not None:
                 return existing
         plan = self.preview(
             request, actor=actor, profile_application_id=profile_application_id
         )
-        if request.plan_digest is not None and plan.plan_digest != request.plan_digest:
-            raise RunSwitchOperationConflict(
-                "run-switch.stale_plan: current evidence no longer matches preview"
-            )
-        if not plan.allowed:
+        if not plan.allowed and not _plan_blockers_are_waitable(plan):
             raise RunSwitchOperationConflict(
                 "run-switch.plan_blocked: "
                 + "; ".join(reason.code for reason in plan.blockers[:8])
@@ -3184,6 +3200,7 @@ class RunSwitchOperationService:
             kind="recipe.run-switch.v2",
             workload_intent_ordinal=workload_intent_ordinal,
             profile_application_id=profile_application_id,
+            intent=intent,
         )
 
     def apply_run(
@@ -3203,23 +3220,20 @@ class RunSwitchOperationService:
         profile_application_id: str | None = None,
     ) -> RunSwitchOperation:
         request_key = request.request_key or str(uuid.uuid4())
+        intent = {
+            "type": "stop",
+            **request.model_dump(mode="json", exclude={"plan_digest", "request_key"}),
+        }
         if request.request_key is not None:
             existing = self._existing_request_operation(
                 request.request_key,
                 kind="recipe.stop.v2",
-                plan_digest=request.plan_digest,
+                intent=intent,
             )
             if existing is not None:
                 return existing
         preview = self.preview_stop(request, actor=actor)
-        if (
-            request.plan_digest is not None
-            and preview.plan_digest != request.plan_digest
-        ):
-            raise RunSwitchOperationConflict(
-                "run-switch.stale_plan: current evidence no longer matches preview"
-            )
-        if not preview.allowed:
+        if not preview.allowed and not _plan_blockers_are_waitable(preview):
             raise RunSwitchOperationConflict(
                 "run-switch.plan_blocked: "
                 + "; ".join(reason.code for reason in preview.blockers[:8])
@@ -3231,6 +3245,7 @@ class RunSwitchOperationService:
             kind="recipe.stop.v2",
             workload_intent_ordinal=workload_intent_ordinal,
             profile_application_id=profile_application_id,
+            intent=intent,
         )
 
     def apply_profile_stop(
@@ -3246,10 +3261,15 @@ class RunSwitchOperationService:
     ) -> RunSwitchOperation:
         """Apply only a FleetProfile-reviewed reachable-rank Stop scope."""
 
+        intent = {
+            "type": "profile-stop",
+            "run_id": run_id,
+            "profile_stop_scope": profile_stop_scope.model_dump(mode="json"),
+        }
         existing = self._existing_request_operation(
             request_key,
             kind="recipe.stop.v2",
-            plan_digest=plan_digest,
+            intent=intent,
         )
         if existing is not None:
             return existing
@@ -3258,11 +3278,7 @@ class RunSwitchOperationService:
             actor=actor,
             profile_stop_scope=profile_stop_scope,
         )
-        if plan.plan_digest != plan_digest:
-            raise RunSwitchOperationConflict(
-                "run-switch.stale_plan: current evidence no longer matches preview"
-            )
-        if not plan.allowed:
+        if not plan.allowed and not _plan_blockers_are_waitable(plan):
             raise RunSwitchOperationConflict(
                 "run-switch.plan_blocked: "
                 + "; ".join(reason.code for reason in plan.blockers[:8])
@@ -3274,6 +3290,7 @@ class RunSwitchOperationService:
             kind="recipe.stop.v2",
             workload_intent_ordinal=workload_intent_ordinal,
             profile_application_id=profile_application_id,
+            intent=intent,
         )
 
     def get(self, operation_id: str) -> RunSwitchOperation:
@@ -3287,6 +3304,8 @@ class RunSwitchOperationService:
         self, operation_id: str, *, actor: str, request_key: str, reason: str
     ) -> RunSwitchOperation:
         """Stop at the next safe phase boundary, keeping shared immutable work."""
+        stop_run_id: str | None = None
+        profile_application_id: str | None = None
         cancellation = RunSwitchCancellation(
             request_key=request_key,
             actor=actor,
@@ -3317,6 +3336,9 @@ class RunSwitchOperationService:
                     "run-switch operation is not cancellable"
                 )
             plan = _load_plan(job.payload["plan"])
+            profile_application_id = _string_or_none(
+                progress.get("profile_application_id")
+            )
             try:
                 lock_run_switch_build_dependency(
                     session,
@@ -3340,22 +3362,57 @@ class RunSwitchOperationService:
                 job.state in {"running", "waiting"}
                 and phase.kind in {"start", "final_verify"}
             ):
-                raise RunSwitchOperationConflict(
-                    "run-switch runtime is starting or active; use the explicit Stop operation"
+                child_id = _string_or_none(progress.get("child_operation_id"))
+                child = session.get(Job, child_id) if child_id is not None else None
+                owner_id = (
+                    child.payload.get("owner_id")
+                    if child is not None and child.payload.get("owner_kind") == "run"
+                    else None
                 )
-            progress["cancellation"] = cancellation.model_dump(mode="json")
-            if job.state == "waiting":
-                progress["observation_due_at"] = cancellation.requested_at.isoformat()
-            job.status_reason = (
-                "Cancellation requested; finishing the current preparation safely."
-            )
-            if phase.subphase == "container-build" or (
-                job.state == "queued" and not progress.get("child_operation_id")
-            ):
-                _complete_cancellation(job, progress, cancellation.requested_at)
+                stop_run_id = plan.run_id or _string_or_none(owner_id)
+                if stop_run_id is None:
+                    raise RunSwitchOperationConflict(
+                        "run-switch active intent has no run identity to stop"
+                    )
+                # The operation is marked cancelled only after its Stop is
+                # durably accepted below; a failed Stop leaves it cancellable.
             else:
-                job.result = _persisted_result(progress)
-                job.updated_at = cancellation.requested_at
+                progress["cancellation"] = cancellation.model_dump(mode="json")
+                if job.state == "waiting":
+                    progress["observation_due_at"] = (
+                        cancellation.requested_at.isoformat()
+                    )
+                job.status_reason = (
+                    "Cancellation requested; finishing the current preparation safely."
+                )
+                if phase.subphase == "container-build" or (
+                    job.state == "queued" and not progress.get("child_operation_id")
+                ):
+                    _complete_cancellation(job, progress, cancellation.requested_at)
+                else:
+                    job.result = _persisted_result(progress)
+                    job.updated_at = cancellation.requested_at
+        if stop_run_id is not None:
+            stop = self.apply_stop(
+                RunSwitchStopApplyRequest(
+                    run_id=stop_run_id, request_key=cancellation.request_key
+                ),
+                actor=actor,
+                profile_application_id=profile_application_id,
+            )
+            with self._sessions.begin() as session:
+                job = session.get(Job, operation_id, with_for_update=True)
+                if job is not None and job.state in {"queued", "running", "waiting"}:
+                    progress = _read_progress(job.result)
+                    progress["cancellation"] = cancellation.model_dump(mode="json")
+                    job.state = "cancelled"
+                    job.status_reason = (
+                        "Cancellation translated into Run/Switch Stop "
+                        f"operation {stop.operation_id}"
+                    )
+                    job.result = _persisted_result(progress)
+                    job.updated_at = cancellation.requested_at
+            return stop
         return self.get(operation_id)
 
     def retry(
@@ -3381,9 +3438,7 @@ class RunSwitchOperationService:
                 )
             existing = session.scalar(select(Job).where(Job.request_id == request_key))
             if existing is not None:
-                if existing.kind != previous.kind or existing.payload.get(
-                    "plan_digest"
-                ) != previous.payload.get("plan_digest"):
+                if existing.kind != previous.kind:
                     raise RunSwitchOperationConflict(
                         "run-switch request key was already used"
                     )
@@ -3394,19 +3449,10 @@ class RunSwitchOperationService:
                 if current_progress is not None
                 else {}
             )
-            raw_retry = previous.payload.get("retry", {})
-            retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
-            operator_retries = retry.get("operator_retries")
-            operator_retries = (
-                operator_retries
-                if type(operator_retries) is int and operator_retries >= 0
-                else 0
-            )
             if (
                 current_progress is None
                 or previous.state != "failed"
                 or progress.get("retryable") is not True
-                or operator_retries >= _MAX_RETRY_ATTEMPTS
             ):
                 raise RunSwitchOperationConflict(
                     "run-switch operation is not retryable"
@@ -3492,10 +3538,6 @@ class RunSwitchOperationService:
             payload["workload_intent_ordinal"] = ordinal
             payload["progress"] = progress
             payload["retry_of"] = previous.id
-            payload["retry"] = {
-                "automatic_attempts": 1,
-                "operator_retries": operator_retries + 1,
-            }
             progress["child_operation_id"] = None
             progress["retryable"] = False
             progress.pop("failure_code", None)
@@ -6565,6 +6607,7 @@ class RunSwitchOperationService:
         kind: str,
         workload_intent_ordinal: int | None,
         profile_application_id: str | None = None,
+        intent: Mapping[str, object] | None = None,
     ) -> RunSwitchOperation:
         now = _now(self._clock)
         target_node_ids = _plan_target_node_ids(plan)
@@ -6575,6 +6618,7 @@ class RunSwitchOperationService:
             "action": plan.action,
             "plan_digest": plan.plan_digest,
             "plan": plan.model_dump(mode="json"),
+            **({"intent": dict(intent)} if intent is not None else {}),
             "progress": {
                 **(
                     {"profile_application_id": profile_application_id}
@@ -6604,7 +6648,6 @@ class RunSwitchOperationService:
                     if node.node_id in target_node_ids
                 ],
             },
-            "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
         with self._sessions.begin() as session:
             nodes = list(
@@ -6627,10 +6670,7 @@ class RunSwitchOperationService:
                 )
             existing = session.scalar(select(Job).where(Job.request_id == request_key))
             if existing is not None:
-                if (
-                    existing.kind != kind
-                    or existing.payload.get("plan_digest") != plan.plan_digest
-                ):
+                if existing.kind != kind or not _same_intent(existing, intent):
                     raise RunSwitchOperationConflict(
                         "run-switch.request_key_reused_differently"
                     )
@@ -6669,7 +6709,7 @@ class RunSwitchOperationService:
                 id=str(uuid.uuid4()),
                 request_id=request_key,
                 kind=kind,
-                state="queued",
+                state="queued" if plan.allowed else "waiting",
                 actor=actor,
                 authority_revision=(plan.recipe_content_sha256 or plan.plan_digest),
                 targets=list(target_node_ids),
@@ -6679,6 +6719,14 @@ class RunSwitchOperationService:
                 created_at=now,
                 updated_at=now,
             )
+            if not plan.allowed:
+                progress = dict(payload["progress"])
+                due = _next_replan(job.id, progress, now)
+                job.result = _persisted_result(progress)
+                job.status_reason = (
+                    "; ".join(reason.code for reason in plan.blockers[:8])
+                    + f"; next re-plan at {due.isoformat()}"
+                )[:512]
             session.add(job)
             session.flush()
             return self._operation_view(job)
@@ -6701,7 +6749,7 @@ class RunSwitchOperationService:
         request_key: str,
         *,
         kind: str,
-        plan_digest: str | None,
+        intent: Mapping[str, object],
     ) -> RunSwitchOperation | None:
         """Replay a durable operation before re-planning mutable evidence.
 
@@ -6714,17 +6762,191 @@ class RunSwitchOperationService:
             existing = session.scalar(select(Job).where(Job.request_id == request_key))
             if existing is None:
                 return None
-            if existing.kind != kind or (
-                plan_digest is not None
-                and existing.payload.get("plan_digest") != plan_digest
-            ):
+            if existing.kind != kind or not _same_intent(existing, intent):
                 raise RunSwitchOperationConflict(
                     "run-switch.request_key_reused_differently"
                 )
             return self._operation_view(existing)
 
+    def _refresh_blocked_plan(self, operation_id: str, now: datetime) -> bool:
+        """Re-plan accepted intent when its current admission evidence was blocked."""
+        with self._sessions() as session:
+            row = session.get(Job, operation_id)
+            if row is None or row.kind not in _OPERATION_KINDS:
+                return False
+            try:
+                plan = _load_plan(row.payload.get("plan"))
+            except RunSwitchOperationConflict:
+                plan = None
+            try:
+                persisted_progress = _read_progress(row.result)
+            except RunSwitchOperationConflict:
+                # Unreadable evidence of what was issued is never re-planned
+                # from the accepted payload: a Start may already exist.
+                return False
+            if (
+                plan is not None
+                and plan.allowed
+                and not persisted_progress.get("force_replan")
+            ):
+                return False
+            # Cancellation and newer intent are settled before any re-plan.
+            if persisted_progress.get("cancellation") or (
+                self._scope_intent_status(session, row) != "current"
+            ):
+                return False
+            due = persisted_progress.get("observation_due_at")
+            if isinstance(due, str) and now < _aware(datetime.fromisoformat(due)):
+                return False
+            intent = row.payload.get("intent")
+            if not isinstance(intent, Mapping):
+                return False
+            kind = intent.get("type")
+            actor = row.actor
+            profile_application_id = _string_or_none(
+                persisted_progress.get("profile_application_id")
+            )
+
+        try:
+            if kind == "run" and isinstance(intent.get("request"), Mapping):
+                request = RunSwitchPreviewRequest.model_validate(
+                    intent["request"], strict=True
+                )
+                refreshed = self.preview(
+                    request, actor=actor, profile_application_id=profile_application_id
+                )
+            elif kind == "stop":
+                refreshed = self.preview_stop(
+                    RunSwitchStopPreviewRequest.model_validate(
+                        {key: value for key, value in intent.items() if key != "type"},
+                        strict=True,
+                    ),
+                    actor=actor,
+                )
+            elif kind == "cleanup":
+                refreshed = self.preview_cleanup(
+                    RunSwitchCleanupPreviewRequest.model_validate(
+                        {key: value for key, value in intent.items() if key != "type"},
+                        strict=True,
+                    ),
+                    actor=actor,
+                )
+            elif kind == "profile-stop":
+                refreshed = self.preview_stop(
+                    str(intent["run_id"]),
+                    actor=actor,
+                    profile_stop_scope=RunSwitchProfileStopScope.model_validate(
+                        intent["profile_stop_scope"], strict=True
+                    ),
+                )
+            else:
+                raise RunSwitchOperationConflict("run-switch intent is invalid")
+        except (KeyError, TypeError, ValueError, RuntimeError) as error:
+            if is_security_failure(error_code(error)):
+                with self._sessions.begin() as session:
+                    current = session.get(Job, operation_id, with_for_update=True)
+                    if current is not None:
+                        self._mark_failed(current, str(error), now=now)
+                return True
+            refreshed = None
+
+        with self._sessions.begin() as session:
+            current = session.get(Job, operation_id, with_for_update=True)
+            if current is None or current.state not in {"queued", "running", "waiting"}:
+                return True
+            try:
+                current_plan = _load_plan(current.payload.get("plan"))
+            except RunSwitchOperationConflict:
+                current_plan = None
+            try:
+                progress = _read_progress(current.result)
+            except RunSwitchOperationConflict:
+                return False
+            if (
+                current_plan is not None
+                and current_plan.allowed
+                and not progress.get("force_replan")
+            ):
+                return False
+            if progress.get("cancellation") or (
+                self._scope_intent_status(session, current) != "current"
+            ):
+                return False
+            # Target membership is fenced by the accepted workload ordinal on
+            # exactly these Sparks. A refreshed plan naming other Sparks is not
+            # this intent; wait (with backoff) until the plan matches again or a
+            # newer request supersedes it.
+            targets_changed = (refreshed is not None and refreshed.allowed) and sorted(
+                _plan_target_node_ids(refreshed)
+            ) != sorted(current.targets)
+            if refreshed is not None and refreshed.allowed and not targets_changed:
+                current.payload = {
+                    **current.payload,
+                    "plan": refreshed.model_dump(mode="json"),
+                    "plan_digest": refreshed.plan_digest,
+                }
+                current.authority_revision = (
+                    refreshed.recipe_content_sha256 or refreshed.plan_digest
+                )
+                total_bytes, _ = _planned_transfer_bytes(refreshed)
+                # Replanned phases are idempotent, and even an unchanged shape
+                # does not prove the old phase remains valid under new authority.
+                # The new plan starts with no results from the old one and a new
+                # child identity generation, so no installation, run, or adopted
+                # Start of the old plan can be attributed to the new plan.
+                phase_index = 0
+                progress.pop("retry_attempt", None)
+                progress.update(
+                    {
+                        "phase_index": phase_index,
+                        "item_index": 0,
+                        "completed_phases": [],
+                        "phase_results": [],
+                        "child_operation_id": None,
+                        "phase_retry_generation": require_integer(
+                            progress.get("phase_retry_generation") or 0,
+                            "phase retry generation",
+                        )
+                        + 1,
+                        "phase": refreshed.phases[phase_index].kind
+                        if refreshed.phases
+                        else "final_verify",
+                        "subphase": refreshed.phases[phase_index].subphase
+                        if refreshed.phases
+                        else None,
+                        "total_bytes": total_bytes,
+                        "total_bytes_known": total_bytes is not None,
+                        "observation_due_at": None,
+                        "force_replan": False,
+                    }
+                )
+                progress.pop("retry_reason", None)
+                progress.pop("failed_phase", None)
+                current.state = "queued"
+                current.status_reason = None
+            else:
+                due = _next_replan(current.id, progress, now)
+                current.state = "waiting"
+                reasons = (
+                    "run-switch.plan-targets-changed"
+                    if targets_changed
+                    else "; ".join(reason.code for reason in refreshed.blockers[:8])
+                    if refreshed is not None
+                    else "run-switch.plan-refresh-unavailable"
+                )
+                current.status_reason = f"{reasons}; next re-plan at {due.isoformat()}"[
+                    :512
+                ]
+            current.result = _persisted_result(progress)
+            current.payload = {**current.payload, "progress": progress}
+            current.payload_digest = _digest(current.payload)
+            current.updated_at = now
+        return True
+
     def _advance(self, operation_id: str) -> bool:
         now = _now(self._clock)
+        if self._refresh_blocked_plan(operation_id, now):
+            return True
         with self._sessions() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
@@ -6773,6 +6995,33 @@ class RunSwitchOperationService:
                 )
                 session.commit()
                 return True
+            if intent_status == "missing-target":
+                self._mark_failed(
+                    job,
+                    "run-switch target node no longer exists; accepted intent is superseded",
+                    now=now,
+                    progress=progress,
+                )
+                session.commit()
+                return True
+            if intent_status == "waiting":
+                pending_due = progress.get("observation_due_at")
+                if (
+                    job.state == "waiting"
+                    and isinstance(pending_due, str)
+                    and now < _aware(datetime.fromisoformat(pending_due))
+                ):
+                    return False
+                due = _next_replan(job.id, progress, now)
+                job.state = "waiting"
+                job.status_reason = (
+                    "Waiting for a target Spark to return to active state; "
+                    f"next check at {due.isoformat()}"
+                )[:512]
+                job.result = _persisted_result(progress)
+                job.updated_at = now
+                session.commit()
+                return True
             if intent_status == "superseded":
                 job.state = "cancelled"
                 job.status_reason = (
@@ -6802,11 +7051,19 @@ class RunSwitchOperationService:
                 if not child_id:
                     # Final verification observes an existing run and route;
                     # reopening this checkpoint cannot issue a new workload.
+                    # A due automatic wait (an inactive target Spark that has
+                    # returned, a background preparation, a backoff) resumes
+                    # the exact checkpoint: no child is outstanding, and the
+                    # phase key is unchanged, so re-entry is idempotent.
                     # Newer intent was checked above, and the persisted start
                     # deadline remains immutable.
-                    if progress.get("phase") != "final_verify":
+                    if progress.get("phase") != "final_verify" and not (
+                        job.state == "waiting" and isinstance(observation_due, str)
+                    ):
                         return False
                     job.state = "running"
+                    if progress.get("phase") != "final_verify":
+                        job.status_reason = None
                     job.updated_at = now
                     session.commit()
                 else:
@@ -6899,11 +7156,13 @@ class RunSwitchOperationService:
             *,
             retryable: bool = False,
             failure_code: str | None = None,
+            replan: bool = False,
         ) -> None:
             self._fail(
                 operation_id,
                 reason,
                 retryable=retryable,
+                replan=replan,
                 checkpoint=(phase_index, item_index, child_id),
                 failure_code=failure_code,
                 checkpoint_guard=checkpoint_job,
@@ -7038,14 +7297,33 @@ class RunSwitchOperationService:
                     if isinstance(detail, str) and detail:
                         reason += ": " + detail[:384]
                     kind = _child_failure_kind(child)
-                    # The agent authority owns exact transfer retry/observation
-                    # and its durable attempt budget. A terminal child is not
-                    # replayed by a second parent-level automatic retry loop.
+                    if classify(kind) is RecoveryDecision.RETRY:
+                        with self._sessions.begin() as session:
+                            job = checkpoint_job(session)
+                            if job is None:
+                                return False
+                            current = _read_progress(job.result)
+                            if not _checkpoint_matches(
+                                job, current, phase_index, item_index, child_id
+                            ):
+                                return False
+                            current["child_operation_id"] = None
+                            current["phase_retry_generation"] = (
+                                require_integer(
+                                    current.get("phase_retry_generation") or 0,
+                                    "phase retry generation",
+                                )
+                                + 1
+                            )
+                            self._schedule_checkpoint_retry(job, current, reason, now)
+                        return True
+                    # An uncertain effect stays attached to its exact child;
+                    # only a terminal temporary dependency is safe to resubmit.
                     self._fail(
                         operation_id,
                         reason,
-                        retryable=classify(kind) is RecoveryDecision.RETRY,
                         checkpoint=(phase_index, item_index, child_id),
+                        failure_code=_child_failure_code(evidence),
                         child_evidence=evidence,
                         checkpoint_guard=checkpoint_job,
                     )
@@ -7092,11 +7370,23 @@ class RunSwitchOperationService:
                             progress.get("phase_results", []), "phase results"
                         )
                     )
-                    results.extend(
-                        _phase_result(receipt, phase=phase)
-                        for receipt in child_receipts
-                        if isinstance(receipt, Mapping)
-                    )
+                    try:
+                        results.extend(
+                            _phase_result(receipt, phase=phase)
+                            for receipt in child_receipts
+                            if isinstance(receipt, Mapping)
+                        )
+                    except RunSwitchOperationConflict as error:
+                        # The child succeeded; re-issuing it would repeat its
+                        # effects, so a receipt that does not validate fails.
+                        self._mark_failed(
+                            job,
+                            str(error),
+                            now=now,
+                            progress=progress,
+                            failure_code="run-switch.receipt_invalid",
+                        )
+                        return True
                     progress["phase_results"] = results
                 if phase.subphase == "container-build":
                     try:
@@ -7106,11 +7396,17 @@ class RunSwitchOperationService:
                             expected_image=expected_image,
                         )
                     except RunSwitchOperationConflict as error:
-                        job.state = "failed"
-                        job.status_reason = str(error)[:512]
-                        progress["failed_phase"] = phase.kind
-                        job.result = _persisted_result(progress)
-                        job.updated_at = now
+                        # A succeeded child already produced its effects. A receipt that
+                        # does not validate is an integrity failure; re-issuing the child
+                        # would repeat those effects on the Spark.
+                        self._mark_failed(
+                            job,
+                            str(error),
+                            now=now,
+                            progress=progress,
+                            failure_code=error_code(error)
+                            or "run-switch.receipt_invalid",
+                        )
                         return True
                     results = list(
                         require_sequence(
@@ -7136,7 +7432,17 @@ class RunSwitchOperationService:
                             expected_image=expected_image,
                         )
                     except RunSwitchOperationConflict as error:
-                        self._mark_failed(job, str(error), now=now, progress=progress)
+                        # A succeeded child already produced its effects. A receipt that
+                        # does not validate is an integrity failure; re-issuing the child
+                        # would repeat those effects on the Spark.
+                        self._mark_failed(
+                            job,
+                            str(error),
+                            now=now,
+                            progress=progress,
+                            failure_code=error_code(error)
+                            or "run-switch.receipt_invalid",
+                        )
                         return True
                 if (
                     child_receipts is None
@@ -7149,7 +7455,17 @@ class RunSwitchOperationService:
                     try:
                         receipt = _phase_result(child_result, phase=phase)
                     except RunSwitchOperationConflict as error:
-                        self._mark_failed(job, str(error), now=now, progress=progress)
+                        # A succeeded child already produced its effects. A receipt that
+                        # does not validate is an integrity failure; re-issuing the child
+                        # would repeat those effects on the Spark.
+                        self._mark_failed(
+                            job,
+                            str(error),
+                            now=now,
+                            progress=progress,
+                            failure_code=error_code(error)
+                            or "run-switch.receipt_invalid",
+                        )
                         return True
                     progress["phase_results"] = [
                         *require_sequence(
@@ -7205,7 +7521,17 @@ class RunSwitchOperationService:
                 return True
             phase = plan.phases[phase_index]
             actor = job.actor
-            request_key = job.request_id
+            retry_generation = require_integer(
+                progress.get("phase_retry_generation") or 0,
+                "phase retry generation",
+            )
+            request_key = (
+                _phase_request_key(
+                    job.request_id, phase_index, item_index, retry_generation
+                )
+                if retry_generation
+                else job.request_id
+            )
         gate = getattr(self._phase_executor, "preflight", None)
         if isinstance(gate, _PhasePreflightGate):
             try:
@@ -7297,7 +7623,19 @@ class RunSwitchOperationService:
                     pending=pending,
                 )
             except RunSwitchOperationConflict as error:
-                fail(str(error), failure_code=getattr(error, "code", None))
+                code = error_code(error)
+                # Final verification checks effects that already happened. A
+                # mismatch (wrong image, missing member) is refused rather than
+                # hidden behind endless retries; other conflicts re-plan.
+                retryable = phase.kind != "final_verify" and not is_security_failure(
+                    code
+                )
+                fail(
+                    str(error),
+                    retryable=retryable,
+                    failure_code=code,
+                    replan=retryable,
+                )
                 return True
             except RuntimeImagePreparationError as error:
                 if error.code == _RUNTIME_IMAGE_OWNER_CHANGED:
@@ -7310,8 +7648,11 @@ class RunSwitchOperationService:
                         reason=error.code,
                         detail=error.detail,
                     )
+                # Bytes that failed their digest are refused and fetched again
+                # by the ordinary preparation retry, with exponential backoff.
                 fail(
                     f"{type(error).__name__}: {error}",
+                    retryable=error.retryable or is_redownload(error.code),
                     failure_code=error.code,
                 )
                 return True
@@ -7323,9 +7664,14 @@ class RunSwitchOperationService:
                 ValueError,
                 KeyError,
             ) as error:
+                detail = f"{type(error).__name__}: {error}"
                 fail(
-                    f"{type(error).__name__}: {error}",
-                    retryable=_transient_distribution_exception(error),
+                    detail,
+                    retryable=(
+                        not is_security_failure(error_code(error))
+                        and _transient_distribution_exception(error)
+                    ),
+                    replan=isinstance(error, (RuntimeError, ValueError)),
                 )
                 return True
         if (
@@ -7349,7 +7695,9 @@ class RunSwitchOperationService:
                     plan, phase, execution.result, expected_image=expected_image
                 )
             except RunSwitchOperationConflict as error:
-                fail(str(error))
+                # Completed work whose receipt does not validate is refused;
+                # repeating the identical execution cannot repair it.
+                fail(str(error), failure_code=error_code(error))
                 return True
         with self._sessions.begin() as session:
             job = checkpoint_job(session)
@@ -7363,14 +7711,18 @@ class RunSwitchOperationService:
                 progress["observation_due_at"] = None
                 progress["observation_deadline_at"] = None
                 job.status_reason = None
-            if progress.get("retry_reason") in (
+            retry_reason = progress.get("retry_reason")
+            if retry_reason in (
                 AdmissionLockBusy.code,
                 InstallAdmissionBusy.code,
                 RunAdmissionBusy.code,
                 RecipeBuildAdmissionBusy.code,
                 RunSwitchPostStopEvidencePending.code,
+            ) or (
+                isinstance(retry_reason, str) and retry_reason.startswith("artifact.")
             ):
                 progress["retry_reason"] = None
+                progress["retry_attempt"] = None
             deadline_expired = False
             _merge_progress_evidence(
                 progress,
@@ -7556,11 +7908,17 @@ class RunSwitchOperationService:
                             session, plan, expected_image=expected_image
                         )
                     except RunSwitchOperationConflict as error:
-                        job.state = "failed"
-                        job.status_reason = str(error)[:512]
-                        progress["failed_phase"] = phase.kind
-                        job.result = _persisted_result(progress)
-                        job.updated_at = now
+                        # A succeeded child already produced its effects. A receipt that
+                        # does not validate is an integrity failure; re-issuing the child
+                        # would repeat those effects on the Spark.
+                        self._mark_failed(
+                            job,
+                            str(error),
+                            now=now,
+                            progress=progress,
+                            failure_code=error_code(error)
+                            or "run-switch.receipt_invalid",
+                        )
                         return True
                     results = list(
                         require_sequence(
@@ -7628,10 +7986,12 @@ class RunSwitchOperationService:
             select(AgentNode).where(AgentNode.node_id.in_(job.targets))
         )
         current = list(nodes)
-        if len(current) != len(job.targets) or any(
-            node.revoked_at is not None or node.state != "active" for node in current
-        ):
+        if any(node.revoked_at is not None for node in current):
             return "invalid"
+        if len(current) != len(job.targets):
+            return "missing-target"
+        if any(node.state != "active" for node in current):
+            return "waiting"
         if any(node.workload_intent_ordinal != ordinal for node in current):
             return "superseded"
         return "current"
@@ -7744,14 +8104,13 @@ class RunSwitchOperationService:
         reason: str,
         detail: str | None = None,
     ) -> bool:
-        """Retry an unchanged capacity handoff at most once per five seconds.
+        """Retry an unchanged capacity handoff with bounded exponential backoff.
 
         The admission transaction has rolled back and released its locks.
         The wait belongs to the existing operation, holds no worker slot, and
         expires at the next admission attempt; busy SQL is not a failed effect.
         """
         now = _now(self._clock)
-        due = now + timedelta(seconds=5)
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None:
@@ -7762,13 +8121,25 @@ class RunSwitchOperationService:
             if progress.get("cancellation"):
                 _complete_cancellation(job, progress, now)
             else:
+                attempt = (
+                    require_integer(progress.get("retry_attempt"), "retry attempt")
+                    if progress.get("retry_reason") == reason
+                    and progress.get("retry_attempt") is not None
+                    else 1
+                )
+                delay_seconds = min(300, 5 * (2 ** min(attempt - 1, 6)))
+                due = now + timedelta(seconds=delay_seconds)
+                progress["retry_attempt"] = attempt + 1
                 progress["retry_reason"] = reason
                 progress["observation_due_at"] = due.isoformat()
                 progress["observation_deadline_at"] = due.isoformat()
                 job.state = "running"
                 job.status_reason = (
                     detail or "Admission is waiting for the Controller capacity writer"
-                ) + f"; admission will retry at {due.isoformat()}."
+                ) + (
+                    f"; admission retry {attempt} in {delay_seconds}s "
+                    f"at {due.isoformat()}."
+                )
                 job.result = _persisted_result(progress)
                 job.updated_at = now
         return True
@@ -7847,6 +8218,7 @@ class RunSwitchOperationService:
         reason: str,
         *,
         retryable: bool = False,
+        replan: bool = False,
         failure_code: str | None = None,
         checkpoint: tuple[int, int, object] | None = None,
         child_evidence: object | None = None,
@@ -7877,14 +8249,22 @@ class RunSwitchOperationService:
                     _complete_cancellation(job, progress, now)
                     return
             elif retryable and checkpoint is not None and checkpoint[2] is None:
-                plan = _load_plan(job.payload["plan"])
-                phase = plan.phases[checkpoint[0]]
-                if phase.kind in {"prepare", "transfer", "verify"}:
-                    # The phase executor reuses its deterministic request key
-                    # and exact stored plan. Issued children keep their own
-                    # retry owner; never replace one with a parent-level replay.
-                    self._schedule_checkpoint_retry(job, progress, reason, now)
-                    return
+                # Re-enter the current phase with the same accepted intent and
+                # deterministic child identity. The executor reconciles any
+                # issued effect before it retries; the parent never replaces a
+                # live child or changes the exact workload plan.
+                # A re-plan restarts from the first phase, so it is only used
+                # before a Start could have launched this intent's workload.
+                progress["force_replan"] = (
+                    replan
+                    and "start"
+                    not in require_sequence(
+                        progress.get("completed_phases", []), "completed phases"
+                    )
+                    and progress.get("phase") != "start"
+                )
+                self._schedule_checkpoint_retry(job, progress, reason, now)
+                return
             self._mark_failed(
                 job,
                 reason,
@@ -8554,6 +8934,29 @@ def _child_progress_payload(child: object) -> Mapping[str, object]:
     return payload
 
 
+def _child_failure_code(evidence: Mapping[str, object]) -> str | None:
+    """Carry the child's typed error code; a security code anywhere wins."""
+
+    codes: list[str] = []
+    code = evidence.get("error_code")
+    if isinstance(code, str) and code:
+        codes.append(code)
+    for field in ("node_evidence", "launch_evidence"):
+        members = evidence.get(field)
+        if isinstance(members, Mapping):
+            codes.extend(
+                item["error_code"]
+                for item in members.values()
+                if isinstance(item, Mapping)
+                and isinstance(item.get("error_code"), str)
+                and item["error_code"]
+            )
+    return next(
+        (value for value in codes if is_security_failure(value)),
+        codes[0] if codes else None,
+    )
+
+
 def _child_failure_kind(child: object) -> FailureKind:
     """Read typed child evidence; an unknown mixed result stays blocked."""
 
@@ -8687,7 +9090,60 @@ def _transient_distribution_exception(error: BaseException) -> bool:
             errno.ETIMEDOUT,
             errno.EPIPE,
         }
+    if isinstance(error, (RuntimeError, ValueError)):
+        return not is_security_failure(error_code(error))
     return False
+
+
+_REPLAN_POLICY = RecoveryPolicy(max_delay_seconds=300)
+
+
+def _next_replan(
+    operation_id: str, progress: dict[str, Any], now: datetime
+) -> datetime:
+    """Schedule the next re-plan with exponential backoff capped at 5 minutes.
+
+    The attempt count is reset whenever a phase completes or a re-plan is
+    accepted, so a long-lived intent backs off only while it makes no progress.
+    """
+
+    attempt = require_integer(progress.get("retry_attempt") or 1, "retry attempt")
+    due = _REPLAN_POLICY.next_attempt(operation_id, attempt, now, ongoing_intent=True)
+    assert due is not None
+    progress["retry_attempt"] = attempt + 1
+    progress["observation_due_at"] = due.isoformat()
+    return due
+
+
+def _same_intent(existing: Job, intent: Mapping[str, object] | None) -> bool:
+    """A reused request key must name the same accepted intent, not only kind."""
+
+    stored = (
+        existing.payload.get("intent")
+        if isinstance(existing.payload, Mapping)
+        else None
+    )
+    if stored is None or intent is None:
+        return True
+    return canonical_message(stored) == canonical_message(dict(intent))
+
+
+def _plan_blockers_are_waitable(plan: RunSwitchPlan) -> bool:
+    return bool(plan.blockers) and not any(
+        is_security_failure(reason.code) for reason in plan.blockers
+    )
+
+
+def _phase_request_key(
+    operation_id: str, phase_index: int, item_index: int, attempt: int
+) -> str:
+    """Keep one idempotency key per exact phase attempt."""
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"vonk:run-switch-phase:{operation_id}:{phase_index}:{item_index}:{attempt}",
+        )
+    )
 
 
 def _progress_member_entries(value: object) -> list[Mapping[str, object]]:
@@ -8939,6 +9395,8 @@ def _complete_phase_progress(
     plan: RunSwitchPlan,
     phase: RunSwitchPhase,
 ) -> None:
+    # Progress resets the retry backoff of the accepted intent.
+    progress.pop("retry_attempt", None)
     if phase.kind != "transfer":
         return
     model_download, target_copy, aggregate = _planned_transfer_parts(plan)

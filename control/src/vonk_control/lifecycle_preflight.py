@@ -17,6 +17,7 @@ from pydantic import (
 from sqlalchemy import select
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
+from .failure_classification import is_security_failure
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
 from .recovery_policy import RecoveryPolicy
 from .runtime_preflight import (
@@ -48,6 +49,8 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
     pending_job_id: UuidId | None = None
     pending_node_id: NodeId | None = None
     next_check_at: AwareDatetime | None = None
+    last_failure_code: str | None = None
+    last_failure_detail: str | None = None
     attempts: dict[NodeId, Annotated[int, Field(ge=1)]] = Field(
         default_factory=dict, max_length=33
     )
@@ -62,6 +65,20 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
                 "preflight pending child and node identities must be paired"
             )
         return self
+
+
+# Security refusals (failure_classification.is_security_failure) park the
+# preflight; everything else is transient and retried with backoff.
+def _child_error_code(result: object) -> str | None:
+    """Read the typed failure code from a child attempt result, never free text."""
+    if not isinstance(result, Mapping):
+        return None
+    for key in ("error_code", "helper_error_code"):
+        value = result.get(key)
+        if isinstance(value, str) and is_security_failure(value):
+            return value
+    value = result.get("error_code")
+    return value if isinstance(value, str) else None
 
 
 class LifecyclePreflight:
@@ -99,6 +116,24 @@ class LifecyclePreflight:
             checkpoint = LifecyclePreflightCheckpoint(
                 phase_index=phase_index, receipts=checkpoint.receipts
             )
+
+        def retry_probe(
+            node_id: str, reason: str, error_code: str | None = None
+        ) -> tuple[LifecyclePreflightCheckpoint, str | None]:
+            checkpoint.pending_job_id = None
+            checkpoint.pending_node_id = None
+            checkpoint.receipts.pop(node_id, None)
+            checkpoint.next_check_at = None
+            if is_security_failure(error_code):
+                return checkpoint, reason
+            checkpoint.next_check_at = self._recovery.next_attempt(
+                f"{request_key}:{phase_index}:{node_id}",
+                checkpoint.attempts.get(node_id, 1),
+                now,
+                ongoing_intent=True,
+            )
+            return checkpoint, None
+
         if checkpoint.pending_job_id is None:
             if checkpoint.next_check_at is not None and now < checkpoint.next_check_at:
                 return checkpoint, None
@@ -113,7 +148,19 @@ class LifecyclePreflight:
             for node_id, source_build in ordered_nodes:
                 node = session.get(AgentNode, node_id, with_for_update=True)
                 if node is None:
-                    return checkpoint, "runtime_preflight.node_missing"
+                    checkpoint.pending_job_id = None
+                    checkpoint.pending_node_id = None
+                    checkpoint.receipts.pop(node_id, None)
+                    checkpoint.next_check_at = None
+                    return (
+                        checkpoint,
+                        (
+                            "runtime_preflight.node_missing: node was removed from "
+                            "Controller authority"
+                        ),
+                    )
+                if node.revoked_at is not None:
+                    return checkpoint, "runtime_preflight.node_revoked"
                 request = recipe_requirements(
                     document,
                     source_build=source_build,
@@ -144,7 +191,7 @@ class LifecyclePreflight:
                         continue
                     child = session.get(Job, checkpoint.pending_job_id)
                     if child is None:
-                        return checkpoint, "runtime_preflight.child_missing"
+                        return retry_probe(node_id, "runtime_preflight.child_missing")
                     operation = session.scalar(
                         select(AgentOperation).where(
                             AgentOperation.parent_job_id == child.id,
@@ -152,7 +199,9 @@ class LifecyclePreflight:
                         )
                     )
                     if operation is None:
-                        return checkpoint, "runtime_preflight.operation_missing"
+                        return retry_probe(
+                            node_id, "runtime_preflight.operation_missing"
+                        )
                     if child.state in {"queued", "running"}:
                         created_at = child.created_at
                         if created_at.tzinfo is None:
@@ -168,20 +217,25 @@ class LifecyclePreflight:
                             )
                             checkpoint.next_check_at = now + interval
                         return checkpoint, None
-                    if child.state != "succeeded":
-                        return (
-                            checkpoint,
-                            child.status_reason or "runtime_preflight.execution_failed",
-                        )
                     raw = session.scalar(
                         select(AgentOperationAttempt.result).where(
                             AgentOperationAttempt.operation_id == operation.id,
                             AgentOperationAttempt.attempt == operation.current_attempt,
                         )
                     )
+                    if child.state != "succeeded":
+                        # Classify on the typed code only; status_reason is prose.
+                        return retry_probe(
+                            node_id,
+                            child.status_reason or "runtime_preflight.execution_failed",
+                            _child_error_code(raw),
+                        )
                     if raw is None:
-                        return checkpoint, "runtime_preflight.receipt_missing"
-                    result = RuntimePreflightResult.model_validate(raw)
+                        return retry_probe(node_id, "runtime_preflight.receipt_missing")
+                    try:
+                        result = RuntimePreflightResult.model_validate(raw)
+                    except (TypeError, ValueError):
+                        return retry_probe(node_id, "runtime_preflight.receipt_invalid")
                     checkpoint.receipts[node_id] = result
                     checkpoint.pending_job_id = None
                     checkpoint.pending_node_id = None
@@ -193,6 +247,8 @@ class LifecyclePreflight:
                         now=int(now.timestamp()),
                     )
                     if not blockers:
+                        checkpoint.last_failure_code = None
+                        checkpoint.last_failure_detail = None
                         continue
                     if any(
                         item.code
@@ -206,12 +262,29 @@ class LifecyclePreflight:
                         return checkpoint, "; ".join(item.detail for item in blockers)[
                             :512
                         ]
+                    stale_cause = "; ".join(
+                        f"{item.code}: {item.detail}" for item in blockers
+                    )
                     checkpoint.next_check_at = self._recovery.next_attempt(
                         f"{request_key}:{phase_index}:{node_id}",
                         checkpoint.attempts[node_id],
                         now,
                         ongoing_intent=True,
                     )
+                    checkpoint.last_failure_code = next(
+                        (
+                            item.code
+                            for item in blockers
+                            if item.code
+                            in {
+                                "runtime_preflight.host_changed",
+                                "runtime_preflight.requirements_changed",
+                                "runtime_preflight.stale",
+                            }
+                        ),
+                        "runtime_preflight.stale",
+                    )
+                    checkpoint.last_failure_detail = stale_cause[:512]
                     return checkpoint, None
                 attempt = checkpoint.attempts.get(node_id, 0) + 1
                 checkpoint.attempts[node_id] = attempt

@@ -728,6 +728,13 @@ class FleetProfileSwitchChildState(_StrictModel):
     result: FleetProfileSwitchChildResult | None = None
 
 
+class FleetProfileAssignmentFailure(_StrictModel):
+    assignment_id: UuidId | None = None
+    operation_id: UuidId | None = None
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    terminal: bool = False
+
+
 class FleetProfileSwitchAdapterResult(_StrictModel):
     """Complete result of reconciling every assignment in a profile scope."""
 
@@ -756,6 +763,9 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     children: list[FleetProfileSwitchChildState] = Field(
         default_factory=list, max_length=128
     )
+    assignment_failures: list[FleetProfileAssignmentFailure] = Field(
+        default_factory=list, max_length=128
+    )
     actor: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     request_id: UuidId
     state: FleetProfileOperationState = "queued"
@@ -764,6 +774,7 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     observation_due_at: datetime | None = None
     observation_deadline_at: datetime | None = None
     pending_operation_ids: list[UuidId] = Field(default_factory=list, max_length=128)
+    stop_reissue_attempt: int = Field(default=0, ge=0, le=32)
     result: FleetProfileSwitchAdapterResult | None = None
 
     @model_validator(mode="after")
@@ -870,6 +881,7 @@ class FleetProfileApplicationProgress(_StrictModel):
     """Typed progress tree persisted with every profile application."""
 
     attempt: int = Field(default=1, ge=1)
+    retry_due_at: datetime | None = None
     retry_of_application_id: UuidId | None = None
     admission_pending: bool = False
     admission_attempt: int = Field(default=0, ge=0)
@@ -936,6 +948,11 @@ class FleetProfileSwitchAdapter(Protocol):
 
     def recoverable_cache_loss(self, application_id: str, *, session: Session) -> bool:
         """Whether the current exact child failed only because managed bytes vanished."""
+
+        ...
+
+    def recovery_refused(self, application_id: str, *, session: Session) -> bool:
+        """Whether a failed child must not be replayed by profile recovery."""
 
         ...
 

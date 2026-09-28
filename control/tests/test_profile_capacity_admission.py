@@ -151,7 +151,7 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
         "rendezvous-port",
     ],
 )
-def test_load_refuses_capacity_lost_after_its_last_preview(
+def test_load_parks_capacity_lost_after_its_last_preview(
     tmp_path, postgres_engine, monkeypatch, change: str
 ) -> None:
     sessions, _, _, profile, api, headers, review, nodes = _capacity_profile(
@@ -225,9 +225,13 @@ def test_load_refuses_capacity_lost_after_its_last_preview(
             "request_key": str(uuid4()),
         },
     )
-    assert response.status_code == 409, response.text
+    # Lost capacity parks the accepted intent for automatic re-admission; it
+    # issues no effect and claims no workload ordinal while it waits.
+    assert response.status_code == 202, response.text
     with sessions() as session:
-        assert not tuple(session.scalars(select(FleetProfileApplication)))
+        (parked,) = tuple(session.scalars(select(FleetProfileApplication)))
+        assert parked.state == "queued"
+        assert parked.progress["admission_pending"] is True
         assert set(session.execute(select(Job.id, Job.state))) == original_jobs
         assert (
             set(
@@ -585,7 +589,7 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
                         )
                     )
                     assert parked is not None
-                    assert parked.state == "waiting-for-operator"
+                    assert parked.state == "queued"
                     assert parked.progress["admission_pending"] is True
                     assert (
                         set(
@@ -816,7 +820,7 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
             assert pending is not None
             pending_id = pending.id
             pending_plan_digest = pending.plan_digest
-            assert pending.state == "waiting-for-operator"
+            assert pending.state == "queued"
             assert pending.progress["admission_pending"] is True
             assert pending.current_operation_id is None
             assert (

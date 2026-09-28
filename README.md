@@ -63,10 +63,12 @@ costly repeated full hashing.
 
 ### 1. Prepare the controller project
 
-Choose **Lab mode** for a LAN-only setup, or **Secure remote** to connect the
-existing Tailscale gateway. Lab mode needs only the NAS LAN address and an
-optional Hugging Face token; internal passwords, keys, and the local CA are
-generated for you. See the [Lab quickstart](docs/QUICKSTART.md).
+The installer defaults to **Secure remote**, which connects the existing
+Tailscale gateway. **Lab mode** (LAN only, no Tailscale) is available as an
+explicit choice: answer `lab` at the install mode prompt. Lab mode needs only
+the NAS LAN address and an optional Hugging Face token; internal passwords,
+keys, and the local CA are generated for you. See the
+[Lab quickstart](docs/QUICKSTART.md).
 
 For Secure remote, complete the
 [Tailscale preflight](docs/runbooks/tailscale.md#fresh-install-preflight): enable

@@ -140,11 +140,28 @@ async fn pair_agent(
     Ok(())
 }
 
+fn report_ready_after_self_test<T, E>(
+    self_test: impl FnOnce() -> Result<T, E>,
+    report_ready: impl FnOnce(),
+) -> Result<T, E> {
+    let identity = self_test()?;
+    report_ready();
+    Ok(identity)
+}
+
 async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let runtime_identity = self_test::run(
-        config,
-        &std::env::current_exe()?,
-        Path::new("/run/vonk-forge-agent"),
+    // Self-test is the package rollback health boundary. A failed binary must
+    // never report ready; after it passes, report readiness before retryable
+    // identity, Controller, and host work so upgrades do not wait on the fleet.
+    let runtime_identity = report_ready_after_self_test(
+        || {
+            self_test::run(
+                config,
+                &std::env::current_exe()?,
+                Path::new("/run/vonk-forge-agent"),
+            )
+        },
+        || systemd_notify::notify("READY=1\nSTATUS=Agent starting"),
     )?;
     let client = AgentHttpClient::from_config(config)?;
     ensure_startup_identity(
@@ -163,7 +180,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
     state.recover_interrupted()?;
     systemd_notify::notify(
-        "READY=1\nSTATUS=Agent initialized; waiting for Controller and host prerequisites",
+        "STATUS=Agent initialized; waiting for Controller and host prerequisites",
     );
     let control = run_control_lane(config, runtime_identity, client.clone(), state);
     let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
@@ -555,10 +572,11 @@ mod tests {
     use super::{
         LaneExitWithRotation, claim_wait_seconds, collect_inventory_until_ready,
         ensure_startup_identity, exact_observation_disposition, inventory_refresh_due,
-        inventory_retry_delay, retry_rotation_while_valid, supervise_lanes_with_rotation,
+        inventory_retry_delay, report_ready_after_self_test, retry_rotation_while_valid,
+        supervise_lanes_with_rotation,
     };
     use std::{
-        cell::Cell,
+        cell::{Cell, RefCell},
         future,
         sync::{
             Arc, Barrier,
@@ -571,6 +589,28 @@ mod tests {
         executor::RecipeObservationError, host_runtime::HostRuntimeError, rotation::RotationError,
     };
     use vonk_agent::{inventory::Inventory, inventory::InventoryError};
+
+    #[test]
+    fn startup_readiness_is_reported_only_after_self_test_succeeds() {
+        let events = RefCell::new(Vec::new());
+        let identity = report_ready_after_self_test(
+            || {
+                events.borrow_mut().push("self-test");
+                Ok::<_, &'static str>("identity")
+            },
+            || events.borrow_mut().push("ready"),
+        )
+        .unwrap();
+        assert_eq!(identity, "identity");
+        assert_eq!(*events.borrow(), ["self-test", "ready"]);
+
+        let error = report_ready_after_self_test(
+            || Err::<(), _>("self-test failed"),
+            || panic!("failed self-test must not report READY=1"),
+        )
+        .unwrap_err();
+        assert_eq!(error, "self-test failed");
+    }
 
     #[test]
     fn idle_agent_refreshes_inventory_before_controller_admission_expires() {

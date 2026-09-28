@@ -73,6 +73,7 @@ class RunSwitchOperationResult:
                 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult',
                 'RunSwitchVerifyResult', None, Unset]):
             final_verify_started_at (Union[None, Unset, float]):
+            force_replan (Union[Unset, bool]):  Default: False.
             item_index (Union[Unset, int]):  Default: 0.
             members (Union[Unset, list['RunSwitchMemberReceipt']]):
             observation_deadline_at (Union[None, Unset, datetime.datetime]):
@@ -88,6 +89,7 @@ class RunSwitchOperationResult:
                 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult',
                 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult',
                 'RunSwitchVerifyResult']]]):
+            phase_retry_generation (Union[Unset, int]):  Default: 0.
             preflight (Union['LifecyclePreflightCheckpoint', None, Unset]):
             profile_application_id (Union[None, Unset, str]):
             retry_attempt (Union[None, Unset, int]):
@@ -110,6 +112,7 @@ class RunSwitchOperationResult:
     failure_code: Union[None, Unset, str] = UNSET
     final_observation: Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchInstallationVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult', None, Unset] = UNSET
     final_verify_started_at: Union[None, Unset, float] = UNSET
+    force_replan: Union[Unset, bool] = False
     item_index: Union[Unset, int] = 0
     members: Union[Unset, list['RunSwitchMemberReceipt']] = UNSET
     observation_deadline_at: Union[None, Unset, datetime.datetime] = UNSET
@@ -119,6 +122,7 @@ class RunSwitchOperationResult:
     phase: Union[None, RunSwitchOperationResultPhaseType0, Unset] = UNSET
     phase_index: Union[Unset, int] = 0
     phase_results: Union[Unset, list[Union['RunSwitchCachedTransferResult', 'RunSwitchCleanupResult', 'RunSwitchCleanupVerifyResult', 'RunSwitchContainerBuildResult', 'RunSwitchFinalVerifyResult', 'RunSwitchInstallationVerifyResult', 'RunSwitchModelDownloadPendingResult', 'RunSwitchModelDownloadResult', 'RunSwitchPreparedResult', 'RunSwitchRuntimeImageResult', 'RunSwitchRuntimeInstallResult', 'RunSwitchRuntimePlanResult', 'RunSwitchStartResult', 'RunSwitchStopResult', 'RunSwitchTargetTransferEvidenceResult', 'RunSwitchTargetTransferResult', 'RunSwitchUninstallResult', 'RunSwitchVerifyResult']]] = UNSET
+    phase_retry_generation: Union[Unset, int] = 0
     preflight: Union['LifecyclePreflightCheckpoint', None, Unset] = UNSET
     profile_application_id: Union[None, Unset, str] = UNSET
     retry_attempt: Union[None, Unset, int] = UNSET
@@ -247,6 +251,8 @@ class RunSwitchOperationResult:
         else:
             final_verify_started_at = self.final_verify_started_at
 
+        force_replan = self.force_replan
+
         item_index = self.item_index
 
         members: Union[Unset, list[dict[str, Any]]] = UNSET
@@ -344,6 +350,8 @@ class RunSwitchOperationResult:
 
 
 
+        phase_retry_generation = self.phase_retry_generation
+
         preflight: Union[None, Unset, dict[str, Any]]
         if isinstance(self.preflight, Unset):
             preflight = UNSET
@@ -437,6 +445,8 @@ class RunSwitchOperationResult:
             field_dict["final_observation"] = final_observation
         if final_verify_started_at is not UNSET:
             field_dict["final_verify_started_at"] = final_verify_started_at
+        if force_replan is not UNSET:
+            field_dict["force_replan"] = force_replan
         if item_index is not UNSET:
             field_dict["item_index"] = item_index
         if members is not UNSET:
@@ -455,6 +465,8 @@ class RunSwitchOperationResult:
             field_dict["phase_index"] = phase_index
         if phase_results is not UNSET:
             field_dict["phase_results"] = phase_results
+        if phase_retry_generation is not UNSET:
+            field_dict["phase_retry_generation"] = phase_retry_generation
         if preflight is not UNSET:
             field_dict["preflight"] = preflight
         if profile_application_id is not UNSET:
@@ -782,6 +794,8 @@ class RunSwitchOperationResult:
         final_verify_started_at = _parse_final_verify_started_at(d.pop("final_verify_started_at", UNSET))
 
 
+        force_replan = d.pop("force_replan", UNSET)
+
         item_index = d.pop("item_index", UNSET)
 
         members = []
@@ -1073,6 +1087,8 @@ class RunSwitchOperationResult:
             phase_results.append(phase_results_item)
 
 
+        phase_retry_generation = d.pop("phase_retry_generation", UNSET)
+
         def _parse_preflight(data: object) -> Union['LifecyclePreflightCheckpoint', None, Unset]:
             if data is None:
                 return data
@@ -1226,6 +1242,7 @@ class RunSwitchOperationResult:
             failure_code=failure_code,
             final_observation=final_observation,
             final_verify_started_at=final_verify_started_at,
+            force_replan=force_replan,
             item_index=item_index,
             members=members,
             observation_deadline_at=observation_deadline_at,
@@ -1235,6 +1252,7 @@ class RunSwitchOperationResult:
             phase=phase,
             phase_index=phase_index,
             phase_results=phase_results,
+            phase_retry_generation=phase_retry_generation,
             preflight=preflight,
             profile_application_id=profile_application_id,
             retry_attempt=retry_attempt,

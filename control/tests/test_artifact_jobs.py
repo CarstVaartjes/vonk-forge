@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
+from vonk_control import recipe_operations as recipe_operations_module
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.artifact_blob_store import (
     ArtifactBlobStore,
@@ -292,6 +293,57 @@ def running_artifact_service(tmp_path, *, recipe_transform=None, engine=None):
         activated.owner_id,
         nodes[0],
     )
+
+
+def test_activate_replay_serializes_request_key_lookup(tmp_path, monkeypatch) -> None:
+    sessions, recipe_operations, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, recipe_transform=_configure_artifact_recipe
+    )
+    installation = installed_recipe(
+        recipe_operations,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id="00000000-0000-4000-8000-000000000101",
+    )
+    plan = recipe_operations.preview_run(installation.owner_id, "image-job")
+
+    request_id = "00000000-0000-4000-8000-000000000102"
+    acquired = []
+    acquire = recipe_operations_module.acquire_admission_keys
+
+    def record_keys(session, keys):
+        acquired.extend(keys)
+        return acquire(session, keys)
+
+    monkeypatch.setattr(recipe_operations_module, "acquire_admission_keys", record_keys)
+    # Force the race window's fast read to miss, as it can for concurrent callers.
+    monkeypatch.setattr(
+        recipe_operations, "_idempotent", lambda *_args, **_kwargs: None
+    )
+    activated = recipe_operations.activate_job_run(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="operator",
+        request_id=request_id,
+    )
+    replay = recipe_operations.activate_job_run(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="operator",
+        request_id=request_id,
+    )
+
+    assert replay == activated
+    assert any(
+        key.namespace == "job-request" and key.identity == request_id
+        for key in acquired
+    )
+    with sessions() as session:
+        assert (
+            len(tuple(session.scalars(select(Job).where(Job.request_id == request_id))))
+            == 1
+        )
 
 
 def artifact_create_request(run_id: str, request_id: str) -> _ArtifactCreateRequest:

@@ -463,8 +463,6 @@ def test_installed_interactive_review_recovers_the_original_load_after_edit(
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            digest,
             "--request-key",
             KEY,
             "--detach",
@@ -528,7 +526,7 @@ def test_installed_interactive_review_recovers_the_original_load_after_edit(
 
 
 @pytest.mark.lane
-def test_installed_json_no_input_load_requires_reviewed_digest_and_emits_one_result(
+def test_installed_json_no_input_load_uses_latest_plan_and_emits_one_result(
     installed_vonkctl: Path,
     postgres_engine,
     tmp_path: Path,
@@ -542,30 +540,6 @@ def test_installed_json_no_input_load_requires_reviewed_digest_and_emits_one_res
         state,
     ):
         environment = _process_environment(tmp_path, url, certificate, headers)
-        missing_review = subprocess.run(
-            [
-                str(installed_vonkctl),
-                "--no-input",
-                "--json",
-                "--profile",
-                "1",
-                "profile",
-                "load",
-                "--yes",
-                "--detach",
-            ],
-            env=environment,
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-        assert missing_review.returncode == 2
-        refusal = json.loads(missing_review.stdout)
-        assert "--expected-plan DIGEST" in refusal["error"]
-        assert not state.calls
-
         completed = subprocess.run(
             [
                 str(installed_vonkctl),
@@ -575,8 +549,6 @@ def test_installed_json_no_input_load_requires_reviewed_digest_and_emits_one_res
                 "1",
                 "profile",
                 "load",
-                "--expected-plan",
-                digest,
                 "--yes",
                 "--request-key",
                 KEY,
@@ -602,10 +574,11 @@ def test_installed_json_no_input_load_requires_reviewed_digest_and_emits_one_res
     token_value = headers["Authorization"].removeprefix("Bearer ")
     assert token_value not in completed.stdout + completed.stderr
     assert [(method, path) for method, path, _ in state.calls] == [
+        ("POST", "/api/profile/1/preview"),
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/1/requests/{KEY}"),
     ]
-    assert state.calls[0][2] == {
+    assert state.calls[1][2] == {
         "request_key": KEY,
         "plan_digest": digest,
     }

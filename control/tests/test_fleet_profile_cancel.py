@@ -1321,7 +1321,7 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
 
     adapter.advance = pending_child  # type: ignore[method-assign]
     retries: list[str] = []
-    service._automatic_cache_recovery = lambda _now: (application.id, "admin")  # type: ignore[method-assign]
+    service._automatic_profile_recovery = lambda _now: (application.id, "admin")  # type: ignore[method-assign]
     service.retry = lambda application_id, **_kwargs: retries.append(application_id)  # type: ignore[method-assign]
 
     # The actual scheduler boundary observes cancellation and still checks
@@ -1339,7 +1339,7 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
 
     # The next worker pass can service other work instead of polling this
     # unresolved owner again before its next bounded observation time.
-    service._automatic_cache_recovery = lambda _now: None  # type: ignore[method-assign]
+    service._automatic_profile_recovery = lambda _now: None  # type: ignore[method-assign]
     assert service.tick() is False
     assert observations == [application.id]
 

@@ -1036,7 +1036,10 @@ def test_release_chain_is_default_off_and_dependency_gated() -> None:
 
     assert "vars.VONK_CONTAINER_RELEASES_ENABLED == 'true'" in metadata
     assert "needs: [validate-release-images, release-metadata]" in publisher
-    assert "needs: [release-metadata, publish-images, build-agent-package]" in manifest
+    assert (
+        "needs: [release-metadata, publish-images, build-agent-package, supply-chain]"
+        in manifest
+    )
 
 
 def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
@@ -1152,8 +1155,15 @@ def test_release_builds_are_per_version_and_alias_jobs_reconcile_globally() -> N
     text = workflow()
     publisher = job("publish-images")
 
-    assert "github.event.pull_request.number || github.ref" in text
-    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in text
+    assert (
+        "github.event.pull_request.number || github.event.merge_group.head_sha "
+        "|| github.ref" in text
+    )
+    assert (
+        "cancel-in-progress: ${{ github.event_name == 'pull_request' "
+        "|| github.event_name == 'merge_group' || (github.event_name == 'push' "
+        "&& github.ref == 'refs/heads/main') }}" in text
+    )
     assert "group: vonk-forge-container-publication-${{" in publisher
     assert "needs.release-metadata.outputs.version" in publisher
     assert "cancel-in-progress: false" in publisher
@@ -1220,9 +1230,9 @@ def test_public_input_scanner_runs_before_every_image_build() -> None:
     validator = job("validate-release-images")
     publisher = job("publish-images")
     assert "scripts/verify-public-image-inputs" in validator
-    assert "scripts/verify-supply-chain --json" in validator
+    assert "scripts/verify-supply-chain --output-dir" in validator
     assert "scripts/verify-public-image-inputs" not in publisher
-    assert "scripts/verify-supply-chain --json" not in publisher
+    assert "scripts/verify-supply-chain" not in publisher
     assert "Build and push Hermes image" in publisher
 
 
@@ -1239,7 +1249,11 @@ def test_supply_chain_evidence_gate_runs_on_every_pull_request() -> None:
     gate = job("supply-chain")
     assert "needs:" not in gate
     assert "scripts/verify-public-image-inputs" in gate
-    assert "scripts/verify-supply-chain --json" in gate
+    assert "scripts/build-control-wheel" in gate
+    assert (
+        'scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json'
+        in gate
+    )
 
 
 def test_api_worker_and_litellm_are_promoted_from_accepted_dev_manifests() -> None:
@@ -1486,7 +1500,10 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
 def test_final_job_creates_checksum_protected_public_release_asset() -> None:
     text = workflow()
     assert "release-manifest:" in text
-    assert "needs: [release-metadata, publish-images, build-agent-package]" in text
+    assert (
+        "needs: [release-metadata, publish-images, build-agent-package, supply-chain]"
+        in text
+    )
     assert "vonk-forge-images.env" in text
     assert "sha256sum" in text
     assert "scripts/reconcile-github-release" in text

@@ -11,8 +11,8 @@ from vonk_agent_protocol import CompiledExecutionPlan
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
+    InstallAdmissionBusy,
     InstallAdmissionService,
-    InstallPlanConflict,
     InstallPreflightExpired,
     installation_plan_digest_from_stored_document,
 )
@@ -741,8 +741,39 @@ def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) 
                 created_at=now,
             )
         )
-    with pytest.raises(InstallPlanConflict, match="install.plan_stale_or_blocked"):
+    with pytest.raises(InstallAdmissionBusy):
         service.accept_install(plan, actor="admin", now=now)
+
+
+def test_install_adopts_a_fresh_plan_after_nonblocking_reservation_change(
+    tmp_path,
+) -> None:
+    sessions, now, node, mapping, build = setup(tmp_path, free=400)
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
+    preview = service.plan_install(mapping, build, now=now)
+    refreshed_at = now + timedelta(seconds=1)
+    _record_inventory(sessions, node, refreshed_at, free=390)
+    current = service.plan_install(mapping, build, now=refreshed_at)
+    assert current.allowed
+    current_free = current.nodes[0].free_after_bytes
+    preview_free = preview.nodes[0].free_after_bytes
+    assert current_free is not None and preview_free is not None
+    assert current_free < preview_free
+
+    installation_id = service.accept_install(preview, actor="admin", now=refreshed_at)
+
+    with sessions() as session:
+        installed = session.get(RecipeInstallation, installation_id)
+        assert installed is not None
+        reservation = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "installation",
+                ResourceReservation.owner_id == installation_id,
+                ResourceReservation.node_id == node,
+            )
+        )
+        assert reservation is not None
+        assert reservation.amount_bytes == current.nodes[0].required_bytes
 
 
 def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:
@@ -910,7 +941,7 @@ def _record_inventory(sessions, node_id, at, *, free=200) -> None:
     )
 
 
-def test_expired_preflight_alone_is_a_typed_retryable_acceptance_outcome(
+def test_expired_preflight_waits_then_accepts_the_same_request(
     tmp_path,
 ) -> None:
     """An identical plan whose only fault is an aged receipt stays separable.
@@ -938,8 +969,9 @@ def test_expired_preflight_alone_is_a_typed_retryable_acceptance_outcome(
 
     later = now + timedelta(seconds=716)
     _record_inventory(sessions, node, later)
-    with pytest.raises(InstallPreflightExpired, match="install.plan_stale_or_blocked"):
+    with pytest.raises(InstallPreflightExpired) as expired:
         service.accept_install(plan, actor="admin", now=later)
+    assert expired.value.code == "runtime_preflight.stale"
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
         assert list(session.scalars(select(ResourceReservation))) == []
@@ -956,7 +988,7 @@ def test_expired_preflight_alone_is_a_typed_retryable_acceptance_outcome(
 @pytest.mark.parametrize(
     "change", ["inventory", "capacity", "fingerprint-and-capacity"]
 )
-def test_refreshable_preflight_with_any_other_change_stays_an_opaque_conflict(
+def test_refreshable_preflight_and_capacity_changes_wait_for_fresh_state(
     tmp_path, change
 ) -> None:
     """Only preflight evidence separates; any other blocker stays opaque."""
@@ -981,10 +1013,8 @@ def test_refreshable_preflight_with_any_other_change_stays_an_opaque_conflict(
                 if not value.startswith("runtime.preflight.fingerprint.")
             ] + ["runtime.preflight.fingerprint." + "b" * 64]
 
-    with pytest.raises(InstallPlanConflict) as raised:
+    with pytest.raises(InstallAdmissionBusy):
         service.accept_install(plan, actor="admin", now=later)
-    assert not isinstance(raised.value, InstallPreflightExpired)
-    assert str(raised.value) == "install.plan_stale_or_blocked"
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
 
@@ -1017,8 +1047,10 @@ def test_moved_host_fingerprint_refreshes_instead_of_failing_the_identical_plan(
             if not value.startswith("runtime.preflight.fingerprint.")
         ] + ["runtime.preflight.fingerprint." + "b" * 64]
 
-    with pytest.raises(InstallPreflightExpired, match="install.plan_stale_or_blocked"):
+    with pytest.raises(InstallPreflightExpired) as moved:
         service.accept_install(plan, actor="admin", now=later)
+    assert moved.value.code == "runtime_preflight.host_changed"
+    assert "host policy changed" in (moved.value.detail or "")
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
         assert list(session.scalars(select(ResourceReservation))) == []

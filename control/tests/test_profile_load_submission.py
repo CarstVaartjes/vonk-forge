@@ -92,18 +92,15 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
     )
     assert changed.status_code == 200
     assert api.post(path, headers=headers, json=body).json() == accepted.json()
-    # A fresh request cannot use the review of the previous profile revision.
-    stale_review = api.post(
-        path, headers=headers, json={**body, "request_key": str(uuid4())}
-    )
-    assert stale_review.status_code == 409, stale_review.text
-    assert stale_review.headers["x-vonk-error-code"] == "profile.stale_plan"
-    assert (
-        api.post(
-            path, headers=headers, json={**body, "plan_digest": "f" * 64}
-        ).status_code
-        == 409
-    )
+    # The latest request leads: a fresh load with the previous revision's
+    # review digest applies the current saved profile instead of refusing.
+    latest = api.post(path, headers=headers, json={**body, "request_key": str(uuid4())})
+    assert latest.status_code == 202, latest.text
+    assert latest.json()["id"] != accepted.json()["id"]
+    # The review digest is advisory; a replay under the same key is the
+    # original accepted application.
+    replay = api.post(path, headers=headers, json={**body, "plan_digest": "f" * 64})
+    assert replay.json()["id"] == accepted.json()["id"]
     assert (
         api.post(path, headers=_headers(codec, "operator"), json=body).status_code
         == 403
@@ -132,9 +129,10 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
     assert api.post(path, headers=headers, json=body).status_code == 403
     assert api.get(lookup, headers=headers).status_code == 403
     with sessions() as session:
-        assert list(session.scalars(select(FleetProfileApplication.id))) == [
-            accepted.json()["id"]
-        ]
+        assert set(session.scalars(select(FleetProfileApplication.id))) == {
+            accepted.json()["id"],
+            latest.json()["id"],
+        }
 
 
 def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
@@ -174,6 +172,8 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
             headers=dict(request.header_items()),
             content=request.data,
         )
+        if method == "POST" and request.full_url.endswith("/preview"):
+            return Response(response)
         if method == "POST":
             assert response.status_code == 202, response.text
             accepted = response.json()
@@ -196,8 +196,6 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            preview["plan_digest"],
             "--yes",
             "--request-key",
             key,
@@ -208,12 +206,12 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
     captured = capsys.readouterr()
     assert code == 0, captured.out
     assert json.loads(captured.out) == accepted
-    assert [method for method, _, _ in calls] == ["POST", "GET"]
-    assert calls[0][2] == {
+    assert [method for method, _, _ in calls] == ["POST", "POST", "GET"]
+    assert calls[1][2] == {
         "request_key": key,
         "plan_digest": preview["plan_digest"],
     }
-    assert calls[1][1].endswith(f"/api/profile/1/requests/{key}")
+    assert calls[2][1].endswith(f"/api/profile/1/requests/{key}")
     with sessions() as session:
         assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
 
@@ -818,7 +816,7 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
                 with sessions() as session:
                     parked = session.scalar(select(FleetProfileApplication))
                     assert parked is not None
-                    assert parked.state == "waiting-for-operator"
+                    assert parked.state == "queued"
                     assert parked.progress["admission_pending"] is True
                     assert (
                         tuple(

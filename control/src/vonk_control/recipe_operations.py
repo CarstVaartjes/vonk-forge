@@ -69,9 +69,11 @@ from .install_admission import (
     InstallAdmissionBusy,
     InstallAdmissionService,
     InstallPlan,
-    InstallPreflightExpired,
+    InstallPlanConflict,
     installation_plan_digest_from_stored_document,
-    refreshable_preflight_is_the_only_blocker,
+)
+from .install_admission import (
+    require_admissible as require_install_admissible,
 )
 from .logging import redact_text
 from .models import (
@@ -155,7 +157,15 @@ from .recipe_stop_payloads import (
     stop_payload_from_job_run,
 )
 from .recovery_policy import FailureKind
-from .run_admission import RunAdmissionBusy, RunAdmissionService, RunNodePlan, RunPlan
+from .run_admission import (
+    RunAdmissionBusy,
+    RunAdmissionService,
+    RunNodePlan,
+    RunPlan,
+)
+from .run_admission import (
+    require_admissible as require_run_admissible,
+)
 from .source_policy import SourcePolicyReport
 
 # Longest rendered blocker reason kept in an install refusal.  Each reason names
@@ -690,6 +700,36 @@ class RecipeOperationService:
         force: bool = False,
         admission_guard: Callable[[Session], None] | None = None,
     ) -> RecipeOperationView:
+        # A stale independent build request is re-planned with the current
+        # builder inputs instead of being refused. A request that matches its
+        # plan keeps that exact identity, and a parent Run/Switch request binds
+        # the build identity in its accepted plan, so its admission guard keeps
+        # it fixed. reserve_in_session rechecks current capacity either way.
+        if (
+            self._builds is not None
+            and admission_guard is None
+            and build_input_sha256 != plan.build_input_sha256
+        ):
+            builder_node_id = plan.builder_node_id
+            with self._sessions() as session:
+                previous_build = session.get(RecipeBuild, plan.build_id)
+                if (
+                    previous_build is not None
+                    and previous_build.recipe_revision_id == plan.recipe_revision_id
+                ):
+                    builder_node_id = previous_build.builder_node_id
+            refreshed = self._builds.prepare_plan(
+                plan.recipe_revision_id, builder_node_id, now=self._clock()
+            )
+            if (
+                refreshed.builder_node_id != plan.builder_node_id
+                or refreshed.build_input_sha256 != plan.build_input_sha256
+            ):
+                with self._sessions.begin() as session:
+                    plan = self._builds.persist_plan_in_session(
+                        session, refreshed, now=self._clock()
+                    )
+            build_input_sha256 = plan.build_input_sha256
         intent = RecipeBuildIntent(
             kind="dependency" if admission_guard is not None else "independent"
         )
@@ -711,10 +751,6 @@ class RecipeOperationService:
                     if succeeded is not None:
                         return self._view(succeeded)
             return existing
-        if build_input_sha256 != plan.build_input_sha256:
-            raise RecipeOperationConflict(
-                "submitted build input does not match preview"
-            )
         now = self._clock()
         with self._sessions.begin() as session:
             try:
@@ -986,27 +1022,21 @@ class RecipeOperationService:
         """
 
         if not plan.allowed:
-            if refreshable_preflight_is_the_only_blocker(plan):
-                # The plan is unchanged and every objection is preflight
-                # *evidence*: the receipt aged out, the host fingerprint
-                # moved, or it does not cover this recipe's requirements.
-                # Rejecting the plan here dead-ended Run/Switch on its own
-                # re-probeable observation, so hand the caller the narrower
-                # outcome that reruns the ordinary probe and re-presents the
-                # identical plan.
-                raise RecipeInstallPreflightExpired(
-                    "install.plan_preflight_refresh_required"
+            try:
+                require_install_admissible(plan)
+            except InstallAdmissionBusy:
+                raise
+            except InstallPlanConflict as error:
+                reasons = list(
+                    dict.fromkeys(
+                        _bounded_blocker_reason(reason.code, reason.detail)
+                        for node in plan.nodes
+                        for reason in node.blockers
+                    )
                 )
-            reasons = list(
-                dict.fromkeys(
-                    _bounded_blocker_reason(reason.code, reason.detail)
-                    for node in plan.nodes
-                    for reason in node.blockers
-                )
-            )
-            raise RecipeOperationConflict(
-                "install plan is blocked: " + "; ".join(reasons[:3])
-            )
+                raise RecipeOperationConflict(
+                    "install plan is blocked: " + "; ".join(reasons[:3])
+                ) from error
         now = self._clock()
         with self._sessions() as session:
             existing_id = self._prepared_installation_id(session, plan)
@@ -1016,8 +1046,8 @@ class RecipeOperationService:
             self._install_admission.refresh_install_receipts(
                 plan, now=now, profile_application_id=profile_application_id
             )
-        except InstallPreflightExpired as error:
-            raise RecipeInstallPreflightExpired(str(error)) from error
+        except InstallAdmissionBusy:
+            raise
         except (RuntimeError, ValueError) as error:
             raise RecipeOperationConflict(str(error)) from error
         with self._sessions.begin() as session:
@@ -1033,10 +1063,6 @@ class RecipeOperationService:
                     profile_application_id=profile_application_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
-            except InstallPreflightExpired as error:
-                # Nothing is persisted: the surrounding transaction rolls back.
-                # Only the caller's own bounded preflight gate may act on this.
-                raise RecipeInstallPreflightExpired(str(error)) from error
             except InstallAdmissionBusy:
                 raise
             except (RuntimeError, ValueError) as error:
@@ -1285,11 +1311,8 @@ class RecipeOperationService:
             "targets": [node_id for node_id, _payload in plan.targets],
         }
         actual_plan_digest = hashlib.sha256(canonical_message(identity)).hexdigest()
-        if plan_digest != actual_plan_digest:
-            raise RecipeOperationConflict(
-                "submitted image distribution plan does not match preview"
-            )
-        existing = self._idempotent(request_id, "recipe.image.import.v1", plan_digest)
+        plan_digest = actual_plan_digest
+        existing = self._idempotent(request_id, "recipe.image.import.v1", None)
         if existing is not None:
             return existing
         if not plan.targets:
@@ -1344,8 +1367,6 @@ class RecipeOperationService:
             return None
         recorded_digest = existing.payload.get("plan_digest")
         if not isinstance(recorded_digest, str):
-            return None
-        if plan_digest is not None and recorded_digest != plan_digest:
             return None
         owner_id = existing.payload.get("owner_id")
         if not isinstance(owner_id, str):
@@ -1554,16 +1575,24 @@ class RecipeOperationService:
         request_id: str,
         workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
-        existing = self._idempotent(request_id, "recipe.install", plan_digest)
+        now = self._clock()
+        install_identity = (plan.mapping_id, plan.recipe_build_id)
+        existing = self._idempotent(
+            request_id, "recipe.install", None, install_identity=install_identity
+        )
         if existing is not None:
             return existing
-        if plan_digest != plan.plan_digest:
-            raise RecipeOperationConflict(
-                "submitted plan digest does not match preview"
-            )
-        now = self._clock()
+        plan = self._install_admission.plan_install(
+            plan.mapping_id,
+            plan.recipe_build_id,
+            now=now,
+            compiled_execution_plans=plan.compiled_plan_by_node,
+        )
+        require_install_admissible(plan)
         try:
             self._install_admission.refresh_install_receipts(plan, now=now)
+        except InstallAdmissionBusy:
+            raise
         except (RuntimeError, ValueError) as error:
             raise RecipeOperationConflict(str(error)) from error
         with self._sessions.begin() as session:
@@ -1578,7 +1607,11 @@ class RecipeOperationService:
             except AdmissionLockBusy as error:
                 raise InstallAdmissionBusy("install.capacity_busy") from error
             replay = self._idempotent_in_session(
-                session, request_id, "recipe.install", plan_digest
+                session,
+                request_id,
+                "recipe.install",
+                None,
+                install_identity=install_identity,
             )
             if replay is not None:
                 return replay
@@ -1639,15 +1672,24 @@ class RecipeOperationService:
         workload_intent_ordinal: int | None = None,
         profile_application_id: str | None = None,
     ) -> RecipeOperationView:
-        if plan_digest != plan.plan_digest:
-            raise RecipeOperationConflict(
-                "submitted plan digest does not match preview"
-            )
-        existing = self._idempotent(request_id, "recipe.start", plan_digest)
+        existing = self._idempotent(
+            request_id,
+            "recipe.start",
+            None,
+            installation_id=plan.installation_id,
+        )
         if existing is not None:
             return existing
         now = self._clock()
         with self._sessions.begin() as session:
+            plan = self._run_admission.plan_run(
+                plan.installation_id,
+                plan.alias,
+                now=now,
+                _session=session,
+                profile_application_id=profile_application_id,
+            )
+            require_run_admissible(plan)
             try:
                 acquire_admission_keys(
                     session,
@@ -1659,7 +1701,11 @@ class RecipeOperationService:
             except AdmissionLockBusy as error:
                 raise RunAdmissionBusy("run capacity writer is busy") from error
             replay = self._idempotent_in_session(
-                session, request_id, "recipe.start", plan_digest
+                session,
+                request_id,
+                "recipe.start",
+                None,
+                installation_id=plan.installation_id,
             )
             if replay is not None:
                 return replay
@@ -1926,15 +1972,33 @@ class RecipeOperationService:
         request_id: str,
     ) -> RecipeOperationView:
         """Reserve an installed artifact recipe without starting a service container."""
-        if plan_digest != plan.plan_digest:
-            raise RecipeOperationConflict(
-                "submitted plan digest does not match preview"
-            )
-        existing = self._idempotent(request_id, "recipe.job.activate.v1", plan_digest)
+        existing = self._idempotent(
+            request_id,
+            "recipe.job.activate.v1",
+            None,
+            installation_id=plan.installation_id,
+        )
         if existing is not None:
             return existing
         now = self._clock()
         with self._sessions.begin() as session:
+            try:
+                acquire_admission_keys(session, (job_request_key(request_id),))
+            except AdmissionLockBusy as error:
+                raise RunAdmissionBusy("run capacity writer is busy") from error
+            replay = self._idempotent_in_session(
+                session,
+                request_id,
+                "recipe.job.activate.v1",
+                None,
+                installation_id=plan.installation_id,
+            )
+            if replay is not None:
+                return replay
+            plan = self._run_admission.plan_run(
+                plan.installation_id, plan.alias, now=now, _session=session
+            )
+            require_run_admissible(plan)
             installation = session.get(RecipeInstallation, plan.installation_id)
             revision = (
                 _active_recipe_revision(session, installation.recipe_revision_id)
@@ -2241,7 +2305,7 @@ class RecipeOperationService:
         existing = self._idempotent(
             request_id,
             "recipe.stop",
-            plan_digest,
+            None,
             owner_kind="run",
             owner_id=run_id,
         )
@@ -2280,7 +2344,7 @@ class RecipeOperationService:
                     session,
                     request_id,
                     "recipe.stop",
-                    plan_digest,
+                    None,
                     owner_kind="run",
                     owner_id=run_id,
                 )
@@ -2292,8 +2356,9 @@ class RecipeOperationService:
                     lock=True,
                     profile_target_node_ids=profile_target_node_ids,
                 )
-                if not admitted.allowed or admitted.plan_digest != plan_digest:
+                if not admitted.allowed:
                     raise RecipeOperationConflict("stop plan is stale or blocked")
+                plan_digest = admitted.plan_digest
                 prepared = (
                     self._route_publications.prepare_withdrawal_in_session(
                         session, frozenset({run_id})
@@ -3563,7 +3628,7 @@ class RecipeOperationService:
         existing = self._idempotent(
             request_id,
             "recipe.uninstall",
-            plan_digest,
+            None,
             owner_kind="installation",
             owner_id=installation_id,
         )
@@ -3583,7 +3648,7 @@ class RecipeOperationService:
                     session,
                     request_id,
                     "recipe.uninstall",
-                    plan_digest,
+                    None,
                     owner_kind="installation",
                     owner_id=installation_id,
                 )
@@ -3604,8 +3669,6 @@ class RecipeOperationService:
                         "installation was never installed; abandon it instead "
                         "of uninstalling it"
                     )
-                if plan.plan_digest != plan_digest:
-                    raise RecipeOperationConflict("uninstall plan is stale or blocked")
                 job = self._queue_in_session(
                     session,
                     kind="recipe.uninstall",
@@ -5718,7 +5781,6 @@ class RecipeOperationService:
                     pending_job.kind != "recipe.stop"
                     or pending_job.state != "running"
                     or pending_job.payload.get("owner_id") != run_id
-                    or pending_job.payload.get("plan_digest") != plan_digest
                     or pending_job.payload.get("execution_mode") != "one-shot-jobs"
                 ):
                     raise RecipeOperationConflict(
@@ -5745,8 +5807,9 @@ class RecipeOperationService:
                 lock=True,
                 profile_target_node_ids=profile_target_node_ids,
             )
-            if not admitted.allowed or admitted.plan_digest != plan_digest:
+            if not admitted.allowed:
                 raise RecipeOperationConflict("stop plan is stale or blocked")
+            plan_digest = admitted.plan_digest
             installation = session.get(RecipeInstallation, run.installation_id)
             revision = (
                 _active_recipe_revision(session, installation.recipe_revision_id)
@@ -6940,6 +7003,8 @@ class RecipeOperationService:
         *,
         owner_kind: str | None = None,
         owner_id: str | None = None,
+        installation_id: str | None = None,
+        install_identity: tuple[str, str | None] | None = None,
     ) -> RecipeOperationView | None:
         with self._sessions() as session:
             return self._idempotent_in_session(
@@ -6949,6 +7014,8 @@ class RecipeOperationService:
                 plan_digest,
                 owner_kind=owner_kind,
                 owner_id=owner_id,
+                installation_id=installation_id,
+                install_identity=install_identity,
             )
 
     def _idempotent_in_session(
@@ -6960,6 +7027,8 @@ class RecipeOperationService:
         *,
         owner_kind: str | None = None,
         owner_id: str | None = None,
+        installation_id: str | None = None,
+        install_identity: tuple[str, str | None] | None = None,
     ) -> RecipeOperationView | None:
         existing = self._idempotent_job_in_session(
             session,
@@ -6968,6 +7037,8 @@ class RecipeOperationService:
             plan_digest,
             owner_kind=owner_kind,
             owner_id=owner_id,
+            installation_id=installation_id,
+            install_identity=install_identity,
         )
         return self._view(existing) if existing is not None else None
 
@@ -6980,6 +7051,8 @@ class RecipeOperationService:
         *,
         owner_kind: str | None = None,
         owner_id: str | None = None,
+        installation_id: str | None = None,
+        install_identity: tuple[str, str | None] | None = None,
     ) -> Job | None:
         existing = session.scalar(select(Job).where(Job.request_id == request_id))
         if existing is None:
@@ -6995,6 +7068,35 @@ class RecipeOperationService:
             or (owner_id is not None and existing.payload.get("owner_id") != owner_id)
         ):
             raise RecipeOperationConflict("request key was already used differently")
+        if installation_id is not None:
+            if (
+                existing.kind not in {"recipe.start", "recipe.job.activate.v1"}
+                or existing.payload.get("owner_kind") != "run"
+            ):
+                raise RecipeOperationConflict(
+                    "request key was already used differently"
+                )
+            run = session.get(RecipeRun, existing.payload.get("owner_id"))
+            if run is None or run.installation_id != installation_id:
+                raise RecipeOperationConflict(
+                    "request key was already used differently"
+                )
+        if install_identity is not None:
+            # An install replay returns the old job only for the same mapping
+            # and build; a reused key for another mapping is a conflict.
+            installation = (
+                session.get(RecipeInstallation, existing.payload.get("owner_id"))
+                if existing.payload.get("owner_kind") == "installation"
+                else None
+            )
+            if (
+                installation is None
+                or (installation.mapping_id, installation.recipe_build_id)
+                != install_identity
+            ):
+                raise RecipeOperationConflict(
+                    "request key was already used differently"
+                )
         return existing
 
     def _queue(

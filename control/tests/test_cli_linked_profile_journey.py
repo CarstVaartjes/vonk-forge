@@ -699,8 +699,6 @@ def _accept_running_review(
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            digest,
             "--yes",
             "--request-key",
             _REQUEST_KEY,

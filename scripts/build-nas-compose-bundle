@@ -351,8 +351,8 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             },
         ],
         "install_modes": {
-            "prompt": "Install mode: lab (LAN only) or secure-remote (Tailscale)",
-            "default": "lab",
+            "prompt": "Install mode: secure-remote (Tailscale) or lab (LAN only)",
+            "default": "secure-remote",
             "lab_value": "lab",
             "secure_remote_value": "secure-remote",
             "lab_required_values": [

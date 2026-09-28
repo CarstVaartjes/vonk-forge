@@ -352,8 +352,9 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
         (second_revision_id, NODE_2),
     }
 
-    # A profile edit makes a new request with the old review stale, while the
-    # accepted request key continues to return its immutable two-lane result.
+    # After a profile edit a new request applies the latest saved profile,
+    # while the accepted request key continues to return its immutable
+    # two-lane result.
     edited = api.put(
         "/api/profile/1",
         headers=headers,
@@ -377,19 +378,10 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
         headers=headers,
         json={"request_key": stale_key, "plan_digest": reviewed},
     )
-    assert stale.status_code == 409, stale.text
-    assert stale.headers["x-vonk-error-code"] == "profile.stale_plan"
+    assert stale.status_code == 202, stale.text
     with sessions() as session:
         rows = list(session.scalars(select(FleetProfileApplication)))
-        assert {row.request_key for row in rows} == set(lost_responses)
-        assert (
-            session.scalar(
-                select(FleetProfileApplication.id).where(
-                    FleetProfileApplication.request_key == stale_key
-                )
-            )
-            is None
-        )
+        assert {row.request_key for row in rows} == {*lost_responses, stale_key}
     original = api.post(path, headers=headers, json=accepted_body)
     assert original.status_code == 202, original.text
     assert original.json()["id"] == application_id

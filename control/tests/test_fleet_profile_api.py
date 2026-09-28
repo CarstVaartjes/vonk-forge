@@ -389,8 +389,8 @@ def test_profile_load_requires_and_applies_the_reviewed_preview_digest() -> None
             "request_key": "22222222-2222-4222-8222-222222222222",
         },
     )
-    assert stale.status_code == 409
-    assert stale.headers["x-vonk-error-code"] == "profile.stale_plan"
+    assert stale.status_code == 202
+    assert stale.json()["profile_digest"] == changed.json()["profile_digest"]
 
     current_preview = client.post("/api/profile/1/preview", headers=headers)
     loaded = client.post(

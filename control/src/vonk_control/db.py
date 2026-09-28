@@ -1,24 +1,39 @@
 """Database engine, startup retry, and session construction."""
 
+import copy
+import logging
 import sys
 import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.exc import InterfaceError, OperationalError, TimeoutError
+from sqlalchemy.exc import (
+    InterfaceError,
+    OperationalError,
+    SQLAlchemyError,
+    TimeoutError,
+)
 from sqlalchemy.orm import Session, sessionmaker
 
 from .settings import database_wait_budgets
 
 _STARTUP_ADVISORY_LOCK = 8_241_779_103
-_ALEMBIC_CONFIG = Path(__file__).resolve().parent / "alembic.ini"
+_MODULE_ALEMBIC_CONFIG = Path(__file__).resolve().parent / "alembic.ini"
+_SOURCE_ALEMBIC_CONFIG = Path(__file__).resolve().parents[2] / "alembic.ini"
+_ALEMBIC_CONFIG = (
+    _MODULE_ALEMBIC_CONFIG
+    if _MODULE_ALEMBIC_CONFIG.is_file()
+    else _SOURCE_ALEMBIC_CONFIG
+)
 _DATABASE_STARTUP_TIMEOUT_SECONDS = 120.0
 _DATABASE_RETRYABLE_ERRORS = (InterfaceError, OperationalError, TimeoutError)
+_LOGGER = logging.getLogger(__name__)
 
 
 def build_engine(database_url: str) -> Engine:
@@ -122,7 +137,7 @@ def upgrade_schema(
     *,
     config_path: Path = _ALEMBIC_CONFIG,
 ) -> None:
-    """Create the current fresh schema, failing closed on existing tables."""
+    """Apply the baseline revision, then let startup reconcile live metadata."""
     if not database_url.strip():
         raise RuntimeError("database URL secret is empty")
     config = Config(str(config_path))
@@ -136,20 +151,7 @@ def upgrade_schema(
 # created before a model change keeps the retired shape while already reporting
 # ``0000_fresh_schema``; a removed column then stays behind ``NOT NULL`` and
 # every insert fails long after startup.  Comparing the live catalog against the
-# current metadata is the only check that can see it, so startup fails closed.
-_SCHEMA_DIFFERENCE_LABELS = {
-    "add_table": "missing table",
-    "remove_table": "unexpected table",
-    "add_column": "missing column",
-    "remove_column": "unexpected column",
-    "add_constraint": "missing constraint",
-    "remove_constraint": "unexpected constraint",
-    "add_index": "missing index",
-    "remove_index": "unexpected index",
-    "modify_nullable": "changed nullability",
-    "modify_type": "changed type",
-    "modify_default": "changed default",
-}
+# current metadata is the only check that can see it, so startup reconciles it.
 
 
 # Reviewed spurious reports, keyed by ``(operation, object name)``.  The
@@ -161,17 +163,7 @@ _SCHEMA_DIFFERENCE_LABELS = {
 _TOLERATED_SCHEMA_DIFFERENCES = frozenset(
     {("add_constraint", "uq_model_cache_set_artifact_key")}
 )
-_SCHEMA_DIFFERENCE_LIMIT = 16
-# Differences whose fourth element is a ``Column`` rather than a name.
-_COLUMN_DIFFERENCE_OPERATIONS = frozenset(
-    {
-        "add_column",
-        "remove_column",
-        "modify_nullable",
-        "modify_type",
-        "modify_default",
-    }
-)
+_REPLACED_CONSTRAINT_NAMES = frozenset({"uq_control_process_heartbeats_kind"})
 
 
 def _schema_difference_key(difference: tuple[object, ...]) -> tuple[str, str | None]:
@@ -187,29 +179,21 @@ def _schema_difference_key(difference: tuple[object, ...]) -> tuple[str, str | N
     return (str(difference[0]), name)
 
 
-def _schema_difference_label(difference: tuple[object, ...]) -> str:
-    """Name one difference so the operator knows exactly what to reconcile."""
-
-    operation = str(difference[0])
-    qualifier = _SCHEMA_DIFFERENCE_LABELS.get(operation, operation.replace("_", " "))
-    if operation in _COLUMN_DIFFERENCE_OPERATIONS:
-        # ``(operation, schema, table name, Column, ...)``: the column renders as
-        # "table.column" by itself, so name the two parts explicitly.
-        table_name = difference[2] if len(difference) > 2 else None
-        column_name = getattr(
-            difference[3] if len(difference) > 3 else None, "name", None
-        )
-        object_name = ".".join(
-            str(part) for part in (table_name, column_name) if part is not None
-        )
-        return f"{qualifier} {object_name}".strip()
-    item = difference[1] if len(difference) > 1 else None
-    table = getattr(getattr(item, "table", None), "name", None)
-    name = getattr(item, "name", None)
-    object_name = ".".join(part for part in (table, name) if isinstance(part, str)) or (
-        str(item) if item is not None else ""
-    )
-    return f"{qualifier} {object_name}".strip()
+def _flatten_schema_differences(differences: Any) -> list[tuple[Any, ...]]:
+    """Flatten Alembic's list-wrapped comparator results to individual diffs."""
+    if not isinstance(differences, (list, tuple)):
+        return []
+    flattened: list[tuple[Any, ...]] = []
+    for difference in differences:
+        if isinstance(difference, list):
+            flattened.extend(_flatten_schema_differences(difference))
+        elif (
+            isinstance(difference, tuple)
+            and difference
+            and isinstance(difference[0], str)
+        ):
+            flattened.append(difference)
+    return flattened
 
 
 def _check_constraint_differences(connection: Connection) -> list[str]:
@@ -292,46 +276,589 @@ def _check_constraint_differences(connection: Connection) -> list[str]:
     return differences
 
 
-def verify_schema_is_current(connection: Connection) -> None:
-    """Fail closed unless the live schema is exactly the current model schema.
+def _column_default_sql(column: object, connection: Connection) -> str | None:
+    """Return a safe SQL expression for a declared scalar model default."""
+    from sqlalchemy import DefaultClause
 
-    ``alembic_version`` reports the revision that was applied, never the shape
-    that exists now.  This comparison is what turns a stale column or constraint
-    left behind by an earlier baseline into an immediate, actionable startup
-    refusal instead of a mysterious failure deep inside an operation.
+    server_default = getattr(column, "server_default", None)
+    if isinstance(server_default, DefaultClause):
+        argument = server_default.arg
+        compile_default = getattr(argument, "compile", None)
+        if compile_default is None:
+            return str(argument)
+        return str(compile_default(dialect=connection.dialect))
+    default = getattr(column, "default", None)
+    value = getattr(default, "arg", None)
+    if value is None or callable(value):
+        return None
+    literal = getattr(getattr(column, "type", None), "literal_processor", None)
+    processor = literal(connection.dialect) if literal else None
+    if processor is None:
+        return None
+    return processor(value)
 
-    PostgreSQL CHECK expressions are compared through its own parser because
-    autogenerate does not diff them.
-    """
 
-    from alembic.autogenerate import compare_metadata
+def _cosmetic_type_difference(existing_type: object, model_type: object) -> bool:
+    """Recognize dialect spellings for the same binary/date-time storage type."""
+    from sqlalchemy import DateTime, LargeBinary
+
+    existing_name = type(existing_type).__name__.upper()
+    if isinstance(model_type, DateTime) and existing_name in {
+        "DATETIME",
+        "TIMESTAMP",
+    }:
+        return True
+    return isinstance(model_type, LargeBinary) and existing_name in {"BLOB", "BYTEA"}
+
+
+def _is_generated_sequence_default(default: object, reflected_column: object) -> bool:
+    """Never remove PostgreSQL serial/identity ownership during reconciliation."""
+    if getattr(reflected_column, "get", lambda *_: None)("identity"):
+        return True
+    rendered = str(default or "").lower()
+    return "nextval(" in rendered
+
+
+def _constraint_kind(constraint: object) -> str | None:
+    from sqlalchemy import (
+        CheckConstraint,
+        ForeignKeyConstraint,
+        PrimaryKeyConstraint,
+        UniqueConstraint,
+    )
+
+    if isinstance(constraint, CheckConstraint):
+        return "check"
+    if isinstance(constraint, ForeignKeyConstraint):
+        return "foreignkey"
+    if isinstance(constraint, PrimaryKeyConstraint):
+        return "primary"
+    if isinstance(constraint, UniqueConstraint):
+        return "unique"
+    return None
+
+
+def _quoted(connection: Connection, *names: str) -> str:
+    preparer = connection.dialect.identifier_preparer
+    return ".".join(preparer.quote(name) for name in names)
+
+
+def _repair_check_constraints(connection: Connection) -> None:
+    """Converge named CHECKs; invalid historical rows do not block startup."""
     from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import CheckConstraint, inspect
 
     from .models import Base
 
-    differences = list(
-        compare_metadata(MigrationContext.configure(connection), Base.metadata)
-    )
-    unexpected = [
+    ops = Operations(MigrationContext.configure(connection))
+    inspector = inspect(connection)
+    live_tables = set(inspector.get_table_names())
+    differences = set(_check_constraint_differences(connection))
+    for table_name, table in sorted(Base.metadata.tables.items()):
+        if table_name not in live_tables:
+            continue
+        reflected = {
+            item["name"]: item
+            for item in inspector.get_check_constraints(table_name)
+            if item.get("name")
+        }
+        for constraint in table.constraints:
+            name = constraint.name
+            if not isinstance(constraint, CheckConstraint) or not isinstance(name, str):
+                continue
+            existing = reflected.get(name)
+            mismatch = (
+                existing is not None
+                and f"changed check constraint {table_name}.{name}" in differences
+            )
+            if existing is not None and not mismatch:
+                continue
+            expression = str(
+                constraint.sqltext.compile(
+                    dialect=connection.dialect,
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            try:
+                with connection.begin_nested():
+                    if mismatch:
+                        ops.drop_constraint(name, table_name, type_="check")
+                    ops.create_check_constraint(name, table_name, expression)
+                _LOGGER.info(
+                    "%s CHECK constraint %s.%s",
+                    "Reconciled" if mismatch else "Created",
+                    table_name,
+                    name,
+                )
+            except SQLAlchemyError as error:
+                if connection.dialect.name != "postgresql":
+                    _LOGGER.warning(
+                        "Could not create CHECK %s.%s: %s",
+                        table_name,
+                        name,
+                        error,
+                    )
+                    continue
+                quoted_table = _quoted(connection, table_name)
+                quoted_constraint = connection.dialect.identifier_preparer.quote(name)
+                try:
+                    with connection.begin_nested():
+                        connection.exec_driver_sql(
+                            f"ALTER TABLE {quoted_table} ADD CONSTRAINT {quoted_constraint} "
+                            f"CHECK ({expression}) NOT VALID"
+                        )
+                    _LOGGER.warning(
+                        "Created CHECK %s.%s NOT VALID because existing rows violate it: %s",
+                        table_name,
+                        name,
+                        error,
+                    )
+                except SQLAlchemyError as deferred_error:
+                    _LOGGER.warning(
+                        "Could not create CHECK %s.%s: %s",
+                        table_name,
+                        name,
+                        deferred_error,
+                    )
+
+
+def reconcile_schema(connection: Connection) -> None:
+    """Apply safe metadata differences inside the caller's startup transaction."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import inspect
+
+    from .models import Base
+
+    ops = Operations(MigrationContext.configure(connection))
+    differences = [
         difference
-        for difference in differences
+        for difference in _flatten_schema_differences(
+            compare_metadata(
+                MigrationContext.configure(
+                    connection, opts={"compare_server_default": True}
+                ),
+                Base.metadata,
+            )
+        )
         if _schema_difference_key(difference) not in _TOLERATED_SCHEMA_DIFFERENCES
     ]
-    labels = sorted(
-        {_schema_difference_label(difference) for difference in unexpected}
-        | set(_check_constraint_differences(connection))
+    inspector = inspect(connection)
+    tables = set(inspector.get_table_names()) - {"alembic_version"}
+    metadata_tables = set(Base.metadata.tables)
+    column_key = lambda difference: (
+        str(difference[2]),
+        str(getattr(difference[3], "name", difference[3])),
     )
-    if not labels:
-        return
-    listed = ", ".join(labels[:_SCHEMA_DIFFERENCE_LIMIT])
-    if len(labels) > _SCHEMA_DIFFERENCE_LIMIT:
-        listed += f", and {len(labels) - _SCHEMA_DIFFERENCE_LIMIT} more"
-    raise RuntimeError(
-        "The live Controller database schema does not match the current "
-        "Controller model metadata, so startup is refused rather than serving "
-        "an operation against a stale schema. No automatic repair is performed. "
-        f"Reconcile these objects, then restart the Controller: {listed}."
-    )
+    reported_type_changes = {
+        column_key(difference)
+        for difference in differences
+        if difference[0] == "modify_type"
+    }
+    reported_default_changes = {
+        column_key(difference)
+        for difference in differences
+        if difference[0] == "modify_default"
+    }
+    reported_nullable_changes = {
+        column_key(difference)
+        for difference in differences
+        if difference[0] == "modify_nullable"
+    }
+
+    # Create absent tables as a group so foreign-key dependencies are present.
+    for table in Base.metadata.sorted_tables:
+        if table.name in tables:
+            continue
+        table.create(connection, checkfirst=True)
+        _LOGGER.info("Created missing table %s", table.name)
+
+    # Add missing columns. A scalar default is used only to backfill an
+    # otherwise-required column; callable defaults are not safe bulk values.
+    inspector = inspect(connection)
+    for difference in differences:
+        if difference[0] != "add_column":
+            continue
+        table_name, model_column = difference[2], difference[3]
+        column = copy.copy(model_column)
+        default_sql = _column_default_sql(model_column, connection)
+        if not column.nullable and column.server_default is None:
+            if default_sql is None:
+                column.nullable = True
+                _LOGGER.warning(
+                    "Added required column %s.%s as nullable because its model has no safe scalar default",
+                    table_name,
+                    column.name,
+                )
+            else:
+                from sqlalchemy import DefaultClause
+
+                column.server_default = DefaultClause(text(default_sql))
+        try:
+            with connection.begin_nested():
+                ops.add_column(table_name, column)
+        except SQLAlchemyError as error:
+            _LOGGER.warning(
+                "Skipped missing column %s.%s: %s", table_name, column.name, error
+            )
+            continue
+        _LOGGER.info("Added column %s.%s", table_name, model_column.name)
+        if (
+            not model_column.nullable
+            and model_column.server_default is None
+            and default_sql
+        ):
+            try:
+                with connection.begin_nested():
+                    ops.alter_column(
+                        table_name,
+                        model_column.name,
+                        server_default=None,
+                        existing_type=model_column.type,
+                    )
+            except SQLAlchemyError as error:
+                _LOGGER.warning(
+                    "Kept temporary backfill default on %s.%s: %s",
+                    table_name,
+                    model_column.name,
+                    error,
+                )
+
+    # Change types/defaults/nullability before constraint installation. A
+    # PostgreSQL cast failure is scoped to that column and does not poison startup.
+    for table_name, table in Base.metadata.tables.items():
+        if table_name not in tables:
+            continue
+        live_columns = {
+            column["name"]: column for column in inspector.get_columns(table_name)
+        }
+        primary_key_columns = set(
+            inspector.get_pk_constraint(table_name).get("constrained_columns") or ()
+        )
+        for column in table.columns:
+            old = live_columns.get(column.name)
+            if old is None:
+                continue
+            try:
+                if (
+                    table_name,
+                    column.name,
+                ) in reported_type_changes and not _cosmetic_type_difference(
+                    old["type"], column.type
+                ):
+                    if (
+                        column.name in primary_key_columns
+                        or column.primary_key
+                        or old.get("identity")
+                        or getattr(column, "identity", None) is not None
+                    ):
+                        _LOGGER.warning(
+                            "Skipped type change for primary-key or identity column %s.%s",
+                            table_name,
+                            column.name,
+                        )
+                        continue
+                    if connection.dialect.name != "postgresql":
+                        _LOGGER.warning(
+                            "Skipped unverified type change for %s.%s on %s",
+                            table_name,
+                            column.name,
+                            connection.dialect.name,
+                        )
+                        continue
+                    quoted = connection.dialect.identifier_preparer.quote(column.name)
+                    quoted_table = _quoted(connection, table_name)
+                    target_type = column.type.compile(dialect=connection.dialect)
+                    using = f"{quoted}::{target_type}"
+                    with connection.begin_nested():
+                        lossy_value = connection.exec_driver_sql(
+                            f"SELECT 1 FROM {quoted_table} WHERE {quoted} IS NOT NULL "
+                            f"AND NOT ({quoted}::{target_type} = {quoted}) LIMIT 1"
+                        ).first()
+                        if lossy_value is not None:
+                            _LOGGER.warning(
+                                "Skipped lossy type change for %s.%s; existing values do not compare equal after conversion",
+                                table_name,
+                                column.name,
+                            )
+                        else:
+                            ops.alter_column(
+                                table_name,
+                                column.name,
+                                type_=column.type,
+                                existing_type=old["type"],
+                                postgresql_using=using,
+                            )
+                    if lossy_value is None:
+                        _LOGGER.info("Changed type of %s.%s", table_name, column.name)
+            except SQLAlchemyError as error:
+                _LOGGER.warning(
+                    "Skipped uncastable type change for %s.%s: %s",
+                    table_name,
+                    column.name,
+                    error,
+                )
+            if (
+                (table_name, column.name) in reported_nullable_changes
+                and old.get("nullable")
+                and not column.nullable
+            ):
+                default_sql = _column_default_sql(column, connection)
+                try:
+                    with connection.begin_nested():
+                        if default_sql:
+                            quoted_table = _quoted(connection, table_name)
+                            quoted_column = (
+                                connection.dialect.identifier_preparer.quote(
+                                    column.name
+                                )
+                            )
+                            connection.exec_driver_sql(
+                                f"UPDATE {quoted_table} SET {quoted_column}={default_sql} "
+                                f"WHERE {quoted_column} IS NULL"
+                            )
+                        ops.alter_column(
+                            table_name,
+                            column.name,
+                            nullable=False,
+                            existing_type=column.type,
+                        )
+                    _LOGGER.info("Made column %s.%s NOT NULL", table_name, column.name)
+                except SQLAlchemyError as error:
+                    _LOGGER.warning(
+                        "Skipped NOT NULL change for %s.%s: %s",
+                        table_name,
+                        column.name,
+                        error,
+                    )
+            elif (
+                (table_name, column.name) in reported_nullable_changes
+                and not old.get("nullable")
+                and column.nullable
+            ):
+                try:
+                    with connection.begin_nested():
+                        ops.alter_column(
+                            table_name,
+                            column.name,
+                            nullable=True,
+                            existing_type=column.type,
+                        )
+                    _LOGGER.info("Made column %s.%s nullable", table_name, column.name)
+                except SQLAlchemyError as error:
+                    _LOGGER.warning(
+                        "Skipped nullable change for %s.%s: %s",
+                        table_name,
+                        column.name,
+                        error,
+                    )
+            existing_default = old.get("default")
+            if (
+                connection.dialect.name == "postgresql"
+                and (table_name, column.name) in reported_default_changes
+                and not _is_generated_sequence_default(existing_default, old)
+            ):
+                target_sql = _column_default_sql(column, connection)
+                try:
+                    with connection.begin_nested():
+                        ops.alter_column(
+                            table_name,
+                            column.name,
+                            server_default=target_sql,
+                            existing_type=column.type,
+                        )
+                    _LOGGER.info(
+                        "Changed server default for %s.%s", table_name, column.name
+                    )
+                except SQLAlchemyError as error:
+                    _LOGGER.warning(
+                        "Skipped server default change for %s.%s: %s",
+                        table_name,
+                        column.name,
+                        error,
+                    )
+
+    # Unknown columns on model-owned tables can prevent new rows from being
+    # inserted when they are NOT NULL without a default. Keep their data and
+    # definition, but remove that insertion barrier. Tables outside our models
+    # remain completely untouched.
+    inspector = inspect(connection)
+    for table_name in sorted(tables & metadata_tables):
+        model_columns = set(Base.metadata.tables[table_name].columns.keys())
+        for old in inspector.get_columns(table_name):
+            if (
+                old["name"] in model_columns
+                or old.get("nullable", True)
+                or old.get("default") is not None
+            ):
+                continue
+            try:
+                with connection.begin_nested():
+                    ops.alter_column(
+                        table_name,
+                        old["name"],
+                        nullable=True,
+                        existing_type=old["type"],
+                    )
+            except SQLAlchemyError as error:
+                _LOGGER.warning(
+                    "Could not make extra column %s.%s nullable: %s",
+                    table_name,
+                    old["name"],
+                    error,
+                )
+                continue
+            _LOGGER.warning(
+                "Made extra column %s.%s nullable so inserts can continue; existing data was retained",
+                table_name,
+                old["name"],
+            )
+    # Install indexes and unique constraints before dropping old forms. Savepoints
+    # let a data conflict skip just the new uniqueness rule.
+    failed_index_tables: set[str] = set()
+    failed_constraint_tables: set[str] = set()
+    for difference in differences:
+        if difference[0] == "add_index":
+            index = difference[1]
+            try:
+                with connection.begin_nested():
+                    index.create(connection, checkfirst=True)
+                _LOGGER.info("Created index %s", index.name)
+            except SQLAlchemyError as error:
+                failed_index_tables.add(index.table.name)
+                _LOGGER.warning("Skipped index %s: %s", index.name, error)
+        elif difference[0] == "add_constraint":
+            constraint = difference[1]
+            if getattr(constraint, "name", None) == "uq_model_cache_set_artifact_key":
+                continue
+            kind = _constraint_kind(constraint)
+            if kind == "check":
+                continue
+            try:
+                from alembic.operations.ops import AddConstraintOp
+
+                with connection.begin_nested():
+                    ops.invoke(AddConstraintOp.from_constraint(constraint))
+                _LOGGER.info(
+                    "Created %s constraint %s", kind or "database", constraint.name
+                )
+            except SQLAlchemyError as error:
+                failed_constraint_tables.add(constraint.table.name)
+                _LOGGER.warning(
+                    "Skipped constraint %s due to existing data or unsupported change: %s",
+                    constraint.name,
+                    error,
+                )
+
+    _repair_check_constraints(connection)
+
+    # Drop obsolete constraints/indexes before their columns.
+    added_constraints = {
+        (
+            difference[1].table.name,
+            difference[1].name,
+            _constraint_kind(difference[1]),
+            frozenset(column.name for column in difference[1].columns),
+        )
+        for difference in differences
+        if difference[0] == "add_constraint"
+    }
+    added_indexes = {
+        (difference[1].table.name, difference[1].name)
+        for difference in differences
+        if difference[0] == "add_index"
+    }
+    for difference in differences:
+        operation = difference[0]
+        if operation == "remove_constraint":
+            constraint = difference[1]
+            name = getattr(constraint, "name", None)
+            kind = _constraint_kind(constraint)
+            table_name = constraint.table.name
+            if (
+                name
+                and kind
+                and table_name in metadata_tables
+                and (
+                    name in _REPLACED_CONSTRAINT_NAMES
+                    or any(
+                        added_table == table_name
+                        and (
+                            added_name == name
+                            or (
+                                kind == "unique"
+                                and added_kind == "unique"
+                                and added_columns
+                                == frozenset(
+                                    column.name for column in constraint.columns
+                                )
+                            )
+                        )
+                        for (
+                            added_table,
+                            added_name,
+                            added_kind,
+                            added_columns,
+                        ) in added_constraints
+                    )
+                )
+            ):
+                if constraint.table.name in failed_constraint_tables:
+                    _LOGGER.warning(
+                        "Retained obsolete constraint %s.%s because its replacement could not be installed",
+                        constraint.table.name,
+                        name,
+                    )
+                    continue
+                try:
+                    with connection.begin_nested():
+                        ops.drop_constraint(name, constraint.table.name, type_=kind)
+                    _LOGGER.info(
+                        "Dropped obsolete constraint %s.%s", constraint.table.name, name
+                    )
+                except SQLAlchemyError as error:
+                    _LOGGER.warning(
+                        "Could not drop obsolete constraint %s: %s", name, error
+                    )
+        elif operation == "remove_index":
+            index = difference[1]
+            if (
+                index.table.name not in metadata_tables
+                or (
+                    index.table.name,
+                    index.name,
+                )
+                not in added_indexes
+            ):
+                continue
+            if index.table.name in failed_index_tables:
+                _LOGGER.warning(
+                    "Retained obsolete index %s because its replacement could not be installed",
+                    index.name,
+                )
+                continue
+            try:
+                with connection.begin_nested():
+                    index.drop(connection, checkfirst=True)
+                _LOGGER.info("Dropped obsolete index %s", index.name)
+            except SQLAlchemyError as error:
+                _LOGGER.warning(
+                    "Could not drop obsolete index %s: %s", index.name, error
+                )
+
+    remaining = _check_constraint_differences(connection)
+    if remaining:
+        _LOGGER.warning(
+            "Schema reconciliation left deferred CHECK constraints: %s",
+            ", ".join(remaining),
+        )
+
+
+def verify_schema_is_current(connection: Connection) -> None:
+    """Reconcile the live catalog to current metadata within this transaction."""
+    reconcile_schema(connection)
 
 
 def initialize_database(
@@ -357,8 +884,15 @@ def initialize_database(
                 lock_connection.commit()
                 try:
                     upgrade_schema(database_url, config_path=config_path)
-                    with engine.connect() as schema_connection:
-                        verify_schema_is_current(schema_connection)
+                    try:
+                        with engine.begin() as schema_connection:
+                            verify_schema_is_current(schema_connection)
+                    except SQLAlchemyError as error:
+                        raise RuntimeError(
+                            "Controller startup schema reconciliation failed and the "
+                            "transaction was rolled back. Startup will retry "
+                            f"reconciliation automatically; schema failure: {error}"
+                        ) from error
                     authority = DatabaseAuthorityService(session_factory(engine))
                     return authority.ensure_initialized(acquire_advisory_lock=False)
                 finally:

@@ -139,6 +139,7 @@ from .fleet_profile_application_view_state import FleetProfileApplicationViewSta
 from .fleet_profile_assignment import FleetProfileAssignment
 from .fleet_profile_assignment_assessment import FleetProfileAssignmentAssessment
 from .fleet_profile_assignment_desired_state import FleetProfileAssignmentDesiredState
+from .fleet_profile_assignment_failure import FleetProfileAssignmentFailure
 from .fleet_profile_assignment_input import FleetProfileAssignmentInput
 from .fleet_profile_assignment_input_desired_state import FleetProfileAssignmentInputDesiredState
 from .fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
@@ -764,6 +765,7 @@ __all__ = (
     "FleetProfileAssignment",
     "FleetProfileAssignmentAssessment",
     "FleetProfileAssignmentDesiredState",
+    "FleetProfileAssignmentFailure",
     "FleetProfileAssignmentInput",
     "FleetProfileAssignmentInputDesiredState",
     "FleetProfileAssignmentPreparation",
