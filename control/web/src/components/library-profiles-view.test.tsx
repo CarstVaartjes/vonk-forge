@@ -75,12 +75,14 @@ test("renders an empty profile as an explicit whole-fleet idle outcome", async (
   expect(within(saved).getByText("No assignments; every Spark becomes idle on load.")).toBeVisible();
 });
 
-test("refreshes a stale review without submitting the changed decision", async () => {
+test("refreshes and resumes a profile load after the plan changes", async () => {
   const user = userEvent.setup();
-  const api = apiFor({loadProfile: vi.fn(async () => { throw new ApiError(409, "Review the changed profile before loading"); })});
+  const loadProfile = vi.fn(async () => application);
+  loadProfile.mockRejectedValueOnce(new ApiError(409, "Current plan changed"));
+  const api = apiFor({loadProfile});
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
   await user.click(await screen.findByRole("button", {name: "Load profile"}));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Review the changed profile before loading");
-  expect(api.loadProfile).toHaveBeenCalledTimes(1);
+  expect(await screen.findByRole("region", {name: "Profile load progress"})).toBeVisible();
+  expect(loadProfile).toHaveBeenCalledTimes(2);
   expect(api.previewProfile).toHaveBeenCalledTimes(2);
 });

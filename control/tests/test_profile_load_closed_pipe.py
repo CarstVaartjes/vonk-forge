@@ -45,8 +45,6 @@ def test_closed_stdout_reconnects_to_the_single_accepted_load(
                 "--json",
                 "profile",
                 "load",
-                "--expected-plan",
-                digest,
                 "--yes",
                 "--request-key",
                 KEY,
@@ -107,14 +105,16 @@ def test_closed_stdout_reconnects_to_the_single_accepted_load(
     assert receipt["id"] == application_id
     assert receipt["request_key"] == KEY
     assert [(method, path) for method, path, _ in state.calls] == [
+        ("POST", "/api/profile/1/preview"),
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/1/requests/{KEY}"),
         ("GET", f"/api/profile/1/requests/{KEY}"),
     ]
     assert [path for method, path, _ in state.calls if method == "POST"] == [
-        "/api/profile/1/load"
+        "/api/profile/1/preview",
+        "/api/profile/1/load",
     ]
-    assert state.calls[0][2] == {
+    assert state.calls[1][2] == {
         "request_key": KEY,
         "plan_digest": digest,
     }

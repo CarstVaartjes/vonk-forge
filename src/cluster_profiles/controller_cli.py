@@ -510,12 +510,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         action="store_true",
         help="Show the Controller-owned removal impact without submitting it",
     )
-    model_remove.add_argument(
-        "--review-digest",
-        type=_sha256_digest,
-        metavar="SHA256",
-        help="Exact removal review digest to accept with --yes",
-    )
     model_cancel = model_actions.add_parser(
         "cancel", help="Cancel one model download while preserving resumable files"
     )
@@ -589,12 +583,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         action="store_true",
         help="Show the Controller-owned removal impact without submitting it",
     )
-    recipe_remove.add_argument(
-        "--review-digest",
-        type=_sha256_digest,
-        metavar="SHA256",
-        help="Exact removal review digest to accept with --yes",
-    )
     recipe_cancel = recipe_actions.add_parser(
         "cancel", help="Cancel one accepted recipe preparation"
     )
@@ -621,12 +609,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--review",
         action="store_true",
         help="Show the exact reconciliation plan without submitting it",
-    )
-    installation_reconcile.add_argument(
-        "--review-digest",
-        type=_sha256_digest,
-        metavar="SHA256",
-        help="Exact reconciliation plan digest to accept with --yes",
     )
 
     add_artifact_job_commands(
@@ -708,9 +690,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     profile_load.set_defaults(outcome_context="mutation", requires_profile=True)
     profile_load.add_argument("--dry-run", action="store_true")
-    profile_load.add_argument(
-        "--expected-plan", help="The exact plan digest reviewed before this load"
-    )
     profile_load.add_argument("--yes", action="store_true")
     profile_load.add_argument("--request-key")
     profile_load.add_argument("--detach", action="store_true")
@@ -978,15 +957,9 @@ def _submit_profile_load(
     }
 
     def validate(result: Mapping[str, object]) -> str:
-        progress = result.get("progress")
-        intended = (
-            progress.get("intended_profile") if isinstance(progress, Mapping) else None
-        )
         operation_id = result.get("id")
         if (
             result.get("request_key") != key
-            or not isinstance(intended, Mapping)
-            or intended.get("reviewed_plan_digest") != expected_digest
             or not isinstance(operation_id, str)
             or not operation_id
         ):
@@ -1118,7 +1091,6 @@ def _validate_cache_removal_receipt(
     *,
     expected_with_model: bool | None,
     expected_model_content_sha256: str | None = None,
-    expected_review_digest: str | None = None,
 ) -> str:
     """Bind a removal receipt to its submitted target and durable identity."""
 
@@ -1136,20 +1108,10 @@ def _validate_cache_removal_receipt(
         isinstance(receipt_selector, str)
         and receipt_selector.strip().casefold() == selector.strip().casefold()
     )
-    receipt_review_digest = receipt.get("review_digest")
-    review_matches = (
-        isinstance(receipt_review_digest, str)
-        and re.fullmatch(r"[0-9a-f]{64}", receipt_review_digest) is not None
-        and (
-            expected_review_digest is None
-            or receipt_review_digest == expected_review_digest
-        )
-    )
     identity_matches = (
         receipt.get("action") == "remove"
         and selector_matches
         and receipt.get("request_key") == request_key
-        and review_matches
     )
     if noun == "recipe":
         identity_matches = (
@@ -1233,6 +1195,34 @@ def _cache_removal_review(
     return review
 
 
+_SECURITY_BLOCKER_MARKERS = (
+    "authentication_required",
+    "unauthorized",
+    "forbidden",
+    "enrollment_denied",
+    "revoked",
+    "identity_invalid",
+    "identity_mismatch",
+)
+
+
+def _security_blocker_codes(blockers: object) -> list[str]:
+    """Return blocker codes that are real security denials, not bookkeeping.
+
+    Every other blocker is submitted anyway: the Controller parks the latest
+    request until it can run, or refuses it with its own typed answer.
+    """
+    codes: list[str] = []
+    if isinstance(blockers, list):
+        for item in blockers:
+            code = item.get("code") if isinstance(item, Mapping) else None
+            if isinstance(code, str) and any(
+                marker in code for marker in _SECURITY_BLOCKER_MARKERS
+            ):
+                codes.append(code)
+    return codes
+
+
 def _review_digest_for_acceptance(
     client: ControllerClient,
     noun: str,
@@ -1241,44 +1231,19 @@ def _review_digest_for_acceptance(
     *,
     with_model: bool | None,
 ) -> tuple[str, str | None]:
-    supplied_digest = getattr(args, "review_digest", None)
     interactive = _removal_is_interactive(args)
-    if supplied_digest is None and (args.yes or not interactive):
-        raise ValueError(
-            f"{noun} remove requires --review-digest SHA256 --yes for scripted consent; "
-            f"review with {noun} remove {selector} --review first or omit --yes in a terminal"
-        )
-    if supplied_digest is not None and not args.yes and not interactive:
-        raise ValueError(
-            f"{noun} remove requires --yes with --review-digest in noninteractive mode"
-        )
+    if not args.yes and not interactive:
+        raise ValueError(f"{noun} remove requires --yes in noninteractive mode")
 
     review = _cache_removal_review(client, noun, selector, with_model=with_model)
     current_digest = cast(str, review["review_digest"])
-    blockers = cast(list[Mapping[str, object]], review["blockers"])
-    if blockers:
-        if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
-            with redirect_stdout(sys.stderr):
-                render_payload(review, noun, action="preview")
-        details = "; ".join(
-            f"{cast(str, blocker['code'])}: {cast(str, blocker['detail'])}"
-            for blocker in blockers
-        )
+    security = _security_blocker_codes(review["blockers"])
+    if security:
         raise ControlConflict(
             409,
-            f"{noun} removal is blocked by the Controller review: {details}. "
-            f"Inspect the read-only review with {noun} remove {selector} --review.",
+            f"{noun} removal is refused by the Controller: {', '.join(security)}.",
         )
-    if supplied_digest is not None and current_digest != supplied_digest:
-        if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
-            with redirect_stdout(sys.stderr):
-                render_payload(review, noun, action="preview")
-        raise ControlConflict(
-            409,
-            f"{noun} removal review changed; inspect the current impact and "
-            "rerun with the new review digest",
-        )
-    if not (args.yes and supplied_digest is not None):
+    if not args.yes:
         with redirect_stdout(sys.stderr):
             render_payload(review, noun, action="preview")
         _confirm_action(
@@ -1325,7 +1290,6 @@ def _existing_cache_removal(
         key,
         existing,
         expected_with_model=with_model,
-        expected_review_digest=getattr(args, "review_digest", None),
     )
     submission.acceptance = "accepted"
     return existing
@@ -1353,7 +1317,6 @@ def _submit_model_removal(
             result,
             expected_with_model=None,
             expected_model_content_sha256=model_content_sha256,
-            expected_review_digest=review_digest,
         )
 
     return _submit_idempotent_request(
@@ -1378,8 +1341,6 @@ def _submit_model_removal(
                 "model",
                 "remove",
                 selector,
-                "--review-digest",
-                review_digest,
                 "--yes",
                 "--request-key",
                 key,
@@ -1409,7 +1370,6 @@ def _submit_recipe_removal(
             key,
             result,
             expected_with_model=with_model,
-            expected_review_digest=review_digest,
         )
 
     choice = "--with-model" if with_model else "--keep-model"
@@ -1436,8 +1396,6 @@ def _submit_recipe_removal(
                 "remove",
                 selector,
                 choice,
-                "--review-digest",
-                review_digest,
                 "--yes",
                 "--request-key",
                 key,
@@ -1456,7 +1414,7 @@ def _remove_model(
         raise ValueError("model remove requires a non-empty selector")
     args.selector = selector
     if args.review:
-        if args.yes or args.review_digest is not None or args.request_key is not None:
+        if args.yes or args.request_key is not None:
             raise ValueError(
                 "model remove --review cannot be combined with consent or request flags"
             )
@@ -1503,7 +1461,7 @@ def _remove_recipe(
         raise ValueError("recipe remove requires --with-model or --keep-model")
     with_model = args.with_model and not args.keep_model
     if args.review:
-        if args.yes or args.review_digest is not None or args.request_key is not None:
+        if args.yes or args.request_key is not None:
             raise ValueError(
                 "recipe remove --review cannot be combined with consent or request flags"
             )
@@ -2677,7 +2635,7 @@ def _follow_installation_reconciliation(
     args: argparse.Namespace,
     *,
     request_key: str,
-    plan_digest: str,
+    plan_digest: str | None,
 ) -> dict[str, object]:
     operation_id = _validate_installation_reconcile_operation(
         operation,
@@ -2725,7 +2683,6 @@ def _recipe_installation_reconcile(
     if getattr(args, "review", False):
         if (
             getattr(args, "yes", False)
-            or getattr(args, "review_digest", None) is not None
             or getattr(args, "request_key", None) is not None
             or getattr(args, "detach", False)
         ):
@@ -2740,12 +2697,6 @@ def _recipe_installation_reconcile(
         raise ValueError(
             "installation reconcile requires --yes; review with --review first"
         )
-    reviewed_digest = getattr(args, "review_digest", None)
-    if not isinstance(reviewed_digest, str):
-        raise TypeError(
-            "installation reconcile requires --review-digest SHA256 and --yes"
-        )
-
     key = _request_key(args, factory)
     request_timeout = client.request_timeout_seconds
     if not math.isfinite(request_timeout) or request_timeout <= 0:
@@ -2766,8 +2717,6 @@ def _recipe_installation_reconcile(
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            reviewed_digest,
             "--request-key",
             key,
             "--yes",
@@ -2802,7 +2751,7 @@ def _recipe_installation_reconcile(
         request,
         key,
         installation_id=installation_id,
-        expected_plan_digest=reviewed_digest,
+        expected_plan_digest=None,
     )
     if existing is not None:
         submission.acceptance = "accepted"
@@ -2812,7 +2761,7 @@ def _recipe_installation_reconcile(
             existing,
             args,
             request_key=key,
-            plan_digest=reviewed_digest,
+            plan_digest=None,
         )
 
     preview = validate_control_document(
@@ -2822,25 +2771,20 @@ def _recipe_installation_reconcile(
         preview.get("action") != "cleanup"
         or preview.get("cleanup_mode") != "reconcile"
         or preview.get("installation_id") != installation_id
-        or preview.get("plan_digest") != reviewed_digest
+        or not isinstance(preview.get("plan_digest"), str)
     ):
         raise ControlConflict(
             409,
-            "installation reconciliation plan changed; review the current plan again",
+            "installation reconciliation plan is unavailable",
         )
-    if preview.get("allowed") is not True:
-        reasons = preview.get("blockers")
-        codes: list[str] = []
-        if isinstance(reasons, list):
-            for item in reasons:
-                if isinstance(item, Mapping):
-                    code = item.get("code")
-                    if isinstance(code, str):
-                        codes.append(code)
-        detail = "installation reconciliation is blocked" + (
-            f": {', '.join(codes[:6])}" if codes else "; review the current plan"
+    reviewed_digest = cast(str, preview["plan_digest"])
+    security = _security_blocker_codes(preview.get("blockers"))
+    if security:
+        raise ControlConflict(
+            409,
+            "installation reconciliation is refused by the Controller: "
+            + ", ".join(security[:6]),
         )
-        raise ControlConflict(409, detail)
     body = {
         **preview_body,
         "plan_digest": reviewed_digest,
@@ -2855,7 +2799,7 @@ def _recipe_installation_reconcile(
             operation,
             operation_id=None,
             request_key=key,
-            plan_digest=reviewed_digest,
+            plan_digest=None,
             installation_id=installation_id,
         )
     except (ControlTransportError, ControlUnavailable, OSError) as error:
@@ -2878,7 +2822,7 @@ def _recipe_installation_reconcile(
                 operation,
                 operation_id=None,
                 request_key=key,
-                plan_digest=reviewed_digest,
+                plan_digest=None,
                 installation_id=installation_id,
             )
     except ControlHTTPError as error:
@@ -3513,12 +3457,9 @@ def _profile(
         )
     if action == "load":
         if args.dry_run:
-            if args.expected_plan is not None or args.yes or args.detach:
-                raise ValueError(
-                    "--dry-run cannot be combined with --expected-plan, --yes, or --detach"
-                )
+            if args.yes or args.detach:
+                raise ValueError("--dry-run cannot be combined with --yes or --detach")
             return client.request("POST", f"/api/profile/{number}/preview")
-        expected_digest = args.expected_plan
         interactive = (
             not (
                 args.global_json
@@ -3528,97 +3469,40 @@ def _profile(
             and sys.stdin.isatty()
             and sys.stderr.isatty()
         )
-        if expected_digest is not None:
-            if re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None:
-                raise ValueError(
-                    "--expected-plan requires the complete lowercase plan digest"
-                )
-            if interactive and not args.yes:
-                preview = client.request("POST", f"/api/profile/{number}/preview")
-                if preview.get("allowed") is not True:
-                    args.outcome_context = "preview"
-                    return preview
-                current_digest = preview.get("plan_digest")
-                if (
-                    not isinstance(current_digest, str)
-                    or re.fullmatch(r"[0-9a-f]{64}", current_digest) is None
-                ):
-                    raise ControlMalformedResponse(
-                        "profile preview has no valid reviewed plan digest"
-                    )
-                with redirect_stdout(sys.stderr):
-                    render_payload(preview, "profile", action="preview")
-                if current_digest != expected_digest:
-                    raise ControlConflict(
-                        409,
-                        "profile review changed; inspect the current effects and "
-                        "rerun with the new plan digest",
-                    )
-            _confirm_action(
-                args, f"Load profile {number} with reviewed plan {expected_digest}?"
+        if not args.yes and not interactive:
+            raise ValueError("profile load requires --yes in noninteractive mode")
+        preview = client.request("POST", f"/api/profile/{number}/preview")
+        expected_digest = preview.get("plan_digest")
+        if (
+            not isinstance(expected_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
+        ):
+            raise ControlMalformedResponse(
+                "profile preview has no valid current plan digest"
             )
-        else:
-            if not interactive or args.yes:
-                raise ValueError(
-                    "profile load requires --expected-plan DIGEST --yes in noninteractive mode; review with profile load --dry-run first"
-                )
-            preview = client.request("POST", f"/api/profile/{number}/preview")
-            if preview.get("allowed") is not True:
-                args.outcome_context = "preview"
-                return preview
+        if not args.yes:
             with redirect_stdout(sys.stderr):
                 render_payload(preview, "profile", action="preview")
-            expected_digest = preview.get("plan_digest")
-            if (
-                not isinstance(expected_digest, str)
-                or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
-            ):
-                raise ControlMalformedResponse(
-                    "profile preview has no valid reviewed plan digest"
-                )
             _confirm_action(args, f"Load profile {number} with these effects?")
         try:
             result = _submit_profile_load(
                 client, number, expected_digest, args, factory
             )
         except ControlConflict as error:
-            if error.code != "profile.stale_plan":
+            # A stale review is bookkeeping. Refresh the same user's intent and
+            # reconnect with its original request identity.
+            if error.code not in {None, "http.409", "profile.stale_plan"}:
                 raise
-            try:
-                current_review = client.request(
-                    "POST", f"/api/profile/{number}/preview"
-                )
-                if type(current_review.get("allowed")) is not bool:
-                    raise ControlMalformedResponse(
-                        "current profile review has no admission decision"
-                    )
-                current_digest = current_review.get("plan_digest")
-                if (
-                    not isinstance(current_digest, str)
-                    or re.fullmatch(r"[0-9a-f]{64}", current_digest) is None
-                ):
-                    raise ControlMalformedResponse(
-                        "current profile review has no valid plan digest"
-                    )
-                with redirect_stdout(sys.stderr):
-                    render_payload(current_review, "profile", action="preview")
-                print(
-                    "The submitted load was refused. Review these current effects, "
-                    "then start a new load with the current plan digest.",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            except (
-                ControlClientError,
-                OSError,
-                RuntimeError,
-                TypeError,
-                ValueError,
+            current = client.request("POST", f"/api/profile/{number}/preview")
+            current_digest = current.get("plan_digest")
+            if (
+                not isinstance(current_digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", current_digest) is None
             ):
-                # This follow-up is a read after a definitive stale refusal. Its
-                # failure must not replace the original admission error.
-                pass
-            raise
+                raise ControlMalformedResponse(
+                    "profile preview has no valid current plan digest"
+                )
+            result = _submit_profile_load(client, number, current_digest, args, factory)
         if args.detach:
             return result
         application_id = result.get("id")
@@ -3714,12 +3598,11 @@ def _run(
     _profile_authoring(edit_args, client)
 
     preview = client.request("POST", f"/api/profile/{number}/preview")
-    if preview.get("allowed") is not True:
-        args.outcome_context = "preview"
-        return preview
-    digest = preview.get("plan_digest")
-    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-        raise ControlMalformedResponse("profile review has no valid plan identity")
+    security = _security_blocker_codes(preview.get("reasons"))
+    if security:
+        raise ControlConflict(
+            409, f"profile load is refused by the Controller: {', '.join(security)}"
+        )
     if not (args.global_json or getattr(args, "json", False)):
         with redirect_stdout(sys.stderr):
             render_payload(preview, "profile", action="preview")
@@ -3732,7 +3615,6 @@ def _run(
         profile_number=number,
         profile_action="load",
         dry_run=False,
-        expected_plan=digest,
         yes=True,
         request_key=args.request_key,
         detach=False,

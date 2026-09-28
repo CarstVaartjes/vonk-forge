@@ -367,23 +367,6 @@ def _control_error(
     elif not acceptance_may_exist:
         result.pop("reconcile", None)
         if (
-            getattr(args, "command", None) == "profile"
-            and getattr(args, "profile_action", None) == "load"
-            and result.get("code") == "profile.stale_plan"
-        ):
-            result["reconcile"] = {
-                "operation": shlex.join(
-                    [
-                        "vonkctl",
-                        "--profile",
-                        str(getattr(args, "profile_number", 1)),
-                        "profile",
-                        "load",
-                        "--dry-run",
-                    ]
-                )
-            }
-        elif (
             isinstance(command_noun, str)
             and command_noun in {"model", "recipe"}
             and getattr(args, f"{command_noun}_action", None) == "cancel"
@@ -407,10 +390,6 @@ def _control_error(
 def _plain_language_error(code: object, detail: object) -> str:
     """Translate common operator refusals while retaining the wire detail."""
     messages = {
-        "profile.stale_plan": (
-            "The saved profile changed after it was reviewed. Review the latest "
-            "changes, then run it again."
-        ),
         "profile.admission_busy": (
             "Another workload change is using a selected Spark. Wait for it to "
             "finish, then try again."

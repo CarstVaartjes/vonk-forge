@@ -96,17 +96,6 @@ backup_loop() (
   if [ "$interval" -eq 0 ] || [ "$keep" -eq 0 ]; then
     echo "Backup interval and retention must be positive" >&2; exit 1
   fi
-  if [ ! -d /backups ]; then
-    echo "PostgreSQL backup directory /backups is missing; prepare the NAS bundle before starting Compose" >&2
-    exit 1
-  fi
-  backup_owner=$(stat -c '%u:%g' /backups 2>/dev/null || true)
-  case "$backup_owner" in
-    ''|*[!0-9:]*|*:*:*)
-      echo "PostgreSQL backup directory owner cannot be determined" >&2
-      exit 1
-      ;;
-  esac
   temporary=/backups/.postgres-backup.tmp
   state_temporary=/state/.last-successful-backup.epoch.tmp
   verification_temporary=/state/.last-backup-restore-verification.epoch.tmp
@@ -136,6 +125,19 @@ backup_loop() (
     rm -rf "$restore_directory"
   )
   while :; do
+    if [ ! -d /backups ]; then
+      echo "PostgreSQL backup directory /backups is unavailable; retrying shortly" >&2
+      sleep 5 & wait $!
+      continue
+    fi
+    backup_owner=$(stat -c '%u:%g' /backups 2>/dev/null || true)
+    case "$backup_owner" in
+      ''|*[!0-9:]*|*:*:*)
+        echo "PostgreSQL backup directory owner cannot be determined; retrying in five minutes" >&2
+        sleep 300 & wait $!
+        continue
+        ;;
+    esac
     if gosu postgres pg_dumpall --username "$POSTGRES_USER" --database postgres > "$temporary" &&
        gzip -c "$temporary" > "$temporary.gz" && gzip -t "$temporary.gz"; then
       destination=/backups/postgres-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
