@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,20 +12,18 @@ from ..models.compiled_artifact_contract_interface import check_compiled_artifac
 from ..models.compiled_artifact_contract_interface import CompiledArtifactContractInterface
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.integer_parameter import IntegerParameter
-  from ..models.enum_parameter import EnumParameter
-  from ..models.string_parameter import StringParameter
-  from ..models.boolean_parameter import BooleanParameter
-  from ..models.float_parameter import FloatParameter
-  from ..models.artifact_output_contract import ArtifactOutputContract
   from ..models.artifact_input_contract import ArtifactInputContract
+  from ..models.artifact_output_contract import ArtifactOutputContract
   from ..models.artifact_output_limits import ArtifactOutputLimits
+  from ..models.boolean_parameter import BooleanParameter
   from ..models.compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0
+  from ..models.enum_parameter import EnumParameter
+  from ..models.float_parameter import FloatParameter
+  from ..models.integer_parameter import IntegerParameter
+  from ..models.string_parameter import StringParameter
 
 
 
@@ -43,35 +43,34 @@ class CompiledArtifactContract:
             max_timeout_seconds (int):
             output (ArtifactOutputContract):
             output_limits (ArtifactOutputLimits):
-            parameters (list[Union['BooleanParameter', 'EnumParameter', 'FloatParameter', 'IntegerParameter',
-                'StringParameter']]):
+            parameters (list[BooleanParameter | EnumParameter | FloatParameter | IntegerParameter | StringParameter]):
             schema_version (Literal[1]):
-            engine (Union['CompiledArtifactContractEngineType0', None, Unset]):
+            engine (CompiledArtifactContractEngineType0 | None | Unset):
      """
 
-    input_: 'ArtifactInputContract'
+    input_: ArtifactInputContract
     interface: CompiledArtifactContractInterface
     max_timeout_seconds: int
-    output: 'ArtifactOutputContract'
-    output_limits: 'ArtifactOutputLimits'
-    parameters: list[Union['BooleanParameter', 'EnumParameter', 'FloatParameter', 'IntegerParameter', 'StringParameter']]
+    output: ArtifactOutputContract
+    output_limits: ArtifactOutputLimits
+    parameters: list[BooleanParameter | EnumParameter | FloatParameter | IntegerParameter | StringParameter]
     schema_version: Literal[1]
-    engine: Union['CompiledArtifactContractEngineType0', None, Unset] = UNSET
+    engine: CompiledArtifactContractEngineType0 | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.integer_parameter import IntegerParameter
-        from ..models.enum_parameter import EnumParameter
-        from ..models.string_parameter import StringParameter
-        from ..models.boolean_parameter import BooleanParameter
-        from ..models.float_parameter import FloatParameter
-        from ..models.artifact_output_contract import ArtifactOutputContract
-        from ..models.artifact_input_contract import ArtifactInputContract
-        from ..models.artifact_output_limits import ArtifactOutputLimits
-        from ..models.compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0
+        from ..models.artifact_input_contract import ArtifactInputContract # noqa: PLC0415
+        from ..models.artifact_output_contract import ArtifactOutputContract # noqa: PLC0415
+        from ..models.artifact_output_limits import ArtifactOutputLimits # noqa: PLC0415
+        from ..models.boolean_parameter import BooleanParameter # noqa: PLC0415
+        from ..models.compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0 # noqa: PLC0415
+        from ..models.enum_parameter import EnumParameter # noqa: PLC0415
+        from ..models.float_parameter import FloatParameter # noqa: PLC0415
+        from ..models.integer_parameter import IntegerParameter # noqa: PLC0415
+        from ..models.string_parameter import StringParameter # noqa: PLC0415
         input_ = self.input_.to_dict()
 
         interface: str = self.interface
@@ -102,7 +101,7 @@ class CompiledArtifactContract:
 
         schema_version = self.schema_version
 
-        engine: Union[None, Unset, dict[str, Any]]
+        engine: dict[str, Any] | None | Unset
         if isinstance(self.engine, Unset):
             engine = UNSET
         elif isinstance(self.engine, CompiledArtifactContractEngineType0):
@@ -131,15 +130,15 @@ class CompiledArtifactContract:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.integer_parameter import IntegerParameter
-        from ..models.enum_parameter import EnumParameter
-        from ..models.string_parameter import StringParameter
-        from ..models.boolean_parameter import BooleanParameter
-        from ..models.float_parameter import FloatParameter
-        from ..models.artifact_output_contract import ArtifactOutputContract
-        from ..models.artifact_input_contract import ArtifactInputContract
-        from ..models.artifact_output_limits import ArtifactOutputLimits
-        from ..models.compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0
+        from ..models.artifact_input_contract import ArtifactInputContract # noqa: PLC0415
+        from ..models.artifact_output_contract import ArtifactOutputContract # noqa: PLC0415
+        from ..models.artifact_output_limits import ArtifactOutputLimits # noqa: PLC0415
+        from ..models.boolean_parameter import BooleanParameter # noqa: PLC0415
+        from ..models.compiled_artifact_contract_engine_type_0 import CompiledArtifactContractEngineType0 # noqa: PLC0415
+        from ..models.enum_parameter import EnumParameter # noqa: PLC0415
+        from ..models.float_parameter import FloatParameter # noqa: PLC0415
+        from ..models.integer_parameter import IntegerParameter # noqa: PLC0415
+        from ..models.string_parameter import StringParameter # noqa: PLC0415
         d = dict(src_dict)
         input_ = ArtifactInputContract.from_dict(d.pop("input"))
 
@@ -166,7 +165,7 @@ class CompiledArtifactContract:
         parameters = []
         _parameters = d.pop("parameters")
         for parameters_item_data in (_parameters):
-            def _parse_parameters_item(data: object) -> Union['BooleanParameter', 'EnumParameter', 'FloatParameter', 'IntegerParameter', 'StringParameter']:
+            def _parse_parameters_item(data: object) -> BooleanParameter | EnumParameter | FloatParameter | IntegerParameter | StringParameter:
                 try:
                     if not isinstance(data, dict):
                         raise TypeError()
@@ -175,7 +174,7 @@ class CompiledArtifactContract:
 
 
                     return componentsschemas_parameter_definition_type_0
-                except: # noqa: E722
+                except (TypeError, ValueError, AttributeError, KeyError):
                     pass
                 try:
                     if not isinstance(data, dict):
@@ -185,7 +184,7 @@ class CompiledArtifactContract:
 
 
                     return componentsschemas_parameter_definition_type_1
-                except: # noqa: E722
+                except (TypeError, ValueError, AttributeError, KeyError):
                     pass
                 try:
                     if not isinstance(data, dict):
@@ -195,7 +194,7 @@ class CompiledArtifactContract:
 
 
                     return componentsschemas_parameter_definition_type_2
-                except: # noqa: E722
+                except (TypeError, ValueError, AttributeError, KeyError):
                     pass
                 try:
                     if not isinstance(data, dict):
@@ -205,7 +204,7 @@ class CompiledArtifactContract:
 
 
                     return componentsschemas_parameter_definition_type_3
-                except: # noqa: E722
+                except (TypeError, ValueError, AttributeError, KeyError):
                     pass
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -224,7 +223,7 @@ class CompiledArtifactContract:
         if schema_version != 1:
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 
-        def _parse_engine(data: object) -> Union['CompiledArtifactContractEngineType0', None, Unset]:
+        def _parse_engine(data: object) -> CompiledArtifactContractEngineType0 | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -237,9 +236,9 @@ class CompiledArtifactContract:
 
 
                 return engine_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['CompiledArtifactContractEngineType0', None, Unset], data)
+            return cast(CompiledArtifactContractEngineType0 | None | Unset, data)
 
         engine = _parse_engine(d.pop("engine", UNSET))
 

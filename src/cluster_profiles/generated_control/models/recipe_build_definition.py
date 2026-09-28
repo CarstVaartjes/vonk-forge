@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,15 +10,13 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.build_patch import BuildPatch
-  from ..models.build_context import BuildContext
   from ..models.build_argument import BuildArgument
-  from ..models.recipe_image import RecipeImage
+  from ..models.build_context import BuildContext
   from ..models.build_network import BuildNetwork
+  from ..models.build_patch import BuildPatch
+  from ..models.recipe_image import RecipeImage
 
 
 
@@ -30,33 +30,33 @@ T = TypeVar("T", bound="RecipeBuildDefinition")
 class RecipeBuildDefinition:
     """
         Attributes:
-            arguments (list['BuildArgument']):
+            arguments (list[BuildArgument]):
             base_image (RecipeImage):
             context (BuildContext):
             dockerfile (str):
             network (BuildNetwork):
-            patches (list['BuildPatch']):
-            target (Union[None, Unset, str]):
+            patches (list[BuildPatch]):
+            target (None | str | Unset):
      """
 
-    arguments: list['BuildArgument']
-    base_image: 'RecipeImage'
-    context: 'BuildContext'
+    arguments: list[BuildArgument]
+    base_image: RecipeImage
+    context: BuildContext
     dockerfile: str
-    network: 'BuildNetwork'
-    patches: list['BuildPatch']
-    target: Union[None, Unset, str] = UNSET
+    network: BuildNetwork
+    patches: list[BuildPatch]
+    target: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.build_patch import BuildPatch
-        from ..models.build_context import BuildContext
-        from ..models.build_argument import BuildArgument
-        from ..models.recipe_image import RecipeImage
-        from ..models.build_network import BuildNetwork
+        from ..models.build_argument import BuildArgument # noqa: PLC0415
+        from ..models.build_context import BuildContext # noqa: PLC0415
+        from ..models.build_network import BuildNetwork # noqa: PLC0415
+        from ..models.build_patch import BuildPatch # noqa: PLC0415
+        from ..models.recipe_image import RecipeImage # noqa: PLC0415
         arguments = []
         for arguments_item_data in self.arguments:
             arguments_item = arguments_item_data.to_dict()
@@ -79,7 +79,7 @@ class RecipeBuildDefinition:
 
 
 
-        target: Union[None, Unset, str]
+        target: None | str | Unset
         if isinstance(self.target, Unset):
             target = UNSET
         else:
@@ -105,11 +105,11 @@ class RecipeBuildDefinition:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.build_patch import BuildPatch
-        from ..models.build_context import BuildContext
-        from ..models.build_argument import BuildArgument
-        from ..models.recipe_image import RecipeImage
-        from ..models.build_network import BuildNetwork
+        from ..models.build_argument import BuildArgument # noqa: PLC0415
+        from ..models.build_context import BuildContext # noqa: PLC0415
+        from ..models.build_network import BuildNetwork # noqa: PLC0415
+        from ..models.build_patch import BuildPatch # noqa: PLC0415
+        from ..models.recipe_image import RecipeImage # noqa: PLC0415
         d = dict(src_dict)
         arguments = []
         _arguments = d.pop("arguments")
@@ -148,12 +148,12 @@ class RecipeBuildDefinition:
             patches.append(patches_item)
 
 
-        def _parse_target(data: object) -> Union[None, Unset, str]:
+        def _parse_target(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         target = _parse_target(d.pop("target", UNSET))
 

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -32,14 +34,14 @@ class TelemetryState:
 
     age_seconds: float
     freshness: TelemetryStateFreshness
-    sample: 'TelemetryPoint'
+    sample: TelemetryPoint
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.telemetry_point import TelemetryPoint
+        from ..models.telemetry_point import TelemetryPoint # noqa: PLC0415
         age_seconds = self.age_seconds
 
         freshness: str = self.freshness
@@ -61,7 +63,7 @@ class TelemetryState:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.telemetry_point import TelemetryPoint
+        from ..models.telemetry_point import TelemetryPoint # noqa: PLC0415
         d = dict(src_dict)
         age_seconds = d.pop("age_seconds")
 

@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 EvidenceContextSource = Literal['agent', 'controller']
 
@@ -6,5 +6,5 @@ EVIDENCE_CONTEXT_SOURCE_VALUES: set[EvidenceContextSource] = { 'agent', 'control
 
 def check_evidence_context_source(value: str) -> EvidenceContextSource:
     if value in EVIDENCE_CONTEXT_SOURCE_VALUES:
-        return cast(EvidenceContextSource, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {EVIDENCE_CONTEXT_SOURCE_VALUES!r}")

@@ -95,9 +95,9 @@ then stops resolving even though the tag still exists. A digest only resolves as
 long as the registry still holds the manifest blob; a digest recorded against a
 tag the publisher subsequently moves is not durable. That is why the controller
 no longer follows `quay.io/skopeo/stable`: it now pins the publisher's
-`v1.22.2-immutable` tag together with the digest. Treat `-immutable` and full
-SemVer release tags as safe; treat rolling tags (`24-bookworm-slim`,
-`3.12-slim-bookworm`) and even some version tags that publishers re-push as
+`v1.22.3-immutable` tag together with the digest. Treat `-immutable` and full
+SemVer release tags as safe; treat rolling tags (`24-trixie-slim`,
+`3.14-slim-trixie`) and even some version tags that publishers re-push as
 mutable and re-check them when you refresh.
 
 ## Find the current candidate
@@ -106,7 +106,7 @@ Public images need no credentials; `skopeo list-tags` and the registry HTTP APIs
 below are read-only. If `skopeo` is not on the host, run the pinned copy:
 
 ```bash
-SKOPEO="quay.io/skopeo/stable:v1.22.2-immutable"
+SKOPEO="quay.io/skopeo/stable:v1.22.3-immutable"
 docker run --rm "$SKOPEO" list-tags docker://docker.io/library/node
 ```
 
@@ -114,7 +114,7 @@ List tags per registry:
 
 ```bash
 # Docker Hub (library/* and namespaced), including older pages
-curl -fsSL 'https://hub.docker.com/v2/repositories/library/node/tags?page_size=100&name=24-bookworm' \
+curl -fsSL 'https://hub.docker.com/v2/repositories/library/node/tags?page_size=100&name=24-trixie' \
   | python3 -m json.tool
 # Quay
 curl -fsSL 'https://quay.io/api/v1/repository/skopeo/stable/tag/?onlyActiveTags=true&limit=100' \
@@ -127,7 +127,7 @@ Read the index digest and every per-architecture child. `--raw` prints the exact
 manifest bytes, so their SHA-256 **is** the recorded index digest:
 
 ```bash
-reference=quay.io/skopeo/stable:v1.22.2-immutable
+reference=quay.io/skopeo/stable:v1.22.3-immutable
 docker buildx imagetools inspect "$reference"                 # human summary
 docker buildx imagetools inspect --raw "$reference" | sha256sum   # must equal the digest below
 docker buildx imagetools inspect --raw "$reference" | python3 -m json.tool
@@ -168,7 +168,7 @@ Dockerfile and `scripts/verify-controller-skopeo` check them.
 scripts/check-image-pins
 
 # 1. Re-derive the digest you recorded.
-docker buildx imagetools inspect --raw "quay.io/skopeo/stable:v1.22.2-immutable" | sha256sum
+docker buildx imagetools inspect --raw "quay.io/skopeo/stable:v1.22.3-immutable" | sha256sum
 
 # 2. Offline supply-chain gate, and confirm the regenerated manifest is current.
 scripts/verify-supply-chain --json

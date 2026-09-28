@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.operation_recovery_action import check_operation_recovery_action
 from ..models.operation_recovery_action import OperationRecoveryAction
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -26,21 +26,21 @@ T = TypeVar("T", bound="OperationRecovery")
 class OperationRecovery:
     """
         Attributes:
-            actions (Union[Unset, list[OperationRecoveryAction]]):
-            explanation (Union[None, Unset, str]):
-            uncertain (Union[Unset, bool]):  Default: False.
+            actions (list[OperationRecoveryAction] | Unset):
+            explanation (None | str | Unset):
+            uncertain (bool | Unset):  Default: False.
      """
 
-    actions: Union[Unset, list[OperationRecoveryAction]] = UNSET
-    explanation: Union[None, Unset, str] = UNSET
-    uncertain: Union[Unset, bool] = False
+    actions: list[OperationRecoveryAction] | Unset = UNSET
+    explanation: None | str | Unset = UNSET
+    uncertain: bool | Unset = False
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        actions: Union[Unset, list[str]] = UNSET
+        actions: list[str] | Unset = UNSET
         if not isinstance(self.actions, Unset):
             actions = []
             for actions_item_data in self.actions:
@@ -49,7 +49,7 @@ class OperationRecovery:
 
 
 
-        explanation: Union[None, Unset, str]
+        explanation: None | str | Unset
         if isinstance(self.explanation, Unset):
             explanation = UNSET
         else:
@@ -76,22 +76,24 @@ class OperationRecovery:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        actions = []
         _actions = d.pop("actions", UNSET)
-        for actions_item_data in (_actions or []):
-            actions_item = check_operation_recovery_action(actions_item_data)
+        actions: list[OperationRecoveryAction] | Unset = UNSET
+        if _actions is not UNSET:
+            actions = []
+            for actions_item_data in _actions:
+                actions_item = check_operation_recovery_action(actions_item_data)
 
 
 
-            actions.append(actions_item)
+                actions.append(actions_item)
 
 
-        def _parse_explanation(data: object) -> Union[None, Unset, str]:
+        def _parse_explanation(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         explanation = _parse_explanation(d.pop("explanation", UNSET))
 

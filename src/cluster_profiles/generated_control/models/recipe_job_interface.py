@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,9 +12,7 @@ from ..models.recipe_job_interface_adapter import check_recipe_job_interface_ada
 from ..models.recipe_job_interface_adapter import RecipeJobInterfaceAdapter
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_job_input import RecipeJobInput
@@ -33,28 +33,28 @@ class RecipeJobInterface:
             adapter (RecipeJobInterfaceAdapter):
             output (RecipeJobOutput):
             path (Literal['/outputs']):
-            input_ (Union['RecipeJobInput', None, Unset]):
+            input_ (None | RecipeJobInput | Unset):
      """
 
     adapter: RecipeJobInterfaceAdapter
-    output: 'RecipeJobOutput'
+    output: RecipeJobOutput
     path: Literal['/outputs']
-    input_: Union['RecipeJobInput', None, Unset] = UNSET
+    input_: None | RecipeJobInput | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_job_input import RecipeJobInput
-        from ..models.recipe_job_output import RecipeJobOutput
+        from ..models.recipe_job_input import RecipeJobInput # noqa: PLC0415
+        from ..models.recipe_job_output import RecipeJobOutput # noqa: PLC0415
         adapter: str = self.adapter
 
         output = self.output.to_dict()
 
         path = self.path
 
-        input_: Union[None, Unset, dict[str, Any]]
+        input_: dict[str, Any] | None | Unset
         if isinstance(self.input_, Unset):
             input_ = UNSET
         elif isinstance(self.input_, RecipeJobInput):
@@ -79,8 +79,8 @@ class RecipeJobInterface:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_job_input import RecipeJobInput
-        from ..models.recipe_job_output import RecipeJobOutput
+        from ..models.recipe_job_input import RecipeJobInput # noqa: PLC0415
+        from ..models.recipe_job_output import RecipeJobOutput # noqa: PLC0415
         d = dict(src_dict)
         adapter = check_recipe_job_interface_adapter(d.pop("adapter"))
 
@@ -96,7 +96,7 @@ class RecipeJobInterface:
         if path != '/outputs':
             raise ValueError(f"path must match const '/outputs', got '{path}'")
 
-        def _parse_input_(data: object) -> Union['RecipeJobInput', None, Unset]:
+        def _parse_input_(data: object) -> None | RecipeJobInput | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -109,9 +109,9 @@ class RecipeJobInterface:
 
 
                 return input_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeJobInput', None, Unset], data)
+            return cast(None | RecipeJobInput | Unset, data)
 
         input_ = _parse_input_(d.pop("input", UNSET))
 

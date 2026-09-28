@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.fleet_profile_assignment_input_desired_state import check_fleet_pr
 from ..models.fleet_profile_assignment_input_desired_state import FleetProfileAssignmentInputDesiredState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -34,16 +34,16 @@ class FleetProfileAssignmentInput:
         Attributes:
             recipe_selector (str):
             spark_ids (list[str]):
-            assignment_name (Union[None, Unset, str]):
-            desired_state (Union[Unset, FleetProfileAssignmentInputDesiredState]):  Default: 'running'.
-            model_variant (Union[None, Unset, str]):
+            assignment_name (None | str | Unset):
+            desired_state (FleetProfileAssignmentInputDesiredState | Unset):  Default: 'running'.
+            model_variant (None | str | Unset):
      """
 
     recipe_selector: str
     spark_ids: list[str]
-    assignment_name: Union[None, Unset, str] = UNSET
-    desired_state: Union[Unset, FleetProfileAssignmentInputDesiredState] = 'running'
-    model_variant: Union[None, Unset, str] = UNSET
+    assignment_name: None | str | Unset = UNSET
+    desired_state: FleetProfileAssignmentInputDesiredState | Unset = 'running'
+    model_variant: None | str | Unset = UNSET
 
 
 
@@ -56,18 +56,18 @@ class FleetProfileAssignmentInput:
 
 
 
-        assignment_name: Union[None, Unset, str]
+        assignment_name: None | str | Unset
         if isinstance(self.assignment_name, Unset):
             assignment_name = UNSET
         else:
             assignment_name = self.assignment_name
 
-        desired_state: Union[Unset, str] = UNSET
+        desired_state: str | Unset = UNSET
         if not isinstance(self.desired_state, Unset):
             desired_state = self.desired_state
 
 
-        model_variant: Union[None, Unset, str]
+        model_variant: None | str | Unset
         if isinstance(self.model_variant, Unset):
             model_variant = UNSET
         else:
@@ -99,18 +99,18 @@ class FleetProfileAssignmentInput:
         spark_ids = cast(list[str], d.pop("spark_ids"))
 
 
-        def _parse_assignment_name(data: object) -> Union[None, Unset, str]:
+        def _parse_assignment_name(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         assignment_name = _parse_assignment_name(d.pop("assignment_name", UNSET))
 
 
         _desired_state = d.pop("desired_state", UNSET)
-        desired_state: Union[Unset, FleetProfileAssignmentInputDesiredState]
+        desired_state: FleetProfileAssignmentInputDesiredState | Unset
         if isinstance(_desired_state,  Unset):
             desired_state = UNSET
         else:
@@ -119,12 +119,12 @@ class FleetProfileAssignmentInput:
 
 
 
-        def _parse_model_variant(data: object) -> Union[None, Unset, str]:
+        def _parse_model_variant(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_variant = _parse_model_variant(d.pop("model_variant", UNSET))
 

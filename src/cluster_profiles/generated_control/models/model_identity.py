@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -33,8 +35,8 @@ class ModelIdentity:
             version (str):
      """
 
-    family: 'ModelFamily'
-    model: 'ModelRecord'
+    family: ModelFamily
+    model: ModelRecord
     publisher: str
     slug: str
     variant: str
@@ -45,8 +47,8 @@ class ModelIdentity:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.model_family import ModelFamily
-        from ..models.model_record import ModelRecord
+        from ..models.model_family import ModelFamily # noqa: PLC0415
+        from ..models.model_record import ModelRecord # noqa: PLC0415
         family = self.family.to_dict()
 
         model = self.model.to_dict()
@@ -77,8 +79,8 @@ class ModelIdentity:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.model_family import ModelFamily
-        from ..models.model_record import ModelRecord
+        from ..models.model_family import ModelFamily # noqa: PLC0415
+        from ..models.model_record import ModelRecord # noqa: PLC0415
         d = dict(src_dict)
         family = ModelFamily.from_dict(d.pop("family"))
 

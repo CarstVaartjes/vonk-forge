@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,7 +9,6 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
 
 if TYPE_CHECKING:
@@ -31,19 +32,19 @@ class RunSwitchCachedTransferResult:
             skipped (bool):
             subphase (Literal['target-copy']):
             verified (bool):
-            verified_build_id (Union[None, str]):
+            verified_build_id (None | str):
             verified_digests (list[str]):
             verified_image_digest (str):
             verified_oci_layout_sha256 (str):
      """
 
     cached_nodes: list[str]
-    cached_target_totals: 'RunSwitchCachedTransferResultCachedTargetTotals'
+    cached_target_totals: RunSwitchCachedTransferResultCachedTargetTotals
     phase: Literal['transfer']
     skipped: bool
     subphase: Literal['target-copy']
     verified: bool
-    verified_build_id: Union[None, str]
+    verified_build_id: None | str
     verified_digests: list[str]
     verified_image_digest: str
     verified_oci_layout_sha256: str
@@ -53,7 +54,7 @@ class RunSwitchCachedTransferResult:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_cached_transfer_result_cached_target_totals import RunSwitchCachedTransferResultCachedTargetTotals
+        from ..models.run_switch_cached_transfer_result_cached_target_totals import RunSwitchCachedTransferResultCachedTargetTotals # noqa: PLC0415
         cached_nodes = self.cached_nodes
 
 
@@ -68,7 +69,7 @@ class RunSwitchCachedTransferResult:
 
         verified = self.verified
 
-        verified_build_id: Union[None, str]
+        verified_build_id: None | str
         verified_build_id = self.verified_build_id
 
         verified_digests = self.verified_digests
@@ -101,7 +102,7 @@ class RunSwitchCachedTransferResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_cached_transfer_result_cached_target_totals import RunSwitchCachedTransferResultCachedTargetTotals
+        from ..models.run_switch_cached_transfer_result_cached_target_totals import RunSwitchCachedTransferResultCachedTargetTotals # noqa: PLC0415
         d = dict(src_dict)
         cached_nodes = cast(list[str], d.pop("cached_nodes"))
 
@@ -123,10 +124,10 @@ class RunSwitchCachedTransferResult:
 
         verified = d.pop("verified")
 
-        def _parse_verified_build_id(data: object) -> Union[None, str]:
+        def _parse_verified_build_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         verified_build_id = _parse_verified_build_id(d.pop("verified_build_id"))
 

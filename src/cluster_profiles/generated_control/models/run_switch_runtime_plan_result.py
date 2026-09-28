@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,9 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
+from typing import cast
 from typing import Literal, cast
-from typing import Union
 
 
 
@@ -30,8 +31,8 @@ class RunSwitchRuntimePlanResult:
             mapping_id (str):
             phase (Literal['prepare']):
             subphase (Literal['runtime-plan']):
-            model_artifact_set_bytes (Union[None, Unset, int]):
-            model_artifact_set_sha256 (Union[None, Unset, str]):
+            model_artifact_set_bytes (int | None | Unset):
+            model_artifact_set_sha256 (None | str | Unset):
      """
 
     compiled_plan_persisted: bool
@@ -40,8 +41,8 @@ class RunSwitchRuntimePlanResult:
     mapping_id: str
     phase: Literal['prepare']
     subphase: Literal['runtime-plan']
-    model_artifact_set_bytes: Union[None, Unset, int] = UNSET
-    model_artifact_set_sha256: Union[None, Unset, str] = UNSET
+    model_artifact_set_bytes: int | None | Unset = UNSET
+    model_artifact_set_sha256: None | str | Unset = UNSET
 
 
 
@@ -60,13 +61,13 @@ class RunSwitchRuntimePlanResult:
 
         subphase = self.subphase
 
-        model_artifact_set_bytes: Union[None, Unset, int]
+        model_artifact_set_bytes: int | None | Unset
         if isinstance(self.model_artifact_set_bytes, Unset):
             model_artifact_set_bytes = UNSET
         else:
             model_artifact_set_bytes = self.model_artifact_set_bytes
 
-        model_artifact_set_sha256: Union[None, Unset, str]
+        model_artifact_set_sha256: None | str | Unset
         if isinstance(self.model_artifact_set_sha256, Unset):
             model_artifact_set_sha256 = UNSET
         else:
@@ -111,22 +112,22 @@ class RunSwitchRuntimePlanResult:
         if subphase != 'runtime-plan':
             raise ValueError(f"subphase must match const 'runtime-plan', got '{subphase}'")
 
-        def _parse_model_artifact_set_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_model_artifact_set_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         model_artifact_set_bytes = _parse_model_artifact_set_bytes(d.pop("model_artifact_set_bytes", UNSET))
 
 
-        def _parse_model_artifact_set_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_model_artifact_set_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_artifact_set_sha256 = _parse_model_artifact_set_sha256(d.pop("model_artifact_set_sha256", UNSET))
 

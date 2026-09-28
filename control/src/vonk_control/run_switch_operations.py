@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, Protocol, TypeGuard, runtime_checkable
 
-import httpx
+import httpx2
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.exc import DBAPIError
@@ -7658,7 +7658,7 @@ class RunSwitchOperationService:
                 return True
             except (
                 OSError,
-                httpx.HTTPError,
+                httpx2.HTTPError,
                 RuntimeError,
                 TypeError,
                 ValueError,
@@ -9075,12 +9075,12 @@ def _start_still_progressing(
 
 
 def _transient_distribution_exception(error: BaseException) -> bool:
-    if isinstance(error, httpx.HTTPError):
+    if isinstance(error, httpx2.HTTPError):
         response = getattr(error, "response", None)
         status = getattr(response, "status_code", None)
         if type(status) is int:
             return status == 429 or status >= 500
-        return isinstance(error, (httpx.TimeoutException, httpx.ConnectError))
+        return isinstance(error, (httpx2.TimeoutException, httpx2.ConnectError))
     if isinstance(error, OSError):
         return getattr(error, "errno", None) in {
             errno.ECONNRESET,

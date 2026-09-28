@@ -17,7 +17,7 @@ from concurrent.futures import Future
 from email.message import Message
 from typing import IO, Any, Self, cast
 
-import httpx
+import httpx2
 
 _DNS_LOCK = threading.Lock()
 _DNS_PENDING: dict[tuple[object, ...], Future[Any]] = {}
@@ -65,8 +65,8 @@ class HTTPSResponse(io.BufferedIOBase):
     def __init__(self, request: urllib.request.Request, timeout: float) -> None:
         self._runner = asyncio.Runner(loop_factory=_HTTPSLoop)
         self._deadline = self._runner.get_loop().time() + timeout
-        self._client: httpx.AsyncClient | None = None
-        self._response: httpx.Response | None = None
+        self._client: httpx2.AsyncClient | None = None
+        self._response: httpx2.Response | None = None
         self._body: AsyncIterator[bytes] | None = None
         self._pending = b""
         self._ended = False
@@ -89,14 +89,14 @@ class HTTPSResponse(io.BufferedIOBase):
 
         try:
             return self._runner.run(bounded())
-        except (httpx.HTTPError, OSError) as error:
+        except (httpx2.HTTPError, OSError) as error:
             # Keep the typed cause for safe classification, never its raw text.
             raise urllib.error.URLError(error) from None
 
     async def _open(
         self, request: urllib.request.Request, timeout: float
-    ) -> httpx.Response:
-        self._client = httpx.AsyncClient(
+    ) -> httpx2.Response:
+        self._client = httpx2.AsyncClient(
             timeout=timeout, follow_redirects=False, verify=True
         )
         data = request.data
@@ -165,6 +165,12 @@ class HTTPSResponse(io.BufferedIOBase):
         try:
             self._runner.run(self._close())
         finally:
+            # Drop every object that references the loop, so the loop is freed
+            # here rather than by a later garbage collection, where a Ctrl-C
+            # landing in its finalizer would be swallowed.
+            self._body = None
+            self._response = None
+            self._client = None
             self._runner.close()
 
     def __enter__(self) -> Self:

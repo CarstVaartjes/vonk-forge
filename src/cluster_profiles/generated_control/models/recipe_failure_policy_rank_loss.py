@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RecipeFailurePolicyRankLoss = Literal['not-applicable', 'withdraw-endpoint']
 
@@ -6,5 +6,5 @@ RECIPE_FAILURE_POLICY_RANK_LOSS_VALUES: set[RecipeFailurePolicyRankLoss] = { 'no
 
 def check_recipe_failure_policy_rank_loss(value: str) -> RecipeFailurePolicyRankLoss:
     if value in RECIPE_FAILURE_POLICY_RANK_LOSS_VALUES:
-        return cast(RecipeFailurePolicyRankLoss, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RECIPE_FAILURE_POLICY_RANK_LOSS_VALUES!r}")

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.recipe_metadata_alignment_type_0 import check_recipe_metadata_alig
 from ..models.recipe_metadata_alignment_type_0 import RecipeMetadataAlignmentType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -29,13 +29,13 @@ class RecipeMetadata:
             description (str):
             tags (list[str]):
             title (str):
-            alignment (Union[None, RecipeMetadataAlignmentType0, Unset]):
+            alignment (None | RecipeMetadataAlignmentType0 | Unset):
      """
 
     description: str
     tags: list[str]
     title: str
-    alignment: Union[None, RecipeMetadataAlignmentType0, Unset] = UNSET
+    alignment: None | RecipeMetadataAlignmentType0 | Unset = UNSET
 
 
 
@@ -50,7 +50,7 @@ class RecipeMetadata:
 
         title = self.title
 
-        alignment: Union[None, Unset, str]
+        alignment: None | str | Unset
         if isinstance(self.alignment, Unset):
             alignment = UNSET
         elif isinstance(self.alignment, str):
@@ -83,7 +83,7 @@ class RecipeMetadata:
 
         title = d.pop("title")
 
-        def _parse_alignment(data: object) -> Union[None, RecipeMetadataAlignmentType0, Unset]:
+        def _parse_alignment(data: object) -> None | RecipeMetadataAlignmentType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -96,9 +96,9 @@ class RecipeMetadata:
 
 
                 return alignment_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RecipeMetadataAlignmentType0, Unset], data)
+            return cast(None | RecipeMetadataAlignmentType0 | Unset, data)
 
         alignment = _parse_alignment(d.pop("alignment", UNSET))
 

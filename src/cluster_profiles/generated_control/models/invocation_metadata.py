@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,8 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.invocation_metadata_context import InvocationMetadataContext
@@ -27,28 +27,28 @@ class InvocationMetadata:
     """ Context for audit and tracing which has no decision-making authority.
 
         Attributes:
-            context (Union[Unset, InvocationMetadataContext]):
-            correlation_id (Union[None, Unset, str]):
-            origin (Union[Unset, str]):  Default: 'operator'.
-            reason (Union[None, Unset, str]):
+            context (InvocationMetadataContext | Unset):
+            correlation_id (None | str | Unset):
+            origin (str | Unset):  Default: 'operator'.
+            reason (None | str | Unset):
      """
 
-    context: Union[Unset, 'InvocationMetadataContext'] = UNSET
-    correlation_id: Union[None, Unset, str] = UNSET
-    origin: Union[Unset, str] = 'operator'
-    reason: Union[None, Unset, str] = UNSET
+    context: InvocationMetadataContext | Unset = UNSET
+    correlation_id: None | str | Unset = UNSET
+    origin: str | Unset = 'operator'
+    reason: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.invocation_metadata_context import InvocationMetadataContext
-        context: Union[Unset, dict[str, Any]] = UNSET
+        from ..models.invocation_metadata_context import InvocationMetadataContext # noqa: PLC0415
+        context: dict[str, Any] | Unset = UNSET
         if not isinstance(self.context, Unset):
             context = self.context.to_dict()
 
-        correlation_id: Union[None, Unset, str]
+        correlation_id: None | str | Unset
         if isinstance(self.correlation_id, Unset):
             correlation_id = UNSET
         else:
@@ -56,7 +56,7 @@ class InvocationMetadata:
 
         origin = self.origin
 
-        reason: Union[None, Unset, str]
+        reason: None | str | Unset
         if isinstance(self.reason, Unset):
             reason = UNSET
         else:
@@ -82,10 +82,10 @@ class InvocationMetadata:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.invocation_metadata_context import InvocationMetadataContext
+        from ..models.invocation_metadata_context import InvocationMetadataContext # noqa: PLC0415
         d = dict(src_dict)
         _context = d.pop("context", UNSET)
-        context: Union[Unset, InvocationMetadataContext]
+        context: InvocationMetadataContext | Unset
         if isinstance(_context,  Unset):
             context = UNSET
         else:
@@ -94,24 +94,24 @@ class InvocationMetadata:
 
 
 
-        def _parse_correlation_id(data: object) -> Union[None, Unset, str]:
+        def _parse_correlation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         correlation_id = _parse_correlation_id(d.pop("correlation_id", UNSET))
 
 
         origin = d.pop("origin", UNSET)
 
-        def _parse_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         reason = _parse_reason(d.pop("reason", UNSET))
 

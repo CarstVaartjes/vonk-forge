@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -13,30 +15,27 @@ from ..models.run_switch_plan_cleanup_disposition import RunSwitchPlanCleanupDis
 from ..models.run_switch_plan_cleanup_mode import check_run_switch_plan_cleanup_mode
 from ..models.run_switch_plan_cleanup_mode import RunSwitchPlanCleanupMode
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.run_switch_phase import RunSwitchPhase
-  from ..models.mapping_selection import MappingSelection
-  from ..models.spark_group import SparkGroup
   from ..models.artifact_storage_impact import ArtifactStorageImpact
   from ..models.capability_evidence import CapabilityEvidence
+  from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
   from ..models.effective_settings_selection import EffectiveSettingsSelection
+  from ..models.freshness_evidence import FreshnessEvidence
+  from ..models.invocation_metadata import InvocationMetadata
+  from ..models.mapping_selection import MappingSelection
+  from ..models.rollout_preparation import RolloutPreparation
   from ..models.run_switch_build_evidence import RunSwitchBuildEvidence
+  from ..models.run_switch_phase import RunSwitchPhase
+  from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
   from ..models.run_switch_reason import RunSwitchReason
   from ..models.run_switch_reconciliation_authority import RunSwitchReconciliationAuthority
-  from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
-  from ..models.rollout_preparation import RolloutPreparation
   from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
-  from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
-  from ..models.invocation_metadata import InvocationMetadata
   from ..models.spark_fit import SparkFit
-  from ..models.freshness_evidence import FreshnessEvidence
+  from ..models.spark_group import SparkGroup
   from ..models.stop_impact import StopImpact
 
 
@@ -52,117 +51,117 @@ class RunSwitchPlan:
     """
         Attributes:
             action (RunSwitchPlanAction):
-            alias (Union[None, str]):
+            alias (None | str):
             allowed (bool):
-            blockers (list['RunSwitchReason']):
+            blockers (list[RunSwitchReason]):
             build (RunSwitchBuildEvidence):
-            conflicts (list['RunSwitchReason']):
+            conflicts (list[RunSwitchReason]):
             fit (SparkFit):
-            fit_after_stop (Union['SparkFit', None]):
+            fit_after_stop (None | SparkFit):
             fit_current (SparkFit):
             generated_at (datetime.datetime):
-            image_digest (Union[None, str]):
-            installation_id (Union[None, str]):
-            installation_state (Union[None, str]):
+            image_digest (None | str):
+            installation_id (None | str):
+            installation_state (None | str):
             invocation (InvocationMetadata): Context for audit and tracing which has no decision-making authority.
-            mapping (Union['MappingSelection', None]):
-            model_capabilities (list['CapabilityEvidence']):
-            model_content_sha256 (Union[None, str]):
-            phases (list['RunSwitchPhase']):
+            mapping (MappingSelection | None):
+            model_capabilities (list[CapabilityEvidence]):
+            model_content_sha256 (None | str):
+            phases (list[RunSwitchPhase]):
             plan_digest (str):
-            recipe_build_id (Union[None, str]):
-            recipe_capabilities (list['CapabilityEvidence']):
-            recipe_content_sha256 (Union[None, str]):
-            recipe_revision_id (Union[None, str]):
+            recipe_build_id (None | str):
+            recipe_capabilities (list[CapabilityEvidence]):
+            recipe_content_sha256 (None | str):
+            recipe_revision_id (None | str):
             reclaimed_bytes (int):
-            run_id (Union[None, str]):
+            run_id (None | str):
             runtime_storage (RuntimeImageStorageImpact):
             spark_group (SparkGroup): A complete, rank-labelled Spark group selected by the operator.
-            start_plan_digest (Union[None, str]):
-            stops (list['StopImpact']):
+            start_plan_digest (None | str):
+            stops (list[StopImpact]):
             storage (ArtifactStorageImpact): Byte impact with unknown values preserved as unknown, never guessed.
-            warnings (list['RunSwitchReason']):
-            cleanup_disposition (Union[Unset, RunSwitchPlanCleanupDisposition]):  Default: 'uninstall'.
-            cleanup_mode (Union[Unset, RunSwitchPlanCleanupMode]):  Default: 'uninstall'.
-            effective_settings (Union['EffectiveSettingsSelection', None, Unset]):
-            freshness (Union[Unset, list['FreshnessEvidence']]):
-            post_stop_memory_check (Union['ConditionalPostStopMemoryCheck', None, Unset]):
-            preparation (Union['RolloutPreparation', None, Unset]):
-            profile_stop_scope (Union['RunSwitchProfileStopScope', None, Unset]):
-            reconciliation_authority (Union['RunSwitchReconciliationAuthority', None, Unset]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
-            stop_before_prepare (Union[Unset, bool]):  Default: False.
-            stop_before_transfer (Union[Unset, bool]):  Default: False.
+            warnings (list[RunSwitchReason]):
+            cleanup_disposition (RunSwitchPlanCleanupDisposition | Unset):  Default: 'uninstall'.
+            cleanup_mode (RunSwitchPlanCleanupMode | Unset):  Default: 'uninstall'.
+            effective_settings (EffectiveSettingsSelection | None | Unset):
+            freshness (list[FreshnessEvidence] | Unset):
+            post_stop_memory_check (ConditionalPostStopMemoryCheck | None | Unset):
+            preparation (None | RolloutPreparation | Unset):
+            profile_stop_scope (None | RunSwitchProfileStopScope | Unset):
+            reconciliation_authority (None | RunSwitchReconciliationAuthority | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
+            stop_before_prepare (bool | Unset):  Default: False.
+            stop_before_transfer (bool | Unset):  Default: False.
      """
 
     action: RunSwitchPlanAction
-    alias: Union[None, str]
+    alias: None | str
     allowed: bool
-    blockers: list['RunSwitchReason']
-    build: 'RunSwitchBuildEvidence'
-    conflicts: list['RunSwitchReason']
-    fit: 'SparkFit'
-    fit_after_stop: Union['SparkFit', None]
-    fit_current: 'SparkFit'
+    blockers: list[RunSwitchReason]
+    build: RunSwitchBuildEvidence
+    conflicts: list[RunSwitchReason]
+    fit: SparkFit
+    fit_after_stop: None | SparkFit
+    fit_current: SparkFit
     generated_at: datetime.datetime
-    image_digest: Union[None, str]
-    installation_id: Union[None, str]
-    installation_state: Union[None, str]
-    invocation: 'InvocationMetadata'
-    mapping: Union['MappingSelection', None]
-    model_capabilities: list['CapabilityEvidence']
-    model_content_sha256: Union[None, str]
-    phases: list['RunSwitchPhase']
+    image_digest: None | str
+    installation_id: None | str
+    installation_state: None | str
+    invocation: InvocationMetadata
+    mapping: MappingSelection | None
+    model_capabilities: list[CapabilityEvidence]
+    model_content_sha256: None | str
+    phases: list[RunSwitchPhase]
     plan_digest: str
-    recipe_build_id: Union[None, str]
-    recipe_capabilities: list['CapabilityEvidence']
-    recipe_content_sha256: Union[None, str]
-    recipe_revision_id: Union[None, str]
+    recipe_build_id: None | str
+    recipe_capabilities: list[CapabilityEvidence]
+    recipe_content_sha256: None | str
+    recipe_revision_id: None | str
     reclaimed_bytes: int
-    run_id: Union[None, str]
-    runtime_storage: 'RuntimeImageStorageImpact'
-    spark_group: 'SparkGroup'
-    start_plan_digest: Union[None, str]
-    stops: list['StopImpact']
-    storage: 'ArtifactStorageImpact'
-    warnings: list['RunSwitchReason']
-    cleanup_disposition: Union[Unset, RunSwitchPlanCleanupDisposition] = 'uninstall'
-    cleanup_mode: Union[Unset, RunSwitchPlanCleanupMode] = 'uninstall'
-    effective_settings: Union['EffectiveSettingsSelection', None, Unset] = UNSET
-    freshness: Union[Unset, list['FreshnessEvidence']] = UNSET
-    post_stop_memory_check: Union['ConditionalPostStopMemoryCheck', None, Unset] = UNSET
-    preparation: Union['RolloutPreparation', None, Unset] = UNSET
-    profile_stop_scope: Union['RunSwitchProfileStopScope', None, Unset] = UNSET
-    reconciliation_authority: Union['RunSwitchReconciliationAuthority', None, Unset] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
-    stop_before_prepare: Union[Unset, bool] = False
-    stop_before_transfer: Union[Unset, bool] = False
+    run_id: None | str
+    runtime_storage: RuntimeImageStorageImpact
+    spark_group: SparkGroup
+    start_plan_digest: None | str
+    stops: list[StopImpact]
+    storage: ArtifactStorageImpact
+    warnings: list[RunSwitchReason]
+    cleanup_disposition: RunSwitchPlanCleanupDisposition | Unset = 'uninstall'
+    cleanup_mode: RunSwitchPlanCleanupMode | Unset = 'uninstall'
+    effective_settings: EffectiveSettingsSelection | None | Unset = UNSET
+    freshness: list[FreshnessEvidence] | Unset = UNSET
+    post_stop_memory_check: ConditionalPostStopMemoryCheck | None | Unset = UNSET
+    preparation: None | RolloutPreparation | Unset = UNSET
+    profile_stop_scope: None | RunSwitchProfileStopScope | Unset = UNSET
+    reconciliation_authority: None | RunSwitchReconciliationAuthority | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
+    stop_before_prepare: bool | Unset = False
+    stop_before_transfer: bool | Unset = False
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_phase import RunSwitchPhase
-        from ..models.mapping_selection import MappingSelection
-        from ..models.spark_group import SparkGroup
-        from ..models.artifact_storage_impact import ArtifactStorageImpact
-        from ..models.capability_evidence import CapabilityEvidence
-        from ..models.effective_settings_selection import EffectiveSettingsSelection
-        from ..models.run_switch_build_evidence import RunSwitchBuildEvidence
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.run_switch_reconciliation_authority import RunSwitchReconciliationAuthority
-        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
-        from ..models.rollout_preparation import RolloutPreparation
-        from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
-        from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
-        from ..models.invocation_metadata import InvocationMetadata
-        from ..models.spark_fit import SparkFit
-        from ..models.freshness_evidence import FreshnessEvidence
-        from ..models.stop_impact import StopImpact
+        from ..models.artifact_storage_impact import ArtifactStorageImpact # noqa: PLC0415
+        from ..models.capability_evidence import CapabilityEvidence # noqa: PLC0415
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck # noqa: PLC0415
+        from ..models.effective_settings_selection import EffectiveSettingsSelection # noqa: PLC0415
+        from ..models.freshness_evidence import FreshnessEvidence # noqa: PLC0415
+        from ..models.invocation_metadata import InvocationMetadata # noqa: PLC0415
+        from ..models.mapping_selection import MappingSelection # noqa: PLC0415
+        from ..models.rollout_preparation import RolloutPreparation # noqa: PLC0415
+        from ..models.run_switch_build_evidence import RunSwitchBuildEvidence # noqa: PLC0415
+        from ..models.run_switch_phase import RunSwitchPhase # noqa: PLC0415
+        from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope # noqa: PLC0415
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
+        from ..models.run_switch_reconciliation_authority import RunSwitchReconciliationAuthority # noqa: PLC0415
+        from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact # noqa: PLC0415
+        from ..models.spark_fit import SparkFit # noqa: PLC0415
+        from ..models.spark_group import SparkGroup # noqa: PLC0415
+        from ..models.stop_impact import StopImpact # noqa: PLC0415
         action: str = self.action
 
-        alias: Union[None, str]
+        alias: None | str
         alias = self.alias
 
         allowed = self.allowed
@@ -185,7 +184,7 @@ class RunSwitchPlan:
 
         fit = self.fit.to_dict()
 
-        fit_after_stop: Union[None, dict[str, Any]]
+        fit_after_stop: dict[str, Any] | None
         if isinstance(self.fit_after_stop, SparkFit):
             fit_after_stop = self.fit_after_stop.to_dict()
         else:
@@ -195,18 +194,18 @@ class RunSwitchPlan:
 
         generated_at = self.generated_at.isoformat()
 
-        image_digest: Union[None, str]
+        image_digest: None | str
         image_digest = self.image_digest
 
-        installation_id: Union[None, str]
+        installation_id: None | str
         installation_id = self.installation_id
 
-        installation_state: Union[None, str]
+        installation_state: None | str
         installation_state = self.installation_state
 
         invocation = self.invocation.to_dict()
 
-        mapping: Union[None, dict[str, Any]]
+        mapping: dict[str, Any] | None
         if isinstance(self.mapping, MappingSelection):
             mapping = self.mapping.to_dict()
         else:
@@ -219,7 +218,7 @@ class RunSwitchPlan:
 
 
 
-        model_content_sha256: Union[None, str]
+        model_content_sha256: None | str
         model_content_sha256 = self.model_content_sha256
 
         phases = []
@@ -231,7 +230,7 @@ class RunSwitchPlan:
 
         plan_digest = self.plan_digest
 
-        recipe_build_id: Union[None, str]
+        recipe_build_id: None | str
         recipe_build_id = self.recipe_build_id
 
         recipe_capabilities = []
@@ -241,22 +240,22 @@ class RunSwitchPlan:
 
 
 
-        recipe_content_sha256: Union[None, str]
+        recipe_content_sha256: None | str
         recipe_content_sha256 = self.recipe_content_sha256
 
-        recipe_revision_id: Union[None, str]
+        recipe_revision_id: None | str
         recipe_revision_id = self.recipe_revision_id
 
         reclaimed_bytes = self.reclaimed_bytes
 
-        run_id: Union[None, str]
+        run_id: None | str
         run_id = self.run_id
 
         runtime_storage = self.runtime_storage.to_dict()
 
         spark_group = self.spark_group.to_dict()
 
-        start_plan_digest: Union[None, str]
+        start_plan_digest: None | str
         start_plan_digest = self.start_plan_digest
 
         stops = []
@@ -275,17 +274,17 @@ class RunSwitchPlan:
 
 
 
-        cleanup_disposition: Union[Unset, str] = UNSET
+        cleanup_disposition: str | Unset = UNSET
         if not isinstance(self.cleanup_disposition, Unset):
             cleanup_disposition = self.cleanup_disposition
 
 
-        cleanup_mode: Union[Unset, str] = UNSET
+        cleanup_mode: str | Unset = UNSET
         if not isinstance(self.cleanup_mode, Unset):
             cleanup_mode = self.cleanup_mode
 
 
-        effective_settings: Union[None, Unset, dict[str, Any]]
+        effective_settings: dict[str, Any] | None | Unset
         if isinstance(self.effective_settings, Unset):
             effective_settings = UNSET
         elif isinstance(self.effective_settings, EffectiveSettingsSelection):
@@ -293,7 +292,7 @@ class RunSwitchPlan:
         else:
             effective_settings = self.effective_settings
 
-        freshness: Union[Unset, list[dict[str, Any]]] = UNSET
+        freshness: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.freshness, Unset):
             freshness = []
             for freshness_item_data in self.freshness:
@@ -302,7 +301,7 @@ class RunSwitchPlan:
 
 
 
-        post_stop_memory_check: Union[None, Unset, dict[str, Any]]
+        post_stop_memory_check: dict[str, Any] | None | Unset
         if isinstance(self.post_stop_memory_check, Unset):
             post_stop_memory_check = UNSET
         elif isinstance(self.post_stop_memory_check, ConditionalPostStopMemoryCheck):
@@ -310,7 +309,7 @@ class RunSwitchPlan:
         else:
             post_stop_memory_check = self.post_stop_memory_check
 
-        preparation: Union[None, Unset, dict[str, Any]]
+        preparation: dict[str, Any] | None | Unset
         if isinstance(self.preparation, Unset):
             preparation = UNSET
         elif isinstance(self.preparation, RolloutPreparation):
@@ -318,7 +317,7 @@ class RunSwitchPlan:
         else:
             preparation = self.preparation
 
-        profile_stop_scope: Union[None, Unset, dict[str, Any]]
+        profile_stop_scope: dict[str, Any] | None | Unset
         if isinstance(self.profile_stop_scope, Unset):
             profile_stop_scope = UNSET
         elif isinstance(self.profile_stop_scope, RunSwitchProfileStopScope):
@@ -326,7 +325,7 @@ class RunSwitchPlan:
         else:
             profile_stop_scope = self.profile_stop_scope
 
-        reconciliation_authority: Union[None, Unset, dict[str, Any]]
+        reconciliation_authority: dict[str, Any] | None | Unset
         if isinstance(self.reconciliation_authority, Unset):
             reconciliation_authority = UNSET
         elif isinstance(self.reconciliation_authority, RunSwitchReconciliationAuthority):
@@ -405,33 +404,33 @@ class RunSwitchPlan:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_phase import RunSwitchPhase
-        from ..models.mapping_selection import MappingSelection
-        from ..models.spark_group import SparkGroup
-        from ..models.artifact_storage_impact import ArtifactStorageImpact
-        from ..models.capability_evidence import CapabilityEvidence
-        from ..models.effective_settings_selection import EffectiveSettingsSelection
-        from ..models.run_switch_build_evidence import RunSwitchBuildEvidence
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.run_switch_reconciliation_authority import RunSwitchReconciliationAuthority
-        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
-        from ..models.rollout_preparation import RolloutPreparation
-        from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact
-        from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope
-        from ..models.invocation_metadata import InvocationMetadata
-        from ..models.spark_fit import SparkFit
-        from ..models.freshness_evidence import FreshnessEvidence
-        from ..models.stop_impact import StopImpact
+        from ..models.artifact_storage_impact import ArtifactStorageImpact # noqa: PLC0415
+        from ..models.capability_evidence import CapabilityEvidence # noqa: PLC0415
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck # noqa: PLC0415
+        from ..models.effective_settings_selection import EffectiveSettingsSelection # noqa: PLC0415
+        from ..models.freshness_evidence import FreshnessEvidence # noqa: PLC0415
+        from ..models.invocation_metadata import InvocationMetadata # noqa: PLC0415
+        from ..models.mapping_selection import MappingSelection # noqa: PLC0415
+        from ..models.rollout_preparation import RolloutPreparation # noqa: PLC0415
+        from ..models.run_switch_build_evidence import RunSwitchBuildEvidence # noqa: PLC0415
+        from ..models.run_switch_phase import RunSwitchPhase # noqa: PLC0415
+        from ..models.run_switch_profile_stop_scope import RunSwitchProfileStopScope # noqa: PLC0415
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
+        from ..models.run_switch_reconciliation_authority import RunSwitchReconciliationAuthority # noqa: PLC0415
+        from ..models.runtime_image_storage_impact import RuntimeImageStorageImpact # noqa: PLC0415
+        from ..models.spark_fit import SparkFit # noqa: PLC0415
+        from ..models.spark_group import SparkGroup # noqa: PLC0415
+        from ..models.stop_impact import StopImpact # noqa: PLC0415
         d = dict(src_dict)
         action = check_run_switch_plan_action(d.pop("action"))
 
 
 
 
-        def _parse_alias(data: object) -> Union[None, str]:
+        def _parse_alias(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         alias = _parse_alias(d.pop("alias"))
 
@@ -468,7 +467,7 @@ class RunSwitchPlan:
 
 
 
-        def _parse_fit_after_stop(data: object) -> Union['SparkFit', None]:
+        def _parse_fit_after_stop(data: object) -> None | SparkFit:
             if data is None:
                 return data
             try:
@@ -479,9 +478,9 @@ class RunSwitchPlan:
 
 
                 return fit_after_stop_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['SparkFit', None], data)
+            return cast(None | SparkFit, data)
 
         fit_after_stop = _parse_fit_after_stop(d.pop("fit_after_stop"))
 
@@ -491,31 +490,31 @@ class RunSwitchPlan:
 
 
 
-        generated_at = isoparse(d.pop("generated_at"))
+        generated_at = datetime.datetime.fromisoformat(d.pop("generated_at"))
 
 
 
 
-        def _parse_image_digest(data: object) -> Union[None, str]:
+        def _parse_image_digest(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         image_digest = _parse_image_digest(d.pop("image_digest"))
 
 
-        def _parse_installation_id(data: object) -> Union[None, str]:
+        def _parse_installation_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         installation_id = _parse_installation_id(d.pop("installation_id"))
 
 
-        def _parse_installation_state(data: object) -> Union[None, str]:
+        def _parse_installation_state(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         installation_state = _parse_installation_state(d.pop("installation_state"))
 
@@ -525,7 +524,7 @@ class RunSwitchPlan:
 
 
 
-        def _parse_mapping(data: object) -> Union['MappingSelection', None]:
+        def _parse_mapping(data: object) -> MappingSelection | None:
             if data is None:
                 return data
             try:
@@ -536,9 +535,9 @@ class RunSwitchPlan:
 
 
                 return mapping_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['MappingSelection', None], data)
+            return cast(MappingSelection | None, data)
 
         mapping = _parse_mapping(d.pop("mapping"))
 
@@ -553,10 +552,10 @@ class RunSwitchPlan:
             model_capabilities.append(model_capabilities_item)
 
 
-        def _parse_model_content_sha256(data: object) -> Union[None, str]:
+        def _parse_model_content_sha256(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256"))
 
@@ -573,10 +572,10 @@ class RunSwitchPlan:
 
         plan_digest = d.pop("plan_digest")
 
-        def _parse_recipe_build_id(data: object) -> Union[None, str]:
+        def _parse_recipe_build_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         recipe_build_id = _parse_recipe_build_id(d.pop("recipe_build_id"))
 
@@ -591,28 +590,28 @@ class RunSwitchPlan:
             recipe_capabilities.append(recipe_capabilities_item)
 
 
-        def _parse_recipe_content_sha256(data: object) -> Union[None, str]:
+        def _parse_recipe_content_sha256(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         recipe_content_sha256 = _parse_recipe_content_sha256(d.pop("recipe_content_sha256"))
 
 
-        def _parse_recipe_revision_id(data: object) -> Union[None, str]:
+        def _parse_recipe_revision_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         recipe_revision_id = _parse_recipe_revision_id(d.pop("recipe_revision_id"))
 
 
         reclaimed_bytes = d.pop("reclaimed_bytes")
 
-        def _parse_run_id(data: object) -> Union[None, str]:
+        def _parse_run_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         run_id = _parse_run_id(d.pop("run_id"))
 
@@ -627,10 +626,10 @@ class RunSwitchPlan:
 
 
 
-        def _parse_start_plan_digest(data: object) -> Union[None, str]:
+        def _parse_start_plan_digest(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         start_plan_digest = _parse_start_plan_digest(d.pop("start_plan_digest"))
 
@@ -661,7 +660,7 @@ class RunSwitchPlan:
 
 
         _cleanup_disposition = d.pop("cleanup_disposition", UNSET)
-        cleanup_disposition: Union[Unset, RunSwitchPlanCleanupDisposition]
+        cleanup_disposition: RunSwitchPlanCleanupDisposition | Unset
         if isinstance(_cleanup_disposition,  Unset):
             cleanup_disposition = UNSET
         else:
@@ -671,7 +670,7 @@ class RunSwitchPlan:
 
 
         _cleanup_mode = d.pop("cleanup_mode", UNSET)
-        cleanup_mode: Union[Unset, RunSwitchPlanCleanupMode]
+        cleanup_mode: RunSwitchPlanCleanupMode | Unset
         if isinstance(_cleanup_mode,  Unset):
             cleanup_mode = UNSET
         else:
@@ -680,7 +679,7 @@ class RunSwitchPlan:
 
 
 
-        def _parse_effective_settings(data: object) -> Union['EffectiveSettingsSelection', None, Unset]:
+        def _parse_effective_settings(data: object) -> EffectiveSettingsSelection | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -693,24 +692,26 @@ class RunSwitchPlan:
 
 
                 return effective_settings_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['EffectiveSettingsSelection', None, Unset], data)
+            return cast(EffectiveSettingsSelection | None | Unset, data)
 
         effective_settings = _parse_effective_settings(d.pop("effective_settings", UNSET))
 
 
-        freshness = []
         _freshness = d.pop("freshness", UNSET)
-        for freshness_item_data in (_freshness or []):
-            freshness_item = FreshnessEvidence.from_dict(freshness_item_data)
+        freshness: list[FreshnessEvidence] | Unset = UNSET
+        if _freshness is not UNSET:
+            freshness = []
+            for freshness_item_data in _freshness:
+                freshness_item = FreshnessEvidence.from_dict(freshness_item_data)
 
 
 
-            freshness.append(freshness_item)
+                freshness.append(freshness_item)
 
 
-        def _parse_post_stop_memory_check(data: object) -> Union['ConditionalPostStopMemoryCheck', None, Unset]:
+        def _parse_post_stop_memory_check(data: object) -> ConditionalPostStopMemoryCheck | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -723,14 +724,14 @@ class RunSwitchPlan:
 
 
                 return post_stop_memory_check_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['ConditionalPostStopMemoryCheck', None, Unset], data)
+            return cast(ConditionalPostStopMemoryCheck | None | Unset, data)
 
         post_stop_memory_check = _parse_post_stop_memory_check(d.pop("post_stop_memory_check", UNSET))
 
 
-        def _parse_preparation(data: object) -> Union['RolloutPreparation', None, Unset]:
+        def _parse_preparation(data: object) -> None | RolloutPreparation | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -743,14 +744,14 @@ class RunSwitchPlan:
 
 
                 return preparation_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RolloutPreparation', None, Unset], data)
+            return cast(None | RolloutPreparation | Unset, data)
 
         preparation = _parse_preparation(d.pop("preparation", UNSET))
 
 
-        def _parse_profile_stop_scope(data: object) -> Union['RunSwitchProfileStopScope', None, Unset]:
+        def _parse_profile_stop_scope(data: object) -> None | RunSwitchProfileStopScope | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -763,14 +764,14 @@ class RunSwitchPlan:
 
 
                 return profile_stop_scope_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RunSwitchProfileStopScope', None, Unset], data)
+            return cast(None | RunSwitchProfileStopScope | Unset, data)
 
         profile_stop_scope = _parse_profile_stop_scope(d.pop("profile_stop_scope", UNSET))
 
 
-        def _parse_reconciliation_authority(data: object) -> Union['RunSwitchReconciliationAuthority', None, Unset]:
+        def _parse_reconciliation_authority(data: object) -> None | RunSwitchReconciliationAuthority | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -783,14 +784,14 @@ class RunSwitchPlan:
 
 
                 return reconciliation_authority_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RunSwitchReconciliationAuthority', None, Unset], data)
+            return cast(None | RunSwitchReconciliationAuthority | Unset, data)
 
         reconciliation_authority = _parse_reconciliation_authority(d.pop("reconciliation_authority", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

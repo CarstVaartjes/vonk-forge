@@ -384,8 +384,7 @@ def _add_head(
         updated_at=datetime.now(UTC),
     )
     session.add(document)
-    session.flush([document])
-    session.flush([revision])
+    session.flush()
     head = CatalogDocumentHead(
         kind="recipe",
         publisher=revision.publisher,

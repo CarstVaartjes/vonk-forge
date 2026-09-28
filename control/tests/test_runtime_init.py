@@ -188,7 +188,7 @@ def test_optional_huggingface_secret_handles_bind_mounted_dev_null_in_container(
             f"{source_module.parent.parent}:/tmp/module:ro",
             "-v",
             f"{tmp_path}:/tmp/normalized",
-            "python:3.14-bookworm",
+            "python:3.14-slim-trixie",
             "python",
             "-c",
             command,

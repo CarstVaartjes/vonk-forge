@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,25 +12,23 @@ from ..models.model_definition_modalities_item import check_model_definition_mod
 from ..models.model_definition_modalities_item import ModelDefinitionModalitiesItem
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.model_format import ModelFormat
-  from ..models.model_limits import ModelLimits
-  from ..models.model_source import ModelSource
-  from ..models.model_identity import ModelIdentity
-  from ..models.model_reference import ModelReference
   from ..models.git_hub_release_source import GitHubReleaseSource
-  from ..models.model_license import ModelLicense
   from ..models.model_access import ModelAccess
-  from ..models.model_lineage import ModelLineage
+  from ..models.model_capabilities import ModelCapabilities
   from ..models.model_file import ModelFile
+  from ..models.model_format import ModelFormat
+  from ..models.model_identity import ModelIdentity
+  from ..models.model_license import ModelLicense
+  from ..models.model_limits import ModelLimits
+  from ..models.model_lineage import ModelLineage
   from ..models.model_metadata import ModelMetadata
   from ..models.model_parameters import ModelParameters
   from ..models.model_provenance import ModelProvenance
-  from ..models.model_capabilities import ModelCapabilities
+  from ..models.model_reference import ModelReference
+  from ..models.model_source import ModelSource
 
 
 
@@ -45,8 +45,8 @@ class ModelDefinition:
         Attributes:
             access (ModelAccess):
             capabilities (ModelCapabilities):
-            dependencies (list['ModelReference']):
-            files (list['ModelFile']):
+            dependencies (list[ModelReference]):
+            files (list[ModelFile]):
             format_ (ModelFormat):
             identity (ModelIdentity): The family, logical model, exact version, and selected variant.
             license_ (ModelLicense):
@@ -56,49 +56,49 @@ class ModelDefinition:
             modalities (list[ModelDefinitionModalitiesItem]):
             parameters (ModelParameters):
             provenance (ModelProvenance):
-            source (Union['GitHubReleaseSource', 'ModelSource']):
-            kind (Union[Literal['model'], Unset]):  Default: 'model'.
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
-            supersedes (Union['ModelReference', None, Unset]):
+            source (GitHubReleaseSource | ModelSource):
+            kind (Literal['model'] | Unset):  Default: 'model'.
+            schema_version (Literal[2] | Unset):  Default: 2.
+            supersedes (ModelReference | None | Unset):
      """
 
-    access: 'ModelAccess'
-    capabilities: 'ModelCapabilities'
-    dependencies: list['ModelReference']
-    files: list['ModelFile']
-    format_: 'ModelFormat'
-    identity: 'ModelIdentity'
-    license_: 'ModelLicense'
-    limits: 'ModelLimits'
-    lineage: 'ModelLineage'
-    metadata: 'ModelMetadata'
+    access: ModelAccess
+    capabilities: ModelCapabilities
+    dependencies: list[ModelReference]
+    files: list[ModelFile]
+    format_: ModelFormat
+    identity: ModelIdentity
+    license_: ModelLicense
+    limits: ModelLimits
+    lineage: ModelLineage
+    metadata: ModelMetadata
     modalities: list[ModelDefinitionModalitiesItem]
-    parameters: 'ModelParameters'
-    provenance: 'ModelProvenance'
-    source: Union['GitHubReleaseSource', 'ModelSource']
-    kind: Union[Literal['model'], Unset] = 'model'
-    schema_version: Union[Literal[2], Unset] = 2
-    supersedes: Union['ModelReference', None, Unset] = UNSET
+    parameters: ModelParameters
+    provenance: ModelProvenance
+    source: GitHubReleaseSource | ModelSource
+    kind: Literal['model'] | Unset = 'model'
+    schema_version: Literal[2] | Unset = 2
+    supersedes: ModelReference | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.model_format import ModelFormat
-        from ..models.model_limits import ModelLimits
-        from ..models.model_source import ModelSource
-        from ..models.model_identity import ModelIdentity
-        from ..models.model_reference import ModelReference
-        from ..models.git_hub_release_source import GitHubReleaseSource
-        from ..models.model_license import ModelLicense
-        from ..models.model_access import ModelAccess
-        from ..models.model_lineage import ModelLineage
-        from ..models.model_file import ModelFile
-        from ..models.model_metadata import ModelMetadata
-        from ..models.model_parameters import ModelParameters
-        from ..models.model_provenance import ModelProvenance
-        from ..models.model_capabilities import ModelCapabilities
+        from ..models.git_hub_release_source import GitHubReleaseSource # noqa: PLC0415
+        from ..models.model_access import ModelAccess # noqa: PLC0415
+        from ..models.model_capabilities import ModelCapabilities # noqa: PLC0415
+        from ..models.model_file import ModelFile # noqa: PLC0415
+        from ..models.model_format import ModelFormat # noqa: PLC0415
+        from ..models.model_identity import ModelIdentity # noqa: PLC0415
+        from ..models.model_license import ModelLicense # noqa: PLC0415
+        from ..models.model_limits import ModelLimits # noqa: PLC0415
+        from ..models.model_lineage import ModelLineage # noqa: PLC0415
+        from ..models.model_metadata import ModelMetadata # noqa: PLC0415
+        from ..models.model_parameters import ModelParameters # noqa: PLC0415
+        from ..models.model_provenance import ModelProvenance # noqa: PLC0415
+        from ..models.model_reference import ModelReference # noqa: PLC0415
+        from ..models.model_source import ModelSource # noqa: PLC0415
         access = self.access.to_dict()
 
         capabilities = self.capabilities.to_dict()
@@ -151,7 +151,7 @@ class ModelDefinition:
 
         schema_version = self.schema_version
 
-        supersedes: Union[None, Unset, dict[str, Any]]
+        supersedes: dict[str, Any] | None | Unset
         if isinstance(self.supersedes, Unset):
             supersedes = UNSET
         elif isinstance(self.supersedes, ModelReference):
@@ -191,20 +191,20 @@ class ModelDefinition:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.model_format import ModelFormat
-        from ..models.model_limits import ModelLimits
-        from ..models.model_source import ModelSource
-        from ..models.model_identity import ModelIdentity
-        from ..models.model_reference import ModelReference
-        from ..models.git_hub_release_source import GitHubReleaseSource
-        from ..models.model_license import ModelLicense
-        from ..models.model_access import ModelAccess
-        from ..models.model_lineage import ModelLineage
-        from ..models.model_file import ModelFile
-        from ..models.model_metadata import ModelMetadata
-        from ..models.model_parameters import ModelParameters
-        from ..models.model_provenance import ModelProvenance
-        from ..models.model_capabilities import ModelCapabilities
+        from ..models.git_hub_release_source import GitHubReleaseSource # noqa: PLC0415
+        from ..models.model_access import ModelAccess # noqa: PLC0415
+        from ..models.model_capabilities import ModelCapabilities # noqa: PLC0415
+        from ..models.model_file import ModelFile # noqa: PLC0415
+        from ..models.model_format import ModelFormat # noqa: PLC0415
+        from ..models.model_identity import ModelIdentity # noqa: PLC0415
+        from ..models.model_license import ModelLicense # noqa: PLC0415
+        from ..models.model_limits import ModelLimits # noqa: PLC0415
+        from ..models.model_lineage import ModelLineage # noqa: PLC0415
+        from ..models.model_metadata import ModelMetadata # noqa: PLC0415
+        from ..models.model_parameters import ModelParameters # noqa: PLC0415
+        from ..models.model_provenance import ModelProvenance # noqa: PLC0415
+        from ..models.model_reference import ModelReference # noqa: PLC0415
+        from ..models.model_source import ModelSource # noqa: PLC0415
         d = dict(src_dict)
         access = ModelAccess.from_dict(d.pop("access"))
 
@@ -286,7 +286,7 @@ class ModelDefinition:
 
 
 
-        def _parse_source(data: object) -> Union['GitHubReleaseSource', 'ModelSource']:
+        def _parse_source(data: object) -> GitHubReleaseSource | ModelSource:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -295,7 +295,7 @@ class ModelDefinition:
 
 
                 return source_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             if not isinstance(data, dict):
                 raise TypeError()
@@ -308,15 +308,15 @@ class ModelDefinition:
         source = _parse_source(d.pop("source"))
 
 
-        kind = cast(Union[Literal['model'], Unset] , d.pop("kind", UNSET))
+        kind = cast(Literal['model'] | Unset , d.pop("kind", UNSET))
         if kind != 'model' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'model', got '{kind}'")
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
-        def _parse_supersedes(data: object) -> Union['ModelReference', None, Unset]:
+        def _parse_supersedes(data: object) -> ModelReference | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -329,9 +329,9 @@ class ModelDefinition:
 
 
                 return supersedes_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['ModelReference', None, Unset], data)
+            return cast(ModelReference | None | Unset, data)
 
         supersedes = _parse_supersedes(d.pop("supersedes", UNSET))
 

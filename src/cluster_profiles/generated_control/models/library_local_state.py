@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.library_local_state_controller import check_library_local_state_co
 from ..models.library_local_state_controller import LibraryLocalStateController
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.library_local_progress import LibraryLocalProgress
@@ -30,23 +30,23 @@ class LibraryLocalState:
 
         Attributes:
             controller (LibraryLocalStateController):
-            preparation (Union['LibraryLocalProgress', None, Unset]):
-            running_on (Union[Unset, list[str]]):
+            preparation (LibraryLocalProgress | None | Unset):
+            running_on (list[str] | Unset):
      """
 
     controller: LibraryLocalStateController
-    preparation: Union['LibraryLocalProgress', None, Unset] = UNSET
-    running_on: Union[Unset, list[str]] = UNSET
+    preparation: LibraryLocalProgress | None | Unset = UNSET
+    running_on: list[str] | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.library_local_progress import LibraryLocalProgress
+        from ..models.library_local_progress import LibraryLocalProgress # noqa: PLC0415
         controller: str = self.controller
 
-        preparation: Union[None, Unset, dict[str, Any]]
+        preparation: dict[str, Any] | None | Unset
         if isinstance(self.preparation, Unset):
             preparation = UNSET
         elif isinstance(self.preparation, LibraryLocalProgress):
@@ -54,7 +54,7 @@ class LibraryLocalState:
         else:
             preparation = self.preparation
 
-        running_on: Union[Unset, list[str]] = UNSET
+        running_on: list[str] | Unset = UNSET
         if not isinstance(self.running_on, Unset):
             running_on = self.running_on
 
@@ -77,14 +77,14 @@ class LibraryLocalState:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.library_local_progress import LibraryLocalProgress
+        from ..models.library_local_progress import LibraryLocalProgress # noqa: PLC0415
         d = dict(src_dict)
         controller = check_library_local_state_controller(d.pop("controller"))
 
 
 
 
-        def _parse_preparation(data: object) -> Union['LibraryLocalProgress', None, Unset]:
+        def _parse_preparation(data: object) -> LibraryLocalProgress | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -97,9 +97,9 @@ class LibraryLocalState:
 
 
                 return preparation_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['LibraryLocalProgress', None, Unset], data)
+            return cast(LibraryLocalProgress | None | Unset, data)
 
         preparation = _parse_preparation(d.pop("preparation", UNSET))
 

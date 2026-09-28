@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,14 +10,12 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.effective_settings_selection import EffectiveSettingsSelection
-  from ..models.run_switch_reason import RunSwitchReason
-  from ..models.fleet_profile_resource_requirement import FleetProfileResourceRequirement
   from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
+  from ..models.effective_settings_selection import EffectiveSettingsSelection
+  from ..models.fleet_profile_resource_requirement import FleetProfileResourceRequirement
+  from ..models.run_switch_reason import RunSwitchReason
   from ..models.stop_impact import StopImpact
 
 
@@ -30,40 +30,40 @@ T = TypeVar("T", bound="FleetProfileAdmissionDecision")
 class FleetProfileAdmissionDecision:
     """
         Attributes:
-            alias (Union[None, str]):
+            alias (None | str):
             allowed (bool):
             assignment_id (str):
-            blockers (list['RunSwitchReason']):
-            effective_settings (Union['EffectiveSettingsSelection', None]):
-            requirements (list['FleetProfileResourceRequirement']):
+            blockers (list[RunSwitchReason]):
+            effective_settings (EffectiveSettingsSelection | None):
+            requirements (list[FleetProfileResourceRequirement]):
             stop_before_prepare (bool):
             stop_before_transfer (bool):
-            stops (list['StopImpact']):
-            post_stop_memory_check (Union['ConditionalPostStopMemoryCheck', None, Unset]):
+            stops (list[StopImpact]):
+            post_stop_memory_check (ConditionalPostStopMemoryCheck | None | Unset):
      """
 
-    alias: Union[None, str]
+    alias: None | str
     allowed: bool
     assignment_id: str
-    blockers: list['RunSwitchReason']
-    effective_settings: Union['EffectiveSettingsSelection', None]
-    requirements: list['FleetProfileResourceRequirement']
+    blockers: list[RunSwitchReason]
+    effective_settings: EffectiveSettingsSelection | None
+    requirements: list[FleetProfileResourceRequirement]
     stop_before_prepare: bool
     stop_before_transfer: bool
-    stops: list['StopImpact']
-    post_stop_memory_check: Union['ConditionalPostStopMemoryCheck', None, Unset] = UNSET
+    stops: list[StopImpact]
+    post_stop_memory_check: ConditionalPostStopMemoryCheck | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.effective_settings_selection import EffectiveSettingsSelection
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.fleet_profile_resource_requirement import FleetProfileResourceRequirement
-        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
-        from ..models.stop_impact import StopImpact
-        alias: Union[None, str]
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck # noqa: PLC0415
+        from ..models.effective_settings_selection import EffectiveSettingsSelection # noqa: PLC0415
+        from ..models.fleet_profile_resource_requirement import FleetProfileResourceRequirement # noqa: PLC0415
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
+        from ..models.stop_impact import StopImpact # noqa: PLC0415
+        alias: None | str
         alias = self.alias
 
         allowed = self.allowed
@@ -77,7 +77,7 @@ class FleetProfileAdmissionDecision:
 
 
 
-        effective_settings: Union[None, dict[str, Any]]
+        effective_settings: dict[str, Any] | None
         if isinstance(self.effective_settings, EffectiveSettingsSelection):
             effective_settings = self.effective_settings.to_dict()
         else:
@@ -101,7 +101,7 @@ class FleetProfileAdmissionDecision:
 
 
 
-        post_stop_memory_check: Union[None, Unset, dict[str, Any]]
+        post_stop_memory_check: dict[str, Any] | None | Unset
         if isinstance(self.post_stop_memory_check, Unset):
             post_stop_memory_check = UNSET
         elif isinstance(self.post_stop_memory_check, ConditionalPostStopMemoryCheck):
@@ -132,16 +132,16 @@ class FleetProfileAdmissionDecision:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.effective_settings_selection import EffectiveSettingsSelection
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.fleet_profile_resource_requirement import FleetProfileResourceRequirement
-        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
-        from ..models.stop_impact import StopImpact
+        from ..models.conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck # noqa: PLC0415
+        from ..models.effective_settings_selection import EffectiveSettingsSelection # noqa: PLC0415
+        from ..models.fleet_profile_resource_requirement import FleetProfileResourceRequirement # noqa: PLC0415
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
+        from ..models.stop_impact import StopImpact # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_alias(data: object) -> Union[None, str]:
+        def _parse_alias(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         alias = _parse_alias(d.pop("alias"))
 
@@ -160,7 +160,7 @@ class FleetProfileAdmissionDecision:
             blockers.append(blockers_item)
 
 
-        def _parse_effective_settings(data: object) -> Union['EffectiveSettingsSelection', None]:
+        def _parse_effective_settings(data: object) -> EffectiveSettingsSelection | None:
             if data is None:
                 return data
             try:
@@ -171,9 +171,9 @@ class FleetProfileAdmissionDecision:
 
 
                 return effective_settings_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['EffectiveSettingsSelection', None], data)
+            return cast(EffectiveSettingsSelection | None, data)
 
         effective_settings = _parse_effective_settings(d.pop("effective_settings"))
 
@@ -202,7 +202,7 @@ class FleetProfileAdmissionDecision:
             stops.append(stops_item)
 
 
-        def _parse_post_stop_memory_check(data: object) -> Union['ConditionalPostStopMemoryCheck', None, Unset]:
+        def _parse_post_stop_memory_check(data: object) -> ConditionalPostStopMemoryCheck | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -215,9 +215,9 @@ class FleetProfileAdmissionDecision:
 
 
                 return post_stop_memory_check_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['ConditionalPostStopMemoryCheck', None, Unset], data)
+            return cast(ConditionalPostStopMemoryCheck | None | Unset, data)
 
         post_stop_memory_check = _parse_post_stop_memory_check(d.pop("post_stop_memory_check", UNSET))
 

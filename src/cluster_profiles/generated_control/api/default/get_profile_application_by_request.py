@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -27,7 +28,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/profile/{number}/requests/{request_key}".format(number=number,request_key=request_key,),
+        "url": "/api/profile/{number}/requests/{request_key}".format(number=quote(str(number), safe=""),request_key=quote(str(request_key), safe=""),),
     }
 
 
@@ -35,7 +36,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = FleetProfileApplicationView.from_dict(response.json())
 
@@ -84,7 +85,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -99,7 +100,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem]:
     """ Profile Application By Request
 
     Args:
@@ -108,10 +109,10 @@ def sync_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]]
+        Response[BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem]
      """
 
 
@@ -133,7 +134,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]]:
+) -> BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem | None:
     """ Profile Application By Request
 
     Args:
@@ -142,10 +143,10 @@ def sync(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]
+        BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem
      """
 
 
@@ -162,7 +163,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem]:
     """ Profile Application By Request
 
     Args:
@@ -171,10 +172,10 @@ async def asyncio_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]]
+        Response[BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem]
      """
 
 
@@ -196,7 +197,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]]:
+) -> BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem | None:
     """ Profile Application By Request
 
     Args:
@@ -205,10 +206,10 @@ async def asyncio(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetProfileApplicationView, RequestValidationProblem]
+        BoundedErrorResponse | FleetProfileApplicationView | RequestValidationProblem
      """
 
 

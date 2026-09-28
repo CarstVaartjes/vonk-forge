@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,18 +13,15 @@ from ..models.artifact_job_response_interface import check_artifact_job_response
 from ..models.artifact_job_response_state import ArtifactJobResponseState
 from ..models.artifact_job_response_state import check_artifact_job_response_state
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.compiled_artifact_contract import CompiledArtifactContract
   from ..models.artifact_file_declaration import ArtifactFileDeclaration
-  from ..models.output_limits import OutputLimits
   from ..models.artifact_job_result_evidence import ArtifactJobResultEvidence
   from ..models.artifact_output_file import ArtifactOutputFile
+  from ..models.compiled_artifact_contract import CompiledArtifactContract
+  from ..models.output_limits import OutputLimits
 
 
 
@@ -40,55 +39,55 @@ class ArtifactJobResponse:
             contract_sha256 (str):
             created_at (datetime.datetime):
             id (str):
-            input_declarations (list['ArtifactFileDeclaration']):
-            input_files (list['ArtifactFileDeclaration']):
+            input_declarations (list[ArtifactFileDeclaration]):
+            input_files (list[ArtifactFileDeclaration]):
             input_manifest_sha256 (str):
             input_total_bytes (int):
             interface (ArtifactJobResponseInterface):
-            output_files (list['ArtifactOutputFile']):
+            output_files (list[ArtifactOutputFile]):
             output_limits (OutputLimits):
             run_id (str):
             state (ArtifactJobResponseState):
             timeout_seconds (int):
             updated_at (datetime.datetime):
-            operation_id (Union[None, Unset, str]):
-            output_manifest_sha256 (Union[None, Unset, str]):
-            result_evidence (Union['ArtifactJobResultEvidence', None, Unset]):
-            status_reason (Union[None, Unset, str]):
-            submit_request_id (Union[None, Unset, str]):
+            operation_id (None | str | Unset):
+            output_manifest_sha256 (None | str | Unset):
+            result_evidence (ArtifactJobResultEvidence | None | Unset):
+            status_reason (None | str | Unset):
+            submit_request_id (None | str | Unset):
      """
 
-    compiled_contract: 'CompiledArtifactContract'
+    compiled_contract: CompiledArtifactContract
     contract_sha256: str
     created_at: datetime.datetime
     id: str
-    input_declarations: list['ArtifactFileDeclaration']
-    input_files: list['ArtifactFileDeclaration']
+    input_declarations: list[ArtifactFileDeclaration]
+    input_files: list[ArtifactFileDeclaration]
     input_manifest_sha256: str
     input_total_bytes: int
     interface: ArtifactJobResponseInterface
-    output_files: list['ArtifactOutputFile']
-    output_limits: 'OutputLimits'
+    output_files: list[ArtifactOutputFile]
+    output_limits: OutputLimits
     run_id: str
     state: ArtifactJobResponseState
     timeout_seconds: int
     updated_at: datetime.datetime
-    operation_id: Union[None, Unset, str] = UNSET
-    output_manifest_sha256: Union[None, Unset, str] = UNSET
-    result_evidence: Union['ArtifactJobResultEvidence', None, Unset] = UNSET
-    status_reason: Union[None, Unset, str] = UNSET
-    submit_request_id: Union[None, Unset, str] = UNSET
+    operation_id: None | str | Unset = UNSET
+    output_manifest_sha256: None | str | Unset = UNSET
+    result_evidence: ArtifactJobResultEvidence | None | Unset = UNSET
+    status_reason: None | str | Unset = UNSET
+    submit_request_id: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.compiled_artifact_contract import CompiledArtifactContract
-        from ..models.artifact_file_declaration import ArtifactFileDeclaration
-        from ..models.output_limits import OutputLimits
-        from ..models.artifact_job_result_evidence import ArtifactJobResultEvidence
-        from ..models.artifact_output_file import ArtifactOutputFile
+        from ..models.artifact_file_declaration import ArtifactFileDeclaration # noqa: PLC0415
+        from ..models.artifact_job_result_evidence import ArtifactJobResultEvidence # noqa: PLC0415
+        from ..models.artifact_output_file import ArtifactOutputFile # noqa: PLC0415
+        from ..models.compiled_artifact_contract import CompiledArtifactContract # noqa: PLC0415
+        from ..models.output_limits import OutputLimits # noqa: PLC0415
         compiled_contract = self.compiled_contract.to_dict()
 
         contract_sha256 = self.contract_sha256
@@ -134,19 +133,19 @@ class ArtifactJobResponse:
 
         updated_at = self.updated_at.isoformat()
 
-        operation_id: Union[None, Unset, str]
+        operation_id: None | str | Unset
         if isinstance(self.operation_id, Unset):
             operation_id = UNSET
         else:
             operation_id = self.operation_id
 
-        output_manifest_sha256: Union[None, Unset, str]
+        output_manifest_sha256: None | str | Unset
         if isinstance(self.output_manifest_sha256, Unset):
             output_manifest_sha256 = UNSET
         else:
             output_manifest_sha256 = self.output_manifest_sha256
 
-        result_evidence: Union[None, Unset, dict[str, Any]]
+        result_evidence: dict[str, Any] | None | Unset
         if isinstance(self.result_evidence, Unset):
             result_evidence = UNSET
         elif isinstance(self.result_evidence, ArtifactJobResultEvidence):
@@ -154,13 +153,13 @@ class ArtifactJobResponse:
         else:
             result_evidence = self.result_evidence
 
-        status_reason: Union[None, Unset, str]
+        status_reason: None | str | Unset
         if isinstance(self.status_reason, Unset):
             status_reason = UNSET
         else:
             status_reason = self.status_reason
 
-        submit_request_id: Union[None, Unset, str]
+        submit_request_id: None | str | Unset
         if isinstance(self.submit_request_id, Unset):
             submit_request_id = UNSET
         else:
@@ -203,11 +202,11 @@ class ArtifactJobResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.compiled_artifact_contract import CompiledArtifactContract
-        from ..models.artifact_file_declaration import ArtifactFileDeclaration
-        from ..models.output_limits import OutputLimits
-        from ..models.artifact_job_result_evidence import ArtifactJobResultEvidence
-        from ..models.artifact_output_file import ArtifactOutputFile
+        from ..models.artifact_file_declaration import ArtifactFileDeclaration # noqa: PLC0415
+        from ..models.artifact_job_result_evidence import ArtifactJobResultEvidence # noqa: PLC0415
+        from ..models.artifact_output_file import ArtifactOutputFile # noqa: PLC0415
+        from ..models.compiled_artifact_contract import CompiledArtifactContract # noqa: PLC0415
+        from ..models.output_limits import OutputLimits # noqa: PLC0415
         d = dict(src_dict)
         compiled_contract = CompiledArtifactContract.from_dict(d.pop("compiled_contract"))
 
@@ -216,7 +215,7 @@ class ArtifactJobResponse:
 
         contract_sha256 = d.pop("contract_sha256")
 
-        created_at = isoparse(d.pop("created_at"))
+        created_at = datetime.datetime.fromisoformat(d.pop("created_at"))
 
 
 
@@ -276,32 +275,32 @@ class ArtifactJobResponse:
 
         timeout_seconds = d.pop("timeout_seconds")
 
-        updated_at = isoparse(d.pop("updated_at"))
+        updated_at = datetime.datetime.fromisoformat(d.pop("updated_at"))
 
 
 
 
-        def _parse_operation_id(data: object) -> Union[None, Unset, str]:
+        def _parse_operation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         operation_id = _parse_operation_id(d.pop("operation_id", UNSET))
 
 
-        def _parse_output_manifest_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_output_manifest_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         output_manifest_sha256 = _parse_output_manifest_sha256(d.pop("output_manifest_sha256", UNSET))
 
 
-        def _parse_result_evidence(data: object) -> Union['ArtifactJobResultEvidence', None, Unset]:
+        def _parse_result_evidence(data: object) -> ArtifactJobResultEvidence | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -314,29 +313,29 @@ class ArtifactJobResponse:
 
 
                 return result_evidence_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['ArtifactJobResultEvidence', None, Unset], data)
+            return cast(ArtifactJobResultEvidence | None | Unset, data)
 
         result_evidence = _parse_result_evidence(d.pop("result_evidence", UNSET))
 
 
-        def _parse_status_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_status_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         status_reason = _parse_status_reason(d.pop("status_reason", UNSET))
 
 
-        def _parse_submit_request_id(data: object) -> Union[None, Unset, str]:
+        def _parse_submit_request_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         submit_request_id = _parse_submit_request_id(d.pop("submit_request_id", UNSET))
 

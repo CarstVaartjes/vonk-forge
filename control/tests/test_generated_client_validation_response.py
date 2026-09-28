@@ -2,7 +2,7 @@
 
 
 def test_generated_python_list_jobs_preserves_cursor_and_typed_rejection() -> None:
-    import httpx
+    import httpx2
     from vonk_control.operation_api import RequestValidationProblem as ProblemProducer
 
     from cluster_profiles.generated_control.api.default import list_jobs
@@ -27,7 +27,7 @@ def test_generated_python_list_jobs_preserves_cursor_and_typed_rejection() -> No
 
     parsed = list_jobs._parse_response(
         client=Client(base_url="https://control.invalid"),
-        response=httpx.Response(
+        response=httpx2.Response(
             422,
             json=ProblemProducer(detail="job cursor is invalid", issues=[]).model_dump(
                 mode="json"

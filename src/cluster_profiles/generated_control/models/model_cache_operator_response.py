@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,16 +14,14 @@ from ..models.model_cache_operator_response_state import check_model_cache_opera
 from ..models.model_cache_operator_response_state import ModelCacheOperatorResponseState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.availability_operation_failure import AvailabilityOperationFailure
-  from ..models.model_cache_removal_result import ModelCacheRemovalResult
   from ..models.model_cache_cancellation import ModelCacheCancellation
-  from ..models.operation_progress import OperationProgress
   from ..models.model_cache_download_result import ModelCacheDownloadResult
+  from ..models.model_cache_removal_result import ModelCacheRemovalResult
+  from ..models.operation_progress import OperationProgress
 
 
 
@@ -43,50 +43,50 @@ class ModelCacheOperatorResponse:
             selector (str):
             state (ModelCacheOperatorResponseState):
             transferred_bytes (int):
-            cancellation (Union['ModelCacheCancellation', None, Unset]):
-            cancelled_operations (Union[Unset, list[str]]):
-            eta_seconds (Union[None, Unset, float]):
-            failure (Union['AvailabilityOperationFailure', None, Unset]):
-            model_content_sha256 (Union[None, Unset, str]):
-            next_actions (Union[Unset, list[str]]):
-            operation_id (Union[None, Unset, str]):
-            preserved (Union[Unset, list[str]]):
-            result (Union['ModelCacheDownloadResult', 'ModelCacheRemovalResult', None, Unset]):
-            review_digest (Union[None, Unset, str]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
-            total_bytes (Union[None, Unset, int]):
+            cancellation (ModelCacheCancellation | None | Unset):
+            cancelled_operations (list[str] | Unset):
+            eta_seconds (float | None | Unset):
+            failure (AvailabilityOperationFailure | None | Unset):
+            model_content_sha256 (None | str | Unset):
+            next_actions (list[str] | Unset):
+            operation_id (None | str | Unset):
+            preserved (list[str] | Unset):
+            result (ModelCacheDownloadResult | ModelCacheRemovalResult | None | Unset):
+            review_digest (None | str | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
+            total_bytes (int | None | Unset):
      """
 
     action: ModelCacheOperatorResponseAction
     phase: str
-    progress: 'OperationProgress'
+    progress: OperationProgress
     request_key: str
     selector: str
     state: ModelCacheOperatorResponseState
     transferred_bytes: int
-    cancellation: Union['ModelCacheCancellation', None, Unset] = UNSET
-    cancelled_operations: Union[Unset, list[str]] = UNSET
-    eta_seconds: Union[None, Unset, float] = UNSET
-    failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
-    model_content_sha256: Union[None, Unset, str] = UNSET
-    next_actions: Union[Unset, list[str]] = UNSET
-    operation_id: Union[None, Unset, str] = UNSET
-    preserved: Union[Unset, list[str]] = UNSET
-    result: Union['ModelCacheDownloadResult', 'ModelCacheRemovalResult', None, Unset] = UNSET
-    review_digest: Union[None, Unset, str] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
-    total_bytes: Union[None, Unset, int] = UNSET
+    cancellation: ModelCacheCancellation | None | Unset = UNSET
+    cancelled_operations: list[str] | Unset = UNSET
+    eta_seconds: float | None | Unset = UNSET
+    failure: AvailabilityOperationFailure | None | Unset = UNSET
+    model_content_sha256: None | str | Unset = UNSET
+    next_actions: list[str] | Unset = UNSET
+    operation_id: None | str | Unset = UNSET
+    preserved: list[str] | Unset = UNSET
+    result: ModelCacheDownloadResult | ModelCacheRemovalResult | None | Unset = UNSET
+    review_digest: None | str | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
+    total_bytes: int | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.availability_operation_failure import AvailabilityOperationFailure
-        from ..models.model_cache_removal_result import ModelCacheRemovalResult
-        from ..models.model_cache_cancellation import ModelCacheCancellation
-        from ..models.operation_progress import OperationProgress
-        from ..models.model_cache_download_result import ModelCacheDownloadResult
+        from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
+        from ..models.model_cache_cancellation import ModelCacheCancellation # noqa: PLC0415
+        from ..models.model_cache_download_result import ModelCacheDownloadResult # noqa: PLC0415
+        from ..models.model_cache_removal_result import ModelCacheRemovalResult # noqa: PLC0415
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
         action: str = self.action
 
         phase = self.phase
@@ -101,7 +101,7 @@ class ModelCacheOperatorResponse:
 
         transferred_bytes = self.transferred_bytes
 
-        cancellation: Union[None, Unset, dict[str, Any]]
+        cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
             cancellation = UNSET
         elif isinstance(self.cancellation, ModelCacheCancellation):
@@ -109,19 +109,19 @@ class ModelCacheOperatorResponse:
         else:
             cancellation = self.cancellation
 
-        cancelled_operations: Union[Unset, list[str]] = UNSET
+        cancelled_operations: list[str] | Unset = UNSET
         if not isinstance(self.cancelled_operations, Unset):
             cancelled_operations = self.cancelled_operations
 
 
 
-        eta_seconds: Union[None, Unset, float]
+        eta_seconds: float | None | Unset
         if isinstance(self.eta_seconds, Unset):
             eta_seconds = UNSET
         else:
             eta_seconds = self.eta_seconds
 
-        failure: Union[None, Unset, dict[str, Any]]
+        failure: dict[str, Any] | None | Unset
         if isinstance(self.failure, Unset):
             failure = UNSET
         elif isinstance(self.failure, AvailabilityOperationFailure):
@@ -129,31 +129,31 @@ class ModelCacheOperatorResponse:
         else:
             failure = self.failure
 
-        model_content_sha256: Union[None, Unset, str]
+        model_content_sha256: None | str | Unset
         if isinstance(self.model_content_sha256, Unset):
             model_content_sha256 = UNSET
         else:
             model_content_sha256 = self.model_content_sha256
 
-        next_actions: Union[Unset, list[str]] = UNSET
+        next_actions: list[str] | Unset = UNSET
         if not isinstance(self.next_actions, Unset):
             next_actions = self.next_actions
 
 
 
-        operation_id: Union[None, Unset, str]
+        operation_id: None | str | Unset
         if isinstance(self.operation_id, Unset):
             operation_id = UNSET
         else:
             operation_id = self.operation_id
 
-        preserved: Union[Unset, list[str]] = UNSET
+        preserved: list[str] | Unset = UNSET
         if not isinstance(self.preserved, Unset):
             preserved = self.preserved
 
 
 
-        result: Union[None, Unset, dict[str, Any]]
+        result: dict[str, Any] | None | Unset
         if isinstance(self.result, Unset):
             result = UNSET
         elif isinstance(self.result, ModelCacheDownloadResult):
@@ -163,7 +163,7 @@ class ModelCacheOperatorResponse:
         else:
             result = self.result
 
-        review_digest: Union[None, Unset, str]
+        review_digest: None | str | Unset
         if isinstance(self.review_digest, Unset):
             review_digest = UNSET
         else:
@@ -171,7 +171,7 @@ class ModelCacheOperatorResponse:
 
         schema_version = self.schema_version
 
-        total_bytes: Union[None, Unset, int]
+        total_bytes: int | None | Unset
         if isinstance(self.total_bytes, Unset):
             total_bytes = UNSET
         else:
@@ -220,11 +220,11 @@ class ModelCacheOperatorResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.availability_operation_failure import AvailabilityOperationFailure
-        from ..models.model_cache_removal_result import ModelCacheRemovalResult
-        from ..models.model_cache_cancellation import ModelCacheCancellation
-        from ..models.operation_progress import OperationProgress
-        from ..models.model_cache_download_result import ModelCacheDownloadResult
+        from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
+        from ..models.model_cache_cancellation import ModelCacheCancellation # noqa: PLC0415
+        from ..models.model_cache_download_result import ModelCacheDownloadResult # noqa: PLC0415
+        from ..models.model_cache_removal_result import ModelCacheRemovalResult # noqa: PLC0415
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
         d = dict(src_dict)
         action = check_model_cache_operator_response_action(d.pop("action"))
 
@@ -249,7 +249,7 @@ class ModelCacheOperatorResponse:
 
         transferred_bytes = d.pop("transferred_bytes")
 
-        def _parse_cancellation(data: object) -> Union['ModelCacheCancellation', None, Unset]:
+        def _parse_cancellation(data: object) -> ModelCacheCancellation | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -262,9 +262,9 @@ class ModelCacheOperatorResponse:
 
 
                 return cancellation_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['ModelCacheCancellation', None, Unset], data)
+            return cast(ModelCacheCancellation | None | Unset, data)
 
         cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
 
@@ -272,17 +272,17 @@ class ModelCacheOperatorResponse:
         cancelled_operations = cast(list[str], d.pop("cancelled_operations", UNSET))
 
 
-        def _parse_eta_seconds(data: object) -> Union[None, Unset, float]:
+        def _parse_eta_seconds(data: object) -> float | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, float], data)
+            return cast(float | None | Unset, data)
 
         eta_seconds = _parse_eta_seconds(d.pop("eta_seconds", UNSET))
 
 
-        def _parse_failure(data: object) -> Union['AvailabilityOperationFailure', None, Unset]:
+        def _parse_failure(data: object) -> AvailabilityOperationFailure | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -295,19 +295,19 @@ class ModelCacheOperatorResponse:
 
 
                 return failure_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['AvailabilityOperationFailure', None, Unset], data)
+            return cast(AvailabilityOperationFailure | None | Unset, data)
 
         failure = _parse_failure(d.pop("failure", UNSET))
 
 
-        def _parse_model_content_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_model_content_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256", UNSET))
 
@@ -315,12 +315,12 @@ class ModelCacheOperatorResponse:
         next_actions = cast(list[str], d.pop("next_actions", UNSET))
 
 
-        def _parse_operation_id(data: object) -> Union[None, Unset, str]:
+        def _parse_operation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         operation_id = _parse_operation_id(d.pop("operation_id", UNSET))
 
@@ -328,7 +328,7 @@ class ModelCacheOperatorResponse:
         preserved = cast(list[str], d.pop("preserved", UNSET))
 
 
-        def _parse_result(data: object) -> Union['ModelCacheDownloadResult', 'ModelCacheRemovalResult', None, Unset]:
+        def _parse_result(data: object) -> ModelCacheDownloadResult | ModelCacheRemovalResult | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -341,7 +341,7 @@ class ModelCacheOperatorResponse:
 
 
                 return result_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -351,33 +351,33 @@ class ModelCacheOperatorResponse:
 
 
                 return result_type_1
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['ModelCacheDownloadResult', 'ModelCacheRemovalResult', None, Unset], data)
+            return cast(ModelCacheDownloadResult | ModelCacheRemovalResult | None | Unset, data)
 
         result = _parse_result(d.pop("result", UNSET))
 
 
-        def _parse_review_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_review_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         review_digest = _parse_review_digest(d.pop("review_digest", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
-        def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_total_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         total_bytes = _parse_total_bytes(d.pop("total_bytes", UNSET))
 

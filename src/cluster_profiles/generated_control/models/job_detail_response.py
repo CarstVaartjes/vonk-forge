@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,13 +10,11 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.job_progress import JobProgress
-  from ..models.job_operation_response import JobOperationResponse
   from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
+  from ..models.job_operation_response import JobOperationResponse
+  from ..models.job_progress import JobProgress
   from ..models.operation_recovery import OperationRecovery
 
 
@@ -34,16 +34,16 @@ class JobDetailResponse:
             id (str):
             kind (str):
             operation_total (int):
-            operations (list['JobOperationResponse']):
+            operations (list[JobOperationResponse]):
             progress (JobProgress):
             state (str):
             target_total (int):
             targets (list[str]):
-            agent_upgrade_diagnostics (Union['AgentUpgradeDiagnosticsResponse', None, Unset]):
-            operation_next_cursor (Union[None, Unset, str]):
-            recovery (Union['OperationRecovery', None, Unset]):
-            status_reason (Union[None, Unset, str]):
-            target_next_cursor (Union[None, Unset, str]):
+            agent_upgrade_diagnostics (AgentUpgradeDiagnosticsResponse | None | Unset):
+            operation_next_cursor (None | str | Unset):
+            recovery (None | OperationRecovery | Unset):
+            status_reason (None | str | Unset):
+            target_next_cursor (None | str | Unset):
      """
 
     authority_revision: str
@@ -51,26 +51,26 @@ class JobDetailResponse:
     id: str
     kind: str
     operation_total: int
-    operations: list['JobOperationResponse']
-    progress: 'JobProgress'
+    operations: list[JobOperationResponse]
+    progress: JobProgress
     state: str
     target_total: int
     targets: list[str]
-    agent_upgrade_diagnostics: Union['AgentUpgradeDiagnosticsResponse', None, Unset] = UNSET
-    operation_next_cursor: Union[None, Unset, str] = UNSET
-    recovery: Union['OperationRecovery', None, Unset] = UNSET
-    status_reason: Union[None, Unset, str] = UNSET
-    target_next_cursor: Union[None, Unset, str] = UNSET
+    agent_upgrade_diagnostics: AgentUpgradeDiagnosticsResponse | None | Unset = UNSET
+    operation_next_cursor: None | str | Unset = UNSET
+    recovery: None | OperationRecovery | Unset = UNSET
+    status_reason: None | str | Unset = UNSET
+    target_next_cursor: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.job_progress import JobProgress
-        from ..models.job_operation_response import JobOperationResponse
-        from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
-        from ..models.operation_recovery import OperationRecovery
+        from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse # noqa: PLC0415
+        from ..models.job_operation_response import JobOperationResponse # noqa: PLC0415
+        from ..models.job_progress import JobProgress # noqa: PLC0415
+        from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
         authority_revision = self.authority_revision
 
         current_attempt = self.current_attempt
@@ -98,7 +98,7 @@ class JobDetailResponse:
 
 
 
-        agent_upgrade_diagnostics: Union[None, Unset, dict[str, Any]]
+        agent_upgrade_diagnostics: dict[str, Any] | None | Unset
         if isinstance(self.agent_upgrade_diagnostics, Unset):
             agent_upgrade_diagnostics = UNSET
         elif isinstance(self.agent_upgrade_diagnostics, AgentUpgradeDiagnosticsResponse):
@@ -106,13 +106,13 @@ class JobDetailResponse:
         else:
             agent_upgrade_diagnostics = self.agent_upgrade_diagnostics
 
-        operation_next_cursor: Union[None, Unset, str]
+        operation_next_cursor: None | str | Unset
         if isinstance(self.operation_next_cursor, Unset):
             operation_next_cursor = UNSET
         else:
             operation_next_cursor = self.operation_next_cursor
 
-        recovery: Union[None, Unset, dict[str, Any]]
+        recovery: dict[str, Any] | None | Unset
         if isinstance(self.recovery, Unset):
             recovery = UNSET
         elif isinstance(self.recovery, OperationRecovery):
@@ -120,13 +120,13 @@ class JobDetailResponse:
         else:
             recovery = self.recovery
 
-        status_reason: Union[None, Unset, str]
+        status_reason: None | str | Unset
         if isinstance(self.status_reason, Unset):
             status_reason = UNSET
         else:
             status_reason = self.status_reason
 
-        target_next_cursor: Union[None, Unset, str]
+        target_next_cursor: None | str | Unset
         if isinstance(self.target_next_cursor, Unset):
             target_next_cursor = UNSET
         else:
@@ -164,10 +164,10 @@ class JobDetailResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.job_progress import JobProgress
-        from ..models.job_operation_response import JobOperationResponse
-        from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
-        from ..models.operation_recovery import OperationRecovery
+        from ..models.agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse # noqa: PLC0415
+        from ..models.job_operation_response import JobOperationResponse # noqa: PLC0415
+        from ..models.job_progress import JobProgress # noqa: PLC0415
+        from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
         d = dict(src_dict)
         authority_revision = d.pop("authority_revision")
 
@@ -201,7 +201,7 @@ class JobDetailResponse:
         targets = cast(list[str], d.pop("targets"))
 
 
-        def _parse_agent_upgrade_diagnostics(data: object) -> Union['AgentUpgradeDiagnosticsResponse', None, Unset]:
+        def _parse_agent_upgrade_diagnostics(data: object) -> AgentUpgradeDiagnosticsResponse | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -214,24 +214,24 @@ class JobDetailResponse:
 
 
                 return agent_upgrade_diagnostics_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['AgentUpgradeDiagnosticsResponse', None, Unset], data)
+            return cast(AgentUpgradeDiagnosticsResponse | None | Unset, data)
 
         agent_upgrade_diagnostics = _parse_agent_upgrade_diagnostics(d.pop("agent_upgrade_diagnostics", UNSET))
 
 
-        def _parse_operation_next_cursor(data: object) -> Union[None, Unset, str]:
+        def _parse_operation_next_cursor(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         operation_next_cursor = _parse_operation_next_cursor(d.pop("operation_next_cursor", UNSET))
 
 
-        def _parse_recovery(data: object) -> Union['OperationRecovery', None, Unset]:
+        def _parse_recovery(data: object) -> None | OperationRecovery | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -244,29 +244,29 @@ class JobDetailResponse:
 
 
                 return recovery_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['OperationRecovery', None, Unset], data)
+            return cast(None | OperationRecovery | Unset, data)
 
         recovery = _parse_recovery(d.pop("recovery", UNSET))
 
 
-        def _parse_status_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_status_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         status_reason = _parse_status_reason(d.pop("status_reason", UNSET))
 
 
-        def _parse_target_next_cursor(data: object) -> Union[None, Unset, str]:
+        def _parse_target_next_cursor(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         target_next_cursor = _parse_target_next_cursor(d.pop("target_next_cursor", UNSET))
 

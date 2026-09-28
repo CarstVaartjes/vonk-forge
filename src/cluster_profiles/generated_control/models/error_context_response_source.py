@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 ErrorContextResponseSource = Literal['local_io', 'protocol', 'remote_rejection', 'transport', 'unknown']
 
@@ -6,5 +6,5 @@ ERROR_CONTEXT_RESPONSE_SOURCE_VALUES: set[ErrorContextResponseSource] = { 'local
 
 def check_error_context_response_source(value: str) -> ErrorContextResponseSource:
     if value in ERROR_CONTEXT_RESPONSE_SOURCE_VALUES:
-        return cast(ErrorContextResponseSource, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {ERROR_CONTEXT_RESPONSE_SOURCE_VALUES!r}")

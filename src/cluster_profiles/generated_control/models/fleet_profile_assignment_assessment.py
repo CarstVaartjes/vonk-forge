@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -27,7 +29,7 @@ class FleetProfileAssignmentAssessment:
             assignment_id (str):
      """
 
-    assessment: 'RunSwitchAssessment'
+    assessment: RunSwitchAssessment
     assignment_id: str
 
 
@@ -35,7 +37,7 @@ class FleetProfileAssignmentAssessment:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_assessment import RunSwitchAssessment
+        from ..models.run_switch_assessment import RunSwitchAssessment # noqa: PLC0415
         assessment = self.assessment.to_dict()
 
         assignment_id = self.assignment_id
@@ -54,7 +56,7 @@ class FleetProfileAssignmentAssessment:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_assessment import RunSwitchAssessment
+        from ..models.run_switch_assessment import RunSwitchAssessment # noqa: PLC0415
         d = dict(src_dict)
         assessment = RunSwitchAssessment.from_dict(d.pop("assessment"))
 

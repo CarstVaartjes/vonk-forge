@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 ArtifactStorageImpactSparkCoverage = Literal['complete', 'partial', 'unknown']
 
@@ -6,5 +6,5 @@ ARTIFACT_STORAGE_IMPACT_SPARK_COVERAGE_VALUES: set[ArtifactStorageImpactSparkCov
 
 def check_artifact_storage_impact_spark_coverage(value: str) -> ArtifactStorageImpactSparkCoverage:
     if value in ARTIFACT_STORAGE_IMPACT_SPARK_COVERAGE_VALUES:
-        return cast(ArtifactStorageImpactSparkCoverage, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {ARTIFACT_STORAGE_IMPACT_SPARK_COVERAGE_VALUES!r}")

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,7 +12,7 @@ from ..models.run_memory_residual_range_reservation_kind import check_run_memory
 from ..models.run_memory_residual_range_reservation_kind import RunMemoryResidualRangeReservationKind
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 
 
@@ -30,14 +32,14 @@ class RunMemoryResidualRange:
             reservation_kind (RunMemoryResidualRangeReservationKind):
             run_generation (int):
             run_id (str):
-            minimum_bytes (Union[Literal[0], Unset]):  Default: 0.
+            minimum_bytes (Literal[0] | Unset):  Default: 0.
      """
 
     maximum_bytes: int
     reservation_kind: RunMemoryResidualRangeReservationKind
     run_generation: int
     run_id: str
-    minimum_bytes: Union[Literal[0], Unset] = 0
+    minimum_bytes: Literal[0] | Unset = 0
 
 
 
@@ -84,7 +86,7 @@ class RunMemoryResidualRange:
 
         run_id = d.pop("run_id")
 
-        minimum_bytes = cast(Union[Literal[0], Unset] , d.pop("minimum_bytes", UNSET))
+        minimum_bytes = cast(Literal[0] | Unset , d.pop("minimum_bytes", UNSET))
         if minimum_bytes != 0 and not isinstance(minimum_bytes, Unset):
             raise ValueError(f"minimum_bytes must match const 0, got '{minimum_bytes}'")
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TypedDict
 
-import httpx
+import httpx2
 import jwt
 import pytest
 from cryptography import x509
@@ -90,7 +90,7 @@ class _SignRequestBody(TypedDict):
 
 
 class _SignExchange(TypedDict):
-    request: httpx.Request
+    request: httpx2.Request
     body: _SignRequestBody
 
 
@@ -259,7 +259,7 @@ def _provider(
         timeout_seconds=2.0,
         certificate_lifetime_seconds=certificate_lifetime_seconds,
         max_response_bytes=max_response_bytes,
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     return provider, material
 
@@ -295,12 +295,12 @@ def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleName
 
 
 def _success_response(
-    request: httpx.Request,
+    request: httpx2.Request,
     material: _Material,
     seen: list[_SignExchange],
     *,
     serial: int = 1234,
-) -> httpx.Response:
+) -> httpx2.Response:
     body = json.loads(request.content)
     seen.append({"request": request, "body": body})
     leaf = _leaf(body["csr"].encode(), material, serial=serial)
@@ -308,7 +308,7 @@ def _success_response(
     intermediate_pem = (
         material["intermediate"].public_bytes(serialization.Encoding.PEM).decode()
     )
-    return httpx.Response(
+    return httpx2.Response(
         201,
         json={
             "crt": leaf_pem,
@@ -324,7 +324,7 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     seen: list[_SignExchange] = []
     holder: dict[str, _Material] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         return _success_response(request, holder["material"], seen)
 
     provider, material = _provider(tmp_path, handler)
@@ -363,7 +363,7 @@ def test_sign_uses_and_validates_configured_certificate_lifetime(
     seen: list[_SignRequestBody] = []
     holder: dict[str, _Material] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         body = json.loads(request.content)
         seen.append(body)
         leaf = _leaf(
@@ -377,7 +377,7 @@ def test_sign_uses_and_validates_configured_certificate_lifetime(
             .public_bytes(serialization.Encoding.PEM)
             .decode()
         )
-        return httpx.Response(
+        return httpx2.Response(
             201,
             json={
                 "crt": leaf_pem,
@@ -407,7 +407,7 @@ def test_rejects_invalid_configured_certificate_lifetime(
     with pytest.raises(ValueError, match="certificate lifetime"):
         _provider(
             tmp_path,
-            lambda _: httpx.Response(500),
+            lambda _: httpx2.Response(500),
             certificate_lifetime_seconds=lifetime,
         )
 
@@ -416,7 +416,7 @@ def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
     seen: list[_SignExchange] = []
     holder: dict[str, _Material] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         return _success_response(request, holder["material"], seen, serial=5678)
 
     provider, material = _provider(tmp_path, handler)
@@ -441,9 +441,9 @@ def test_revocation_is_authenticated_passive_and_idempotent_in_effect(
 ) -> None:
     seen: list[dict[str, object]] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(json.loads(request.content))
-        return httpx.Response(200, json={"status": "ok"})
+        return httpx2.Response(200, json={"status": "ok"})
 
     provider, _ = _provider(tmp_path, handler)
     provider.revoke_node("5678", NOW)
@@ -476,7 +476,7 @@ def test_revocation_is_authenticated_passive_and_idempotent_in_effect(
 
 def _crl_response(
     material: _Material, *, last_update: datetime, next_update: datetime | None
-) -> httpx.Response:
+) -> httpx2.Response:
     builder = (
         x509.CertificateRevocationListBuilder()
         .issuer_name(material["intermediate"].subject)
@@ -485,7 +485,7 @@ def _crl_response(
     if next_update is not None:
         builder = builder.next_update(next_update)
     crl = builder.sign(material["intermediate_key"], algorithm=None)
-    return httpx.Response(
+    return httpx2.Response(
         200,
         content=crl.public_bytes(serialization.Encoding.PEM),
         headers={"content-type": "application/x-pem-file"},
@@ -495,7 +495,7 @@ def _crl_response(
 def test_revocation_bundle_accepts_current_bounded_signed_crl(tmp_path: Path) -> None:
     holder: dict[str, _Material] = {}
 
-    def handler(_: httpx.Request) -> httpx.Response:
+    def handler(_: httpx2.Request) -> httpx2.Response:
         return _crl_response(
             holder["material"],
             last_update=NOW - timedelta(minutes=1),
@@ -525,7 +525,7 @@ def test_revocation_bundle_rejects_stale_future_expired_or_unbounded_crl(
 ) -> None:
     holder: dict[str, _Material] = {}
 
-    def handler(_: httpx.Request) -> httpx.Response:
+    def handler(_: httpx2.Request) -> httpx2.Response:
         return _crl_response(
             holder["material"], last_update=last_update, next_update=next_update
         )
@@ -562,7 +562,7 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(
 ) -> None:
     holder: dict[str, _Material] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         material = holder["material"]
         body = json.loads(request.content)
         request_pem = body["csr"].encode()
@@ -656,7 +656,7 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(
             chain.append(
                 material["root"].public_bytes(serialization.Encoding.PEM).decode()
             )
-        return httpx.Response(
+        return httpx2.Response(
             201, json={"crt": leaf_pem, "ca": ca_pem, "certChain": chain}
         )
 
@@ -671,11 +671,11 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("HTTPS_PROXY", "http://attacker.invalid:3128")
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def redirect(request: httpx.Request) -> httpx.Response:
+    def redirect(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(
+        return httpx2.Response(
             307, headers={"location": "https://attacker.invalid/sign"}
         )
 
@@ -685,8 +685,8 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
     assert len(requests) == 1 and requests[0].url.host == "step-ca"
     assert "eyJ" not in str(caught.value)
 
-    def oversized(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(201, content=b"{" + b"x" * 2048 + b"}")
+    def oversized(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(201, content=b"{" + b"x" * 2048 + b"}")
 
     bounded, _ = _provider(tmp_path / "bounded", oversized, max_response_bytes=1024)
     with pytest.raises(StepCAError, match="too large"):
@@ -760,11 +760,11 @@ def test_rejects_public_provisioner_key_with_copied_configured_kid(
 
 
 def test_health_probe_is_bounded_get_without_body(tmp_path: Path) -> None:
-    seen: list[httpx.Request] = []
+    seen: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(request)
-        return httpx.Response(200, json={"status": "ok"})
+        return httpx2.Response(200, json={"status": "ok"})
 
     provider, _ = _provider(tmp_path, handler)
     provider.check_health()

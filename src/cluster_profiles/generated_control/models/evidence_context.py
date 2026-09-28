@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.evidence_context_source import check_evidence_context_source
 from ..models.evidence_context_source import EvidenceContextSource
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -32,11 +32,11 @@ class EvidenceContext:
             operation_id (str):
             source (EvidenceContextSource):
             updated_at (str):
-            authority_revision (Union[None, Unset, str]):
-            omitted_node_count (Union[Unset, int]):  Default: 0.
-            payload_digest (Union[None, Unset, str]):
-            plan_digest (Union[None, Unset, str]):
-            rank (Union[None, Unset, int]):
+            authority_revision (None | str | Unset):
+            omitted_node_count (int | Unset):  Default: 0.
+            payload_digest (None | str | Unset):
+            plan_digest (None | str | Unset):
+            rank (int | None | Unset):
      """
 
     attempt: int
@@ -45,11 +45,11 @@ class EvidenceContext:
     operation_id: str
     source: EvidenceContextSource
     updated_at: str
-    authority_revision: Union[None, Unset, str] = UNSET
-    omitted_node_count: Union[Unset, int] = 0
-    payload_digest: Union[None, Unset, str] = UNSET
-    plan_digest: Union[None, Unset, str] = UNSET
-    rank: Union[None, Unset, int] = UNSET
+    authority_revision: None | str | Unset = UNSET
+    omitted_node_count: int | Unset = 0
+    payload_digest: None | str | Unset = UNSET
+    plan_digest: None | str | Unset = UNSET
+    rank: int | None | Unset = UNSET
 
 
 
@@ -70,7 +70,7 @@ class EvidenceContext:
 
         updated_at = self.updated_at
 
-        authority_revision: Union[None, Unset, str]
+        authority_revision: None | str | Unset
         if isinstance(self.authority_revision, Unset):
             authority_revision = UNSET
         else:
@@ -78,19 +78,19 @@ class EvidenceContext:
 
         omitted_node_count = self.omitted_node_count
 
-        payload_digest: Union[None, Unset, str]
+        payload_digest: None | str | Unset
         if isinstance(self.payload_digest, Unset):
             payload_digest = UNSET
         else:
             payload_digest = self.payload_digest
 
-        plan_digest: Union[None, Unset, str]
+        plan_digest: None | str | Unset
         if isinstance(self.plan_digest, Unset):
             plan_digest = UNSET
         else:
             plan_digest = self.plan_digest
 
-        rank: Union[None, Unset, int]
+        rank: int | None | Unset
         if isinstance(self.rank, Unset):
             rank = UNSET
         else:
@@ -141,44 +141,44 @@ class EvidenceContext:
 
         updated_at = d.pop("updated_at")
 
-        def _parse_authority_revision(data: object) -> Union[None, Unset, str]:
+        def _parse_authority_revision(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         authority_revision = _parse_authority_revision(d.pop("authority_revision", UNSET))
 
 
         omitted_node_count = d.pop("omitted_node_count", UNSET)
 
-        def _parse_payload_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_payload_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         payload_digest = _parse_payload_digest(d.pop("payload_digest", UNSET))
 
 
-        def _parse_plan_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_plan_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         plan_digest = _parse_plan_digest(d.pop("plan_digest", UNSET))
 
 
-        def _parse_rank(data: object) -> Union[None, Unset, int]:
+        def _parse_rank(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         rank = _parse_rank(d.pop("rank", UNSET))
 

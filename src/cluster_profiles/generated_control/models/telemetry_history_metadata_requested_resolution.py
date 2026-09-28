@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 TelemetryHistoryMetadataRequestedResolution = Literal['daily', 'fifteen-minute', 'minute', 'raw']
 
@@ -6,5 +6,5 @@ TELEMETRY_HISTORY_METADATA_REQUESTED_RESOLUTION_VALUES: set[TelemetryHistoryMeta
 
 def check_telemetry_history_metadata_requested_resolution(value: str) -> TelemetryHistoryMetadataRequestedResolution:
     if value in TELEMETRY_HISTORY_METADATA_REQUESTED_RESOLUTION_VALUES:
-        return cast(TelemetryHistoryMetadataRequestedResolution, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {TELEMETRY_HISTORY_METADATA_REQUESTED_RESOLUTION_VALUES!r}")

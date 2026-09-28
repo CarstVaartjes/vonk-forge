@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FleetProfileAssignmentInputDesiredState = Literal['installed', 'running']
 
@@ -6,5 +6,5 @@ FLEET_PROFILE_ASSIGNMENT_INPUT_DESIRED_STATE_VALUES: set[FleetProfileAssignmentI
 
 def check_fleet_profile_assignment_input_desired_state(value: str) -> FleetProfileAssignmentInputDesiredState:
     if value in FLEET_PROFILE_ASSIGNMENT_INPUT_DESIRED_STATE_VALUES:
-        return cast(FleetProfileAssignmentInputDesiredState, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FLEET_PROFILE_ASSIGNMENT_INPUT_DESIRED_STATE_VALUES!r}")

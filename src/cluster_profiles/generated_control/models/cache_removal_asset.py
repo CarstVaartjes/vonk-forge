@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -14,8 +16,6 @@ from ..models.cache_removal_asset_kind import CacheRemovalAssetKind
 from ..models.cache_removal_asset_kind import check_cache_removal_asset_kind
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -35,16 +35,16 @@ class CacheRemovalAsset:
             disposition (CacheRemovalAssetDisposition):
             kind (CacheRemovalAssetKind):
             sha256 (str):
-            available_bytes (Union[None, Unset, int]):
-            expected_bytes (Union[None, Unset, int]):
+            available_bytes (int | None | Unset):
+            expected_bytes (int | None | Unset):
      """
 
     availability: CacheRemovalAssetAvailability
     disposition: CacheRemovalAssetDisposition
     kind: CacheRemovalAssetKind
     sha256: str
-    available_bytes: Union[None, Unset, int] = UNSET
-    expected_bytes: Union[None, Unset, int] = UNSET
+    available_bytes: int | None | Unset = UNSET
+    expected_bytes: int | None | Unset = UNSET
 
 
 
@@ -59,13 +59,13 @@ class CacheRemovalAsset:
 
         sha256 = self.sha256
 
-        available_bytes: Union[None, Unset, int]
+        available_bytes: int | None | Unset
         if isinstance(self.available_bytes, Unset):
             available_bytes = UNSET
         else:
             available_bytes = self.available_bytes
 
-        expected_bytes: Union[None, Unset, int]
+        expected_bytes: int | None | Unset
         if isinstance(self.expected_bytes, Unset):
             expected_bytes = UNSET
         else:
@@ -109,22 +109,22 @@ class CacheRemovalAsset:
 
         sha256 = d.pop("sha256")
 
-        def _parse_available_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_available_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         available_bytes = _parse_available_bytes(d.pop("available_bytes", UNSET))
 
 
-        def _parse_expected_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_expected_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         expected_bytes = _parse_expected_bytes(d.pop("expected_bytes", UNSET))
 

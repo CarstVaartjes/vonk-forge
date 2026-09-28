@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,7 +13,6 @@ from ..models.recipe_validation_check_assertions_item import RecipeValidationChe
 from ..models.recipe_validation_check_kind import check_recipe_validation_check_kind
 from ..models.recipe_validation_check_kind import RecipeValidationCheckKind
 from typing import cast
-from typing import cast, Union
 
 if TYPE_CHECKING:
   from ..models.recipe_http_serving_request import RecipeHttpServingRequest
@@ -32,21 +33,21 @@ class RecipeValidationCheck:
             assertions (list[RecipeValidationCheckAssertionsItem]):
             kind (RecipeValidationCheckKind):
             name (str):
-            request (Union['RecipeHttpServingRequest', 'RecipeJobServingRequest']):
+            request (RecipeHttpServingRequest | RecipeJobServingRequest):
      """
 
     assertions: list[RecipeValidationCheckAssertionsItem]
     kind: RecipeValidationCheckKind
     name: str
-    request: Union['RecipeHttpServingRequest', 'RecipeJobServingRequest']
+    request: RecipeHttpServingRequest | RecipeJobServingRequest
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_http_serving_request import RecipeHttpServingRequest
-        from ..models.recipe_job_serving_request import RecipeJobServingRequest
+        from ..models.recipe_http_serving_request import RecipeHttpServingRequest # noqa: PLC0415
+        from ..models.recipe_job_serving_request import RecipeJobServingRequest # noqa: PLC0415
         assertions = []
         for assertions_item_data in self.assertions:
             assertions_item: str = assertions_item_data
@@ -81,8 +82,8 @@ class RecipeValidationCheck:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_http_serving_request import RecipeHttpServingRequest
-        from ..models.recipe_job_serving_request import RecipeJobServingRequest
+        from ..models.recipe_http_serving_request import RecipeHttpServingRequest # noqa: PLC0415
+        from ..models.recipe_job_serving_request import RecipeJobServingRequest # noqa: PLC0415
         d = dict(src_dict)
         assertions = []
         _assertions = d.pop("assertions")
@@ -101,7 +102,7 @@ class RecipeValidationCheck:
 
         name = d.pop("name")
 
-        def _parse_request(data: object) -> Union['RecipeHttpServingRequest', 'RecipeJobServingRequest']:
+        def _parse_request(data: object) -> RecipeHttpServingRequest | RecipeJobServingRequest:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -110,7 +111,7 @@ class RecipeValidationCheck:
 
 
                 return request_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             if not isinstance(data, dict):
                 raise TypeError()

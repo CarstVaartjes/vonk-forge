@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -110,7 +110,7 @@ class _WalkthroughState:
     stop_child: str
     run_child: str
     cache: ModelCacheService
-    cache_http_client: httpx.Client
+    cache_http_client: httpx2.Client
     library: LibraryProjection
     recipe_image_availability: RecipeImageAvailabilityService
     recipe_selector: str
@@ -779,9 +779,9 @@ def _prepare(
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
     runtime_storage = FilesystemRuntimeImageStorage(workspace / "runtime-images")
-    http_client = httpx.Client(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
+    http_client = httpx2.Client(
+        transport=httpx2.MockTransport(
+            lambda request: httpx2.Response(
                 200, content=_PROFILE_MODEL_BYTES, request=request
             )
         )

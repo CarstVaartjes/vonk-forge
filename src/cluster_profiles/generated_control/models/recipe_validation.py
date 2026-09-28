@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -24,20 +26,20 @@ T = TypeVar("T", bound="RecipeValidation")
 class RecipeValidation:
     """
         Attributes:
-            benchmarks (list['RecipeBenchmark']):
+            benchmarks (list[RecipeBenchmark]):
             serving (RecipeServingValidation):
      """
 
-    benchmarks: list['RecipeBenchmark']
-    serving: 'RecipeServingValidation'
+    benchmarks: list[RecipeBenchmark]
+    serving: RecipeServingValidation
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_benchmark import RecipeBenchmark
-        from ..models.recipe_serving_validation import RecipeServingValidation
+        from ..models.recipe_benchmark import RecipeBenchmark # noqa: PLC0415
+        from ..models.recipe_serving_validation import RecipeServingValidation # noqa: PLC0415
         benchmarks = []
         for benchmarks_item_data in self.benchmarks:
             benchmarks_item = benchmarks_item_data.to_dict()
@@ -61,8 +63,8 @@ class RecipeValidation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_benchmark import RecipeBenchmark
-        from ..models.recipe_serving_validation import RecipeServingValidation
+        from ..models.recipe_benchmark import RecipeBenchmark # noqa: PLC0415
+        from ..models.recipe_serving_validation import RecipeServingValidation # noqa: PLC0415
         d = dict(src_dict)
         benchmarks = []
         _benchmarks = d.pop("benchmarks")

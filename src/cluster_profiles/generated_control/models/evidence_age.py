@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,10 +11,7 @@ from ..types import UNSET, Unset
 from ..models.evidence_age_freshness import check_evidence_age_freshness
 from ..models.evidence_age_freshness import EvidenceAgeFreshness
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
@@ -29,15 +28,15 @@ class EvidenceAge:
     """
         Attributes:
             source (str):
-            age_seconds (Union[None, Unset, int]):
-            freshness (Union[Unset, EvidenceAgeFreshness]):  Default: 'unknown'.
-            observed_at (Union[None, Unset, datetime.datetime]):
+            age_seconds (int | None | Unset):
+            freshness (EvidenceAgeFreshness | Unset):  Default: 'unknown'.
+            observed_at (datetime.datetime | None | Unset):
      """
 
     source: str
-    age_seconds: Union[None, Unset, int] = UNSET
-    freshness: Union[Unset, EvidenceAgeFreshness] = 'unknown'
-    observed_at: Union[None, Unset, datetime.datetime] = UNSET
+    age_seconds: int | None | Unset = UNSET
+    freshness: EvidenceAgeFreshness | Unset = 'unknown'
+    observed_at: datetime.datetime | None | Unset = UNSET
 
 
 
@@ -46,18 +45,18 @@ class EvidenceAge:
     def to_dict(self) -> dict[str, Any]:
         source = self.source
 
-        age_seconds: Union[None, Unset, int]
+        age_seconds: int | None | Unset
         if isinstance(self.age_seconds, Unset):
             age_seconds = UNSET
         else:
             age_seconds = self.age_seconds
 
-        freshness: Union[Unset, str] = UNSET
+        freshness: str | Unset = UNSET
         if not isinstance(self.freshness, Unset):
             freshness = self.freshness
 
 
-        observed_at: Union[None, Unset, str]
+        observed_at: None | str | Unset
         if isinstance(self.observed_at, Unset):
             observed_at = UNSET
         elif isinstance(self.observed_at, datetime.datetime):
@@ -87,18 +86,18 @@ class EvidenceAge:
         d = dict(src_dict)
         source = d.pop("source")
 
-        def _parse_age_seconds(data: object) -> Union[None, Unset, int]:
+        def _parse_age_seconds(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         age_seconds = _parse_age_seconds(d.pop("age_seconds", UNSET))
 
 
         _freshness = d.pop("freshness", UNSET)
-        freshness: Union[Unset, EvidenceAgeFreshness]
+        freshness: EvidenceAgeFreshness | Unset
         if isinstance(_freshness,  Unset):
             freshness = UNSET
         else:
@@ -107,7 +106,7 @@ class EvidenceAge:
 
 
 
-        def _parse_observed_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_observed_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -115,14 +114,14 @@ class EvidenceAge:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                observed_at_type_0 = isoparse(data)
+                observed_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return observed_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         observed_at = _parse_observed_at(d.pop("observed_at", UNSET))
 

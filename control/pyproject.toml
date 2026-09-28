@@ -3,26 +3,26 @@ name = "vonk-control"
 version = "0.1.1"
 requires-python = ">=3.14"
 dependencies = [
-  "alembic==1.16.4",
-  "argon2-cffi==25.1.0",
-  "cryptography==46.0.7",
-  "vonk-agent-protocol==3.0.0",
+  "alembic>=1.20.0",
+  "argon2-cffi>=25.1.0",
+  "cryptography>=50.0.1",
+  "vonk-agent-protocol==3.0.1",
   "vonk-forge-public-contracts",
-  "fastapi==0.116.1",
-  "httpx==0.28.1",
-  "jsonschema==4.25.1",
-  "psycopg[binary]==3.3.5",
-  "PyJWT==2.13.0",
-  "PyYAML==6.0.3",
-  "sigstore==4.5.0",
-  "sqlalchemy==2.0.42",
-  "vonk-cluster-profiles==0.1.1",
-  "tomli-w==1.2.0",
-  "uvicorn==0.35.0",
+  "fastapi>=0.141.1",
+  "httpx2>=2.13.1",
+  "jsonschema>=4.26.0",
+  "psycopg[binary]>=3.3.6",
+  "PyJWT>=2.15.0",
+  "PyYAML>=6.0.3",
+  "sigstore>=4.5.0",
+  "sqlalchemy>=2.1.1",
+  "vonk-cluster-profiles>=0.1.1",
+  "tomli-w>=1.2.0",
+  "uvicorn>=0.54.0",
 ]
 
 [tool.uv.sources]
-vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl" }
+vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl" }
 # Editable, so the repository and Compose suites that run in this environment
 # exercise the working tree rather than a snapshot built at sync time.
 vonk-cluster-profiles = { path = "..", editable = true }
@@ -33,17 +33,17 @@ vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-for
 
 # The one locked tool environment for every suite, lint and type check, local
 # and CI alike (docs/testing-and-ci.md). Nothing is added with `uv run --with`
-# or `uvx`. Ruff lives in the root project's dev group: openapi-python-client
-# pins an older ruff for formatting generated code.
+# or `uvx`.
 [dependency-groups]
 dev = [
-    "hatchling==1.31.0",
-    "openapi-python-client==0.26.2",
+    "hatchling>=1.32.4",
+    "openapi-python-client>=0.29.1",
     # The nodejs extra ships Node as a wheel, so pyright never downloads it.
-    "pyright[nodejs]==1.1.408",
-    "pytest==9.1.1",
-    "pytest-timeout==2.4.0",
-    "pytest-xdist==3.8.0",
+    "pyright[nodejs]>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-timeout>=2.4.0",
+    "pytest-xdist>=3.8.0",
+    "ruff>=0.16.9",
 ]
 
 [build-system]

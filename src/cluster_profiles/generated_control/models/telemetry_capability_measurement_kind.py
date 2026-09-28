@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 TelemetryCapabilityMeasurementKind = Literal['configured', 'derived', 'estimated', 'measured']
 
@@ -6,5 +6,5 @@ TELEMETRY_CAPABILITY_MEASUREMENT_KIND_VALUES: set[TelemetryCapabilityMeasurement
 
 def check_telemetry_capability_measurement_kind(value: str) -> TelemetryCapabilityMeasurementKind:
     if value in TELEMETRY_CAPABILITY_MEASUREMENT_KIND_VALUES:
-        return cast(TelemetryCapabilityMeasurementKind, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {TELEMETRY_CAPABILITY_MEASUREMENT_KIND_VALUES!r}")

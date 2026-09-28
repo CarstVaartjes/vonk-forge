@@ -44,7 +44,7 @@ def _wrap(body: str) -> str:
     return (
         "import fcntl\n"
         "import os\n"
-        "import httpx\n"
+        "import httpx2\n"
         "import subprocess\n"
         "import time\n"
         "\n"
@@ -97,14 +97,14 @@ def test_http_process_and_sleep_inside_a_transaction_are_sites() -> None:
             """\
                 with self.sessions.begin() as session:
                     session.add(1)
-                    httpx.get('https://example.invalid/manifest')
+                    httpx2.get('https://example.invalid/manifest')
                     subprocess.run(['skopeo', 'copy'])
                     time.sleep(5)
             """
         )
     )
     assert [detail for _kind, _line, detail in kinds] == [
-        "external call httpx.get",
+        "external call httpx2.get",
         "external call subprocess.run",
         "external call time.sleep",
     ]

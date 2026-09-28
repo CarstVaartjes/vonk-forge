@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,9 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
+from typing import cast
 from typing import Literal, cast
-from typing import Union
 from uuid import UUID
 
 
@@ -40,7 +41,7 @@ class RecipeStartSingleEvidence:
             run_generation (int):
             runtime_arguments_sha256 (str):
             world_size (Literal[1]):
-            model_identity (Union[None, Unset, str]):
+            model_identity (None | str | Unset):
      """
 
     artifact_set_digest: str
@@ -58,7 +59,7 @@ class RecipeStartSingleEvidence:
     run_generation: int
     runtime_arguments_sha256: str
     world_size: Literal[1]
-    model_identity: Union[None, Unset, str] = UNSET
+    model_identity: None | str | Unset = UNSET
 
 
 
@@ -95,7 +96,7 @@ class RecipeStartSingleEvidence:
 
         world_size = self.world_size
 
-        model_identity: Union[None, Unset, str]
+        model_identity: None | str | Unset
         if isinstance(self.model_identity, Unset):
             model_identity = UNSET
         else:
@@ -168,12 +169,12 @@ class RecipeStartSingleEvidence:
         if world_size != 1:
             raise ValueError(f"world_size must match const 1, got '{world_size}'")
 
-        def _parse_model_identity(data: object) -> Union[None, Unset, str]:
+        def _parse_model_identity(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_identity = _parse_model_identity(d.pop("model_identity", UNSET))
 

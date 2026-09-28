@@ -9,7 +9,7 @@ import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -82,23 +82,23 @@ def test_candidate_package_decodes_and_restart_only_reads_index(tmp_path: Path) 
     assert isinstance(package_path, str)
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(request.url.path)
         if request.url.path.endswith("index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/json"},
                 content=json.dumps(index).encode(),
             )
         assert request.url.path.endswith(Path(package_path).name)
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
         )
 
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     snapshot = client.list()
     assert len(snapshot.catalog_entities) == len(
@@ -113,7 +113,7 @@ def test_candidate_package_decodes_and_restart_only_reads_index(tmp_path: Path) 
     restarted = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     restarted.prepare(restarted.list())
     assert calls == ["/v1/recipe-library/index.json"]
@@ -132,19 +132,19 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     )
     index_bytes = json.dumps(index).encode()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200, headers={"content-type": "application/json"}, content=index_bytes
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
         )
 
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     snapshot = client.list()
     item = client.fetch(snapshot.items[0].uri)
@@ -279,9 +279,9 @@ def test_candidate_package_rejects_unsafe_source_path(
     index["recipes"] = [copy.deepcopy(row)]
     index["recipes"][0]["source_path"] = source_path
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.url.path.endswith("index.json")
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"content-type": "application/json"},
             content=json.dumps(index).encode(),
@@ -290,7 +290,7 @@ def test_candidate_package_rejects_unsafe_source_path(
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     with pytest.raises(RecipePackageError, match="invalid"):
         client.list()
@@ -335,21 +335,21 @@ def test_candidate_package_rejects_model_snapshot_digest_mismatch(
     row_package["sha256"] = hashlib.sha256(package).hexdigest()
     row_package["expected_bytes"] = len(package)
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/json"},
                 content=json.dumps(index).encode(),
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
         )
 
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     with pytest.raises(RecipePackageError, match="invalid"):
         client.fetch(client.list().items[0].uri)
@@ -363,19 +363,19 @@ def test_candidate_package_imports_into_canonical_controller_documents(
     index["recipes"] = [row]
     index_bytes = json.dumps(index).encode()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200, headers={"content-type": "application/json"}, content=index_bytes
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
         )
 
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     item = client.fetch(client.list().items[0].uri)
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")

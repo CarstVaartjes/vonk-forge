@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -13,15 +15,12 @@ from ..models.run_switch_progress_state import RunSwitchProgressState
 from ..models.run_switch_progress_subphase_type_0 import check_run_switch_progress_subphase_type_0
 from ..models.run_switch_progress_subphase_type_0 import RunSwitchProgressSubphaseType0
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.run_switch_member_progress import RunSwitchMemberProgress
   from ..models.operation_progress import OperationProgress
+  from ..models.run_switch_member_progress import RunSwitchMemberProgress
 
 
 
@@ -35,40 +34,40 @@ T = TypeVar("T", bound="RunSwitchProgress")
 class RunSwitchProgress:
     """
         Attributes:
-            members (list['RunSwitchMemberProgress']):
-            phase (Union[None, RunSwitchProgressPhaseType0]):
+            members (list[RunSwitchMemberProgress]):
+            phase (None | RunSwitchProgressPhaseType0):
             phase_count (int):
             phase_index (int):
             state (RunSwitchProgressState):
             total_bytes_known (bool):
-            completed_bytes (Union[Unset, int]):  Default: 0.
-            operation (Union['OperationProgress', None, Unset]):
-            start_deadline (Union[None, Unset, datetime.datetime]):
-            startup_budget_seconds (Union[None, Unset, int]):
-            subphase (Union[None, RunSwitchProgressSubphaseType0, Unset]):
-            total_bytes (Union[None, Unset, int]):
+            completed_bytes (int | Unset):  Default: 0.
+            operation (None | OperationProgress | Unset):
+            start_deadline (datetime.datetime | None | Unset):
+            startup_budget_seconds (int | None | Unset):
+            subphase (None | RunSwitchProgressSubphaseType0 | Unset):
+            total_bytes (int | None | Unset):
      """
 
-    members: list['RunSwitchMemberProgress']
-    phase: Union[None, RunSwitchProgressPhaseType0]
+    members: list[RunSwitchMemberProgress]
+    phase: None | RunSwitchProgressPhaseType0
     phase_count: int
     phase_index: int
     state: RunSwitchProgressState
     total_bytes_known: bool
-    completed_bytes: Union[Unset, int] = 0
-    operation: Union['OperationProgress', None, Unset] = UNSET
-    start_deadline: Union[None, Unset, datetime.datetime] = UNSET
-    startup_budget_seconds: Union[None, Unset, int] = UNSET
-    subphase: Union[None, RunSwitchProgressSubphaseType0, Unset] = UNSET
-    total_bytes: Union[None, Unset, int] = UNSET
+    completed_bytes: int | Unset = 0
+    operation: None | OperationProgress | Unset = UNSET
+    start_deadline: datetime.datetime | None | Unset = UNSET
+    startup_budget_seconds: int | None | Unset = UNSET
+    subphase: None | RunSwitchProgressSubphaseType0 | Unset = UNSET
+    total_bytes: int | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_member_progress import RunSwitchMemberProgress
-        from ..models.operation_progress import OperationProgress
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
+        from ..models.run_switch_member_progress import RunSwitchMemberProgress # noqa: PLC0415
         members = []
         for members_item_data in self.members:
             members_item = members_item_data.to_dict()
@@ -76,7 +75,7 @@ class RunSwitchProgress:
 
 
 
-        phase: Union[None, str]
+        phase: None | str
         if isinstance(self.phase, str):
             phase = self.phase
         else:
@@ -92,7 +91,7 @@ class RunSwitchProgress:
 
         completed_bytes = self.completed_bytes
 
-        operation: Union[None, Unset, dict[str, Any]]
+        operation: dict[str, Any] | None | Unset
         if isinstance(self.operation, Unset):
             operation = UNSET
         elif isinstance(self.operation, OperationProgress):
@@ -100,7 +99,7 @@ class RunSwitchProgress:
         else:
             operation = self.operation
 
-        start_deadline: Union[None, Unset, str]
+        start_deadline: None | str | Unset
         if isinstance(self.start_deadline, Unset):
             start_deadline = UNSET
         elif isinstance(self.start_deadline, datetime.datetime):
@@ -108,13 +107,13 @@ class RunSwitchProgress:
         else:
             start_deadline = self.start_deadline
 
-        startup_budget_seconds: Union[None, Unset, int]
+        startup_budget_seconds: int | None | Unset
         if isinstance(self.startup_budget_seconds, Unset):
             startup_budget_seconds = UNSET
         else:
             startup_budget_seconds = self.startup_budget_seconds
 
-        subphase: Union[None, Unset, str]
+        subphase: None | str | Unset
         if isinstance(self.subphase, Unset):
             subphase = UNSET
         elif isinstance(self.subphase, str):
@@ -122,7 +121,7 @@ class RunSwitchProgress:
         else:
             subphase = self.subphase
 
-        total_bytes: Union[None, Unset, int]
+        total_bytes: int | None | Unset
         if isinstance(self.total_bytes, Unset):
             total_bytes = UNSET
         else:
@@ -158,8 +157,8 @@ class RunSwitchProgress:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_member_progress import RunSwitchMemberProgress
-        from ..models.operation_progress import OperationProgress
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
+        from ..models.run_switch_member_progress import RunSwitchMemberProgress # noqa: PLC0415
         d = dict(src_dict)
         members = []
         _members = d.pop("members")
@@ -171,7 +170,7 @@ class RunSwitchProgress:
             members.append(members_item)
 
 
-        def _parse_phase(data: object) -> Union[None, RunSwitchProgressPhaseType0]:
+        def _parse_phase(data: object) -> None | RunSwitchProgressPhaseType0:
             if data is None:
                 return data
             try:
@@ -182,9 +181,9 @@ class RunSwitchProgress:
 
 
                 return phase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchProgressPhaseType0], data)
+            return cast(None | RunSwitchProgressPhaseType0, data)
 
         phase = _parse_phase(d.pop("phase"))
 
@@ -202,7 +201,7 @@ class RunSwitchProgress:
 
         completed_bytes = d.pop("completed_bytes", UNSET)
 
-        def _parse_operation(data: object) -> Union['OperationProgress', None, Unset]:
+        def _parse_operation(data: object) -> None | OperationProgress | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -215,14 +214,14 @@ class RunSwitchProgress:
 
 
                 return operation_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['OperationProgress', None, Unset], data)
+            return cast(None | OperationProgress | Unset, data)
 
         operation = _parse_operation(d.pop("operation", UNSET))
 
 
-        def _parse_start_deadline(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_start_deadline(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -230,29 +229,29 @@ class RunSwitchProgress:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                start_deadline_type_0 = isoparse(data)
+                start_deadline_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return start_deadline_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         start_deadline = _parse_start_deadline(d.pop("start_deadline", UNSET))
 
 
-        def _parse_startup_budget_seconds(data: object) -> Union[None, Unset, int]:
+        def _parse_startup_budget_seconds(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         startup_budget_seconds = _parse_startup_budget_seconds(d.pop("startup_budget_seconds", UNSET))
 
 
-        def _parse_subphase(data: object) -> Union[None, RunSwitchProgressSubphaseType0, Unset]:
+        def _parse_subphase(data: object) -> None | RunSwitchProgressSubphaseType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -265,19 +264,19 @@ class RunSwitchProgress:
 
 
                 return subphase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchProgressSubphaseType0, Unset], data)
+            return cast(None | RunSwitchProgressSubphaseType0 | Unset, data)
 
         subphase = _parse_subphase(d.pop("subphase", UNSET))
 
 
-        def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_total_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         total_bytes = _parse_total_bytes(d.pop("total_bytes", UNSET))
 

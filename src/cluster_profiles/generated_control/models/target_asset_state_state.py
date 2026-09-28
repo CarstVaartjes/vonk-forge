@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 TargetAssetStateState = Literal['failed', 'missing', 'preparing', 'ready', 'unknown', 'unsupported', 'verifying']
 
@@ -6,5 +6,5 @@ TARGET_ASSET_STATE_STATE_VALUES: set[TargetAssetStateState] = { 'failed', 'missi
 
 def check_target_asset_state_state(value: str) -> TargetAssetStateState:
     if value in TARGET_ASSET_STATE_STATE_VALUES:
-        return cast(TargetAssetStateState, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {TARGET_ASSET_STATE_STATE_VALUES!r}")

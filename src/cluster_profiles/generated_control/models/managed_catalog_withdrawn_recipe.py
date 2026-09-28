@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -24,13 +25,13 @@ class ManagedCatalogWithdrawnRecipe:
     """
         Attributes:
             recipe_id (str):
-            recipe_uri (Union[None, Unset, str]):
-            release_version (Union[None, Unset, str]):
+            recipe_uri (None | str | Unset):
+            release_version (None | str | Unset):
      """
 
     recipe_id: str
-    recipe_uri: Union[None, Unset, str] = UNSET
-    release_version: Union[None, Unset, str] = UNSET
+    recipe_uri: None | str | Unset = UNSET
+    release_version: None | str | Unset = UNSET
 
 
 
@@ -39,13 +40,13 @@ class ManagedCatalogWithdrawnRecipe:
     def to_dict(self) -> dict[str, Any]:
         recipe_id = self.recipe_id
 
-        recipe_uri: Union[None, Unset, str]
+        recipe_uri: None | str | Unset
         if isinstance(self.recipe_uri, Unset):
             recipe_uri = UNSET
         else:
             recipe_uri = self.recipe_uri
 
-        release_version: Union[None, Unset, str]
+        release_version: None | str | Unset
         if isinstance(self.release_version, Unset):
             release_version = UNSET
         else:
@@ -71,22 +72,22 @@ class ManagedCatalogWithdrawnRecipe:
         d = dict(src_dict)
         recipe_id = d.pop("recipe_id")
 
-        def _parse_recipe_uri(data: object) -> Union[None, Unset, str]:
+        def _parse_recipe_uri(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         recipe_uri = _parse_recipe_uri(d.pop("recipe_uri", UNSET))
 
 
-        def _parse_release_version(data: object) -> Union[None, Unset, str]:
+        def _parse_release_version(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         release_version = _parse_release_version(d.pop("release_version", UNSET))
 

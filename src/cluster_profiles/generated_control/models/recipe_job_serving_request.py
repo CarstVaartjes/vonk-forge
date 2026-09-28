@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_job_serving_request_input_slots import RecipeJobServingRequestInputSlots
@@ -31,23 +31,23 @@ class RecipeJobServingRequest:
             output_path (Literal['/outputs']):
             output_slot (str):
             transport (Literal['job']):
-            input_path (Union[Literal['/inputs'], None, Unset]):
-            input_slots (Union[Unset, RecipeJobServingRequestInputSlots]):
+            input_path (Literal['/inputs'] | None | Unset):
+            input_slots (RecipeJobServingRequestInputSlots | Unset):
      """
 
     fixture: str
     output_path: Literal['/outputs']
     output_slot: str
     transport: Literal['job']
-    input_path: Union[Literal['/inputs'], None, Unset] = UNSET
-    input_slots: Union[Unset, 'RecipeJobServingRequestInputSlots'] = UNSET
+    input_path: Literal['/inputs'] | None | Unset = UNSET
+    input_slots: RecipeJobServingRequestInputSlots | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_job_serving_request_input_slots import RecipeJobServingRequestInputSlots
+        from ..models.recipe_job_serving_request_input_slots import RecipeJobServingRequestInputSlots # noqa: PLC0415
         fixture = self.fixture
 
         output_path = self.output_path
@@ -56,13 +56,13 @@ class RecipeJobServingRequest:
 
         transport = self.transport
 
-        input_path: Union[Literal['/inputs'], None, Unset]
+        input_path: Literal['/inputs'] | None | Unset
         if isinstance(self.input_path, Unset):
             input_path = UNSET
         else:
             input_path = self.input_path
 
-        input_slots: Union[Unset, dict[str, Any]] = UNSET
+        input_slots: dict[str, Any] | Unset = UNSET
         if not isinstance(self.input_slots, Unset):
             input_slots = self.input_slots.to_dict()
 
@@ -86,7 +86,7 @@ class RecipeJobServingRequest:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_job_serving_request_input_slots import RecipeJobServingRequestInputSlots
+        from ..models.recipe_job_serving_request_input_slots import RecipeJobServingRequestInputSlots # noqa: PLC0415
         d = dict(src_dict)
         fixture = d.pop("fixture")
 
@@ -100,7 +100,7 @@ class RecipeJobServingRequest:
         if transport != 'job':
             raise ValueError(f"transport must match const 'job', got '{transport}'")
 
-        def _parse_input_path(data: object) -> Union[Literal['/inputs'], None, Unset]:
+        def _parse_input_path(data: object) -> Literal['/inputs'] | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -109,13 +109,13 @@ class RecipeJobServingRequest:
             if input_path_type_0 != '/inputs':
                 raise ValueError(f"input_path_type_0 must match const '/inputs', got '{input_path_type_0}'")
             return input_path_type_0
-            return cast(Union[Literal['/inputs'], None, Unset], data)
+            return cast(Literal['/inputs'] | None | Unset, data)
 
         input_path = _parse_input_path(d.pop("input_path", UNSET))
 
 
         _input_slots = d.pop("input_slots", UNSET)
-        input_slots: Union[Unset, RecipeJobServingRequestInputSlots]
+        input_slots: RecipeJobServingRequestInputSlots | Unset
         if isinstance(_input_slots,  Unset):
             input_slots = UNSET
         else:

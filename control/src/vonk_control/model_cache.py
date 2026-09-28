@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import unquote, urljoin, urlsplit
 
-import httpx
+import httpx2
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -1252,7 +1252,7 @@ class ModelCacheService:
         reserve_bytes: int = 10 * 1024**3,
         max_parallel_downloads: int = _DEFAULT_MAX_PARALLEL_DOWNLOADS,
         clock: Callable[[], datetime] | None = None,
-        http_client: httpx.Client | None = None,
+        http_client: httpx2.Client | None = None,
         fixture_sources: bool = False,
         trusted_source_hosts: Sequence[str] = ("huggingface.co",),
         huggingface_token_path: Path | None = None,
@@ -4340,7 +4340,7 @@ class ModelCacheService:
             self._finish_partial(
                 operation_id, set_digest, manifest, str(error) or "download interrupted"
             )
-        except (ModelCacheError, OSError, httpx.HTTPError, ValueError) as error:
+        except (ModelCacheError, OSError, httpx2.HTTPError, ValueError) as error:
             self._finish_failed(operation_id, set_digest, manifest, error)
 
     def _download_one_unique(
@@ -4632,7 +4632,7 @@ class ModelCacheService:
                         # Completion/interruption syncs once; a crash resumes from
                         # the actual retained file length, never a progress counter.
                         observe(received)
-                except (OSError, httpx.HTTPError, ModelCacheError):
+                except (OSError, httpx2.HTTPError, ModelCacheError):
                     # Preserve even a sub-MiB tail when a source fails. Never
                     # publish its byte count until the sync has succeeded.
                     if received > durable_received:
@@ -4640,7 +4640,7 @@ class ModelCacheService:
                     raise
                 if received > durable_received:
                     sync_received()
-        except (OSError, httpx.HTTPError, ModelCacheError) as error:
+        except (OSError, httpx2.HTTPError, ModelCacheError) as error:
             if getattr(error, "code", None) == "model_cache.source_size_mismatch":
                 # The source disagrees with the pin; retained bytes are
                 # untrusted, so the retry starts again from byte zero.
@@ -4655,7 +4655,7 @@ class ModelCacheService:
                 completed_artifacts=completed_artifacts,
             )
             if spec.kind == "github-release.asset" and isinstance(
-                error, httpx.HTTPError
+                error, httpx2.HTTPError
             ):
                 raise ModelCacheStorageError(
                     "model_cache.source_unavailable",
@@ -4861,11 +4861,13 @@ class ModelCacheService:
         owns_client = client is None
         try:
             if client is None:
-                client = httpx.Client(
-                    follow_redirects=False, timeout=httpx.Timeout(30.0), trust_env=False
+                client = httpx2.Client(
+                    follow_redirects=False,
+                    timeout=httpx2.Timeout(30.0),
+                    trust_env=False,
                 )
 
-            def open_range(start: int, end: int) -> httpx.Response:
+            def open_range(start: int, end: int) -> httpx2.Response:
                 headers = {
                     "Range": f"bytes={start}-{end}",
                     "Accept-Encoding": "identity",
@@ -4901,7 +4903,7 @@ class ModelCacheService:
                     completed_artifacts=completed_artifacts,
                 )
             return completed
-        except (OSError, httpx.HTTPError, ValueError, ModelCacheError) as error:
+        except (OSError, httpx2.HTTPError, ValueError, ModelCacheError) as error:
             self._checkpoint_artifact(
                 spec,
                 operation_id=operation_id,
@@ -4913,7 +4915,7 @@ class ModelCacheService:
                 completed_artifacts=completed_artifacts,
             )
             if spec.kind == "github-release.asset" and isinstance(
-                error, httpx.HTTPError
+                error, httpx2.HTTPError
             ):
                 raise ModelCacheStorageError(
                     "model_cache.source_unavailable",
@@ -4961,9 +4963,9 @@ class ModelCacheService:
         client = self._http
         owns_client = client is None
         if client is None:
-            client = httpx.Client(
+            client = httpx2.Client(
                 follow_redirects=False,
-                timeout=httpx.Timeout(30.0),
+                timeout=httpx2.Timeout(30.0),
                 trust_env=False,
             )
         elif not self._fixture_sources and getattr(client, "follow_redirects", False):
@@ -5006,8 +5008,8 @@ class ModelCacheService:
 
     @staticmethod
     def _send_anonymous_github_request(
-        client: httpx.Client, url: str, headers: Mapping[str, str]
-    ) -> httpx.Response:
+        client: httpx2.Client, url: str, headers: Mapping[str, str]
+    ) -> httpx2.Response:
         """Send only these headers, ignoring injected client auth and cookies.
 
         `Client.build_request` merges client headers and the cookie jar. A raw
@@ -5017,7 +5019,7 @@ class ModelCacheService:
 
         request_headers = dict(headers)
         request_headers["User-Agent"] = _GITHUB_USER_AGENT
-        request = httpx.Request("GET", url, headers=request_headers)
+        request = httpx2.Request("GET", url, headers=request_headers)
         return client.send(
             request,
             stream=True,
@@ -5031,15 +5033,15 @@ class ModelCacheService:
         client = self._http
         owns_client = client is None
         if client is None:
-            client = httpx.Client(
+            client = httpx2.Client(
                 follow_redirects=False,
-                timeout=httpx.Timeout(30.0),
+                timeout=httpx2.Timeout(30.0),
                 trust_env=False,
             )
         release_url = (
             f"https://{_GITHUB_API_HOST}/repos/{owner}/{name}/releases/{release_id}"
         )
-        response: httpx.Response | None = None
+        response: httpx2.Response | None = None
         try:
             response = self._send_anonymous_github_request(
                 client,
@@ -5071,7 +5073,7 @@ class ModelCacheService:
                             "GitHub release metadata exceeds the size limit",
                             recovery="inspect",
                         )
-            except httpx.HTTPError as error:
+            except httpx2.HTTPError as error:
                 raise ModelCacheStorageError(
                     "model_cache.source_unavailable",
                     "GitHub release metadata transfer failed",
@@ -5127,7 +5129,7 @@ class ModelCacheService:
                 client.close()
 
     def _raise_github_http_status(
-        self, response: httpx.Response, *, allow_binary: bool
+        self, response: httpx2.Response, *, allow_binary: bool
     ) -> None:
         status = response.status_code
         remaining = response.headers.get("x-ratelimit-remaining")
@@ -5179,7 +5181,7 @@ class ModelCacheService:
 
     @staticmethod
     def _github_error_reports_secondary_rate_limit(
-        response: httpx.Response,
+        response: httpx2.Response,
     ) -> bool:
         """Read only a small typed error body; never persist its message."""
 
@@ -5190,16 +5192,16 @@ class ModelCacheService:
                     return False
                 raw.extend(chunk)
             error = _GitHubErrorMetadata.model_validate_json(raw)
-        except (httpx.HTTPError, TypeError, ValueError, ValidationError):
+        except (httpx2.HTTPError, TypeError, ValueError, ValidationError):
             return False
         return "secondary rate limit" in error.message.casefold()
 
     def _open_github_release_asset(
         self,
-        client: httpx.Client,
+        client: httpx2.Client,
         spec: ArtifactSpec,
         headers: Mapping[str, str],
-    ) -> httpx.Response:
+    ) -> httpx2.Response:
         _github_release_asset_binding(spec)
         self._validate_http_download(spec)
         request_headers = {
@@ -5211,7 +5213,7 @@ class ModelCacheService:
             response = self._send_anonymous_github_request(
                 client, spec.source, request_headers
             )
-        except httpx.HTTPError as error:
+        except httpx2.HTTPError as error:
             raise ModelCacheStorageError(
                 "model_cache.source_unavailable",
                 "GitHub release asset request failed",
@@ -5245,7 +5247,7 @@ class ModelCacheService:
                     if key in {"Range", "Accept-Encoding"}
                 },
             )
-        except httpx.HTTPError as error:
+        except httpx2.HTTPError as error:
             raise ModelCacheStorageError(
                 "model_cache.source_unavailable",
                 "GitHub release asset transfer failed",
@@ -5263,10 +5265,10 @@ class ModelCacheService:
 
     def _open_http_response(
         self,
-        client: httpx.Client,
+        client: httpx2.Client,
         source: str,
         headers: Mapping[str, str],
-    ) -> httpx.Response:
+    ) -> httpx2.Response:
         """Open a pinned source, authenticating only the HF authority.
 
         Hugging Face commonly redirects a resolve URL to a signed CDN URL.
@@ -6175,7 +6177,7 @@ class ModelCacheService:
                     else None
                 ),
             )
-        except (ModelCacheStorageError, httpx.HTTPError, OSError) as error:
+        except (ModelCacheStorageError, httpx2.HTTPError, OSError) as error:
             if _retryable_failure(error):
                 self._finish_failed(
                     operation_id,
@@ -6328,9 +6330,9 @@ class ModelCacheService:
         client = self._http
         owns_client = client is None
         if client is None:
-            client = httpx.Client(
+            client = httpx2.Client(
                 follow_redirects=False,
-                timeout=httpx.Timeout(30.0),
+                timeout=httpx2.Timeout(30.0),
                 trust_env=False,
             )
         try:
@@ -8290,7 +8292,7 @@ class ModelCacheService:
             "error_code": None,
         }
         own_client = self._http is None
-        client = self._http or httpx.Client(timeout=20, follow_redirects=False)
+        client = self._http or httpx2.Client(timeout=20, follow_redirects=False)
         try:
             response = self._open_http_response(
                 client,
@@ -8314,7 +8316,7 @@ class ModelCacheService:
                 latest_revision=latest,
                 status="current" if latest == revision else "update-available",
             )
-        except (ModelCacheError, httpx.HTTPError, ValueError, OSError) as error:
+        except (ModelCacheError, httpx2.HTTPError, ValueError, OSError) as error:
             # Provider failures must not hide accepted catalog updates or
             # expose signed URLs/credentials in the public response.
             result["error_code"] = getattr(

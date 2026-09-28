@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.availability_recovery_action import AvailabilityRecoveryAction
 from ..models.availability_recovery_action import check_availability_recovery_action
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -29,28 +29,28 @@ class AvailabilityOperationFailure:
         Attributes:
             code (str):
             detail (str):
-            artifact_key (Union[None, Unset, str]):
-            free_bytes (Union[None, Unset, int]):
-            log_excerpt (Union[None, Unset, str]):
-            recovery_actions (Union[Unset, list[AvailabilityRecoveryAction]]):
-            required_bytes (Union[None, Unset, int]):
-            retry_after_seconds (Union[None, Unset, int]):
-            retry_time (Union[None, Unset, str]):
-            retryable (Union[Unset, bool]):  Default: False.
-            shortfall_bytes (Union[None, Unset, int]):
+            artifact_key (None | str | Unset):
+            free_bytes (int | None | Unset):
+            log_excerpt (None | str | Unset):
+            recovery_actions (list[AvailabilityRecoveryAction] | Unset):
+            required_bytes (int | None | Unset):
+            retry_after_seconds (int | None | Unset):
+            retry_time (None | str | Unset):
+            retryable (bool | Unset):  Default: False.
+            shortfall_bytes (int | None | Unset):
      """
 
     code: str
     detail: str
-    artifact_key: Union[None, Unset, str] = UNSET
-    free_bytes: Union[None, Unset, int] = UNSET
-    log_excerpt: Union[None, Unset, str] = UNSET
-    recovery_actions: Union[Unset, list[AvailabilityRecoveryAction]] = UNSET
-    required_bytes: Union[None, Unset, int] = UNSET
-    retry_after_seconds: Union[None, Unset, int] = UNSET
-    retry_time: Union[None, Unset, str] = UNSET
-    retryable: Union[Unset, bool] = False
-    shortfall_bytes: Union[None, Unset, int] = UNSET
+    artifact_key: None | str | Unset = UNSET
+    free_bytes: int | None | Unset = UNSET
+    log_excerpt: None | str | Unset = UNSET
+    recovery_actions: list[AvailabilityRecoveryAction] | Unset = UNSET
+    required_bytes: int | None | Unset = UNSET
+    retry_after_seconds: int | None | Unset = UNSET
+    retry_time: None | str | Unset = UNSET
+    retryable: bool | Unset = False
+    shortfall_bytes: int | None | Unset = UNSET
 
 
 
@@ -61,25 +61,25 @@ class AvailabilityOperationFailure:
 
         detail = self.detail
 
-        artifact_key: Union[None, Unset, str]
+        artifact_key: None | str | Unset
         if isinstance(self.artifact_key, Unset):
             artifact_key = UNSET
         else:
             artifact_key = self.artifact_key
 
-        free_bytes: Union[None, Unset, int]
+        free_bytes: int | None | Unset
         if isinstance(self.free_bytes, Unset):
             free_bytes = UNSET
         else:
             free_bytes = self.free_bytes
 
-        log_excerpt: Union[None, Unset, str]
+        log_excerpt: None | str | Unset
         if isinstance(self.log_excerpt, Unset):
             log_excerpt = UNSET
         else:
             log_excerpt = self.log_excerpt
 
-        recovery_actions: Union[Unset, list[str]] = UNSET
+        recovery_actions: list[str] | Unset = UNSET
         if not isinstance(self.recovery_actions, Unset):
             recovery_actions = []
             for recovery_actions_item_data in self.recovery_actions:
@@ -88,19 +88,19 @@ class AvailabilityOperationFailure:
 
 
 
-        required_bytes: Union[None, Unset, int]
+        required_bytes: int | None | Unset
         if isinstance(self.required_bytes, Unset):
             required_bytes = UNSET
         else:
             required_bytes = self.required_bytes
 
-        retry_after_seconds: Union[None, Unset, int]
+        retry_after_seconds: int | None | Unset
         if isinstance(self.retry_after_seconds, Unset):
             retry_after_seconds = UNSET
         else:
             retry_after_seconds = self.retry_after_seconds
 
-        retry_time: Union[None, Unset, str]
+        retry_time: None | str | Unset
         if isinstance(self.retry_time, Unset):
             retry_time = UNSET
         else:
@@ -108,7 +108,7 @@ class AvailabilityOperationFailure:
 
         retryable = self.retryable
 
-        shortfall_bytes: Union[None, Unset, int]
+        shortfall_bytes: int | None | Unset
         if isinstance(self.shortfall_bytes, Unset):
             shortfall_bytes = UNSET
         else:
@@ -151,84 +151,86 @@ class AvailabilityOperationFailure:
 
         detail = d.pop("detail")
 
-        def _parse_artifact_key(data: object) -> Union[None, Unset, str]:
+        def _parse_artifact_key(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         artifact_key = _parse_artifact_key(d.pop("artifact_key", UNSET))
 
 
-        def _parse_free_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_free_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         free_bytes = _parse_free_bytes(d.pop("free_bytes", UNSET))
 
 
-        def _parse_log_excerpt(data: object) -> Union[None, Unset, str]:
+        def _parse_log_excerpt(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         log_excerpt = _parse_log_excerpt(d.pop("log_excerpt", UNSET))
 
 
-        recovery_actions = []
         _recovery_actions = d.pop("recovery_actions", UNSET)
-        for recovery_actions_item_data in (_recovery_actions or []):
-            recovery_actions_item = check_availability_recovery_action(recovery_actions_item_data)
+        recovery_actions: list[AvailabilityRecoveryAction] | Unset = UNSET
+        if _recovery_actions is not UNSET:
+            recovery_actions = []
+            for recovery_actions_item_data in _recovery_actions:
+                recovery_actions_item = check_availability_recovery_action(recovery_actions_item_data)
 
 
 
-            recovery_actions.append(recovery_actions_item)
+                recovery_actions.append(recovery_actions_item)
 
 
-        def _parse_required_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_required_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         required_bytes = _parse_required_bytes(d.pop("required_bytes", UNSET))
 
 
-        def _parse_retry_after_seconds(data: object) -> Union[None, Unset, int]:
+        def _parse_retry_after_seconds(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         retry_after_seconds = _parse_retry_after_seconds(d.pop("retry_after_seconds", UNSET))
 
 
-        def _parse_retry_time(data: object) -> Union[None, Unset, str]:
+        def _parse_retry_time(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         retry_time = _parse_retry_time(d.pop("retry_time", UNSET))
 
 
         retryable = d.pop("retryable", UNSET)
 
-        def _parse_shortfall_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_shortfall_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         shortfall_bytes = _parse_shortfall_bytes(d.pop("shortfall_bytes", UNSET))
 

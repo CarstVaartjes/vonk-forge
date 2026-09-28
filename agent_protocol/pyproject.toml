@@ -1,16 +1,16 @@
 [build-system]
-requires = ["hatchling==1.31.0"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [project]
 name = "vonk-agent-protocol"
-version = "3.0.0"
+version = "3.0.1"
 description = "Versioned, fenced contracts for Vonk Forge agents"
 requires-python = ">=3.14"
-dependencies = ["jsonschema==4.25.1", "pydantic==2.13.4"]
+dependencies = ["jsonschema>=4.26.0", "pydantic>=2.13.5"]
 
 [dependency-groups]
-dev = ["pytest==9.1.1"]
+dev = ["pytest>=9.1.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vonk_agent_protocol"]

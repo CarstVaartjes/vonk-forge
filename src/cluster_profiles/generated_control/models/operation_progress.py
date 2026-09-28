@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.operation_progress_activity_type_0 import check_operation_progress
 from ..models.operation_progress_activity_type_0 import OperationProgressActivityType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.operation_checkpoint import OperationCheckpoint
@@ -31,52 +31,52 @@ class OperationProgress:
 
         Attributes:
             phase (str):
-            activity (Union[None, OperationProgressActivityType0, Unset]):
-            bytes_per_second (Union[None, Unset, float]):
-            checkpoint (Union['OperationCheckpoint', None, Unset]):
-            completed_bytes (Union[Unset, int]):  Default: 0.
-            completed_items (Union[None, Unset, int]):
-            elapsed_seconds (Union[None, Unset, float]):
-            eta_seconds (Union[None, Unset, float]):
-            kind (Union[None, Unset, str]):
-            last_progress_at (Union[None, Unset, str]):
-            members (Union[Unset, list['OperationMemberProgress']]):
-            object_sha256 (Union[None, Unset, str]):
-            observed_at (Union[None, Unset, str]):
-            smoothed_bytes_per_second (Union[None, Unset, float]):
-            total_bytes (Union[None, Unset, int]):
-            total_bytes_known (Union[Unset, bool]):  Default: False.
-            total_items (Union[None, Unset, int]):
+            activity (None | OperationProgressActivityType0 | Unset):
+            bytes_per_second (float | None | Unset):
+            checkpoint (None | OperationCheckpoint | Unset):
+            completed_bytes (int | Unset):  Default: 0.
+            completed_items (int | None | Unset):
+            elapsed_seconds (float | None | Unset):
+            eta_seconds (float | None | Unset):
+            kind (None | str | Unset):
+            last_progress_at (None | str | Unset):
+            members (list[OperationMemberProgress] | Unset):
+            object_sha256 (None | str | Unset):
+            observed_at (None | str | Unset):
+            smoothed_bytes_per_second (float | None | Unset):
+            total_bytes (int | None | Unset):
+            total_bytes_known (bool | Unset):  Default: False.
+            total_items (int | None | Unset):
      """
 
     phase: str
-    activity: Union[None, OperationProgressActivityType0, Unset] = UNSET
-    bytes_per_second: Union[None, Unset, float] = UNSET
-    checkpoint: Union['OperationCheckpoint', None, Unset] = UNSET
-    completed_bytes: Union[Unset, int] = 0
-    completed_items: Union[None, Unset, int] = UNSET
-    elapsed_seconds: Union[None, Unset, float] = UNSET
-    eta_seconds: Union[None, Unset, float] = UNSET
-    kind: Union[None, Unset, str] = UNSET
-    last_progress_at: Union[None, Unset, str] = UNSET
-    members: Union[Unset, list['OperationMemberProgress']] = UNSET
-    object_sha256: Union[None, Unset, str] = UNSET
-    observed_at: Union[None, Unset, str] = UNSET
-    smoothed_bytes_per_second: Union[None, Unset, float] = UNSET
-    total_bytes: Union[None, Unset, int] = UNSET
-    total_bytes_known: Union[Unset, bool] = False
-    total_items: Union[None, Unset, int] = UNSET
+    activity: None | OperationProgressActivityType0 | Unset = UNSET
+    bytes_per_second: float | None | Unset = UNSET
+    checkpoint: None | OperationCheckpoint | Unset = UNSET
+    completed_bytes: int | Unset = 0
+    completed_items: int | None | Unset = UNSET
+    elapsed_seconds: float | None | Unset = UNSET
+    eta_seconds: float | None | Unset = UNSET
+    kind: None | str | Unset = UNSET
+    last_progress_at: None | str | Unset = UNSET
+    members: list[OperationMemberProgress] | Unset = UNSET
+    object_sha256: None | str | Unset = UNSET
+    observed_at: None | str | Unset = UNSET
+    smoothed_bytes_per_second: float | None | Unset = UNSET
+    total_bytes: int | None | Unset = UNSET
+    total_bytes_known: bool | Unset = False
+    total_items: int | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.operation_checkpoint import OperationCheckpoint
-        from ..models.operation_member_progress import OperationMemberProgress
+        from ..models.operation_checkpoint import OperationCheckpoint # noqa: PLC0415
+        from ..models.operation_member_progress import OperationMemberProgress # noqa: PLC0415
         phase = self.phase
 
-        activity: Union[None, Unset, str]
+        activity: None | str | Unset
         if isinstance(self.activity, Unset):
             activity = UNSET
         elif isinstance(self.activity, str):
@@ -84,13 +84,13 @@ class OperationProgress:
         else:
             activity = self.activity
 
-        bytes_per_second: Union[None, Unset, float]
+        bytes_per_second: float | None | Unset
         if isinstance(self.bytes_per_second, Unset):
             bytes_per_second = UNSET
         else:
             bytes_per_second = self.bytes_per_second
 
-        checkpoint: Union[None, Unset, dict[str, Any]]
+        checkpoint: dict[str, Any] | None | Unset
         if isinstance(self.checkpoint, Unset):
             checkpoint = UNSET
         elif isinstance(self.checkpoint, OperationCheckpoint):
@@ -100,37 +100,37 @@ class OperationProgress:
 
         completed_bytes = self.completed_bytes
 
-        completed_items: Union[None, Unset, int]
+        completed_items: int | None | Unset
         if isinstance(self.completed_items, Unset):
             completed_items = UNSET
         else:
             completed_items = self.completed_items
 
-        elapsed_seconds: Union[None, Unset, float]
+        elapsed_seconds: float | None | Unset
         if isinstance(self.elapsed_seconds, Unset):
             elapsed_seconds = UNSET
         else:
             elapsed_seconds = self.elapsed_seconds
 
-        eta_seconds: Union[None, Unset, float]
+        eta_seconds: float | None | Unset
         if isinstance(self.eta_seconds, Unset):
             eta_seconds = UNSET
         else:
             eta_seconds = self.eta_seconds
 
-        kind: Union[None, Unset, str]
+        kind: None | str | Unset
         if isinstance(self.kind, Unset):
             kind = UNSET
         else:
             kind = self.kind
 
-        last_progress_at: Union[None, Unset, str]
+        last_progress_at: None | str | Unset
         if isinstance(self.last_progress_at, Unset):
             last_progress_at = UNSET
         else:
             last_progress_at = self.last_progress_at
 
-        members: Union[Unset, list[dict[str, Any]]] = UNSET
+        members: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.members, Unset):
             members = []
             for members_item_data in self.members:
@@ -139,25 +139,25 @@ class OperationProgress:
 
 
 
-        object_sha256: Union[None, Unset, str]
+        object_sha256: None | str | Unset
         if isinstance(self.object_sha256, Unset):
             object_sha256 = UNSET
         else:
             object_sha256 = self.object_sha256
 
-        observed_at: Union[None, Unset, str]
+        observed_at: None | str | Unset
         if isinstance(self.observed_at, Unset):
             observed_at = UNSET
         else:
             observed_at = self.observed_at
 
-        smoothed_bytes_per_second: Union[None, Unset, float]
+        smoothed_bytes_per_second: float | None | Unset
         if isinstance(self.smoothed_bytes_per_second, Unset):
             smoothed_bytes_per_second = UNSET
         else:
             smoothed_bytes_per_second = self.smoothed_bytes_per_second
 
-        total_bytes: Union[None, Unset, int]
+        total_bytes: int | None | Unset
         if isinstance(self.total_bytes, Unset):
             total_bytes = UNSET
         else:
@@ -165,7 +165,7 @@ class OperationProgress:
 
         total_bytes_known = self.total_bytes_known
 
-        total_items: Union[None, Unset, int]
+        total_items: int | None | Unset
         if isinstance(self.total_items, Unset):
             total_items = UNSET
         else:
@@ -216,12 +216,12 @@ class OperationProgress:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.operation_checkpoint import OperationCheckpoint
-        from ..models.operation_member_progress import OperationMemberProgress
+        from ..models.operation_checkpoint import OperationCheckpoint # noqa: PLC0415
+        from ..models.operation_member_progress import OperationMemberProgress # noqa: PLC0415
         d = dict(src_dict)
         phase = d.pop("phase")
 
-        def _parse_activity(data: object) -> Union[None, OperationProgressActivityType0, Unset]:
+        def _parse_activity(data: object) -> None | OperationProgressActivityType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -234,24 +234,24 @@ class OperationProgress:
 
 
                 return activity_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, OperationProgressActivityType0, Unset], data)
+            return cast(None | OperationProgressActivityType0 | Unset, data)
 
         activity = _parse_activity(d.pop("activity", UNSET))
 
 
-        def _parse_bytes_per_second(data: object) -> Union[None, Unset, float]:
+        def _parse_bytes_per_second(data: object) -> float | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, float], data)
+            return cast(float | None | Unset, data)
 
         bytes_per_second = _parse_bytes_per_second(d.pop("bytes_per_second", UNSET))
 
 
-        def _parse_checkpoint(data: object) -> Union['OperationCheckpoint', None, Unset]:
+        def _parse_checkpoint(data: object) -> None | OperationCheckpoint | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -264,123 +264,125 @@ class OperationProgress:
 
 
                 return checkpoint_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['OperationCheckpoint', None, Unset], data)
+            return cast(None | OperationCheckpoint | Unset, data)
 
         checkpoint = _parse_checkpoint(d.pop("checkpoint", UNSET))
 
 
         completed_bytes = d.pop("completed_bytes", UNSET)
 
-        def _parse_completed_items(data: object) -> Union[None, Unset, int]:
+        def _parse_completed_items(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         completed_items = _parse_completed_items(d.pop("completed_items", UNSET))
 
 
-        def _parse_elapsed_seconds(data: object) -> Union[None, Unset, float]:
+        def _parse_elapsed_seconds(data: object) -> float | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, float], data)
+            return cast(float | None | Unset, data)
 
         elapsed_seconds = _parse_elapsed_seconds(d.pop("elapsed_seconds", UNSET))
 
 
-        def _parse_eta_seconds(data: object) -> Union[None, Unset, float]:
+        def _parse_eta_seconds(data: object) -> float | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, float], data)
+            return cast(float | None | Unset, data)
 
         eta_seconds = _parse_eta_seconds(d.pop("eta_seconds", UNSET))
 
 
-        def _parse_kind(data: object) -> Union[None, Unset, str]:
+        def _parse_kind(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         kind = _parse_kind(d.pop("kind", UNSET))
 
 
-        def _parse_last_progress_at(data: object) -> Union[None, Unset, str]:
+        def _parse_last_progress_at(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         last_progress_at = _parse_last_progress_at(d.pop("last_progress_at", UNSET))
 
 
-        members = []
         _members = d.pop("members", UNSET)
-        for members_item_data in (_members or []):
-            members_item = OperationMemberProgress.from_dict(members_item_data)
+        members: list[OperationMemberProgress] | Unset = UNSET
+        if _members is not UNSET:
+            members = []
+            for members_item_data in _members:
+                members_item = OperationMemberProgress.from_dict(members_item_data)
 
 
 
-            members.append(members_item)
+                members.append(members_item)
 
 
-        def _parse_object_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_object_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         object_sha256 = _parse_object_sha256(d.pop("object_sha256", UNSET))
 
 
-        def _parse_observed_at(data: object) -> Union[None, Unset, str]:
+        def _parse_observed_at(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         observed_at = _parse_observed_at(d.pop("observed_at", UNSET))
 
 
-        def _parse_smoothed_bytes_per_second(data: object) -> Union[None, Unset, float]:
+        def _parse_smoothed_bytes_per_second(data: object) -> float | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, float], data)
+            return cast(float | None | Unset, data)
 
         smoothed_bytes_per_second = _parse_smoothed_bytes_per_second(d.pop("smoothed_bytes_per_second", UNSET))
 
 
-        def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_total_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         total_bytes = _parse_total_bytes(d.pop("total_bytes", UNSET))
 
 
         total_bytes_known = d.pop("total_bytes_known", UNSET)
 
-        def _parse_total_items(data: object) -> Union[None, Unset, int]:
+        def _parse_total_items(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         total_items = _parse_total_items(d.pop("total_items", UNSET))
 

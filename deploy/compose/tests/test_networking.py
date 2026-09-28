@@ -31,7 +31,7 @@ def _rendered() -> dict:
         "LITELLM_DATABASE_URL_FILE": "/dev/null",
         "LITELLM_DATABASE_PASSWORD_FILE": "/dev/null",
         "STEP_CA_IMAGE": "smallstep/step-ca:0.30.2@sha256:" + "1" * 64,
-        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.3",
+        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.5",
         "AGENT_CLIENT_CA_FILE": "/dev/null",
         "AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/dev/null",
         "CONTROLLER_CA_FILE": "/dev/null",

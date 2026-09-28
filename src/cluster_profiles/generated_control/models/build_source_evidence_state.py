@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 BuildSourceEvidenceState = Literal['available', 'missing', 'unknown']
 
@@ -6,5 +6,5 @@ BUILD_SOURCE_EVIDENCE_STATE_VALUES: set[BuildSourceEvidenceState] = { 'available
 
 def check_build_source_evidence_state(value: str) -> BuildSourceEvidenceState:
     if value in BUILD_SOURCE_EVIDENCE_STATE_VALUES:
-        return cast(BuildSourceEvidenceState, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {BUILD_SOURCE_EVIDENCE_STATE_VALUES!r}")

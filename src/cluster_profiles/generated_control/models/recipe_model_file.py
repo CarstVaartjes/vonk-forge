@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -31,7 +33,7 @@ class RecipeModelFile:
 
     file_id: str
     id: str
-    mount: 'RecipeMount'
+    mount: RecipeMount
     roles: list[str]
 
 
@@ -39,7 +41,7 @@ class RecipeModelFile:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_mount import RecipeMount
+        from ..models.recipe_mount import RecipeMount # noqa: PLC0415
         file_id = self.file_id
 
         id = self.id
@@ -66,7 +68,7 @@ class RecipeModelFile:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_mount import RecipeMount
+        from ..models.recipe_mount import RecipeMount # noqa: PLC0415
         d = dict(src_dict)
         file_id = d.pop("file_id")
 

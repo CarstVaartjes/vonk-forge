@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,8 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_definition import FleetProfileDefinition
@@ -27,27 +28,27 @@ class FleetProfileDefinitionView:
     """
         Attributes:
             definition (FleetProfileDefinition): Saved authoring intent, independent of execution and cache projections.
-            id (Union[None, str]):
+            id (None | str):
             number (int):
             revision (int):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    definition: 'FleetProfileDefinition'
-    id: Union[None, str]
+    definition: FleetProfileDefinition
+    id: None | str
     number: int
     revision: int
-    schema_version: Union[Literal[2], Unset] = 2
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_definition import FleetProfileDefinition
+        from ..models.fleet_profile_definition import FleetProfileDefinition # noqa: PLC0415
         definition = self.definition.to_dict()
 
-        id: Union[None, str]
+        id: None | str
         id = self.id
 
         number = self.number
@@ -74,17 +75,17 @@ class FleetProfileDefinitionView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_definition import FleetProfileDefinition
+        from ..models.fleet_profile_definition import FleetProfileDefinition # noqa: PLC0415
         d = dict(src_dict)
         definition = FleetProfileDefinition.from_dict(d.pop("definition"))
 
 
 
 
-        def _parse_id(data: object) -> Union[None, str]:
+        def _parse_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         id = _parse_id(d.pop("id"))
 
@@ -93,7 +94,7 @@ class FleetProfileDefinitionView:
 
         revision = d.pop("revision")
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

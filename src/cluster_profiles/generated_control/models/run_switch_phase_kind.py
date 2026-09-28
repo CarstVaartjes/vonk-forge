@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RunSwitchPhaseKind = Literal['cleanup', 'final_verify', 'prepare', 'start', 'stop', 'transfer', 'uninstall', 'verify']
 
@@ -6,5 +6,5 @@ RUN_SWITCH_PHASE_KIND_VALUES: set[RunSwitchPhaseKind] = { 'cleanup', 'final_veri
 
 def check_run_switch_phase_kind(value: str) -> RunSwitchPhaseKind:
     if value in RUN_SWITCH_PHASE_KIND_VALUES:
-        return cast(RunSwitchPhaseKind, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RUN_SWITCH_PHASE_KIND_VALUES!r}")

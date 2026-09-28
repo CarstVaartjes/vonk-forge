@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.model_artifact_preparation_completeness import check_model_artifac
 from ..models.model_artifact_preparation_completeness import ModelArtifactPreparationCompleteness
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.controller_asset_state import ControllerAssetState
@@ -36,28 +36,28 @@ class ModelArtifactPreparation:
             completeness (ModelArtifactPreparationCompleteness):
             controller (ControllerAssetState): Availability of one immutable asset in Controller/NAS storage.
             model_content_sha256 (str):
-            targets (list['TargetAssetState']):
-            dependency_model_content_sha256 (Union[Unset, list[str]]):
-            recipe_revision_sha256 (Union[None, Unset, str]):
+            targets (list[TargetAssetState]):
+            dependency_model_content_sha256 (list[str] | Unset):
+            recipe_revision_sha256 (None | str | Unset):
      """
 
     artifact_count: int
     artifact_set_bytes: int
     artifact_set_sha256: str
     completeness: ModelArtifactPreparationCompleteness
-    controller: 'ControllerAssetState'
+    controller: ControllerAssetState
     model_content_sha256: str
-    targets: list['TargetAssetState']
-    dependency_model_content_sha256: Union[Unset, list[str]] = UNSET
-    recipe_revision_sha256: Union[None, Unset, str] = UNSET
+    targets: list[TargetAssetState]
+    dependency_model_content_sha256: list[str] | Unset = UNSET
+    recipe_revision_sha256: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.controller_asset_state import ControllerAssetState
-        from ..models.target_asset_state import TargetAssetState
+        from ..models.controller_asset_state import ControllerAssetState # noqa: PLC0415
+        from ..models.target_asset_state import TargetAssetState # noqa: PLC0415
         artifact_count = self.artifact_count
 
         artifact_set_bytes = self.artifact_set_bytes
@@ -77,13 +77,13 @@ class ModelArtifactPreparation:
 
 
 
-        dependency_model_content_sha256: Union[Unset, list[str]] = UNSET
+        dependency_model_content_sha256: list[str] | Unset = UNSET
         if not isinstance(self.dependency_model_content_sha256, Unset):
             dependency_model_content_sha256 = self.dependency_model_content_sha256
 
 
 
-        recipe_revision_sha256: Union[None, Unset, str]
+        recipe_revision_sha256: None | str | Unset
         if isinstance(self.recipe_revision_sha256, Unset):
             recipe_revision_sha256 = UNSET
         else:
@@ -112,8 +112,8 @@ class ModelArtifactPreparation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.controller_asset_state import ControllerAssetState
-        from ..models.target_asset_state import TargetAssetState
+        from ..models.controller_asset_state import ControllerAssetState # noqa: PLC0415
+        from ..models.target_asset_state import TargetAssetState # noqa: PLC0415
         d = dict(src_dict)
         artifact_count = d.pop("artifact_count")
 
@@ -146,12 +146,12 @@ class ModelArtifactPreparation:
         dependency_model_content_sha256 = cast(list[str], d.pop("dependency_model_content_sha256", UNSET))
 
 
-        def _parse_recipe_revision_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_recipe_revision_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         recipe_revision_sha256 = _parse_recipe_revision_sha256(d.pop("recipe_revision_sha256", UNSET))
 

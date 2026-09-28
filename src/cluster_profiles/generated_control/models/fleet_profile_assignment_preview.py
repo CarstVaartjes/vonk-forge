@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -34,7 +36,7 @@ class FleetProfileAssignmentPreview:
             current_state (FleetProfileAssignmentPreviewCurrentState):
             desired_state (FleetProfileAssignmentPreviewDesiredState):
             node_ids (list[str]):
-            reasons (list['FleetProfileReason']):
+            reasons (list[FleetProfileReason]):
             recipe_revision_id (str):
             recipe_title (str):
      """
@@ -44,7 +46,7 @@ class FleetProfileAssignmentPreview:
     current_state: FleetProfileAssignmentPreviewCurrentState
     desired_state: FleetProfileAssignmentPreviewDesiredState
     node_ids: list[str]
-    reasons: list['FleetProfileReason']
+    reasons: list[FleetProfileReason]
     recipe_revision_id: str
     recipe_title: str
 
@@ -53,7 +55,7 @@ class FleetProfileAssignmentPreview:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_reason import FleetProfileReason
+        from ..models.fleet_profile_reason import FleetProfileReason # noqa: PLC0415
         actions = []
         for actions_item_data in self.actions:
             actions_item: str = actions_item_data
@@ -102,7 +104,7 @@ class FleetProfileAssignmentPreview:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_reason import FleetProfileReason
+        from ..models.fleet_profile_reason import FleetProfileReason # noqa: PLC0415
         d = dict(src_dict)
         actions = []
         _actions = d.pop("actions")

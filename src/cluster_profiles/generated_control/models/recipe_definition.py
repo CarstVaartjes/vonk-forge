@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,24 +10,23 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.recipe_job_settings import RecipeJobSettings
-  from ..models.recipe_model_selection import RecipeModelSelection
-  from ..models.recipe_job_interface import RecipeJobInterface
-  from ..models.recipe_identity import RecipeIdentity
-  from ..models.recipe_runtime import RecipeRuntime
   from ..models.recipe_build_execution import RecipeBuildExecution
   from ..models.recipe_embedding_settings import RecipeEmbeddingSettings
   from ..models.recipe_generation_settings import RecipeGenerationSettings
-  from ..models.recipe_provenance import RecipeProvenance
-  from ..models.recipe_topology import RecipeTopology
-  from ..models.recipe_metadata import RecipeMetadata
+  from ..models.recipe_identity import RecipeIdentity
   from ..models.recipe_image_execution import RecipeImageExecution
-  from ..models.recipe_release import RecipeRelease
+  from ..models.recipe_job_interface import RecipeJobInterface
+  from ..models.recipe_job_settings import RecipeJobSettings
+  from ..models.recipe_metadata import RecipeMetadata
+  from ..models.recipe_model_selection import RecipeModelSelection
   from ..models.recipe_open_ai_interface import RecipeOpenAIInterface
+  from ..models.recipe_provenance import RecipeProvenance
+  from ..models.recipe_release import RecipeRelease
+  from ..models.recipe_runtime import RecipeRuntime
+  from ..models.recipe_topology import RecipeTopology
   from ..models.recipe_validation import RecipeValidation
 
 
@@ -41,55 +42,55 @@ class RecipeDefinition:
     """ The sole public recipe authoring contract.
 
         Attributes:
-            execution (Union['RecipeBuildExecution', 'RecipeImageExecution']):
+            execution (RecipeBuildExecution | RecipeImageExecution):
             identity (RecipeIdentity):
-            interfaces (list[Union['RecipeJobInterface', 'RecipeOpenAIInterface']]):
+            interfaces (list[RecipeJobInterface | RecipeOpenAIInterface]):
             metadata (RecipeMetadata):
-            models (list['RecipeModelSelection']):
+            models (list[RecipeModelSelection]):
             provenance (RecipeProvenance):
             release (RecipeRelease):
             runtime (RecipeRuntime):
-            settings (Union['RecipeEmbeddingSettings', 'RecipeGenerationSettings', 'RecipeJobSettings']):
+            settings (RecipeEmbeddingSettings | RecipeGenerationSettings | RecipeJobSettings):
             topology (RecipeTopology):
             validation (RecipeValidation):
-            kind (Union[Literal['recipe'], Unset]):  Default: 'recipe'.
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            kind (Literal['recipe'] | Unset):  Default: 'recipe'.
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    execution: Union['RecipeBuildExecution', 'RecipeImageExecution']
-    identity: 'RecipeIdentity'
-    interfaces: list[Union['RecipeJobInterface', 'RecipeOpenAIInterface']]
-    metadata: 'RecipeMetadata'
-    models: list['RecipeModelSelection']
-    provenance: 'RecipeProvenance'
-    release: 'RecipeRelease'
-    runtime: 'RecipeRuntime'
-    settings: Union['RecipeEmbeddingSettings', 'RecipeGenerationSettings', 'RecipeJobSettings']
-    topology: 'RecipeTopology'
-    validation: 'RecipeValidation'
-    kind: Union[Literal['recipe'], Unset] = 'recipe'
-    schema_version: Union[Literal[2], Unset] = 2
+    execution: RecipeBuildExecution | RecipeImageExecution
+    identity: RecipeIdentity
+    interfaces: list[RecipeJobInterface | RecipeOpenAIInterface]
+    metadata: RecipeMetadata
+    models: list[RecipeModelSelection]
+    provenance: RecipeProvenance
+    release: RecipeRelease
+    runtime: RecipeRuntime
+    settings: RecipeEmbeddingSettings | RecipeGenerationSettings | RecipeJobSettings
+    topology: RecipeTopology
+    validation: RecipeValidation
+    kind: Literal['recipe'] | Unset = 'recipe'
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_job_settings import RecipeJobSettings
-        from ..models.recipe_model_selection import RecipeModelSelection
-        from ..models.recipe_job_interface import RecipeJobInterface
-        from ..models.recipe_identity import RecipeIdentity
-        from ..models.recipe_runtime import RecipeRuntime
-        from ..models.recipe_build_execution import RecipeBuildExecution
-        from ..models.recipe_embedding_settings import RecipeEmbeddingSettings
-        from ..models.recipe_generation_settings import RecipeGenerationSettings
-        from ..models.recipe_provenance import RecipeProvenance
-        from ..models.recipe_topology import RecipeTopology
-        from ..models.recipe_metadata import RecipeMetadata
-        from ..models.recipe_image_execution import RecipeImageExecution
-        from ..models.recipe_release import RecipeRelease
-        from ..models.recipe_open_ai_interface import RecipeOpenAIInterface
-        from ..models.recipe_validation import RecipeValidation
+        from ..models.recipe_build_execution import RecipeBuildExecution # noqa: PLC0415
+        from ..models.recipe_embedding_settings import RecipeEmbeddingSettings # noqa: PLC0415
+        from ..models.recipe_generation_settings import RecipeGenerationSettings # noqa: PLC0415
+        from ..models.recipe_identity import RecipeIdentity # noqa: PLC0415
+        from ..models.recipe_image_execution import RecipeImageExecution # noqa: PLC0415
+        from ..models.recipe_job_interface import RecipeJobInterface # noqa: PLC0415
+        from ..models.recipe_job_settings import RecipeJobSettings # noqa: PLC0415
+        from ..models.recipe_metadata import RecipeMetadata # noqa: PLC0415
+        from ..models.recipe_model_selection import RecipeModelSelection # noqa: PLC0415
+        from ..models.recipe_open_ai_interface import RecipeOpenAIInterface # noqa: PLC0415
+        from ..models.recipe_provenance import RecipeProvenance # noqa: PLC0415
+        from ..models.recipe_release import RecipeRelease # noqa: PLC0415
+        from ..models.recipe_runtime import RecipeRuntime # noqa: PLC0415
+        from ..models.recipe_topology import RecipeTopology # noqa: PLC0415
+        from ..models.recipe_validation import RecipeValidation # noqa: PLC0415
         execution: dict[str, Any]
         if isinstance(self.execution, RecipeImageExecution):
             execution = self.execution.to_dict()
@@ -170,23 +171,23 @@ class RecipeDefinition:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_job_settings import RecipeJobSettings
-        from ..models.recipe_model_selection import RecipeModelSelection
-        from ..models.recipe_job_interface import RecipeJobInterface
-        from ..models.recipe_identity import RecipeIdentity
-        from ..models.recipe_runtime import RecipeRuntime
-        from ..models.recipe_build_execution import RecipeBuildExecution
-        from ..models.recipe_embedding_settings import RecipeEmbeddingSettings
-        from ..models.recipe_generation_settings import RecipeGenerationSettings
-        from ..models.recipe_provenance import RecipeProvenance
-        from ..models.recipe_topology import RecipeTopology
-        from ..models.recipe_metadata import RecipeMetadata
-        from ..models.recipe_image_execution import RecipeImageExecution
-        from ..models.recipe_release import RecipeRelease
-        from ..models.recipe_open_ai_interface import RecipeOpenAIInterface
-        from ..models.recipe_validation import RecipeValidation
+        from ..models.recipe_build_execution import RecipeBuildExecution # noqa: PLC0415
+        from ..models.recipe_embedding_settings import RecipeEmbeddingSettings # noqa: PLC0415
+        from ..models.recipe_generation_settings import RecipeGenerationSettings # noqa: PLC0415
+        from ..models.recipe_identity import RecipeIdentity # noqa: PLC0415
+        from ..models.recipe_image_execution import RecipeImageExecution # noqa: PLC0415
+        from ..models.recipe_job_interface import RecipeJobInterface # noqa: PLC0415
+        from ..models.recipe_job_settings import RecipeJobSettings # noqa: PLC0415
+        from ..models.recipe_metadata import RecipeMetadata # noqa: PLC0415
+        from ..models.recipe_model_selection import RecipeModelSelection # noqa: PLC0415
+        from ..models.recipe_open_ai_interface import RecipeOpenAIInterface # noqa: PLC0415
+        from ..models.recipe_provenance import RecipeProvenance # noqa: PLC0415
+        from ..models.recipe_release import RecipeRelease # noqa: PLC0415
+        from ..models.recipe_runtime import RecipeRuntime # noqa: PLC0415
+        from ..models.recipe_topology import RecipeTopology # noqa: PLC0415
+        from ..models.recipe_validation import RecipeValidation # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_execution(data: object) -> Union['RecipeBuildExecution', 'RecipeImageExecution']:
+        def _parse_execution(data: object) -> RecipeBuildExecution | RecipeImageExecution:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -195,7 +196,7 @@ class RecipeDefinition:
 
 
                 return execution_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             if not isinstance(data, dict):
                 raise TypeError()
@@ -216,7 +217,7 @@ class RecipeDefinition:
         interfaces = []
         _interfaces = d.pop("interfaces")
         for interfaces_item_data in (_interfaces):
-            def _parse_interfaces_item(data: object) -> Union['RecipeJobInterface', 'RecipeOpenAIInterface']:
+            def _parse_interfaces_item(data: object) -> RecipeJobInterface | RecipeOpenAIInterface:
                 try:
                     if not isinstance(data, dict):
                         raise TypeError()
@@ -225,7 +226,7 @@ class RecipeDefinition:
 
 
                     return interfaces_item_type_0
-                except: # noqa: E722
+                except (TypeError, ValueError, AttributeError, KeyError):
                     pass
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -270,7 +271,7 @@ class RecipeDefinition:
 
 
 
-        def _parse_settings(data: object) -> Union['RecipeEmbeddingSettings', 'RecipeGenerationSettings', 'RecipeJobSettings']:
+        def _parse_settings(data: object) -> RecipeEmbeddingSettings | RecipeGenerationSettings | RecipeJobSettings:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -279,7 +280,7 @@ class RecipeDefinition:
 
 
                 return settings_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             try:
                 if not isinstance(data, dict):
@@ -289,7 +290,7 @@ class RecipeDefinition:
 
 
                 return settings_type_1
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
             if not isinstance(data, dict):
                 raise TypeError()
@@ -312,11 +313,11 @@ class RecipeDefinition:
 
 
 
-        kind = cast(Union[Literal['recipe'], Unset] , d.pop("kind", UNSET))
+        kind = cast(Literal['recipe'] | Unset , d.pop("kind", UNSET))
         if kind != 'recipe' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'recipe', got '{kind}'")
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

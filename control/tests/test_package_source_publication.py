@@ -16,7 +16,7 @@ sys.path[:0] = [
     str(ROOT / path)
     for path in ("scripts", "agent_protocol/src", "control/src", "tests/scripts")
 ]
-import httpx
+import httpx2
 import yaml
 from agent_package_source_publication import package_source
 from vonk_control.agent_package_source import load_package_source
@@ -80,11 +80,11 @@ class PackageSourcePublicationTests(unittest.TestCase):
 
             def respond(request):
                 requested.append(request.url.path)
-                return httpx.Response(200, content=raw)
+                return httpx2.Response(200, content=raw)
 
-            with httpx.Client(
+            with httpx2.Client(
                 base_url="https://install.vonkforge.ai",
-                transport=httpx.MockTransport(respond),
+                transport=httpx2.MockTransport(respond),
             ) as client:
                 loaded = load_package_source(
                     client, "dev", source.build_digest, source.package.binary_sha256

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -14,8 +16,6 @@ from ..models.run_switch_phase_subphase_type_0 import check_run_switch_phase_sub
 from ..models.run_switch_phase_subphase_type_0 import RunSwitchPhaseSubphaseType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -34,18 +34,18 @@ class RunSwitchPhase:
             index (int):
             kind (RunSwitchPhaseKind):
             state (RunSwitchPhaseState):
-            node_ids (Union[Unset, list[str]]):
-            operation_digest (Union[None, Unset, str]):
-            subphase (Union[None, RunSwitchPhaseSubphaseType0, Unset]):
+            node_ids (list[str] | Unset):
+            operation_digest (None | str | Unset):
+            subphase (None | RunSwitchPhaseSubphaseType0 | Unset):
      """
 
     detail: str
     index: int
     kind: RunSwitchPhaseKind
     state: RunSwitchPhaseState
-    node_ids: Union[Unset, list[str]] = UNSET
-    operation_digest: Union[None, Unset, str] = UNSET
-    subphase: Union[None, RunSwitchPhaseSubphaseType0, Unset] = UNSET
+    node_ids: list[str] | Unset = UNSET
+    operation_digest: None | str | Unset = UNSET
+    subphase: None | RunSwitchPhaseSubphaseType0 | Unset = UNSET
 
 
 
@@ -60,19 +60,19 @@ class RunSwitchPhase:
 
         state: str = self.state
 
-        node_ids: Union[Unset, list[str]] = UNSET
+        node_ids: list[str] | Unset = UNSET
         if not isinstance(self.node_ids, Unset):
             node_ids = self.node_ids
 
 
 
-        operation_digest: Union[None, Unset, str]
+        operation_digest: None | str | Unset
         if isinstance(self.operation_digest, Unset):
             operation_digest = UNSET
         else:
             operation_digest = self.operation_digest
 
-        subphase: Union[None, Unset, str]
+        subphase: None | str | Unset
         if isinstance(self.subphase, Unset):
             subphase = UNSET
         elif isinstance(self.subphase, str):
@@ -120,17 +120,17 @@ class RunSwitchPhase:
         node_ids = cast(list[str], d.pop("node_ids", UNSET))
 
 
-        def _parse_operation_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_operation_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         operation_digest = _parse_operation_digest(d.pop("operation_digest", UNSET))
 
 
-        def _parse_subphase(data: object) -> Union[None, RunSwitchPhaseSubphaseType0, Unset]:
+        def _parse_subphase(data: object) -> None | RunSwitchPhaseSubphaseType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -143,9 +143,9 @@ class RunSwitchPhase:
 
 
                 return subphase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchPhaseSubphaseType0, Unset], data)
+            return cast(None | RunSwitchPhaseSubphaseType0 | Unset, data)
 
         subphase = _parse_subphase(d.pop("subphase", UNSET))
 

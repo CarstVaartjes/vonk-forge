@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,9 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import Literal, Union, cast
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -28,20 +29,20 @@ class FleetProfileList:
     """
         Attributes:
             generated_at (datetime.datetime):
-            profiles (list['FleetProfileView']):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            profiles (list[FleetProfileView]):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     generated_at: datetime.datetime
-    profiles: list['FleetProfileView']
-    schema_version: Union[Literal[2], Unset] = 2
+    profiles: list[FleetProfileView]
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_view import FleetProfileView
+        from ..models.fleet_profile_view import FleetProfileView # noqa: PLC0415
         generated_at = self.generated_at.isoformat()
 
         profiles = []
@@ -69,9 +70,9 @@ class FleetProfileList:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_view import FleetProfileView
+        from ..models.fleet_profile_view import FleetProfileView # noqa: PLC0415
         d = dict(src_dict)
-        generated_at = isoparse(d.pop("generated_at"))
+        generated_at = datetime.datetime.fromisoformat(d.pop("generated_at"))
 
 
 
@@ -86,7 +87,7 @@ class FleetProfileList:
             profiles.append(profiles_item)
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

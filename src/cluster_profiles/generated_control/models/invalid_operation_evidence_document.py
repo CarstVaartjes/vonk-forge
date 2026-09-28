@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 InvalidOperationEvidenceDocument = Literal['payload', 'result']
 
@@ -6,5 +6,5 @@ INVALID_OPERATION_EVIDENCE_DOCUMENT_VALUES: set[InvalidOperationEvidenceDocument
 
 def check_invalid_operation_evidence_document(value: str) -> InvalidOperationEvidenceDocument:
     if value in INVALID_OPERATION_EVIDENCE_DOCUMENT_VALUES:
-        return cast(InvalidOperationEvidenceDocument, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {INVALID_OPERATION_EVIDENCE_DOCUMENT_VALUES!r}")

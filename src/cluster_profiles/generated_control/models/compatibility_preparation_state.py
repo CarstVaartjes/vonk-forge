@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 CompatibilityPreparationState = Literal['failed', 'missing', 'preparing', 'ready', 'unknown', 'unsupported', 'verifying']
 
@@ -6,5 +6,5 @@ COMPATIBILITY_PREPARATION_STATE_VALUES: set[CompatibilityPreparationState] = { '
 
 def check_compatibility_preparation_state(value: str) -> CompatibilityPreparationState:
     if value in COMPATIBILITY_PREPARATION_STATE_VALUES:
-        return cast(CompatibilityPreparationState, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {COMPATIBILITY_PREPARATION_STATE_VALUES!r}")

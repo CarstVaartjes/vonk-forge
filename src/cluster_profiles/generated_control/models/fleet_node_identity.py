@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -26,13 +27,13 @@ class FleetNodeIdentity:
             display_name (str):
             hostname (str):
             id (str):
-            ip_address (Union[None, Unset, str]):
+            ip_address (None | str | Unset):
      """
 
     display_name: str
     hostname: str
     id: str
-    ip_address: Union[None, Unset, str] = UNSET
+    ip_address: None | str | Unset = UNSET
 
 
 
@@ -45,7 +46,7 @@ class FleetNodeIdentity:
 
         id = self.id
 
-        ip_address: Union[None, Unset, str]
+        ip_address: None | str | Unset
         if isinstance(self.ip_address, Unset):
             ip_address = UNSET
         else:
@@ -75,12 +76,12 @@ class FleetNodeIdentity:
 
         id = d.pop("id")
 
-        def _parse_ip_address(data: object) -> Union[None, Unset, str]:
+        def _parse_ip_address(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         ip_address = _parse_ip_address(d.pop("ip_address", UNSET))
 

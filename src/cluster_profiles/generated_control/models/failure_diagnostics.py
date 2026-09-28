@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,7 +12,7 @@ from ..models.failure_diagnostics_category import check_failure_diagnostics_cate
 from ..models.failure_diagnostics_category import FailureDiagnosticsCategory
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.failure_log_tail import FailureLogTail
@@ -32,34 +34,34 @@ class FailureDiagnostics:
             collected_at (str):
             collector_errors (list[str]):
             phase (str):
-            preflight (list['FailureProperty']):
-            sandbox (list['FailureProperty']):
+            preflight (list[FailureProperty]):
+            sandbox (list[FailureProperty]):
             stderr (FailureLogTail):
             stdout (FailureLogTail):
-            storage (list['FailureProperty']):
-            versions (list['FailureProperty']):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            storage (list[FailureProperty]):
+            versions (list[FailureProperty]):
+            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     category: FailureDiagnosticsCategory
     collected_at: str
     collector_errors: list[str]
     phase: str
-    preflight: list['FailureProperty']
-    sandbox: list['FailureProperty']
-    stderr: 'FailureLogTail'
-    stdout: 'FailureLogTail'
-    storage: list['FailureProperty']
-    versions: list['FailureProperty']
-    schema_version: Union[Literal[1], Unset] = 1
+    preflight: list[FailureProperty]
+    sandbox: list[FailureProperty]
+    stderr: FailureLogTail
+    stdout: FailureLogTail
+    storage: list[FailureProperty]
+    versions: list[FailureProperty]
+    schema_version: Literal[1] | Unset = 1
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.failure_log_tail import FailureLogTail
-        from ..models.failure_property import FailureProperty
+        from ..models.failure_log_tail import FailureLogTail # noqa: PLC0415
+        from ..models.failure_property import FailureProperty # noqa: PLC0415
         category: str = self.category
 
         collected_at = self.collected_at
@@ -128,8 +130,8 @@ class FailureDiagnostics:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.failure_log_tail import FailureLogTail
-        from ..models.failure_property import FailureProperty
+        from ..models.failure_log_tail import FailureLogTail # noqa: PLC0415
+        from ..models.failure_property import FailureProperty # noqa: PLC0415
         d = dict(src_dict)
         category = check_failure_diagnostics_category(d.pop("category"))
 
@@ -193,7 +195,7 @@ class FailureDiagnostics:
             versions.append(versions_item)
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 

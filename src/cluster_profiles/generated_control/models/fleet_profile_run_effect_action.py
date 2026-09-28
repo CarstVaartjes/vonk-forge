@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FleetProfileRunEffectAction = Literal['keep', 'stop']
 
@@ -6,5 +6,5 @@ FLEET_PROFILE_RUN_EFFECT_ACTION_VALUES: set[FleetProfileRunEffectAction] = { 'ke
 
 def check_fleet_profile_run_effect_action(value: str) -> FleetProfileRunEffectAction:
     if value in FLEET_PROFILE_RUN_EFFECT_ACTION_VALUES:
-        return cast(FleetProfileRunEffectAction, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FLEET_PROFILE_RUN_EFFECT_ACTION_VALUES!r}")

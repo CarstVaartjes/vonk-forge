@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,12 +10,11 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.output_limits import OutputLimits
   from ..models.artifact_file_declaration import ArtifactFileDeclaration
   from ..models.artifact_job_create_parameters import ArtifactJobCreateParameters
+  from ..models.output_limits import OutputLimits
 
 
 
@@ -30,31 +31,31 @@ class ArtifactJobCreate:
             interface (str):
             output_limits (OutputLimits):
             timeout_seconds (int):
-            inputs (Union[Unset, list['ArtifactFileDeclaration']]):
-            parameters (Union[Unset, ArtifactJobCreateParameters]):
+            inputs (list[ArtifactFileDeclaration] | Unset):
+            parameters (ArtifactJobCreateParameters | Unset):
      """
 
     interface: str
-    output_limits: 'OutputLimits'
+    output_limits: OutputLimits
     timeout_seconds: int
-    inputs: Union[Unset, list['ArtifactFileDeclaration']] = UNSET
-    parameters: Union[Unset, 'ArtifactJobCreateParameters'] = UNSET
+    inputs: list[ArtifactFileDeclaration] | Unset = UNSET
+    parameters: ArtifactJobCreateParameters | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.output_limits import OutputLimits
-        from ..models.artifact_file_declaration import ArtifactFileDeclaration
-        from ..models.artifact_job_create_parameters import ArtifactJobCreateParameters
+        from ..models.artifact_file_declaration import ArtifactFileDeclaration # noqa: PLC0415
+        from ..models.artifact_job_create_parameters import ArtifactJobCreateParameters # noqa: PLC0415
+        from ..models.output_limits import OutputLimits # noqa: PLC0415
         interface = self.interface
 
         output_limits = self.output_limits.to_dict()
 
         timeout_seconds = self.timeout_seconds
 
-        inputs: Union[Unset, list[dict[str, Any]]] = UNSET
+        inputs: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.inputs, Unset):
             inputs = []
             for inputs_item_data in self.inputs:
@@ -63,7 +64,7 @@ class ArtifactJobCreate:
 
 
 
-        parameters: Union[Unset, dict[str, Any]] = UNSET
+        parameters: dict[str, Any] | Unset = UNSET
         if not isinstance(self.parameters, Unset):
             parameters = self.parameters.to_dict()
 
@@ -86,9 +87,9 @@ class ArtifactJobCreate:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.output_limits import OutputLimits
-        from ..models.artifact_file_declaration import ArtifactFileDeclaration
-        from ..models.artifact_job_create_parameters import ArtifactJobCreateParameters
+        from ..models.artifact_file_declaration import ArtifactFileDeclaration # noqa: PLC0415
+        from ..models.artifact_job_create_parameters import ArtifactJobCreateParameters # noqa: PLC0415
+        from ..models.output_limits import OutputLimits # noqa: PLC0415
         d = dict(src_dict)
         interface = d.pop("interface")
 
@@ -99,18 +100,20 @@ class ArtifactJobCreate:
 
         timeout_seconds = d.pop("timeout_seconds")
 
-        inputs = []
         _inputs = d.pop("inputs", UNSET)
-        for inputs_item_data in (_inputs or []):
-            inputs_item = ArtifactFileDeclaration.from_dict(inputs_item_data)
+        inputs: list[ArtifactFileDeclaration] | Unset = UNSET
+        if _inputs is not UNSET:
+            inputs = []
+            for inputs_item_data in _inputs:
+                inputs_item = ArtifactFileDeclaration.from_dict(inputs_item_data)
 
 
 
-            inputs.append(inputs_item)
+                inputs.append(inputs_item)
 
 
         _parameters = d.pop("parameters", UNSET)
-        parameters: Union[Unset, ArtifactJobCreateParameters]
+        parameters: ArtifactJobCreateParameters | Unset
         if isinstance(_parameters,  Unset):
             parameters = UNSET
         else:

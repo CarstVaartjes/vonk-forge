@@ -11,7 +11,7 @@ from email.message import Message
 from pathlib import Path
 from typing import Self
 
-import httpx
+import httpx2
 import pytest
 
 from cluster_profiles import cli
@@ -645,16 +645,16 @@ def test_generated_transport_rejects_malformed_raw_response(
 
 
 def test_generated_transport_rejects_malformed_request_before_network() -> None:
-    class _CountingTransport(httpx.BaseTransport):
+    class _CountingTransport(httpx2.BaseTransport):
         calls = 0
 
-        def handle_request(self, _request: httpx.Request) -> httpx.Response:
+        def handle_request(self, _request: httpx2.Request) -> httpx2.Response:
             self.calls += 1
             raise AssertionError("malformed request reached the network")
 
     underlying = _CountingTransport()
     transport = _RecordingTransport(underlying)
-    request = httpx.Request(
+    request = httpx2.Request(
         "POST",
         "https://forge.example.test/api/model/qwen-code/download",
         headers={"Content-Type": "application/json"},

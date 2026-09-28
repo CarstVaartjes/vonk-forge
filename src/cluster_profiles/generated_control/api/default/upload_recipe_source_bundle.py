@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -30,11 +31,10 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "put",
-        "url": "/api/catalog/source-bundles/{sha256}".format(sha256=sha256,),
+        "url": "/api/catalog/source-bundles/{sha256}".format(sha256=quote(str(sha256), safe=""),),
     }
 
     _kwargs["content"] = body.payload
-
     headers["Content-Type"] = "application/octet-stream"
 
     _kwargs["headers"] = headers
@@ -42,7 +42,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[CatalogProblem, SourceBundleResponse]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> CatalogProblem | SourceBundleResponse | None:
     if response.status_code == 200:
         response_200 = SourceBundleResponse.from_dict(response.json())
 
@@ -84,7 +84,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[CatalogProblem, SourceBundleResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[CatalogProblem | SourceBundleResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -99,7 +99,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: File,
 
-) -> Response[Union[CatalogProblem, SourceBundleResponse]]:
+) -> Response[CatalogProblem | SourceBundleResponse]:
     """ Upload Source Bundle
 
     Args:
@@ -108,10 +108,10 @@ def sync_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[CatalogProblem, SourceBundleResponse]]
+        Response[CatalogProblem | SourceBundleResponse]
      """
 
 
@@ -133,7 +133,7 @@ def sync(
     client: AuthenticatedClient,
     body: File,
 
-) -> Optional[Union[CatalogProblem, SourceBundleResponse]]:
+) -> CatalogProblem | SourceBundleResponse | None:
     """ Upload Source Bundle
 
     Args:
@@ -142,10 +142,10 @@ def sync(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[CatalogProblem, SourceBundleResponse]
+        CatalogProblem | SourceBundleResponse
      """
 
 
@@ -162,7 +162,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: File,
 
-) -> Response[Union[CatalogProblem, SourceBundleResponse]]:
+) -> Response[CatalogProblem | SourceBundleResponse]:
     """ Upload Source Bundle
 
     Args:
@@ -171,10 +171,10 @@ async def asyncio_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[CatalogProblem, SourceBundleResponse]]
+        Response[CatalogProblem | SourceBundleResponse]
      """
 
 
@@ -196,7 +196,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: File,
 
-) -> Optional[Union[CatalogProblem, SourceBundleResponse]]:
+) -> CatalogProblem | SourceBundleResponse | None:
     """ Upload Source Bundle
 
     Args:
@@ -205,10 +205,10 @@ async def asyncio(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[CatalogProblem, SourceBundleResponse]
+        CatalogProblem | SourceBundleResponse
      """
 
 

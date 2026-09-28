@@ -9,9 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64ct::{Base64, Base64UrlUnpadded, Encoding};
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use pkcs8::LineEnding;
-use rand_core::{OsRng, RngCore};
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
     Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519,
@@ -910,8 +909,7 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
             request.prompt
         ))?;
         if import_path.is_empty() {
-            let signing_key = ed25519_dalek::SigningKey::generate(&mut OsRng);
-            return Ok(canonical_ed25519_pkcs8_pem(&signing_key));
+            return Ok(canonical_ed25519_pkcs8_pem(&generate_ed25519_key()?));
         }
         let pem = read_import_file(Path::new(&import_path), 64 * 1024)?;
         validate_ed25519_private_key(&pem, &request.file)?;
@@ -992,6 +990,18 @@ fn validate_ed25519_private_key(pem: &str, file: &str) -> Result<(), SetupError>
         )));
     }
     Ok(())
+}
+
+fn random_bytes<const N: usize>() -> Result<[u8; N], SetupError> {
+    let mut bytes = [0_u8; N];
+    SystemRandom::new().fill(&mut bytes).map_err(|_| {
+        SetupError::InvalidSecretMaterial("the system random generator failed".to_owned())
+    })?;
+    Ok(bytes)
+}
+
+fn generate_ed25519_key() -> Result<ed25519_dalek::SigningKey, SetupError> {
+    Ok(ed25519_dalek::SigningKey::from_bytes(&random_bytes()?))
 }
 
 fn canonical_ed25519_pkcs8_pem(signing_key: &ed25519_dalek::SigningKey) -> String {
@@ -1162,8 +1172,7 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
             secret_values.push((
                 request.file.clone(),
                 if lab_mode {
-                    let signing_key = ed25519_dalek::SigningKey::generate(&mut OsRng);
-                    canonical_ed25519_pkcs8_pem(&signing_key)
+                    canonical_ed25519_pkcs8_pem(&generate_ed25519_key()?)
                 } else {
                     prompt.ed25519_private_key(request)?
                 },
@@ -1375,16 +1384,13 @@ fn generate_pki<G: SecretGenerator>(
     let plaintext = signing_key
         .to_pkcs8_der()
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    let private_key_info = pkcs8::PrivateKeyInfo::try_from(plaintext.as_bytes())
+    let private_key_info = pkcs8::PrivateKeyInfoRef::try_from(plaintext.as_bytes())
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    let mut salt = [0_u8; 16];
-    let mut initialization_vector = [0_u8; 16];
-    OsRng.fill_bytes(&mut salt);
-    OsRng.fill_bytes(&mut initialization_vector);
-    let encryption = pkcs8::pkcs5::pbes2::Parameters::pbkdf2_sha256_aes256cbc(
+    let salt: [u8; 16] = random_bytes()?;
+    let encryption = pkcs8::pkcs5::pbes2::Parameters::generate_pbkdf2_sha256_aes256cbc(
         600_000,
         &salt,
-        &initialization_vector,
+        random_bytes()?,
     )
     .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
     let encrypted_document = private_key_info
@@ -1507,8 +1513,14 @@ fn pki_hostnames(
 }
 
 fn generate_es256_jwks() -> Result<(PublicJwk, PrivateJwk), SetupError> {
-    let secret = p256::SecretKey::random(&mut OsRng);
-    let point = secret.public_key().to_encoded_point(false);
+    // Rejection sampling: a uniformly random 32-byte string is a valid P-256
+    // scalar except with negligible probability.
+    let secret = loop {
+        if let Ok(secret) = p256::SecretKey::from_slice(&random_bytes::<32>()?) {
+            break secret;
+        }
+    };
+    let point = secret.public_key().to_sec1_point(false);
     let x = Base64UrlUnpadded::encode_string(
         point
             .x()
@@ -1836,7 +1848,7 @@ fn validate_es256_jwks(public: &PublicJwk, private: &PrivateJwk) -> Result<(), S
         .map_err(|_| invalid_pki("private provisioner JWK scalar is invalid"))?;
     let secret = p256::SecretKey::from_slice(&scalar)
         .map_err(|_| invalid_pki("private provisioner JWK scalar is invalid"))?;
-    let point = secret.public_key().to_encoded_point(false);
+    let point = secret.public_key().to_sec1_point(false);
     if Base64UrlUnpadded::encode_string(point.x().ok_or_else(|| invalid_pki("P-256 x is missing"))?)
         != public.x
         || Base64UrlUnpadded::encode_string(

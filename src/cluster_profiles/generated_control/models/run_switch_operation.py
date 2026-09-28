@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -20,13 +22,11 @@ from ..models.run_switch_operation_state import check_run_switch_operation_state
 from ..models.run_switch_operation_state import RunSwitchOperationState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.run_switch_progress import RunSwitchProgress
   from ..models.run_switch_operation_result import RunSwitchOperationResult
+  from ..models.run_switch_progress import RunSwitchProgress
 
 
 
@@ -49,12 +49,12 @@ class RunSwitchOperation:
             progress (RunSwitchProgress):
             request_key (str):
             state (RunSwitchOperationState):
-            cleanup_mode (Union[None, RunSwitchOperationCleanupModeType0, Unset]):
-            current_phase (Union[None, RunSwitchOperationCurrentPhaseType0, Unset]):
-            installation_id (Union[None, Unset, str]):
-            result (Union['RunSwitchOperationResult', None, Unset]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
-            status_reason (Union[None, Unset, str]):
+            cleanup_mode (None | RunSwitchOperationCleanupModeType0 | Unset):
+            current_phase (None | RunSwitchOperationCurrentPhaseType0 | Unset):
+            installation_id (None | str | Unset):
+            result (None | RunSwitchOperationResult | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
+            status_reason (None | str | Unset):
      """
 
     action: RunSwitchOperationAction
@@ -63,23 +63,23 @@ class RunSwitchOperation:
     node_ids: list[str]
     operation_id: str
     plan_digest: str
-    progress: 'RunSwitchProgress'
+    progress: RunSwitchProgress
     request_key: str
     state: RunSwitchOperationState
-    cleanup_mode: Union[None, RunSwitchOperationCleanupModeType0, Unset] = UNSET
-    current_phase: Union[None, RunSwitchOperationCurrentPhaseType0, Unset] = UNSET
-    installation_id: Union[None, Unset, str] = UNSET
-    result: Union['RunSwitchOperationResult', None, Unset] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
-    status_reason: Union[None, Unset, str] = UNSET
+    cleanup_mode: None | RunSwitchOperationCleanupModeType0 | Unset = UNSET
+    current_phase: None | RunSwitchOperationCurrentPhaseType0 | Unset = UNSET
+    installation_id: None | str | Unset = UNSET
+    result: None | RunSwitchOperationResult | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
+    status_reason: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_progress import RunSwitchProgress
-        from ..models.run_switch_operation_result import RunSwitchOperationResult
+        from ..models.run_switch_operation_result import RunSwitchOperationResult # noqa: PLC0415
+        from ..models.run_switch_progress import RunSwitchProgress # noqa: PLC0415
         action: str = self.action
 
         completed_phases = []
@@ -105,7 +105,7 @@ class RunSwitchOperation:
 
         state: str = self.state
 
-        cleanup_mode: Union[None, Unset, str]
+        cleanup_mode: None | str | Unset
         if isinstance(self.cleanup_mode, Unset):
             cleanup_mode = UNSET
         elif isinstance(self.cleanup_mode, str):
@@ -113,7 +113,7 @@ class RunSwitchOperation:
         else:
             cleanup_mode = self.cleanup_mode
 
-        current_phase: Union[None, Unset, str]
+        current_phase: None | str | Unset
         if isinstance(self.current_phase, Unset):
             current_phase = UNSET
         elif isinstance(self.current_phase, str):
@@ -121,13 +121,13 @@ class RunSwitchOperation:
         else:
             current_phase = self.current_phase
 
-        installation_id: Union[None, Unset, str]
+        installation_id: None | str | Unset
         if isinstance(self.installation_id, Unset):
             installation_id = UNSET
         else:
             installation_id = self.installation_id
 
-        result: Union[None, Unset, dict[str, Any]]
+        result: dict[str, Any] | None | Unset
         if isinstance(self.result, Unset):
             result = UNSET
         elif isinstance(self.result, RunSwitchOperationResult):
@@ -137,7 +137,7 @@ class RunSwitchOperation:
 
         schema_version = self.schema_version
 
-        status_reason: Union[None, Unset, str]
+        status_reason: None | str | Unset
         if isinstance(self.status_reason, Unset):
             status_reason = UNSET
         else:
@@ -176,8 +176,8 @@ class RunSwitchOperation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_progress import RunSwitchProgress
-        from ..models.run_switch_operation_result import RunSwitchOperationResult
+        from ..models.run_switch_operation_result import RunSwitchOperationResult # noqa: PLC0415
+        from ..models.run_switch_progress import RunSwitchProgress # noqa: PLC0415
         d = dict(src_dict)
         action = check_run_switch_operation_action(d.pop("action"))
 
@@ -218,7 +218,7 @@ class RunSwitchOperation:
 
 
 
-        def _parse_cleanup_mode(data: object) -> Union[None, RunSwitchOperationCleanupModeType0, Unset]:
+        def _parse_cleanup_mode(data: object) -> None | RunSwitchOperationCleanupModeType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -231,14 +231,14 @@ class RunSwitchOperation:
 
 
                 return cleanup_mode_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchOperationCleanupModeType0, Unset], data)
+            return cast(None | RunSwitchOperationCleanupModeType0 | Unset, data)
 
         cleanup_mode = _parse_cleanup_mode(d.pop("cleanup_mode", UNSET))
 
 
-        def _parse_current_phase(data: object) -> Union[None, RunSwitchOperationCurrentPhaseType0, Unset]:
+        def _parse_current_phase(data: object) -> None | RunSwitchOperationCurrentPhaseType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -251,24 +251,24 @@ class RunSwitchOperation:
 
 
                 return current_phase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchOperationCurrentPhaseType0, Unset], data)
+            return cast(None | RunSwitchOperationCurrentPhaseType0 | Unset, data)
 
         current_phase = _parse_current_phase(d.pop("current_phase", UNSET))
 
 
-        def _parse_installation_id(data: object) -> Union[None, Unset, str]:
+        def _parse_installation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         installation_id = _parse_installation_id(d.pop("installation_id", UNSET))
 
 
-        def _parse_result(data: object) -> Union['RunSwitchOperationResult', None, Unset]:
+        def _parse_result(data: object) -> None | RunSwitchOperationResult | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -281,23 +281,23 @@ class RunSwitchOperation:
 
 
                 return result_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RunSwitchOperationResult', None, Unset], data)
+            return cast(None | RunSwitchOperationResult | Unset, data)
 
         result = _parse_result(d.pop("result", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
-        def _parse_status_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_status_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         status_reason = _parse_status_reason(d.pop("status_reason", UNSET))
 

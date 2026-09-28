@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -25,18 +27,18 @@ class FleetProfileSwitchAdapterResult:
 
         Attributes:
             assignment_ids (list[str]):
-            children (list['FleetProfileSwitchChildState']):
+            children (list[FleetProfileSwitchChildState]):
      """
 
     assignment_ids: list[str]
-    children: list['FleetProfileSwitchChildState']
+    children: list[FleetProfileSwitchChildState]
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState
+        from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState # noqa: PLC0415
         assignment_ids = self.assignment_ids
 
 
@@ -62,7 +64,7 @@ class FleetProfileSwitchAdapterResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState
+        from ..models.fleet_profile_switch_child_state import FleetProfileSwitchChildState # noqa: PLC0415
         d = dict(src_dict)
         assignment_ids = cast(list[str], d.pop("assignment_ids"))
 

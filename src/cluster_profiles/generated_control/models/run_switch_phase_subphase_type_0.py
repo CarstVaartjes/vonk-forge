@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RunSwitchPhaseSubphaseType0 = Literal['container-build', 'model-download', 'runtime-image', 'runtime-install', 'runtime-plan', 'target-copy']
 
@@ -6,5 +6,5 @@ RUN_SWITCH_PHASE_SUBPHASE_TYPE_0_VALUES: set[RunSwitchPhaseSubphaseType0] = { 'c
 
 def check_run_switch_phase_subphase_type_0(value: str) -> RunSwitchPhaseSubphaseType0:
     if value in RUN_SWITCH_PHASE_SUBPHASE_TYPE_0_VALUES:
-        return cast(RunSwitchPhaseSubphaseType0, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RUN_SWITCH_PHASE_SUBPHASE_TYPE_0_VALUES!r}")

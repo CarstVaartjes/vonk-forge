@@ -128,10 +128,8 @@ Every Python suite, lint and type check runs in one locked environment: the
 `control` project with its `dev` dependency group (`control/uv.lock`). It
 contains the root `vonk-cluster-profiles` package (editable), the Controller,
 the locked recipe contracts, pytest and its plugins, the build backend and
-pyright. Nothing is added with `uv run --with` or `uvx`: a new test or tool
-dependency goes into a dependency group and the lock. Ruff is the one
-exception to the shared environment: `openapi-python-client` pins an older ruff,
-so the root project's `dev` group carries the repository's ruff pin.
+pyright and ruff. Nothing is added with `uv run --with` or `uvx`: a new test or
+tool dependency goes into a dependency group and the lock.
 
 Tests never download, build an environment or pull an image. A test that needs
 a wheel builds it with the locked `hatchling` in the running interpreter; one
@@ -248,7 +246,7 @@ Each uses the pinned toolchain.
 export UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache
 
 # Python lint; ruff is the repository's formatting authority too.
-uv run --frozen --only-group dev ruff check .
+uv run --project control --frozen ruff check .
 
 # Python types. Pyright is locked in the control dev group and resolves imports
 # from that same environment.

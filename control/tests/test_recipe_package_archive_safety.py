@@ -24,7 +24,7 @@ import tarfile
 from collections.abc import Callable
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from vonk_control import recipe_packages
 from vonk_control.recipe_packages import (
@@ -136,21 +136,21 @@ def _reject(
     served_row["package"]["expected_bytes"] = len(package)
     served["recipes"] = [served_row]
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/json"},
                 content=_canonical(served),
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
         )
 
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     try:
         with pytest.raises(RecipePackageError) as caught:
