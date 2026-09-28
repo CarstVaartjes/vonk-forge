@@ -62,7 +62,7 @@ from vonk_agent_protocol.host_helper import (
     RecipeReconciliationIdentity,
 )
 from vonk_agent_protocol.telemetry import TelemetryRequest
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import read_recipe
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
 from .auth import (
@@ -1611,17 +1611,12 @@ def install_agent_routes(
                     detail="recipe specification installation authority is stale",
                 )
             try:
-                recipe = RecipeDefinition.model_validate(revision.document)
+                read_recipe(revision.document)
             except (TypeError, ValueError):
                 raise HTTPException(
                     status_code=409,
                     detail="recipe specification installation authority is stale",
                 ) from None
-            if content_sha256(recipe) != revision.content_digest:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification installation authority is stale",
-                )
             try:
                 stored_installation_plan = parse_stored_installation_plan(
                     installation.plan

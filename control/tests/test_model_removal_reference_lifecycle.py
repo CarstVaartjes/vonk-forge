@@ -28,7 +28,7 @@ from vonk_control.models import (
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
-from vonk_forge_contracts import ModelDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from .test_model_cache import _artifact, _canonical_model, _download, _remove_model
 
@@ -50,7 +50,7 @@ def _removal_service(
 def _register_model(sessions: sessionmaker[Session], model: ModelDefinition) -> str:
     now = datetime.now(UTC)
     identity = model.identity
-    digest = content_sha256(model)
+    digest = document_sha256(model.model_dump(mode="json"))
     with sessions.begin() as session:
         document = CatalogDocument(
             kind="model",
@@ -89,7 +89,7 @@ def _seed_model(
     request_key: str,
 ) -> tuple[str, dict[str, object], str]:
     data = b"abc"
-    digest = content_sha256(model)
+    digest = document_sha256(model.model_dump(mode="json"))
     artifact = _artifact(
         tmp_path,
         data,

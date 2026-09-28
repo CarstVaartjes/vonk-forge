@@ -28,7 +28,7 @@ from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalResult,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import content_sha256
+from vonk_forge_contracts import document_sha256
 
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 from .test_recipe_image_availability import (
@@ -61,7 +61,7 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
     codec = TokenCodec(_TOKEN_KEY)
     recipe = _recipe("recipe-image.json")
     revision_id = "rev-cli-rm-263"
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     receipt = _reference_receipt().model_copy(
         update={
             "distribution_publisher": recipe.identity.publisher,

@@ -19,7 +19,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 
 def _drain(cache: ModelCacheService, operation_id: str) -> None:
@@ -67,7 +67,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         for key, value in (("weights-a", b"weights-a"), ("weights-b", b"weights-b"))
     ]
     model = ModelDefinition.model_validate(model_raw)
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
 
     recipe_raw = json.loads(
         files("vonk_forge_contracts")
@@ -102,7 +102,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         library_commit="0" * 40,
         source_path="recipes/synthetic-tiny.json",
         document=recipe.model_dump(mode="json"),
-        expected_content_sha256=content_sha256(recipe),
+        expected_content_sha256=document_sha256(recipe.model_dump(mode="json")),
         dependency_documents=[model.model_dump(mode="json")],
         source_bundle_sha256="c" * 64,
     ).id

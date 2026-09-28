@@ -24,7 +24,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     User,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 NODE_1 = "spk_" + "1" * 32
@@ -60,7 +60,7 @@ def _seed(sessions: sessionmaker) -> None:
     )
     model = ModelDefinition.model_validate(model_document)
     recipe = RecipeDefinition.model_validate(recipe_document)
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
     assert recipe.models[0].model.content_sha256 == model_digest
     with sessions.begin() as session:
         session.add_all(
@@ -141,7 +141,7 @@ def _seed(sessions: sessionmaker) -> None:
                     schema_version=2,
                     state="active",
                     document=recipe.model_dump(mode="json"),
-                    content_digest=content_sha256(recipe),
+                    content_digest=document_sha256(recipe.model_dump(mode="json")),
                     execution_key="b" * 64,
                     created_by="test",
                     created_at=NOW,

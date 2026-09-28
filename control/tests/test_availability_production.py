@@ -52,7 +52,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_recipe_builds import _write_controller_build_receipt
 from .test_recipe_builds import setup as _build_setup
@@ -362,7 +362,7 @@ def test_source_build_without_builder_queues_provisional_parent(
                 schema_version=2,
                 state="active",
                 document=recipe.model_dump(mode="json"),
-                content_digest=content_sha256(recipe),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
                 artifact_key="c" * 64,
                 execution_key="a" * 64,
                 projected={},
@@ -452,7 +452,7 @@ def test_authority_resolves_builds_without_an_open_transaction(
                 schema_version=2,
                 state="active",
                 document=recipe.model_dump(mode="json"),
-                content_digest=content_sha256(recipe),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
                 artifact_key="c" * 64,
                 execution_key="a" * 64,
                 projected={},
@@ -569,7 +569,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
         def resolve(self, _revision_id: str):
             return RecipeBuildResolution(
                 recipe_revision_id=_revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 input_intent_sha256="a" * 64,
                 input_intent={},
@@ -777,7 +777,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
                 schema_version=2,
                 state="active",
                 document=recipe.model_dump(mode="json"),
-                content_digest=content_sha256(recipe),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
                 artifact_key="c" * 64,
                 execution_key="a" * 64,
                 projected={},
@@ -814,7 +814,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
         def resolve(self, revision_id: str):
             return RecipeBuildResolution(
                 recipe_revision_id=revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 input_intent_sha256="a" * 64,
                 input_intent={},
@@ -824,7 +824,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
             return RecipeBuildPlan(
                 build_id="00000000-0000-4000-8000-000000000743",
                 recipe_revision_id=revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 agent_payload={},
                 build_input_sha256="b" * 64,
@@ -1119,7 +1119,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         def resolve(self, _revision_id: str):
             return RecipeBuildResolution(
                 recipe_revision_id=_revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 input_intent_sha256="a" * 64,
                 input_intent={},
@@ -1256,7 +1256,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     model_raw["files"][0]["size_bytes"] = len(model_bytes)
 
     model = ModelDefinition.model_validate(model_raw)
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
     recipe_raw = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-source-build.json")
@@ -1264,7 +1264,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     )
     recipe_raw["models"][0]["model"]["content_sha256"] = model_digest
     recipe = RecipeDefinition.model_validate(recipe_raw)
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     now = datetime.now(UTC)
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -1308,7 +1308,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
         def resolve(self, _revision_id: str):
             return RecipeBuildResolution(
                 recipe_revision_id=_revision_id,
-                recipe_content_sha256=content_sha256(recipe),
+                recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
                 source_bundle_sha256="c" * 64,
                 input_intent_sha256=intent,
                 input_intent={},

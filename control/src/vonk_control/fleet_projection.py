@@ -20,7 +20,7 @@ from vonk_agent_protocol.telemetry import (
     TelemetryRunState,
     TelemetryWorkloadState,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .auth import CursorError
 from .fleet_events import FleetEventDraft, FleetEventRepository
@@ -87,10 +87,9 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
     ):
         return None
     try:
-        recipe = RecipeDefinition.model_validate(revision.document)
+        return read_recipe(revision.document)
     except (TypeError, ValueError):
         return None
-    return recipe if content_sha256(recipe) == revision.content_digest else None
 
 
 def _installation_payload_expectations(plan: object) -> dict[str, int]:

@@ -35,7 +35,7 @@ from vonk_control.recipe_library_types import (
     RecipeLibrarySnapshot,
 )
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -91,7 +91,7 @@ def _item_with_document(
     item: RecipeLibraryItem, document: dict[str, object]
 ) -> RecipeLibraryItem:
     recipe = RecipeDefinition.model_validate(document)
-    digest = content_sha256(recipe)
+    digest = document_sha256(recipe.model_dump(mode="json"))
     return replace(
         item,
         content_sha256=digest,

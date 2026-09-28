@@ -34,7 +34,7 @@ from vonk_control.recipe_image_removal_contract import (
     RecipeCacheRemovalResult,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_removal_review_support import remove_after_review
 from .test_model_removal_reference_lifecycle import (
@@ -99,8 +99,8 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         str(uuid4()),
     )
     assert selected_selector == "vonk-forge/synthetic-tiny-fp16"
-    assert model_digest == content_sha256(selected_model)
-    assert sibling_digest == content_sha256(sibling_model)
+    assert model_digest == document_sha256(selected_model.model_dump(mode="json"))
+    assert sibling_digest == document_sha256(sibling_model.model_dump(mode="json"))
     assert selected_set != sibling_set
 
     shared_object_digest = hashlib.sha256(model_bytes).hexdigest()

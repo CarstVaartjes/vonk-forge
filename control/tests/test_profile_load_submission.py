@@ -37,7 +37,7 @@ from vonk_control.models import (
     ResourceReservation,
     User,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
@@ -448,7 +448,7 @@ def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_inten
                     schema_version=2,
                     state="active",
                     document=document.model_dump(mode="json"),
-                    content_digest=content_sha256(document),
+                    content_digest=document_sha256(document.model_dump(mode="json")),
                     execution_key="d" * 64,
                     created_by="test",
                     created_at=NOW,

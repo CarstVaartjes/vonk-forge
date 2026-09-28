@@ -402,11 +402,11 @@ class ManagedRecipeCatalogSyncService:
                         document=hydrated.document,
                         expected_content_sha256=hydrated.content_sha256,
                         dependency_documents=hydrated.dependencies,
-                        release_version=hydrated.release_history[0].version
-                        if hydrated.release_history
+                        release_version=hydrated.release.version
+                        if hydrated.release
                         else None,
-                        release_released_at=hydrated.release_history[0].released_at
-                        if hydrated.release_history
+                        release_released_at=hydrated.release.released_at
+                        if hydrated.release
                         else None,
                         package_handle=getattr(hydrated, "package_handle", None),
                         package_sha256=getattr(hydrated, "package_sha256", None),

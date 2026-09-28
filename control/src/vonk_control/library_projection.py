@@ -12,7 +12,12 @@ from typing import Literal, cast
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    read_model,
+    read_recipe,
+)
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -208,16 +213,12 @@ def _canonical_document(
     document_type: type[ModelDefinition | RecipeDefinition],
 ) -> ModelDefinition | RecipeDefinition:
     try:
-        document = document_type.model_validate(revision.document)
+        reader = read_model if document_type is ModelDefinition else read_recipe
+        return reader(revision.document)
     except ValidationError as error:
         raise LibraryProjectionError(
             f"active {revision.kind} document is not canonical"
         ) from error
-    if content_sha256(document) != revision.content_digest:
-        raise LibraryProjectionError(
-            f"active {revision.kind} document digest does not match catalog authority"
-        )
-    return document
 
 
 def _canonical_model(revision: CatalogDocumentRevision) -> ModelDefinition:

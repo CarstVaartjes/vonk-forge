@@ -69,7 +69,7 @@ from vonk_control.recipe_stop_payloads import (
     stop_payload_from_job_run,
     stop_payload_from_start,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 NOW = datetime(2036, 7, 1, 12, 0, tzinfo=UTC)
 REQUEST_ID = "10000000-0000-4000-8000-000000000001"
@@ -317,7 +317,7 @@ def runtime_service(
     recipe_raw["identity"].update(publisher="vonk-forge", slug="authority-test")
     recipe = RecipeDefinition.model_validate_json(canonical_message(recipe_raw))
     recipe_document = json.loads(canonical_message(recipe))
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     collective = (
         operation_kind == "recipe.start"
         and operation_payload is not None

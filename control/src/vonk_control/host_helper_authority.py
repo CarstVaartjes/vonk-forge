@@ -44,7 +44,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
     RecipeUninstallPayload,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import read_recipe
 
 from .agent_jobs import (
     _WORKLOAD_INTENT_OPERATIONS,
@@ -730,13 +730,11 @@ class HostRuntimeAuthorityService:
         ):
             raise HostHelperAuthorityError("recipe run observation authority is stale")
         try:
-            recipe = RecipeDefinition.model_validate(revision.document)
+            read_recipe(revision.document)
         except (TypeError, ValueError) as error:
             raise HostHelperAuthorityError(
                 "recipe run observation authority is stale"
             ) from error
-        if content_sha256(recipe) != revision.content_digest:
-            raise HostHelperAuthorityError("recipe run observation authority is stale")
         run_node_ids = tuple(
             session.scalars(
                 select(RunNode.node_id)

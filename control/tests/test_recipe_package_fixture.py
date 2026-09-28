@@ -26,7 +26,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_packages import RecipePackageError, load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -152,7 +152,9 @@ def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
             files[member.name] = stream.read()
     recipe = json.loads(files["recipe.json"])
     recipe["metadata"]["description"] += " (package sync fixture revision)"
-    digest = content_sha256(RecipeDefinition.model_validate(recipe))
+    digest = document_sha256(
+        RecipeDefinition.model_validate(recipe).model_dump(mode="json")
+    )
     files["recipe.json"] = _canonical(recipe) + b"\n"
     manifest = json.loads(files["manifest.json"])
     manifest["recipe_content_sha256"] = digest

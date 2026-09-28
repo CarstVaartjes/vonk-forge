@@ -12,7 +12,7 @@ from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.model_cache import CacheOperationView, ModelCacheService
 from vonk_control.model_cache_contract import ModelCacheRemovalResult
 from vonk_control.models import ModelCacheSet
-from vonk_forge_contracts import ModelDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from .test_model_cache import _artifact, _canonical_model, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (
@@ -36,7 +36,7 @@ def _seed_unrelated_model(
         file_digest=hashlib.sha256(data).hexdigest(),
     )
     selector = _register_model(sessions, model)
-    digest = content_sha256(model)
+    digest = document_sha256(model.model_dump(mode="json"))
     artifact = _artifact(tmp_path, data, model_content_sha256=digest)
     operation = _download(
         service,

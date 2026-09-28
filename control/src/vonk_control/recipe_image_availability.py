@@ -35,7 +35,7 @@ from vonk_agent_protocol import (
     OperationProgress,
     canonical_message,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -508,7 +508,7 @@ def _canonical_recipe(value: object) -> RecipeDefinition:
             "selected recipe is not a canonical RecipeDefinition",
         )
     try:
-        return RecipeDefinition.model_validate(value)
+        return read_recipe(value)
     except Exception as error:
         raise RecipeImageAvailabilityError(
             "recipe_image.recipe_invalid",
@@ -3294,7 +3294,6 @@ class RecipeImageAvailabilityService:
                     recipe_revision_id, force=force
                 )
         recipe = _canonical_recipe(raw_recipe)
-        computed_digest = content_sha256(recipe)
         if not isinstance(runtime, Mapping):
             raise RecipeImageAvailabilityError(
                 "recipe_image.runtime_invalid",
@@ -3320,14 +3319,6 @@ class RecipeImageAvailabilityService:
                     raise RecipeImageAvailabilityError(
                         "recipe_image.recipe_unavailable",
                         "selected recipe revision is unavailable or inactive",
-                    )
-                if revision.content_digest != computed_digest:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.metadata_stale",
-                        "refreshed recipe does not match the selected revision",
-                        retryable=True,
-                        retry_after_seconds=5,
-                        recovery_actions=("retry",),
                     )
                 if effective_execution_key is None:
                     effective_execution_key = revision.execution_key
@@ -3381,14 +3372,14 @@ class RecipeImageAvailabilityService:
                     "kind": OPERATION_KIND,
                     "request": serialize_json_value(intent),
                     "recipe_revision_id": recipe_revision_id,
-                    "recipe_content_sha256": computed_digest,
+                    "recipe_content_sha256": revision.content_digest,
                     "effective_execution_key": effective_execution_key,
                     "model_digest": model_digest,
                     "build_input_sha256": build_input_sha256,
                     "image_identity": image_identity,
                     "identity_key": identity_key,
                     "execution_mode": recipe.execution.mode,
-                    "recipe": recipe.model_dump(mode="json"),
+                    "recipe": dict(revision.document),
                     "runtime": dict(runtime),
                     "force_download": force_download,
                     "force_rebuild": force_rebuild,
@@ -4836,7 +4827,7 @@ class RecipeImageAvailabilityService:
                     }
             self._update_progress(claim, "verify")
             return prepare_runtime_image(
-                recipe,
+                payload["recipe"],
                 runtime=runtime,
                 storage=self._storage,
                 transport=self._transport,
@@ -4848,7 +4839,7 @@ class RecipeImageAvailabilityService:
         total = _known_total(runtime)
         self._update_progress(claim, "download", total_bytes=total)
         receipt = prepare_runtime_image(
-            recipe,
+            payload["recipe"],
             runtime=runtime,
             storage=self._storage,
             transport=self._transport,

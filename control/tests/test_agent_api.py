@@ -91,7 +91,7 @@ from vonk_control.recipe_execution_contract import (
     installation_plan_document,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -176,7 +176,7 @@ def _canonical_recipe_fixture(
     raw["identity"]["slug"] = slug
     recipe = RecipeDefinition.model_validate(raw)
     document = recipe.model_dump(mode="json")
-    return document, content_sha256(recipe)
+    return document, document_sha256(recipe.model_dump(mode="json"))
 
 
 def _compiled_plan_fixture(

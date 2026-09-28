@@ -70,7 +70,7 @@ from vonk_control.runtime_image_preparation import (
     persist_runtime_image_receipt,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_removal_review_support import remove_after_review
 
@@ -999,7 +999,7 @@ def test_build_resolution_reuses_notes_only_revision_when_inputs_match(
         _json_object(document["metadata"])["title"] = "Editorially renamed recipe"
         canonical = RecipeDefinition.model_validate(document)
         document = canonical.model_dump(mode="json")
-        content_digest = content_sha256(canonical)
+        content_digest = document_sha256(canonical.model_dump(mode="json"))
         newer_revision = CatalogDocumentRevision(
             id="notes-revision-" + "1" * 19,
             document_id=current.document_id,
@@ -1102,7 +1102,7 @@ def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
         ]
         canonical = RecipeDefinition.model_validate(document)
         document = canonical.model_dump(mode="json")
-        content_digest = content_sha256(canonical)
+        content_digest = document_sha256(canonical.model_dump(mode="json"))
         newer_revision = CatalogDocumentRevision(
             id="new-revision-" + "1" * 25,
             document_id=current.document_id,

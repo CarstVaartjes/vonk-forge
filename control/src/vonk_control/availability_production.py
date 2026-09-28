@@ -26,7 +26,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .admission_locking import (
     AdmissionLockBusy,
@@ -219,7 +219,7 @@ def build_recipe_image_availability(
                     "selected recipe revision is unavailable or inactive",
                 )
             try:
-                recipe = RecipeDefinition.model_validate(revision.document)
+                recipe = read_recipe(revision.document)
                 entities = resolve_recipe_entities(session, revision.document)
             except Exception as error:
                 raise RecipeImageAvailabilityError(

@@ -36,7 +36,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .preflight_fixtures import record_passing_preflight
 
@@ -87,7 +87,9 @@ def _canonical_catalog_documents(
             "safety_margin_bytes": 10,
         }
     )
-    raw_recipe["models"][0]["model"]["content_sha256"] = content_sha256(model)
+    raw_recipe["models"][0]["model"]["content_sha256"] = document_sha256(
+        model.model_dump(mode="json")
+    )
     return model, RecipeDefinition.model_validate(raw_recipe)
 
 
@@ -104,11 +106,11 @@ def _seed_canonical_catalog(
         recipe_mode=recipe_mode,
         disk_estimates=disk_estimates,
     )
-    model_digest = content_sha256(model)
-    recipe_digest = content_sha256(recipe)
+    model_digest = document_sha256(model.model_dump(mode="json"))
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     model_document = model.model_dump(mode="json")
     stored_model = ModelDefinition.model_validate(model_document)
-    assert content_sha256(stored_model) == model_digest
+    assert document_sha256(stored_model.model_dump(mode="json")) == model_digest
     recipe_document = recipe.model_dump(mode="json")
     stored_recipe = RecipeDefinition.model_validate(recipe_document)
     assert stored_recipe.models[0].model.content_sha256 == model_digest
@@ -203,8 +205,10 @@ def _seed_canonical_catalog(
         stored_model_revision = session.get(CatalogDocumentRevision, MODEL_REVISION_ID)
         assert stored_model_revision is not None
         assert (
-            content_sha256(
-                ModelDefinition.model_validate(stored_model_revision.document)
+            document_sha256(
+                ModelDefinition.model_validate(
+                    stored_model_revision.document
+                ).model_dump(mode="json")
             )
             == stored_model_revision.content_digest
         )

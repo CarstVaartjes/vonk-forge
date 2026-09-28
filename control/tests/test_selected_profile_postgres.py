@@ -23,7 +23,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .test_fleet_profiles import (
     _assessment,
@@ -589,7 +589,7 @@ def test_pending_recipe_head_change_is_rejected_before_workload_fencing(
                 schema_version=2,
                 state="active",
                 document=document.model_dump(mode="json"),
-                content_digest=content_sha256(document),
+                content_digest=document_sha256(document.model_dump(mode="json")),
                 execution_key="d" * 64,
                 created_by="test",
                 created_at=NOW,

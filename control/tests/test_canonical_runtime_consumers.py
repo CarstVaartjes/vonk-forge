@@ -15,7 +15,7 @@ from vonk_control.agent_api import _runtime_image_authorization_matches
 from vonk_control.artifact_jobs import _active_recipe_revision
 from vonk_control.fleet_projection import _canonical_recipe
 from vonk_control.models import CatalogDocumentRevision
-from vonk_forge_contracts import content_sha256
+from vonk_forge_contracts import document_sha256
 
 
 def _document() -> dict[str, object]:
@@ -47,7 +47,7 @@ def _revision(
         schema_version=2,
         state=state,
         document=document,
-        content_digest=digest or content_sha256(recipe),
+        content_digest=digest or document_sha256(recipe.model_dump(mode="json")),
     )
 
 

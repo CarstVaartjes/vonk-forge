@@ -89,51 +89,6 @@ def _digest(value: object) -> str:
     return hashlib.sha256(_canonical_json(value)).hexdigest()
 
 
-def _unwrap(value: object, label: str) -> object:
-    if isinstance(value, (RecipeDefinition, ModelDefinition)):
-        return value
-    document = getattr(value, "document", None)
-    if isinstance(document, Mapping):
-        return document
-    if isinstance(value, Mapping):
-        return value
-    raise HarnessCompileError(f"{label} projection is invalid")
-
-
-def _recipe(value: object) -> RecipeDefinition:
-    if isinstance(value, RecipeDefinition):
-        return value
-    try:
-        raw = _unwrap(value, "recipe")
-        if not isinstance(raw, Mapping):
-            raise TypeError
-        return RecipeDefinition.model_validate(raw)
-    except Exception as error:
-        raise HarnessCompileError(
-            "recipe does not satisfy RecipeDefinition v2"
-        ) from error
-
-
-def _models(values: object) -> tuple[ModelDefinition, ...]:
-    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
-        raise HarnessCompileError("canonical model projections are missing")
-    result: list[ModelDefinition] = []
-    for value in values:
-        if isinstance(value, ModelDefinition):
-            result.append(value)
-            continue
-        try:
-            raw = _unwrap(value, "model")
-            if not isinstance(raw, Mapping):
-                raise TypeError
-            result.append(ModelDefinition.model_validate(raw))
-        except Exception as error:
-            raise HarnessCompileError(
-                "canonical model projection is invalid"
-            ) from error
-    return tuple(result)
-
-
 def _scalar(value: object, label: str) -> str:
     if type(value) is bool:
         rendered = "true" if value else "false"
@@ -344,13 +299,13 @@ def _merge_environment(
 
 
 def _model_mounts(
-    recipe: RecipeDefinition, models: tuple[ModelDefinition, ...], role: str
+    recipe: RecipeDefinition, models: Mapping[str, ModelDefinition], role: str
 ) -> tuple[tuple[dict[str, object], HarnessMount], ...]:
     try:
         validate_recipe_models(recipe, models)
     except ContractResolutionError as error:
         raise HarnessCompileError(str(error)) from error
-    by_identity = {(m.identity.publisher, m.identity.slug): m for m in models}
+    by_identity = {(m.identity.publisher, m.identity.slug): m for m in models.values()}
     selected: list[tuple[dict[str, object], HarnessMount]] = []
     mounts_by_key: dict[tuple[str, str], HarnessMount] = {}
     target_owner: dict[str, str] = {}
@@ -466,7 +421,7 @@ def _harness_security(slug: str, topology: object) -> tuple[tuple[str, ...], boo
 
 def compile_canonical_harness(
     recipe: RecipeDefinition,
-    models: tuple[ModelDefinition, ...],
+    models: Mapping[str, ModelDefinition],
     package: object,
     *,
     role: str,

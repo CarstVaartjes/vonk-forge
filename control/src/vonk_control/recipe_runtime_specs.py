@@ -15,13 +15,19 @@ from collections.abc import Mapping, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.recipe_jobs import MAX_TIMEOUT_SECONDS
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
-from vonk_forge_contracts.recipe import RecipeFabric
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    read_recipe,
+)
+from vonk_forge_contracts.recipe import RecipeTopology
 from vonk_forge_contracts.resolver import (
     ContractResolutionError,
     validate_recipe_package_paths,
 )
 
+from .catalog_revision_contract import read_model_set
 from .harnesses.canonical import compile_canonical_harness
 from .harnesses.common import HarnessCompileError
 from .models import CatalogDocumentRevision
@@ -39,9 +45,9 @@ def recipe_topology(value: object) -> Mapping[str, object]:
     return _recipe(value).topology.model_dump(mode="json")
 
 
-def recipe_fabric(value: object) -> RecipeFabric:
-    """Return the validated fabric projection from a canonical recipe."""
-    return _recipe(value).topology.fabric
+def recipe_fabric(value: object) -> RecipeTopology:
+    """Return the validated topology, whose fabric properties are derived."""
+    return _recipe(value).topology
 
 
 def _recipe(value: object) -> RecipeDefinition:
@@ -51,31 +57,29 @@ def _recipe(value: object) -> RecipeDefinition:
     if not isinstance(raw, Mapping):
         raise RecipeRuntimeSpecError("recipe projection is invalid")
     try:
-        return RecipeDefinition.model_validate(raw)
+        return read_recipe(raw)
     except Exception as error:
         raise RecipeRuntimeSpecError(
             "recipe does not satisfy RecipeDefinition v2"
         ) from error
 
 
-def _models(value: object) -> tuple[ModelDefinition, ...]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise RecipeRuntimeSpecError("canonical model projections are missing")
-    result: list[ModelDefinition] = []
-    for item in value:
-        if isinstance(item, ModelDefinition):
-            result.append(item)
-            continue
-        raw = getattr(item, "document", item)
-        if not isinstance(raw, Mapping):
-            raise RecipeRuntimeSpecError("canonical model projection is invalid")
-        try:
-            result.append(ModelDefinition.model_validate(raw))
-        except Exception as error:
-            raise RecipeRuntimeSpecError(
-                "canonical model projection is invalid"
-            ) from error
-    return tuple(result)
+def _recipe_digest(value: object, resolved: Mapping[str, object]) -> str:
+    digest = resolved.get("recipe_digest")
+    if not isinstance(digest, str):
+        digest = getattr(value, "content_digest", None)
+    if not isinstance(digest, str) and isinstance(value, Mapping):
+        digest = document_sha256(value)
+    if not isinstance(digest, str):
+        raise RecipeRuntimeSpecError("recipe document digest is unavailable")
+    return digest
+
+
+def _models(value: object) -> dict[str, ModelDefinition]:
+    try:
+        return read_model_set(value)
+    except Exception as error:
+        raise RecipeRuntimeSpecError("canonical model projection is invalid") from error
 
 
 def _package(value: object, resolved: Mapping[str, object]) -> object:
@@ -131,22 +135,14 @@ def _package_paths(package: object) -> Sequence[str] | None:
 
 def _resolved_inputs(
     resolved_entities: Mapping[str, object] | None,
-    models: Sequence[ModelDefinition] | None,
+    models: object,
     package_handle: object,
-    parsed: RecipeDefinition,
-) -> tuple[tuple[ModelDefinition, ...], object]:
+) -> tuple[dict[str, ModelDefinition], object]:
     resolved = {} if resolved_entities is None else dict(resolved_entities)
-    allowed = {"recipe", "models", "package_handle"}
+    allowed = {"recipe", "recipe_digest", "models", "package_handle"}
     unknown = set(resolved) - allowed
     if unknown:
         raise RecipeRuntimeSpecError("resolved inputs contain retired authorities")
-    resolved_recipe = resolved.get("recipe")
-    if resolved_recipe is not None:
-        candidate = _recipe(resolved_recipe)
-        if content_sha256(candidate) != content_sha256(parsed):
-            raise RecipeRuntimeSpecError(
-                "resolved recipe projection does not match the candidate"
-            )
     supplied_models = models if models is not None else resolved.get("models")
     return _models(supplied_models), _package(package_handle, resolved)
 
@@ -158,8 +154,9 @@ def compile_runtime_spec(
     role: str | None = None,
     rank: int | None = None,
     *,
-    models: Sequence[ModelDefinition] | None = None,
+    models: object = None,
     package_handle: object = None,
+    recipe_digest: str | None = None,
 ) -> dict[str, object]:
     """Compile one canonical recipe role into a secure runtime transport.
 
@@ -175,8 +172,9 @@ def compile_runtime_spec(
     if type(rank) is not int or isinstance(rank, bool) or rank < 0:
         raise RecipeRuntimeSpecError("mapped rank is invalid")
     supplied_models, package = _resolved_inputs(
-        resolved_entities, models, package_handle, parsed
+        resolved_entities, models, package_handle
     )
+    recipe_digest = recipe_digest or _recipe_digest(recipe, resolved_entities or {})
     try:
         # The package handle is also the exact closure authority when member
         # paths are available.  Source/build inputs are never inferred from a
@@ -299,7 +297,7 @@ def compile_runtime_spec(
         "backend": parsed.topology.parallelism.backend,
     }
     identity: dict[str, object] = {
-        "recipe_revision_sha256": content_sha256(parsed),
+        "recipe_revision_sha256": recipe_digest,
         "model_dependencies": dependencies,
         "harness_sha256": binding.harness_content_sha256,
         "execution_sha256": None,
@@ -407,7 +405,7 @@ def resolve_recipe_entities(
 ) -> dict[str, object]:
     """Resolve a canonical recipe and its exact active Model revisions."""
     try:
-        recipe = RecipeDefinition.model_validate(document)
+        recipe = read_recipe(document)
     except (TypeError, ValueError) as error:
         raise RecipeRuntimeSpecError(
             "recipe does not satisfy the canonical contract"
@@ -430,7 +428,11 @@ def resolve_recipe_entities(
         if revision is None:
             raise RecipeRuntimeSpecError("exact recipe model is not active")
         models.append(revision)
-    return {"recipe": recipe, "models": tuple(models)}
+    return {
+        "recipe": recipe,
+        "recipe_digest": document_sha256(document),
+        "models": tuple(models),
+    }
 
 
 __all__ = [

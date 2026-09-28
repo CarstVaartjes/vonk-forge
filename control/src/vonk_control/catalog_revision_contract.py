@@ -11,8 +11,9 @@ from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
-    TestReport,
-    content_sha256,
+    document_sha256,
+    read_model,
+    read_recipe,
 )
 from vonk_forge_contracts.model import ModelIdentity
 from vonk_forge_contracts.recipe import RecipeTopology
@@ -58,7 +59,6 @@ class _CatalogRevisionProjection(StrictJSONModel):
     package_handle: RecipePackageHandleProjection | None = None
     release_version: str | None = None
     release_released_at: str | None = None
-    test_report: TestReport | None = None
 
 
 class BuildResourcesProjection(StrictJSONModel):
@@ -144,21 +144,7 @@ def read_catalog_projection(
         )
         if revision.kind not in {"model", "recipe"}:
             raise ValueError("unknown catalog revision kind")
-        parsed = projection_type.model_validate_json(_json(revision.projected))
-        if revision.kind == "recipe":
-            recipe = read_catalog_document(revision)
-            assert isinstance(recipe, RecipeDefinition)
-            assert isinstance(parsed, RecipeRevisionProjection)
-            if recipe.execution.mode == "build" and any(
-                value is None
-                for value in (
-                    parsed.build_resources,
-                    parsed.build_security,
-                    parsed.build_options,
-                )
-            ):
-                raise ValueError("source-build projection is incomplete")
-        return parsed
+        return projection_type.model_validate_json(_json(revision.projected))
     except (TypeError, ValueError, ValidationError) as error:
         raise CatalogRevisionContractError(
             f"catalog revision {revision.id} has invalid projected data"
@@ -193,22 +179,19 @@ def write_catalog_projection(
 def read_catalog_document(
     revision: CatalogDocumentRevision,
 ) -> ModelDefinition | RecipeDefinition:
-    """Read and authenticate one persisted canonical public document."""
+    """Parse one persisted published document; its digest is stored with it."""
 
     try:
+        document = require_mapping(
+            revision.document, "catalog document is not a JSON object"
+        )
         if revision.kind == "model":
-            parsed: ModelDefinition | RecipeDefinition = (
-                ModelDefinition.model_validate_json(_json(revision.document))
-            )
+            parsed: ModelDefinition | RecipeDefinition = read_model(document)
         elif revision.kind == "recipe":
-            parsed = RecipeDefinition.model_validate_json(_json(revision.document))
+            parsed = read_recipe(document)
         else:
             raise CatalogRevisionContractError(
                 f"catalog revision {revision.id} has unknown kind {revision.kind!r}"
-            )
-        if revision.content_digest != content_sha256(parsed):
-            raise CatalogRevisionContractError(
-                f"catalog revision {revision.id} document digest does not match"
             )
         if (
             parsed.identity.publisher != revision.publisher
@@ -226,10 +209,42 @@ def read_catalog_document(
         ) from error
 
 
+def read_model_set(value: object) -> dict[str, ModelDefinition]:
+    """Return published Model documents keyed by their document digest.
+
+    Accepts a digest-keyed mapping, or a sequence of stored catalog revisions
+    (which carry their digest) or raw published documents (hashed once here).
+    """
+
+    if isinstance(value, Mapping):
+        items = list(value.items())
+    elif isinstance(value, (list, tuple)):
+        items = []
+        for item in value:
+            digest = getattr(item, "content_digest", None)
+            document = getattr(item, "document", item)
+            if not isinstance(document, Mapping):
+                raise TypeError("model projection is not a published document")
+            if not isinstance(digest, str):
+                digest = document_sha256(document)
+            items.append((digest, document))
+    else:
+        raise TypeError("canonical model projections are missing")
+    result: dict[str, ModelDefinition] = {}
+    for digest, document in items:
+        if not isinstance(digest, str):
+            raise TypeError("model digest is invalid")
+        result[digest] = (
+            document if isinstance(document, ModelDefinition) else read_model(document)
+        )
+    return result
+
+
 __all__ = [
     "CatalogRevisionContractError",
     "CatalogRevisionProjection",
     "read_catalog_document",
     "read_catalog_projection",
+    "read_model_set",
     "write_catalog_projection",
 ]

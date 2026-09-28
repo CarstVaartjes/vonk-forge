@@ -72,7 +72,7 @@ from vonk_control.runtime_image_preparation import (
     read_runtime_image_reference_intent,
     resolve_persisted_runtime_image_receipt,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_removal_review_support import remove_after_review
 
@@ -247,7 +247,7 @@ def _add_revision(
         schema_version=2,
         state="active",
         document=recipe.model_dump(mode="json"),
-        content_digest=content_sha256(recipe),
+        content_digest=document_sha256(recipe.model_dump(mode="json")),
         artifact_key="b" * 64,
         execution_key="a" * 64,
         projected=write_catalog_projection(projected, kind="recipe"),
@@ -477,7 +477,12 @@ def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions
         )
         assert started.recipe_revision_id == current_id
     assert service._resolve_recipe_selector(old_id) == old_id
-    assert service._resolve_recipe_selector(content_sha256(old_recipe)) == old_id
+    assert (
+        service._resolve_recipe_selector(
+            document_sha256(old_recipe.model_dump(mode="json"))
+        )
+        == old_id
+    )
     other = recipe.model_copy(
         update={
             "identity": recipe.identity.model_copy(
@@ -674,7 +679,7 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
             restored = resolve_persisted_runtime_image_receipt(
                 session,
                 recipe_revision_id="revision-restore",
-                current_content_digest=content_sha256(recipe),
+                current_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=execution_key,
                 receipt=cached,
             )
@@ -1142,7 +1147,7 @@ def test_recipe_removal_fails_closed_on_symlinked_archive(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
                 source="published",
-                original_content_digest=content_sha256(recipe),
+                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
                 registry_manifest_digest=receipt.registry_manifest_digest,
                 platform_manifest_digest=receipt.platform_manifest_digest,
@@ -1209,7 +1214,7 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
                 source="published",
-                original_content_digest=content_sha256(recipe),
+                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
                 registry_manifest_digest=receipt.registry_manifest_digest,
                 platform_manifest_digest=receipt.platform_manifest_digest,
@@ -1468,7 +1473,7 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
                 source="published",
-                original_content_digest=content_sha256(recipe),
+                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
                 registry_manifest_digest=receipt.registry_manifest_digest,
                 platform_manifest_digest=receipt.platform_manifest_digest,
@@ -1559,7 +1564,7 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
                 source="published",
-                original_content_digest=content_sha256(recipe),
+                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
                 registry_manifest_digest=receipt.registry_manifest_digest,
                 platform_manifest_digest=receipt.platform_manifest_digest,
@@ -1649,7 +1654,7 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
                 source="published",
-                original_content_digest=content_sha256(recipe),
+                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
                 registry_manifest_digest=receipt.registry_manifest_digest,
                 platform_manifest_digest=receipt.platform_manifest_digest,
@@ -1745,7 +1750,7 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
             RuntimeImageAuthorization(
                 recipe_revision_id=revision.id,
                 source="published",
-                original_content_digest=content_sha256(recipe),
+                original_content_digest=document_sha256(recipe.model_dump(mode="json")),
                 effective_execution_key=revision.execution_key,
                 registry_manifest_digest=receipt.registry_manifest_digest,
                 platform_manifest_digest=receipt.platform_manifest_digest,
@@ -3596,7 +3601,7 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
             recipe_revision_id="revision-progress"
         ).model_dump(mode="json"),
         "recipe_revision_id": "revision-progress",
-        "recipe_content_sha256": content_sha256(recipe),
+        "recipe_content_sha256": document_sha256(recipe.model_dump(mode="json")),
         "progress": {
             "phase": "available",
             "completed_bytes": 20,

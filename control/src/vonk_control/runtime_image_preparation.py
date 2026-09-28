@@ -38,7 +38,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.wire_model import Digest, WireModel
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .artifact_lifecycle import (
     ArtifactIdentity,
@@ -2282,7 +2282,7 @@ def prepare_runtime_image(
             transport=effective_transport,
             publisher=parsed.identity.publisher,
             slug=parsed.identity.slug,
-            content_sha256=_recipe_digest(parsed),
+            content_sha256=_recipe_digest(recipe),
             expected_architecture=projection["architecture"],
             expected_interface=projection["interface"],
             adapter=resolved_adapter,
@@ -2298,7 +2298,7 @@ def prepare_runtime_image(
             expected_manifest=expected_manifest,
             publisher=parsed.identity.publisher,
             slug=parsed.identity.slug,
-            content_sha256=_recipe_digest(parsed),
+            content_sha256=_recipe_digest(recipe),
             expected_architecture=projection["architecture"],
             expected_interface=projection["interface"],
             now=now,
@@ -2383,8 +2383,9 @@ def make_runtime_image_receipt_preparer(
                 "image_bytes": build.image_bytes,
             }
 
+        recipe_digest = _recipe_digest(document)
+
         def write_receipt(receipt: RuntimeImageReceipt) -> None:
-            recipe_digest = content_sha256(parsed)
             with sessions.begin() as session:
                 revision = session.scalar(
                     select(CatalogDocumentRevision).where(
@@ -2407,7 +2408,7 @@ def make_runtime_image_receipt_preparer(
                 )
 
         return prepare_runtime_image(
-            parsed,
+            document,
             runtime=runtime,
             storage=storage,
             transport=transport,
@@ -2676,10 +2677,7 @@ def _canonical_recipe(
             "canonical RecipeDefinition document is unavailable",
         )
     try:
-        # Persisted JSON has already been decoded by the database driver. Run
-        # it back through the canonical JSON path so strict validation has the
-        # same semantics as validation of the stored wire document.
-        return RecipeDefinition.model_validate_json(canonical_message(raw))
+        return read_recipe(raw)
     except Exception as error:
         raise RuntimeImagePreparationError(
             "runtime_image.recipe_invalid",
@@ -2766,10 +2764,19 @@ def _recipe_image(recipe: RecipeDefinition) -> tuple[str, str]:
     return f"{image.repository}@{digest}", digest
 
 
-def _recipe_digest(recipe: RecipeDefinition) -> str:
-    from vonk_forge_contracts import content_sha256
+def _recipe_digest(value: object) -> str:
+    """Return the stored digest of a published recipe document."""
 
-    return content_sha256(recipe)
+    digest = getattr(value, "content_digest", None)
+    if isinstance(digest, str):
+        return digest
+    raw = getattr(value, "document", value)
+    if not isinstance(raw, Mapping):
+        raise RuntimeImagePreparationError(
+            "runtime_image.recipe_invalid",
+            "published recipe document is unavailable",
+        )
+    return document_sha256(raw)
 
 
 def _validate_evidence(

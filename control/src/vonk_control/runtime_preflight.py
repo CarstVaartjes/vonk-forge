@@ -44,8 +44,8 @@ def recipe_requirements(
         architecture=architecture,
         source_build=source_build,
         minimum_free_bytes=minimum_free_bytes,
-        fabric_connectivity=fabric.connectivity,
-        fabric_minimum_mbps=fabric.minimum_bandwidth_mbps,
+        fabric_connectivity=fabric.fabric_connectivity,
+        fabric_minimum_mbps=fabric.fabric_minimum_bandwidth_mbps,
         mandatory_capabilities=[],
     )
 

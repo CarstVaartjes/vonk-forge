@@ -20,7 +20,7 @@ from vonk_control.recipe_packages import (
     RecipePackageError,
 )
 from vonk_control.recipe_release import RecipeReleaseError
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 
 def _canonical(value: object) -> bytes:
@@ -133,7 +133,7 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
         }
     )
     model_document = model.model_dump(mode="json")
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
     recipe = RecipeDefinition.model_validate(
         {
             "identity": {"publisher": "fixture", "slug": "tiny-recipe"},
@@ -271,7 +271,7 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
         }
     )
     recipe_document = recipe.model_dump(mode="json")
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     files = {
         "models/tiny-model.json": _canonical(model_document) + b"\n",
         "recipe.json": _canonical(recipe_document) + b"\n",

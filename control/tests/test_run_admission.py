@@ -31,7 +31,7 @@ from vonk_control.run_admission import (
     RunPlanConflict,
     require_admissible,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 
 def setup(
@@ -85,7 +85,9 @@ def setup(
         }
     model = ModelDefinition.model_validate(model_document)
     model_document = model.model_dump(mode="json")
-    document["models"][0]["model"]["content_sha256"] = content_sha256(model)
+    document["models"][0]["model"]["content_sha256"] = document_sha256(
+        model.model_dump(mode="json")
+    )
     memory = document["topology"]["roles"][0]["resources"]["memory"]
     memory.update(
         {
@@ -126,7 +128,7 @@ def setup(
                 schema_version=2,
                 state="active",
                 document=model_document,
-                content_digest=content_sha256(model),
+                content_digest=document_sha256(model.model_dump(mode="json")),
                 artifact_key="a" * 64,
                 projected={},
                 created_by="admin",
@@ -156,7 +158,9 @@ def setup(
             schema_version=2,
             state="active",
             document=recipe_document,
-            content_digest=content_sha256(RecipeDefinition.model_validate(document)),
+            content_digest=document_sha256(
+                RecipeDefinition.model_validate(document).model_dump(mode="json")
+            ),
             projected={},
             created_by="admin",
             created_at=now,

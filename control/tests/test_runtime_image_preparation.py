@@ -42,8 +42,8 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
     resolve_persisted_runtime_image_receipt,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
-from vonk_forge_contracts.recipe import RecipeImage, RecipeImageExecution
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts.recipe import RecipeImage
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
 PLATFORM_IMAGE_DIGEST = "sha256:" + "e" * 64
@@ -97,7 +97,7 @@ def _add_revision(
             schema_version=2,
             state=state,
             document=recipe.model_dump(mode="json"),
-            content_digest=content_sha256(recipe),
+            content_digest=document_sha256(recipe.model_dump(mode="json")),
             artifact_key="b" * 64,
             execution_key="a" * 64,
             projected=projected,
@@ -1045,7 +1045,6 @@ def test_cancelled_owner_and_source_lock_loser_preserve_verified_stage(
         lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
     )
     recipe = _recipe("recipe-image.json")
-    assert isinstance(recipe.execution, RecipeImageExecution)
     reference = (
         f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
     )
@@ -1112,7 +1111,6 @@ def test_oversized_published_stage_checkpoint_is_discarded_and_pulled_again(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     recipe = _recipe("recipe-image.json")
-    assert isinstance(recipe.execution, RecipeImageExecution)
     reference = (
         f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
     )
@@ -1146,7 +1144,6 @@ def test_nonregular_published_stage_checkpoint_is_discarded(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     recipe = _recipe("recipe-image.json")
-    assert isinstance(recipe.execution, RecipeImageExecution)
     reference = (
         f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
     )
@@ -1175,7 +1172,6 @@ def test_fifo_published_stage_checkpoint_is_discarded_without_blocking(
     root = tmp_path / "objects"
     storage = FilesystemRuntimeImageStorage(root)
     recipe = _recipe("recipe-image.json")
-    assert isinstance(recipe.execution, RecipeImageExecution)
     reference = (
         f"{recipe.execution.image.repository}@sha256:{recipe.execution.image.digest}"
     )
@@ -1770,7 +1766,7 @@ def test_rebuilt_source_image_registers_new_receipt_without_rebinding_old_plan(
     postgres_engine: Engine,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
     revision_id = "revision-rebuilt-source"
     execution_key = "a" * 64
@@ -1955,8 +1951,8 @@ def test_notes_revision_reuses_original_receipt_with_separate_authorization(
     receipt = prepare_runtime_image(
         original, runtime=_runtime(), storage=storage, transport=TinyTransport()
     )
-    old_digest = content_sha256(original)
-    new_digest = content_sha256(revised)
+    old_digest = document_sha256(original.model_dump(mode="json"))
+    new_digest = document_sha256(revised.model_dump(mode="json"))
     old_id, new_id, document_id = "old-revision", "new-revision", "recipe-document"
     now = datetime.now(UTC)
     engine = create_engine("sqlite:///:memory:")
@@ -2104,7 +2100,7 @@ def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(
     tmp_path: Path,
 ) -> None:
     recipe = _recipe("recipe-image.json")
-    digest = content_sha256(recipe)
+    digest = document_sha256(recipe.model_dump(mode="json"))
     revision_id = "authority-revision"
     now = datetime.now(UTC)
     receipt = prepare_runtime_image(
@@ -2203,7 +2199,9 @@ def test_runtime_image_authority_rejects_changed_current_execution_identity(
             persist_runtime_image_receipt(
                 session,
                 recipe_revision_id="changed-execution",
-                original_content_digest=content_sha256(original),
+                original_content_digest=document_sha256(
+                    original.model_dump(mode="json")
+                ),
                 effective_execution_key="a" * 64,
                 receipt=receipt,
                 verified_at=now,

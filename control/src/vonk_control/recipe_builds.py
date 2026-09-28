@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
 from .admission_locking import (
@@ -189,12 +189,14 @@ def _build_effective_settings(value: object | None) -> dict[str, object] | None:
 
 def _canonical_recipe_document(value: object) -> dict[str, object]:
     try:
-        recipe = RecipeDefinition.model_validate_json(canonical_message(value))
+        if not isinstance(value, Mapping):
+            raise TypeError("stored recipe is not a JSON object")
+        read_recipe(value)
     except (TypeError, ValueError) as error:
         raise RecipeBuildError(
             "build.contract_invalid", "stored recipe does not satisfy RecipeDefinition"
         ) from error
-    return recipe.model_dump(mode="json")
+    return dict(value)
 
 
 def _canonical_model_build_inputs(
@@ -1014,9 +1016,7 @@ class RecipeBuildService:
         called while the availability parent and builder rows are locked.
         """
         try:
-            acquire_admission_keys(
-                session, (node_admission_key(plan.builder_node_id),)
-            )
+            acquire_admission_keys(session, (node_admission_key(plan.builder_node_id),))
             locked = lock_admission_rows(
                 session,
                 (
@@ -1218,9 +1218,7 @@ class RecipeBuildService:
         request_id: str | None = None,
     ) -> None:
         try:
-            acquire_admission_keys(
-                session, (node_admission_key(plan.builder_node_id),)
-            )
+            acquire_admission_keys(session, (node_admission_key(plan.builder_node_id),))
             self._reserve_in_session(session, plan, now=now, request_id=request_id)
         except AdmissionLockBusy as error:
             raise RecipeBuildAdmissionBusy() from error
@@ -1252,9 +1250,7 @@ class RecipeBuildService:
                 AdmissionRowLock(
                     "build-builder-node",
                     AgentNode,
-                    select(AgentNode).where(
-                        AgentNode.node_id == plan.builder_node_id
-                    ),
+                    select(AgentNode).where(AgentNode.node_id == plan.builder_node_id),
                 ),
                 AdmissionRowLock(
                     "build-recipe-revision",
@@ -1614,8 +1610,7 @@ def _available_build_memory(
             - capacity.occupied_bytes
             - capacity.unmaterialized_bytes
             - sum(
-                residual.maximum_bytes
-                for residual in capacity.unknown_run_residuals
+                residual.maximum_bytes for residual in capacity.unknown_run_residuals
             ),
         )
         - floor

@@ -52,7 +52,7 @@ from vonk_control.route_runtime import (
     AtomicRouteBundlePublisher,
     RouteRuntimeError,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 GATEWAY = "https://control.test.example/v1"
@@ -171,7 +171,9 @@ def setup(
         )
         recipe_document["identity"]["slug"] = "qwen"
         recipe_document["metadata"]["title"] = "Qwen"
-        recipe_document["models"][0]["model"]["content_sha256"] = content_sha256(model)
+        recipe_document["models"][0]["model"]["content_sha256"] = document_sha256(
+            model.model_dump(mode="json")
+        )
         if interfaces is None:
             recipe_document["interfaces"] = [
                 {
@@ -265,7 +267,7 @@ def setup(
             schema_version=2,
             state="active",
             document=recipe_document,
-            content_digest=content_sha256(recipe),
+            content_digest=document_sha256(recipe.model_dump(mode="json")),
             projected={},
             created_by="admin",
             created_at=NOW,
@@ -283,7 +285,7 @@ def setup(
                     schema_version=2,
                     state="active",
                     document=model.model_dump(mode="json"),
-                    content_digest=content_sha256(model),
+                    content_digest=document_sha256(model.model_dump(mode="json")),
                     projected={},
                     created_by="admin",
                     created_at=NOW,

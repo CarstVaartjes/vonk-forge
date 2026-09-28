@@ -70,7 +70,7 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptWire,
 )
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 from vonk_forge_contracts.model import ModelFile, ModelReference
 
 from .canonical_recipe_fixtures import canonical_example
@@ -790,14 +790,14 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
     )
     services.artifact_root.mkdir()
     original_recipe = canonical_example("recipe-image.json")
-    from vonk_forge_contracts import RecipeDefinition, content_sha256
+    from vonk_forge_contracts import RecipeDefinition, document_sha256
 
     original = RecipeDefinition.model_validate(original_recipe)
     revised_data = original.model_dump(mode="json")
     revised_data["metadata"]["description"] = "Agent spec editorial revision"
     revised = RecipeDefinition.model_validate(revised_data)
-    original_digest = content_sha256(original)
-    current_digest = content_sha256(revised)
+    original_digest = document_sha256(original.model_dump(mode="json"))
+    current_digest = document_sha256(revised.model_dump(mode="json"))
     spec = _spec(recipe_digest=current_digest)
     payload = _compile(spec).to_compiled_launch_payload(
         spec,
@@ -1044,7 +1044,7 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
 
 
 def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
-    from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+    from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
     recipe = RecipeDefinition.model_validate(
         canonical_example("recipe-source-build.json")
@@ -1060,10 +1060,10 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     model = ModelDefinition.model_validate(canonical_example("model-definition.json"))
     recipe_document = recipe.model_dump(mode="json")
     model_document = model.model_dump(mode="json")
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
     recipe_document["models"][0]["model"]["content_sha256"] = model_digest
     recipe = RecipeDefinition.model_validate(recipe_document)
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     artifact_set_digest = "a" * 64
 
     class Manifest:
@@ -1668,7 +1668,7 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
     )
     model_projection = SimpleNamespace(
         document=model.model_dump(mode="json"),
-        content_digest=content_sha256(model),
+        content_digest=document_sha256(model.model_dump(mode="json")),
     )
     spec = _bind_runtime_artifacts(spec, [model_projection])
     artifacts = _sequence(spec["artifacts"])

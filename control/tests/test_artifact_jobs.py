@@ -51,7 +51,7 @@ from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeOperationConflict,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
@@ -541,7 +541,7 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
             schema_version=2,
             state="active",
             document=parsed.model_dump(mode="json"),
-            content_digest=content_sha256(parsed),
+            content_digest=document_sha256(parsed.model_dump(mode="json")),
             projected={},
             created_by="admin",
             created_at=revision.created_at,

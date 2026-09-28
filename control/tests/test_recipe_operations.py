@@ -118,7 +118,7 @@ from vonk_control.runtime_image_preparation import (
     PulledImageEvidence,
     prepare_runtime_image,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .canonical_recipe_fixtures import canonical_example
 from .preflight_fixtures import record_passing_preflight
@@ -253,7 +253,9 @@ def _synthetic_model_content_sha256() -> str:
         .joinpath("examples", "model-definition.json")
         .read_text()
     )
-    return content_sha256(ModelDefinition.model_validate(document))
+    return document_sha256(
+        ModelDefinition.model_validate(document).model_dump(mode="json")
+    )
 
 
 def test_recipe_model_identities_include_canonical_companion_dependencies() -> None:
@@ -267,7 +269,7 @@ def test_recipe_model_identities_include_canonical_companion_dependencies() -> N
     companion_document["identity"]["model"]["slug"] = "synthetic-companion"
     companion_document["identity"]["family"]["slug"] = "synthetic-companion"
     companion = ModelDefinition.model_validate(companion_document)
-    companion_digest = content_sha256(companion)
+    companion_digest = document_sha256(companion.model_dump(mode="json"))
     primary_document["dependencies"] = [
         {
             "kind": "model",
@@ -277,7 +279,7 @@ def test_recipe_model_identities_include_canonical_companion_dependencies() -> N
         }
     ]
     primary = ModelDefinition.model_validate(primary_document)
-    primary_digest = content_sha256(primary)
+    primary_digest = document_sha256(primary.model_dump(mode="json"))
     recipe_document = json.loads(
         resources.files("vonk_forge_contracts")
         .joinpath("examples", "recipe-source-build.json")
@@ -604,8 +606,8 @@ def setup_services(
         model_transform(model_document)
     recipe_definition = RecipeDefinition.model_validate(document)
     model_definition = ModelDefinition.model_validate(model_document)
-    recipe_digest = content_sha256(recipe_definition)
-    model_digest = content_sha256(model_definition)
+    recipe_digest = document_sha256(recipe_definition.model_dump(mode="json"))
+    model_digest = document_sha256(model_definition.model_dump(mode="json"))
     canonical_recipe_document = recipe_definition.model_dump(mode="json")
     canonical_model_document = model_definition.model_dump(mode="json")
     recipe_revision_id = str(uuid.uuid4())

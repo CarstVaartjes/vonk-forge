@@ -22,7 +22,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
@@ -49,8 +49,8 @@ def _recipe(
     identity = recipe["identity"]
     assert isinstance(identity, dict)
     identity["slug"] = slug
-    _model_reference(recipe)["content_sha256"] = content_sha256(
-        ModelDefinition.model_validate(model)
+    _model_reference(recipe)["content_sha256"] = document_sha256(
+        ModelDefinition.model_validate(model).model_dump(mode="json")
     )
     RecipeDefinition.model_validate(recipe)
     return recipe

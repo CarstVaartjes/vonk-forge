@@ -289,7 +289,7 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         from vonk_forge_contracts import (
             ModelDefinition,
             RecipeDefinition,
-            content_sha256,
+            document_sha256,
         )
     except ImportError as error:
         raise LifecycleError(
@@ -335,7 +335,8 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         for model in catalog_models
         if model.identity.publisher == model_reference.publisher
         and model.identity.slug == model_reference.slug
-        and content_sha256(model) == model_reference.content_sha256
+        and document_sha256(model.model_dump(mode="json"))
+        == model_reference.content_sha256
     ]
     if len(matching_models) != 1:
         raise LifecycleError("canonical synthetic canary Model closure is invalid")
@@ -353,7 +354,8 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         or not isinstance(index.get("source_commit"), str)
         or SOURCE_SHA.fullmatch(index["source_commit"]) is None
         or not isinstance(entry.get("content_sha256"), str)
-        or entry["content_sha256"] != content_sha256(recipe_contract)
+        or entry["content_sha256"]
+        != document_sha256(recipe_contract.model_dump(mode="json"))
         or package.get("media_type")
         != "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
         or package.get("recipe_content_sha256") not in {None, entry["content_sha256"]}

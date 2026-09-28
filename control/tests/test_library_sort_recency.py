@@ -30,7 +30,7 @@ from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from tests.recipe_library_source import recipe_library_root
 
@@ -120,7 +120,7 @@ def _insert_synthetic_corpus(
                 schema_version=2,
                 state="active",
                 document=clean,
-                content_digest=content_sha256(canonical),
+                content_digest=document_sha256(canonical.model_dump(mode="json")),
                 projected={},
                 created_by="test",
                 created_at=stamp,

@@ -8,7 +8,7 @@ from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .canonical_recipe_fixtures import canonical_example
 
@@ -53,7 +53,9 @@ def test_recipe_uses_the_canonical_model_and_topology_bindings(
     assert recipe.kind == "recipe"
     assert recipe.topology.node_count == 1
     assert recipe.models[0].model.kind == "model"
-    assert recipe.models[0].model.content_sha256 == content_sha256(model)
+    assert recipe.models[0].model.content_sha256 == document_sha256(
+        model.model_dump(mode="json")
+    )
     assert recipe.interfaces[0].adapter == "openai"
 
 

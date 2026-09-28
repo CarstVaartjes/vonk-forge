@@ -35,7 +35,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolAgentOperation,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import read_model, read_recipe
 
 from .admission_locking import (
     AdmissionLockBusy,
@@ -7440,7 +7440,7 @@ def _recipe_model_identities(
     document: Mapping[str, object],
 ) -> tuple[tuple[str, str], ...]:
     try:
-        recipe = RecipeDefinition.model_validate(document)
+        recipe = read_recipe(document)
     except (TypeError, ValueError) as error:
         raise RecipeOperationConflict(
             "recipe model dependencies are invalid"
@@ -7470,7 +7470,7 @@ def _recipe_model_identities(
         if revision is None or not isinstance(revision.document, Mapping):
             raise RecipeOperationConflict("recipe model reference is unavailable")
         try:
-            model = ModelDefinition.model_validate(revision.document)
+            model = read_model(revision.document)
         except (TypeError, ValueError) as error:
             raise RecipeOperationConflict(
                 "recipe model reference is invalid"

@@ -28,7 +28,7 @@ from vonk_agent_protocol import (
     recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .artifact_blob_store import (
     ArtifactBlobStore,
@@ -84,10 +84,8 @@ def _active_recipe_revision(
     ):
         return None
     try:
-        recipe = RecipeDefinition.model_validate(revision.document)
+        recipe = read_recipe(revision.document)
     except (TypeError, ValueError):
-        return None
-    if content_sha256(recipe) != revision.content_digest:
         return None
     return revision, recipe
 
@@ -1140,7 +1138,7 @@ class ArtifactJobService:
             )
             if installation is None or resolved is None:
                 raise ArtifactJobError("recipe job workload identity is unavailable")
-            revision, recipe = resolved
+            revision, _recipe = resolved
             node = self._job_node_in_session(session, run)
             try:
                 stored_run_plan = parse_stored_run_plan(run.plan)
@@ -1177,7 +1175,7 @@ class ArtifactJobService:
                 ) from error
             invocation = compile_job_invocation(
                 session,
-                recipe=recipe,
+                revision=revision,
                 installed=installation_plan.compiled_execution_plans[
                     node.node_id
                 ].model_dump(mode="json"),

@@ -18,7 +18,7 @@ from vonk_control.model_cache import (
     ModelCacheStorageError,
 )
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
-from vonk_forge_contracts import ModelDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, document_sha256
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=UTC)
 REPOSITORY = "https://github.com/valeoai/NAF"
@@ -82,7 +82,7 @@ def _model(data: bytes) -> ModelDefinition:
 
 
 def _insert_model(sessions, model: ModelDefinition) -> tuple[str, str]:
-    digest = content_sha256(model)
+    digest = document_sha256(model.model_dump(mode="json"))
     with sessions.begin() as session:
         document = CatalogDocument(
             kind="model",

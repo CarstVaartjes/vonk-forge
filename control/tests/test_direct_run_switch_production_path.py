@@ -66,7 +66,7 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
 )
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .canonical_recipe_fixtures import canonical_example
 from .preflight_fixtures import record_passing_preflight
@@ -78,12 +78,14 @@ CONFIG_DIGEST = "sha256:" + "c" * 64
 MODEL_DIGEST = "c" * 64
 MODEL_SET_DIGEST = "f" * 64
 # The published example model the recipe fixture selects.
-EXAMPLE_MODEL_DIGEST = content_sha256(
-    ModelDefinition.model_validate_json(
-        resources.files("vonk_forge_contracts")
-        .joinpath("examples", "model-definition.json")
-        .read_text()
-    )
+EXAMPLE_MODEL_DIGEST = document_sha256(
+    (
+        ModelDefinition.model_validate_json(
+            resources.files("vonk_forge_contracts")
+            .joinpath("examples", "model-definition.json")
+            .read_text()
+        )
+    ).model_dump(mode="json")
 )
 ARCHIVE = b"direct-published-runtime-archive"
 ARCHIVE_DIGEST = hashlib.sha256(ARCHIVE).hexdigest()
@@ -389,8 +391,12 @@ def _seed(
     model_document = ModelDefinition.model_validate(model_document).model_dump(
         mode="json"
     )
-    recipe_digest = content_sha256(RecipeDefinition.model_validate(recipe_document))
-    model_digest = content_sha256(ModelDefinition.model_validate(model_document))
+    recipe_digest = document_sha256(
+        RecipeDefinition.model_validate(recipe_document).model_dump(mode="json")
+    )
+    model_digest = document_sha256(
+        ModelDefinition.model_validate(model_document).model_dump(mode="json")
+    )
     assert model_digest == EXAMPLE_MODEL_DIGEST
     with sessions.begin() as session:
         entities = CatalogEntityService(session, clock=lambda: NOW)

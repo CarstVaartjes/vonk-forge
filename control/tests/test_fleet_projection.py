@@ -46,7 +46,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_execution_contract import installation_plan_document
 from vonk_control.telemetry import TelemetryRepository
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 
@@ -84,7 +84,9 @@ def _canonical_catalog_documents(
     )
     recipe_document["identity"]["slug"] = slug
     recipe_document["metadata"]["title"] = title
-    recipe_document["models"][0]["model"]["content_sha256"] = content_sha256(model)
+    recipe_document["models"][0]["model"]["content_sha256"] = document_sha256(
+        model.model_dump(mode="json")
+    )
     if interfaces is not None:
         recipe_document["interfaces"] = interfaces
     recipe = RecipeDefinition.model_validate(recipe_document)
@@ -124,7 +126,7 @@ def _canonical_catalog_documents(
                 schema_version=2,
                 state="active",
                 document=canonical_recipe,
-                content_digest=content_sha256(recipe),
+                content_digest=document_sha256(recipe.model_dump(mode="json")),
                 projected={},
                 created_by="admin",
                 created_at=NOW,
@@ -139,7 +141,7 @@ def _canonical_catalog_documents(
                 schema_version=2,
                 state="active",
                 document=model_document,
-                content_digest=content_sha256(model),
+                content_digest=document_sha256(model.model_dump(mode="json")),
                 projected={},
                 created_by="admin",
                 created_at=NOW,

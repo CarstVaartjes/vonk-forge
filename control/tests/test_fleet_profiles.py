@@ -71,7 +71,7 @@ from vonk_control.run_switch_contract import (
     SparkFit,
     SparkFitNode,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_recipe_execution_contract import _installation_plan
 
@@ -645,7 +645,7 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                     state="active",
                     schema_version=2,
                     document=document,
-                    content_digest=content_sha256(recipe),
+                    content_digest=document_sha256(recipe.model_dump(mode="json")),
                     execution_key="b" * 64,
                     created_by="admin",
                     created_at=NOW,
@@ -660,7 +660,7 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                     state="active",
                     schema_version=2,
                     document=model.model_dump(mode="json"),
-                    content_digest=content_sha256(model),
+                    content_digest=document_sha256(model.model_dump(mode="json")),
                     artifact_key="a" * 64,
                     created_by="admin",
                     created_at=NOW,
@@ -747,8 +747,10 @@ def _seed_dual_solo_without_runtime_state(
             .where(CatalogDocumentRevision.id == dual_revision_id)
             .values(
                 document=dual_document,
-                content_digest=content_sha256(
-                    RecipeDefinition.model_validate(dual_document)
+                content_digest=document_sha256(
+                    RecipeDefinition.model_validate(dual_document).model_dump(
+                        mode="json"
+                    )
                 ),
             )
         )
@@ -779,7 +781,7 @@ def _seed_dual_solo_without_runtime_state(
                 state="active",
                 schema_version=2,
                 document=solo_document,
-                content_digest=content_sha256(solo),
+                content_digest=document_sha256(solo.model_dump(mode="json")),
                 execution_key="c" * 64,
                 created_by="admin",
                 created_at=NOW,
@@ -2917,7 +2919,7 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
             .where(CatalogDocumentRevision.id == revision_id)
             .values(
                 document=document,
-                content_digest=content_sha256(parsed_document),
+                content_digest=document_sha256(parsed_document.model_dump(mode="json")),
             )
         )
         session.add(
@@ -3054,7 +3056,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
             .where(CatalogDocumentRevision.id == dual_revision_id)
             .values(
                 document=dual_document,
-                content_digest=content_sha256(dual_recipe),
+                content_digest=document_sha256(dual_recipe.model_dump(mode="json")),
             )
         )
         solo_document = _recipe_document()
@@ -3085,7 +3087,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                 state="active",
                 schema_version=2,
                 document=solo_document,
-                content_digest=content_sha256(solo_recipe),
+                content_digest=document_sha256(solo_recipe.model_dump(mode="json")),
                 execution_key="c" * 64,
                 created_by="admin",
                 created_at=NOW,
@@ -3159,7 +3161,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                     mapping_id=_uuid(10),
                     build_id=_uuid(13),
                     recipe_revision_id=dual_revision_id,
-                    recipe_digest=content_sha256(dual_recipe),
+                    recipe_digest=document_sha256(dual_recipe.model_dump(mode="json")),
                 ),
                 state="installed",
                 actor="admin",

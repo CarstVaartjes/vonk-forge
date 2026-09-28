@@ -12,7 +12,13 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
 from vonk_forge_contracts.resolver import validate_recipe_models
 
 from .auth import CursorCodec
@@ -348,7 +354,8 @@ class CatalogEntityService:
             raise CatalogValidationError(
                 "catalog.recipe_invalid", "recipe revision is not a recipe document"
             )
-        models, bindings = [], []
+        models: dict[str, ModelDefinition] = {}
+        bindings = []
         artifact_inputs = []
         for selection in recipe.models:
             ref = selection.model
@@ -374,7 +381,7 @@ class CatalogEntityService:
                     "catalog.model_reference_invalid",
                     "referenced revision is not a model document",
                 )
-            models.append(model)
+            models[model_revision.content_digest] = model
             if model_revision.artifact_key is None:
                 raise CatalogValidationError(
                     "catalog.model_artifact_missing",
@@ -423,18 +430,17 @@ def _parse(
     document: Mapping[str, object],
 ) -> tuple[ModelDefinition | RecipeDefinition, dict[str, object], str, str, str, str]:
     try:
-        raw = dict(document)
+        # Keep the published document exactly as received: its digest is the
+        # document identity recipes reference.
+        clean = json.loads(json.dumps(dict(document), allow_nan=False))
         parsed = (
-            ModelDefinition.model_validate(raw)
-            if raw.get("kind") == "model"
-            else RecipeDefinition.model_validate(raw)
+            read_model(clean) if clean.get("kind") == "model" else read_recipe(clean)
         )
     except Exception as error:
         raise CatalogValidationError(
             "catalog.document_invalid",
-            "document does not satisfy the public v2 contract",
+            "document does not satisfy the public recipe contract",
         ) from error
-    clean = parsed.model_dump(mode="json", exclude_unset=False, exclude_none=False)
     title = (
         parsed.identity.model.title
         if isinstance(parsed, ModelDefinition)
@@ -490,7 +496,7 @@ def _revision(
         schema_version=2,
         state="candidate",
         document=copy.deepcopy(clean),
-        content_digest=content_sha256(parsed),
+        content_digest=document_sha256(clean),
         artifact_key=artifact_key,
         execution_key=_digest(_execution_projection(parsed)),
         download_bytes=download,
@@ -508,8 +514,6 @@ def _build_projection(recipe: RecipeDefinition) -> dict[str, object]:
     measures and verifies the exported archive before it can be distributed.
     No public Recipe fields or local author overrides grant build authority.
     """
-    if recipe.execution.mode != "build":
-        return {}
     gib = 1024**3
     disks = [role.resources.disk for role in recipe.topology.roles]
     image_bytes = max(disk.image_bytes for disk in disks)
@@ -519,7 +523,7 @@ def _build_projection(recipe: RecipeDefinition) -> dict[str, object]:
             "download_bytes": image_bytes,
             "temporary_bytes": min(
                 16 * 1024**4,
-                max(3 * image_bytes, *(disk.staging_bytes for disk in disks)),
+                max(3 * image_bytes, *(disk.working_bytes for disk in disks)),
             ),
             "memory_bytes": min(64 * gib, max(2 * gib, image_bytes)),
             "processes": 4096,

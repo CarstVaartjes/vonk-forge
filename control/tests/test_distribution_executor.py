@@ -61,7 +61,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
     _validate_artifact_execution,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .test_recipe_operations import NOW, setup_services
@@ -894,7 +894,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             .read_text(encoding="utf-8")
         )
     )
-    model_content_sha256 = content_sha256(model)
+    model_content_sha256 = document_sha256(model.model_dump(mode="json"))
     recipe_document = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-source-build.json")
@@ -904,7 +904,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     recipe_document["models"][0]["model"]["content_sha256"] = model_content_sha256
     recipe = RecipeDefinition.model_validate(recipe_document)
     recipe_document = recipe.model_dump(mode="json")
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     model_payload = b"model weights"
     auxiliary_payload = b"tokenizer auxiliary"
     model_source = tmp_path / "weights.source"
@@ -1449,7 +1449,7 @@ def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
     )
     recipe_document["identity"]["slug"] = "published-fallback-guard"
     recipe = RecipeDefinition.model_validate(recipe_document)
-    recipe_digest = content_sha256(recipe)
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     registry_digest = "sha256:" + "d" * 64
     image_digest = "sha256:" + "e" * 64
     assert registry_digest != image_digest

@@ -18,7 +18,7 @@ from vonk_control.compiled_execution_plan import compile_verified_execution_plan
 from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placement
 from vonk_control.models import ClusterMappingNode
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .recipe_library_source import recipe_library_root
 
@@ -45,7 +45,7 @@ def _package(recipe: RecipeDefinition) -> dict[str, object]:
 def _receipts(models: list[ModelDefinition]) -> list[dict[str, object]]:
     result: dict[tuple[str, str], dict[str, object]] = {}
     for model in models:
-        model_digest = content_sha256(model)
+        model_digest = document_sha256(model.model_dump(mode="json"))
         for file in model.files:
             result.setdefault(
                 (model_digest, file.id),
@@ -95,7 +95,7 @@ def check_catalog(root: Path) -> dict[str, Any]:
     models_by_digest: dict[str, ModelDefinition] = {}
     for path in (root / "models").glob("*.json"):
         model = ModelDefinition.model_validate(json.loads(path.read_text()))
-        models_by_digest[content_sha256(model)] = model
+        models_by_digest[document_sha256(model.model_dump(mode="json"))] = model
     rows = []
     errors = []
     for path in sorted((root / "recipes").glob("*.json")):
@@ -107,7 +107,7 @@ def check_catalog(root: Path) -> dict[str, Any]:
         model_revisions = [
             SimpleNamespace(
                 document=model.model_dump(mode="json"),
-                content_digest=content_sha256(model),
+                content_digest=document_sha256(model.model_dump(mode="json")),
             )
             for model in models
         ]

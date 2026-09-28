@@ -2545,7 +2545,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
 
     import copy
 
-    from vonk_forge_contracts import RecipeDefinition, content_sha256
+    from vonk_forge_contracts import RecipeDefinition, document_sha256
 
     sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
@@ -2592,7 +2592,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
             schema_version=2,
             state="active",
             document=canonical.model_dump(mode="json"),
-            content_digest=content_sha256(canonical),
+            content_digest=document_sha256(canonical.model_dump(mode="json")),
             artifact_key="b" * 64,
             execution_key="c" * 64,
             projected=copy.deepcopy(revision.projected),
@@ -2606,7 +2606,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
         reused_plan = RecipeBuildPlan(
             build_id=build.id,
             recipe_revision_id=successor_id,
-            recipe_content_sha256=content_sha256(canonical),
+            recipe_content_sha256=document_sha256(canonical.model_dump(mode="json")),
             builder_node_id=build.builder_node_id,
             source_bundle_sha256=build.source_bundle_sha256,
             build_input_sha256=build.build_input_sha256,

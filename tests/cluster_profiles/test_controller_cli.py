@@ -12,7 +12,7 @@ from io import StringIO
 from typing import cast
 
 import pytest
-from vonk_forge_contracts import ModelDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_render import progress_line, render_payload
@@ -668,7 +668,7 @@ def _model_detail(selector: str = "qwen") -> tuple[dict[str, object], str]:
     )
     model = ModelDefinition.model_validate(json.loads(document_path.read_text()))
     identity = model.identity
-    digest = content_sha256(model)
+    digest = document_sha256(model.model_dump(mode="json"))
     return (
         {
             "selector": selector,

@@ -11,7 +11,7 @@ from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 
 def _example(name: str) -> dict[str, object]:
@@ -115,7 +115,9 @@ def _multi_artifact_inputs() -> tuple[RecipeDefinition, ModelDefinition]:
     _json_array(model_raw["files"]).append(draft)
     model = ModelDefinition.model_validate(model_raw)
     model_entry = _json_object(_json_array(raw["models"])[0])
-    _json_object(model_entry["model"])["content_sha256"] = content_sha256(model)
+    _json_object(model_entry["model"])["content_sha256"] = document_sha256(
+        model.model_dump(mode="json")
+    )
     files = _json_array(model_entry["files"])
     _json_object(_json_object(files[0])["mount"])["target"] = "/models/target"
     files.append(
@@ -155,7 +157,9 @@ def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
         == f"localhost/vonk/recipe-build@sha256:{digest}"
     )
     assert artifact["path"] == "model.safetensors"
-    assert _json_object(artifact["model"])["content_sha256"] == content_sha256(model)
+    assert _json_object(artifact["model"])["content_sha256"] == document_sha256(
+        model.model_dump(mode="json")
+    )
     assert artifact["mount"] == {
         "source": "/run/vonk/models/primary/weights",
         "target": "/models",
@@ -325,7 +329,7 @@ def test_runtime_spec_binds_exact_auxiliary_model_versions() -> None:
             "selection_id": "primary",
             "publisher": "vonk-forge",
             "slug": "synthetic-tiny-fp16",
-            "content_sha256": content_sha256(model),
+            "content_sha256": document_sha256(model.model_dump(mode="json")),
             "artifact_key": "weights",
         }
     ]

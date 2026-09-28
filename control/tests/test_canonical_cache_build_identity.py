@@ -20,16 +20,20 @@ from vonk_control.recipe_builds import (
     derive_build_input_identity,
 )
 from vonk_control.runtime_adapters import resolve_runtime_adapter
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
 
 def _digest(value: object) -> str:
     if isinstance(value, dict) and value.get("kind") == "model":
-        return content_sha256(ModelDefinition.model_validate(value))
+        return document_sha256(
+            ModelDefinition.model_validate(value).model_dump(mode="json")
+        )
     if isinstance(value, dict) and value.get("kind") == "recipe":
-        return content_sha256(RecipeDefinition.model_validate(value))
+        return document_sha256(
+            RecipeDefinition.model_validate(value).model_dump(mode="json")
+        )
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -149,7 +153,7 @@ def _add_active(
         schema_version=2,
         state="active",
         document=document,
-        content_digest=content_sha256(parsed),
+        content_digest=document_sha256(parsed.model_dump(mode="json")),
         artifact_key=("a" * 64 if kind == "model" else None),
         projected=write_catalog_projection(projected, kind=kind),
         created_by="test",

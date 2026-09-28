@@ -23,7 +23,7 @@ from vonk_agent_protocol.route_activation import (
     ROUTE_MAXIMUM_LEASE_SECONDS,
     recipe_route_lease_expiry,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import read_recipe
 
 from .distributed_lifecycle import DistributedLifecycleError
 from .distributed_recovery import enforce_recovery_deadline
@@ -1191,15 +1191,11 @@ def _primary_model_alias(session: Session, run: RecipeRun) -> str:
             "recipe runtime interface authority is stale", run_id=run.id
         )
     try:
-        recipe = RecipeDefinition.model_validate(revision.document)
+        recipe = read_recipe(revision.document)
     except (TypeError, ValueError) as error:
         raise RecipeRouteError(
             "recipe runtime interface authority is invalid", run_id=run.id
         ) from error
-    if content_sha256(recipe) != revision.content_digest:
-        raise RecipeRouteError(
-            "recipe runtime interface authority is stale", run_id=run.id
-        )
     interfaces = recipe.model_dump(mode="json").get("interfaces")
     interface = None
     if isinstance(interfaces, list):

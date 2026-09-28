@@ -13,8 +13,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, read_recipe
 
+from .catalog_revision_contract import read_model_set
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     CompiledRuntimeImage,
@@ -35,7 +36,7 @@ from .runtime_image_preparation import RuntimeImageReceipt
 def compile_job_invocation(
     session: Session,
     *,
-    recipe: RecipeDefinition,
+    revision: CatalogDocumentRevision,
     installed: object,
     build: RecipeBuild | None,
     parameters: Mapping[str, object],
@@ -47,11 +48,12 @@ def compile_job_invocation(
     from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 
     plan = CompiledExecutionPlan.model_validate(installed)
+    recipe = read_recipe(revision.document)
     if plan.job is None or not 1 <= timeout_seconds <= plan.job.timeout_seconds:
         raise ExecutionPlanCompilationError(
             "job timeout exceeds the installed workload"
         )
-    if content_sha256(recipe) != plan.identity.recipe_revision_sha256:
+    if revision.content_digest != plan.identity.recipe_revision_sha256:
         raise ExecutionPlanCompilationError(
             "job recipe differs from the installed workload"
         )
@@ -71,12 +73,13 @@ def compile_job_invocation(
         raise ExecutionPlanCompilationError(
             "job memory kind differs from the accepted canonical workload"
         )
-    resolved = resolve_recipe_entities(session, recipe.model_dump(mode="json"))
+    resolved = resolve_recipe_entities(session, revision.document)
     models = _canonical_models(resolved["models"])
     if _is_source_build(recipe) and build is None:
         raise ExecutionPlanCompilationError("job build receipt is unavailable")
     runtime_spec = compile_runtime_spec(
         recipe,
+        recipe_digest=revision.content_digest,
         models=models,
         package_handle=_build_package(build) if build is not None else None,
         parameters=parameters,
@@ -177,10 +180,6 @@ class ControllerExecutionPlanService:
             raise ExecutionPlanCompilationError(
                 "recipe does not satisfy the canonical contract"
             ) from error
-        if content_sha256(recipe) != revision.content_digest:
-            raise ExecutionPlanCompilationError(
-                "recipe revision digest does not match the canonical document"
-            )
         try:
             resolved = (
                 dict(resolved_entities)
@@ -238,7 +237,11 @@ class ControllerExecutionPlanService:
             try:
                 runtime_spec = compile_runtime_spec(
                     recipe,
-                    resolved_entities={"recipe": recipe, "models": models},
+                    resolved_entities={
+                        "recipe": recipe,
+                        "recipe_digest": revision.content_digest,
+                        "models": models,
+                    },
                     parameters=parameters,
                     role=node.role,
                     rank=node.rank,
@@ -341,35 +344,20 @@ def _runtime_receipt_mapping(receipt: object) -> dict[str, object]:
 def _canonical_recipe(
     document: Mapping[str, object], resolved_entities: Mapping[str, object] | None
 ) -> RecipeDefinition:
-    """Return the producer-resolved canonical recipe after validating its source."""
+    """Return the producer-resolved canonical recipe, or parse the stored one."""
 
-    parsed = RecipeDefinition.model_validate(document)
     resolved = (
         resolved_entities.get("recipe") if resolved_entities is not None else None
     )
-    if resolved is None:
-        return parsed
-    if not isinstance(resolved, RecipeDefinition):
-        raw = getattr(resolved, "document", resolved)
-        resolved = RecipeDefinition.model_validate(raw)
-    if content_sha256(resolved) != content_sha256(parsed):
-        raise ValueError("resolved recipe projection does not match the revision")
-    return resolved
+    if isinstance(resolved, RecipeDefinition):
+        return resolved
+    return read_recipe(document)
 
 
-def _canonical_models(value: object) -> tuple[ModelDefinition, ...]:
-    """Validate resolved model revisions before selecting their exact files."""
+def _canonical_models(value: object) -> dict[str, ModelDefinition]:
+    """Validate resolved model revisions, keyed by their document digest."""
 
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise TypeError("canonical model projections are missing")
-    result: list[ModelDefinition] = []
-    for item in value:
-        if isinstance(item, ModelDefinition):
-            result.append(item)
-            continue
-        raw = getattr(item, "document", item)
-        result.append(ModelDefinition.model_validate(raw))
-    return tuple(result)
+    return read_model_set(value)
 
 
 def _is_source_build(recipe: RecipeDefinition) -> bool:
@@ -491,8 +479,7 @@ def _bind_runtime_artifacts(
         raise ExecutionPlanCompilationError(
             "canonical model projection is invalid"
         ) from error
-    for model in canonical_models:
-        identity = content_sha256(model)
+    for identity, model in canonical_models.items():
         for file in model.files:
             by_identity[(identity, file.id)] = file.model_dump(mode="json")
     bound: list[dict[str, object]] = []

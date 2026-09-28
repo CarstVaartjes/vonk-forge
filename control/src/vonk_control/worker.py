@@ -548,7 +548,6 @@ if __name__ == "__main__":
     from pathlib import Path
 
     from sqlalchemy import select
-    from vonk_forge_contracts import RecipeDefinition, content_sha256
 
     from .agent_jobs import AgentJobService
     from .db import build_engine, session_factory, wait_for_database
@@ -654,8 +653,12 @@ if __name__ == "__main__":
         execution_key = (
             identity.get("execution_sha256") if isinstance(identity, Mapping) else None
         )
-        recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
-        if not isinstance(execution_key, str):
+        recipe_digest = (
+            identity.get("recipe_revision_sha256")
+            if isinstance(identity, Mapping)
+            else None
+        )
+        if not isinstance(execution_key, str) or not isinstance(recipe_digest, str):
             raise TypeError(
                 "runtime image preparation execution identity is unavailable"
             )

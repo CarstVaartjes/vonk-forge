@@ -22,7 +22,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_model_cache import _artifact, _canonical_model, _download
 from .test_model_removal_reference_lifecycle import _register_model
@@ -140,7 +140,7 @@ def _recipe_model_with_assets(
     assert isinstance(selected, dict)
     model_reference = selected["model"]
     assert isinstance(model_reference, dict)
-    model_reference["content_sha256"] = content_sha256(model)
+    model_reference["content_sha256"] = document_sha256(model.model_dump(mode="json"))
     recipe = RecipeDefinition.model_validate_json(json.dumps(recipe_document))
     return model, recipe
 
@@ -182,7 +182,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
     model, recipe = _recipe_model_with_assets(
         recipe_seed, partial=partial_bytes, shared=shared_bytes
     )
-    model_digest = content_sha256(model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
     selector = f"{model.identity.publisher}/{model.identity.slug}"
     _register_model(sessions, model)
 
@@ -192,7 +192,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
         file_id="weights",
         file_digest=hashlib.sha256(shared_bytes).hexdigest(),
     )
-    peer_digest = content_sha256(peer_model)
+    peer_digest = document_sha256(peer_model.model_dump(mode="json"))
     _register_model(sessions, peer_model)
 
     recipe_revision_id = uuid.uuid4().hex[:24]

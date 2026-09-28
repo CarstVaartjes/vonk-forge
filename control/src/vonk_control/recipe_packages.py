@@ -17,12 +17,17 @@ from urllib.parse import urlsplit
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, ValidationError
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
 from vonk_forge_contracts.resolver import validate_recipe_models
 
 from .bounded_json import integer, require_integer
 from .recipe_library_types import (
-    RecipeLibraryChange,
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibraryRelease,
@@ -108,7 +113,8 @@ class RecipePackageHandle:
     archive_path: Path
     closure_path: Path
     recipe: RecipeDefinition
-    models: tuple[ModelDefinition, ...]
+    # Model snapshots keyed by the document digest recipes reference.
+    models: Mapping[str, ModelDefinition]
 
     @property
     def recipe_identity(self) -> tuple[str, str, str]:
@@ -118,8 +124,8 @@ class RecipePackageHandle:
     @property
     def model_identities(self) -> tuple[tuple[str, str, str], ...]:
         return tuple(
-            (model.identity.publisher, model.identity.slug, content_sha256(model))
-            for model in self.models
+            (model.identity.publisher, model.identity.slug, digest)
+            for digest, model in self.models.items()
         )
 
 
@@ -141,32 +147,6 @@ def _safe_path(value: str) -> bool:
 
 def _json(raw: bytes) -> object:
     return json.loads(raw)
-
-
-def _release_history(
-    recipe: RecipeDefinition, digest: str
-) -> tuple[RecipeLibraryRelease, ...]:
-    result: list[RecipeLibraryRelease] = []
-    for index, entry in enumerate(recipe.release.history):
-        changes = tuple(
-            RecipeLibraryChange(
-                change.kind,
-                change.summary,
-                change.details,
-                tuple(change.references),
-            )
-            for change in entry.changes
-        )
-        result.append(
-            RecipeLibraryRelease(
-                entry.version,
-                entry.released_at,
-                digest if index == 0 else (entry.prior_recipe_content_sha256 or digest),
-                entry.upgrade_effect,
-                changes,
-            )
-        )
-    return tuple(result)
 
 
 def _validate_package_paths(
@@ -507,7 +487,7 @@ class RecipePackageClient:
                 )
                 continue
             try:
-                model = ModelDefinition.model_validate(entry["document"])
+                model = read_model(entry["document"])
             except (TypeError, ValueError) as error:
                 problems.append(
                     _index_problem(
@@ -516,7 +496,7 @@ class RecipePackageClient:
                 )
                 continue
             digest = entry.get("content_sha256")
-            if not isinstance(digest, str) or digest != content_sha256(model):
+            if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
                 problems.append(
                     _index_problem(None, "catalog model digest is invalid", entry)
                 )
@@ -528,7 +508,7 @@ class RecipePackageClient:
                     "catalog model identity is duplicated",
                 )
             identities.add(identity)
-            catalog_entities.append(model.model_dump(mode="json"))
+            catalog_entities.append(dict(entry["document"]))
         raw_packages: list[Mapping[str, object]] = []
         for recipe in raw_recipes:
             if (
@@ -541,7 +521,7 @@ class RecipePackageClient:
                 )
                 continue
             try:
-                document = RecipeDefinition.model_validate(recipe["document"])
+                document = read_recipe(recipe["document"])
             except (TypeError, ValueError) as error:
                 problems.append(
                     _index_problem(
@@ -587,7 +567,7 @@ class RecipePackageClient:
                     "title": document.metadata.title,
                     "description": document.metadata.description,
                     "tags": document.metadata.tags,
-                    "document": document.model_dump(mode="json"),
+                    "document": dict(recipe["document"]),
                 }
             )
         packages: dict[str, dict[str, object]] = {}
@@ -987,9 +967,12 @@ class RecipePackageClient:
                 raise ValueError(
                     "package must contain exactly one recipe.json entrypoint"
                 )
-            recipe = RecipeDefinition.model_validate(_json(files["recipe.json"]))
+            recipe_document = _json(files["recipe.json"])
+            if not isinstance(recipe_document, dict):
+                raise TypeError("recipe.json is not a JSON object")
+            recipe = read_recipe(recipe_document)
             if (
-                content_sha256(recipe) != item.content_sha256
+                document_sha256(recipe_document) != item.content_sha256
                 or recipe.identity.publisher != item.publisher
                 or recipe.identity.slug != item.slug
             ):
@@ -1003,19 +986,23 @@ class RecipePackageClient:
                 path != f"models/{Path(path).stem}.json" for path in model_paths
             ):
                 raise ValueError("model snapshot paths are invalid")
-            models = [
-                ModelDefinition.model_validate(_json(files[path]))
-                for path in model_paths
-            ]
-            if {f"models/{model.identity.slug}.json" for model in models} != set(
-                model_paths
-            ):
+            model_documents: list[dict[str, object]] = []
+            for path in model_paths:
+                model_document = _json(files[path])
+                if not isinstance(model_document, dict):
+                    raise TypeError("model snapshot is not a JSON object")
+                model_documents.append(model_document)
+            models = {
+                document_sha256(value): read_model(value) for value in model_documents
+            }
+            if {
+                f"models/{model.identity.slug}.json" for model in models.values()
+            } != set(model_paths):
                 raise ValueError("model snapshot identity does not match its path")
             validate_recipe_models(recipe, models)
             _validate_package_paths(
                 recipe, set(files) - {"manifest.json"}, manifest.get("build_inputs")
             )
-            release_history = _release_history(recipe, item.content_sha256)
         except ValidationError as error:
             # The package bytes are the signed ones, but a document in it does
             # not fit this Controller's contract: that recipe alone is skipped.
@@ -1089,16 +1076,18 @@ class RecipePackageClient:
             archive_path=archive_path,
             closure_path=closure_path,
             recipe=recipe,
-            models=tuple(models),
+            models=models,
         )
         return replace(
             item,
             title=metadata.title,
             description=metadata.description,
             tags=tuple(metadata.tags),
-            document=recipe.model_dump(mode="json"),
-            release_history=release_history,
-            dependencies=tuple(model.model_dump(mode="json") for model in models),
+            document=recipe_document,
+            release=RecipeLibraryRelease(
+                recipe.release.version, recipe.release.released_at
+            ),
+            dependencies=tuple(model_documents),
             source_bundle=source_bundle,
             package_handle=handle,
             package_sha256=package_digest,

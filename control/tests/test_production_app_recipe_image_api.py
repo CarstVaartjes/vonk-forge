@@ -17,7 +17,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
 )
 from vonk_control.settings import Settings
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 
 def test_production_app_recipe_download_auth_and_status(
@@ -37,7 +37,7 @@ def test_production_app_recipe_download_auth_and_status(
         .read_text()
     )
     model_definition = ModelDefinition.model_validate(model)
-    model_digest = content_sha256(model_definition)
+    model_digest = document_sha256(model_definition.model_dump(mode="json"))
     assert recipe.models[0].model.content_sha256 == model_digest
     now = datetime.now(UTC)
     sessions = sessionmaker(bind=postgres_engine)
@@ -94,7 +94,7 @@ def test_production_app_recipe_download_auth_and_status(
                     schema_version=2,
                     state="active",
                     document=recipe.model_dump(mode="json"),
-                    content_digest=content_sha256(recipe),
+                    content_digest=document_sha256(recipe.model_dump(mode="json")),
                     artifact_key="c" * 64,
                     execution_key="a" * 64,
                     projected={},

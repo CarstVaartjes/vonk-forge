@@ -31,7 +31,7 @@ from vonk_control.runtime_image_preparation import (
     persist_runtime_image_receipt,
     prepare_runtime_image,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .test_recipe_image_availability import (
     Transport,
@@ -148,7 +148,7 @@ def test_changed_frozen_revision_is_refused_before_child_commit(update_env):
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == revision_id)
             .values(
-                content_digest=content_sha256(changed),
+                content_digest=document_sha256(changed.model_dump(mode="json")),
                 document=changed.model_dump(mode="json"),
             )
         )

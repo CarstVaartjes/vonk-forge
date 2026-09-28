@@ -16,7 +16,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import RecipeStartPayload, canonical_message
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .distributed_lifecycle import (
     DistributedLifecycleError,
@@ -74,10 +74,8 @@ def _active_recipe_revision(
     ):
         return None
     try:
-        recipe = RecipeDefinition.model_validate(revision.document)
+        recipe = read_recipe(revision.document)
     except (TypeError, ValueError):
-        return None
-    if content_sha256(recipe) != revision.content_digest:
         return None
     return revision, recipe
 

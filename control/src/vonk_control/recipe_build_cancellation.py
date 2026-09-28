@@ -11,7 +11,7 @@ from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import canonical_message
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import read_recipe
 
 from .agent_jobs import _JsonFlagIsTrue
 from .fleet_profile_contract import (
@@ -420,7 +420,7 @@ def _availability_consumer(parent: Job, build: RecipeBuild) -> bool:
     if payload.get("removed") is True or payload.get("removal_fence") is not None:
         return False
     read_availability_intent(payload["request"])
-    recipe = RecipeDefinition.model_validate_json(canonical_message(payload["recipe"]))
+    recipe = read_recipe(payload["recipe"])
     runtime = payload["runtime"]
     if (
         payload["recipe_revision_id"] != build.recipe_revision_id

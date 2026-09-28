@@ -25,7 +25,7 @@ from vonk_control.models import (
     ClusterMapping,
     ClusterMappingNode,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
 MODEL_REVISION_ID = "00000000-0000-4000-8000-000000000011"
@@ -80,8 +80,8 @@ def _seed_canonical_catalog(
     sessions: sessionmaker, now: datetime
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents()
-    model_digest = content_sha256(model)
-    recipe_digest = content_sha256(recipe)
+    model_digest = document_sha256(model.model_dump(mode="json"))
+    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     with sessions.begin() as session:
         session.add_all(
             [

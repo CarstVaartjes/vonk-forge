@@ -33,7 +33,7 @@ from vonk_control.models import (
     FleetProfile,
     RecipeBuild,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 NODE_A = "spk_" + "a" * 32
@@ -151,7 +151,7 @@ def _seed_recipe_reference(
     }
     definition = RecipeDefinition.model_validate(document)
     document = definition.model_dump(mode="json")
-    recipe_digest = content_sha256(definition)
+    recipe_digest = document_sha256(definition.model_dump(mode="json"))
     with sessions.begin() as session:
         session.add(
             CatalogDocument(

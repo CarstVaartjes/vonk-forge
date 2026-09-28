@@ -1232,7 +1232,6 @@ def create_app(
 def production_app(settings: Settings | None = None) -> FastAPI:
     configure_controller_logging()
     from sqlalchemy import func, select
-    from vonk_forge_contracts import RecipeDefinition, content_sha256
 
     from .agent_upgrades import AgentUpgradeService
     from .availability_production import build_recipe_image_availability
@@ -1349,8 +1348,12 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         execution_key = (
             identity.get("execution_sha256") if isinstance(identity, Mapping) else None
         )
-        recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
-        if not isinstance(execution_key, str):
+        recipe_digest = (
+            identity.get("recipe_revision_sha256")
+            if isinstance(identity, Mapping)
+            else None
+        )
+        if not isinstance(execution_key, str) or not isinstance(recipe_digest, str):
             raise TypeError(
                 "runtime image preparation execution identity is unavailable"
             )
