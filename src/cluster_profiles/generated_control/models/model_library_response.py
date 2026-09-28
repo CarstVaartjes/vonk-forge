@@ -17,6 +17,7 @@ if TYPE_CHECKING:
   from ..models.library_facet_values import LibraryFacetValues
   from ..models.library_filter_values import LibraryFilterValues
   from ..models.library_model_projection import LibraryModelProjection
+  from ..models.library_release import LibraryRelease
 
 
 
@@ -40,6 +41,7 @@ class ModelLibraryResponse:
                 This is a typed echo rather than a free-form map so the request and the
                 response describe the same vocabulary. Every field is optional, so a page
                 that applied no filter stays valid without inventing values.
+            library (LibraryRelease | None | Unset):
      """
 
     facets: LibraryFacetValues
@@ -48,6 +50,7 @@ class ModelLibraryResponse:
     models: list[LibraryModelProjection]
     next_cursor: None | str
     filters: LibraryFilterValues | Unset = UNSET
+    library: LibraryRelease | None | Unset = UNSET
 
 
 
@@ -58,6 +61,7 @@ class ModelLibraryResponse:
         from ..models.library_facet_values import LibraryFacetValues # noqa: PLC0415
         from ..models.library_filter_values import LibraryFilterValues # noqa: PLC0415
         from ..models.library_model_projection import LibraryModelProjection # noqa: PLC0415
+        from ..models.library_release import LibraryRelease # noqa: PLC0415
         facets = self.facets.to_dict()
 
         freshness_policy = self.freshness_policy.to_dict()
@@ -78,6 +82,14 @@ class ModelLibraryResponse:
         if not isinstance(self.filters, Unset):
             filters = self.filters.to_dict()
 
+        library: dict[str, Any] | None | Unset
+        if isinstance(self.library, Unset):
+            library = UNSET
+        elif isinstance(self.library, LibraryRelease):
+            library = self.library.to_dict()
+        else:
+            library = self.library
+
 
         field_dict: dict[str, Any] = {}
 
@@ -90,6 +102,8 @@ class ModelLibraryResponse:
         })
         if filters is not UNSET:
             field_dict["filters"] = filters
+        if library is not UNSET:
+            field_dict["library"] = library
 
         return field_dict
 
@@ -101,6 +115,7 @@ class ModelLibraryResponse:
         from ..models.library_facet_values import LibraryFacetValues # noqa: PLC0415
         from ..models.library_filter_values import LibraryFilterValues # noqa: PLC0415
         from ..models.library_model_projection import LibraryModelProjection # noqa: PLC0415
+        from ..models.library_release import LibraryRelease # noqa: PLC0415
         d = dict(src_dict)
         facets = LibraryFacetValues.from_dict(d.pop("facets"))
 
@@ -145,6 +160,26 @@ class ModelLibraryResponse:
 
 
 
+        def _parse_library(data: object) -> LibraryRelease | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                library_type_0 = LibraryRelease.from_dict(data)
+
+
+
+                return library_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(LibraryRelease | None | Unset, data)
+
+        library = _parse_library(d.pop("library", UNSET))
+
+
         model_library_response = cls(
             facets=facets,
             freshness_policy=freshness_policy,
@@ -152,6 +187,7 @@ class ModelLibraryResponse:
             models=models,
             next_cursor=next_cursor,
             filters=filters,
+            library=library,
         )
 
         return model_library_response

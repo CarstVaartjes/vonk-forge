@@ -1560,13 +1560,6 @@ export interface components {
             /** Detail */
             detail: string;
         };
-        /** BuildArgument */
-        BuildArgument: {
-            /** Name */
-            name: string;
-            /** Value */
-            value: string | number | boolean;
-        };
         /** BuildCompatibilityEvidence */
         BuildCompatibilityEvidence: {
             /** Detail */
@@ -1592,11 +1585,6 @@ export interface components {
         BuildNetwork: {
             /** Hosts */
             hosts: string[];
-            /**
-             * Mode
-             * @enum {string}
-             */
-            mode: "none" | "public";
         };
         /** BuildPatch */
         BuildPatch: {
@@ -3956,6 +3944,21 @@ export interface components {
             usage: string[];
         };
         /**
+         * LibraryRelease
+         * @description The recipe library release this Controller last synchronized.
+         */
+        LibraryRelease: {
+            /** Commit */
+            commit: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: string;
+        };
+        /**
          * LibraryResourceProjection
          * @description Declared resource facts; unknown values remain null.
          */
@@ -4069,6 +4072,10 @@ export interface components {
             /** Imported Count */
             imported_count: number;
             last_error?: components["schemas"]["ManagedCatalogSyncFailure"] | null;
+            /** Library Updated At */
+            library_updated_at?: string | null;
+            /** Library Version */
+            library_version?: string | null;
             /** Problems */
             problems: components["schemas"]["ManagedCatalogSyncProblem"][];
             /** Processed Count */
@@ -4154,21 +4161,6 @@ export interface components {
              * @constant
              */
             source: "aggregate_inventory_without_run_usage";
-        };
-        /** ModelAccess */
-        ModelAccess: {
-            /**
-             * Authentication
-             * @enum {string}
-             */
-            authentication: "none" | "token";
-            /** Gated */
-            gated: boolean;
-            /**
-             * Visibility
-             * @enum {string}
-             */
-            visibility: "public" | "restricted";
         };
         /**
          * ModelArtifactIdentity
@@ -4326,50 +4318,13 @@ export interface components {
              */
             schema_version: 2;
         };
-        /** ModelCapabilities */
-        ModelCapabilities: {
-            /** Facts */
-            facts: components["schemas"]["ModelCapabilityFact"][];
-            provenance: components["schemas"]["ModelCapabilityProvenance"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-        };
-        /** ModelCapabilityFact */
-        ModelCapabilityFact: {
-            /**
-             * Capability
-             * @enum {string}
-             */
-            capability: "chat" | "text-generation" | "text-understanding" | "reasoning" | "tool-use" | "code-generation" | "ocr" | "image-generation" | "image-understanding" | "image-editing" | "video-generation" | "video-understanding" | "audio-generation" | "audio-understanding" | "embeddings" | "3d-generation";
-            /**
-             * Evidence Status
-             * @enum {string}
-             */
-            evidence_status: "declared" | "tested" | "contradicted" | "unknown";
-            /**
-             * Support
-             * @enum {string}
-             */
-            support: "supported" | "unsupported" | "unknown";
-        };
-        /** ModelCapabilityProvenance */
-        ModelCapabilityProvenance: {
-            /** Source Revision */
-            source_revision: string;
-            /** Source Url */
-            source_url: string;
-        };
         /**
          * ModelDefinition
          * @description One exact model version and variant, including its complete manifest.
          */
         ModelDefinition: {
-            access: components["schemas"]["ModelAccess"];
-            capabilities: components["schemas"]["ModelCapabilities"];
+            /** Capabilities */
+            capabilities: string[];
             /** Dependencies */
             dependencies: components["schemas"]["ModelReference"][];
             /** Files */
@@ -4383,22 +4338,13 @@ export interface components {
              */
             kind: "model";
             license: components["schemas"]["ModelLicense"];
-            limits: components["schemas"]["ModelLimits"];
-            lineage: components["schemas"]["ModelLineage"];
             metadata: components["schemas"]["ModelMetadata"];
             /** Modalities */
             modalities: ("text" | "image" | "audio" | "video" | "3d" | "embeddings")[];
-            parameters: components["schemas"]["ModelParameters"];
-            provenance: components["schemas"]["ModelProvenance"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
+            /** Requires Token */
+            requires_token: boolean;
             /** Source */
             source: components["schemas"]["ModelSource"] | components["schemas"]["GitHubReleaseSource"];
-            supersedes?: components["schemas"]["ModelReference"] | null;
         };
         /** ModelDetailResponse */
         ModelDetailResponse: {
@@ -4453,11 +4399,6 @@ export interface components {
         };
         /** ModelFormat */
         ModelFormat: {
-            /**
-             * Container
-             * @enum {string}
-             */
-            container: "gguf" | "safetensors" | "onnx" | "other";
             /** Precision */
             precision: string;
             /** Quantization */
@@ -4489,6 +4430,7 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
+            library?: components["schemas"]["LibraryRelease"] | null;
             /** Models */
             models: components["schemas"]["LibraryModelProjection"][];
             /** Next Cursor */
@@ -4498,50 +4440,11 @@ export interface components {
         ModelLicense: {
             /** Attribution */
             attribution: string[];
-            /** Operator Acceptance Required */
-            operator_acceptance_required: boolean;
             /** Spdx */
             spdx: string;
             territorial_restrictions?: components["schemas"]["ModelTerritorialRestrictions"] | null;
             /** Url */
             url: string;
-        };
-        /** ModelLimits */
-        ModelLimits: {
-            /** Context Tokens */
-            context_tokens?: number | null;
-            /** Frames */
-            frames?: number | null;
-            /** Resolution Pixels */
-            resolution_pixels?: number | null;
-            /** Sample Rate Hz */
-            sample_rate_hz?: number | null;
-        };
-        /** ModelLineage */
-        ModelLineage: {
-            /** Derivation */
-            derivation: string;
-            /** Publisher */
-            publisher: string;
-            /**
-             * Relation
-             * @enum {string}
-             */
-            relation: "official" | "derived" | "quantized";
-            source_model: components["schemas"]["ModelLineageSource"];
-        };
-        /** ModelLineageSource */
-        ModelLineageSource: {
-            /**
-             * Kind
-             * @default model
-             * @constant
-             */
-            kind: "model";
-            /** Publisher */
-            publisher: string;
-            /** Slug */
-            slug: string;
         };
         /** ModelMetadata */
         ModelMetadata: {
@@ -4550,26 +4453,8 @@ export interface components {
             /** Tags */
             tags: string[];
         };
-        /** ModelParameters */
-        ModelParameters: {
-            /** Active */
-            active?: number | null;
-            /** Total */
-            total?: number | null;
-        };
-        /** ModelProvenance */
-        ModelProvenance: {
-            /** Attribution */
-            attribution: string[];
-            /** Source Revision */
-            source_revision: string;
-            /** Source Url */
-            source_url: string;
-        };
         /** ModelRecord */
         ModelRecord: {
-            /** Architecture */
-            architecture: string;
             /** Publisher */
             publisher: string;
             /** Slug */
@@ -4939,17 +4824,6 @@ export interface components {
              */
             severity: "info" | "warning" | "error";
         };
-        /** RecipeBenchmark */
-        RecipeBenchmark: {
-            /** Configuration */
-            configuration: {
-                [key: string]: string | number | boolean;
-            };
-            /** Framework */
-            framework: string;
-            /** Name */
-            name: string;
-        };
         /** RecipeBuildCleanupEvidence */
         RecipeBuildCleanupEvidence: {
             /** Build Id */
@@ -4969,8 +4843,6 @@ export interface components {
         };
         /** RecipeBuildDefinition */
         RecipeBuildDefinition: {
-            /** Arguments */
-            arguments: components["schemas"]["BuildArgument"][];
             base_image: components["schemas"]["RecipeImage"];
             context: components["schemas"]["BuildContext"];
             /** Dockerfile */
@@ -4978,8 +4850,6 @@ export interface components {
             network: components["schemas"]["BuildNetwork"];
             /** Patches */
             patches: components["schemas"]["BuildPatch"][];
-            /** Target */
-            target?: string | null;
         };
         /** RecipeBuildEvidence */
         RecipeBuildEvidence: {
@@ -4992,15 +4862,6 @@ export interface components {
             /** Oci Layout Sha256 */
             oci_layout_sha256: string;
             policy: components["schemas"]["RecipeBuildPolicy"];
-        };
-        /** RecipeBuildExecution */
-        RecipeBuildExecution: {
-            build: components["schemas"]["RecipeBuildDefinition"];
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            mode: "build";
         };
         /** RecipeBuildPolicy */
         RecipeBuildPolicy: {
@@ -5034,8 +4895,7 @@ export interface components {
          * @description The sole public recipe authoring contract.
          */
         RecipeDefinition: {
-            /** Execution */
-            execution: components["schemas"]["RecipeImageExecution"] | components["schemas"]["RecipeBuildExecution"];
+            execution: components["schemas"]["RecipeExecution"];
             identity: components["schemas"]["RecipeIdentity"];
             /** Interfaces */
             interfaces: (components["schemas"]["RecipeOpenAIInterface"] | components["schemas"]["RecipeJobInterface"])[];
@@ -5051,12 +4911,6 @@ export interface components {
             provenance: components["schemas"]["RecipeProvenance"];
             release: components["schemas"]["RecipeRelease"];
             runtime: components["schemas"]["RecipeRuntime"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Settings */
             settings: components["schemas"]["RecipeGenerationSettings"] | components["schemas"]["RecipeEmbeddingSettings"] | components["schemas"]["RecipeJobSettings"];
             topology: components["schemas"]["RecipeTopology"];
@@ -5091,16 +4945,12 @@ export interface components {
         RecipeDiskResources: {
             /** Artifact Bytes */
             artifact_bytes: number;
-            /** Cache Bytes */
-            cache_bytes: number;
             /** Image Bytes */
             image_bytes: number;
-            /** Rollback Bytes */
-            rollback_bytes: number;
             /** Safety Margin Bytes */
             safety_margin_bytes: number;
-            /** Staging Bytes */
-            staging_bytes: number;
+            /** Working Bytes */
+            working_bytes: number;
         };
         /** RecipeDownloadRequest */
         RecipeDownloadRequest: {
@@ -5121,28 +4971,12 @@ export interface components {
             };
             max_batch_tokens?: components["schemas"]["RecipeIntegerSetting"] | null;
         };
-        /** RecipeFabric */
-        RecipeFabric: {
-            /**
-             * Connectivity
-             * @enum {string}
-             */
-            connectivity: "none" | "connected" | "full_mesh" | "switch";
-            /** Minimum Bandwidth Mbps */
-            minimum_bandwidth_mbps: number;
-        };
-        /** RecipeFailurePolicy */
-        RecipeFailurePolicy: {
-            /**
-             * Rank Loss
-             * @enum {string}
-             */
-            rank_loss: "not-applicable" | "withdraw-endpoint";
-            /**
-             * Recovery
-             * @enum {string}
-             */
-            recovery: "restart-entrypoint" | "restart-worker-then-entrypoint";
+        /**
+         * RecipeExecution
+         * @description The platform builds every recipe image from its pinned base and context.
+         */
+        RecipeExecution: {
+            build: components["schemas"]["RecipeBuildDefinition"];
         };
         /** RecipeGenerationSettings */
         RecipeGenerationSettings: {
@@ -5189,11 +5023,6 @@ export interface components {
         RecipeImage: {
             /** Digest */
             digest: string;
-            /**
-             * Platform
-             * @constant
-             */
-            platform: "linux/arm64";
             /** Repository */
             repository: string;
         };
@@ -5327,15 +5156,6 @@ export interface components {
             /** Source */
             source: string;
         };
-        /** RecipeImageExecution */
-        RecipeImageExecution: {
-            image: components["schemas"]["RecipeImage"];
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            mode: "image";
-        };
         /** RecipeImageImportEvidence */
         RecipeImageImportEvidence: {
             /** Build Id */
@@ -5420,11 +5240,6 @@ export interface components {
             max_bytes: number;
             /** Media Types */
             media_types: string[];
-            /**
-             * Path
-             * @constant
-             */
-            path: "/inputs";
             /** Required */
             required: boolean;
             /** Slots */
@@ -5439,39 +5254,25 @@ export interface components {
             adapter: "artifact-job" | "audio-job" | "image-job" | "mesh-job" | "video-job";
             input?: components["schemas"]["RecipeJobInput"] | null;
             output: components["schemas"]["RecipeJobOutput"];
-            /**
-             * Path
-             * @constant
-             */
-            path: "/outputs";
         };
         /** RecipeJobOutput */
         RecipeJobOutput: {
             /** Max Total Bytes */
             max_total_bytes: number;
-            /**
-             * Path
-             * @constant
-             */
-            path: "/outputs";
             /** Slots */
             slots: components["schemas"]["RecipeOutputSlot"][];
         };
-        /** RecipeJobServingRequest */
+        /**
+         * RecipeJobServingRequest
+         * @description A job check stages its fixture as the input when the interface has one.
+         */
         RecipeJobServingRequest: {
             /** Fixture */
             fixture: string;
-            /** Input Path */
-            input_path?: "/inputs" | null;
             /** Input Slots */
             input_slots?: {
                 [key: string]: string;
             };
-            /**
-             * Output Path
-             * @constant
-             */
-            output_path: "/outputs";
             /** Output Slot */
             output_slot: string;
             /**
@@ -5503,6 +5304,7 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
+            library?: components["schemas"]["LibraryRelease"] | null;
             /** Next Cursor */
             next_cursor: string | null;
             /** Recipes */
@@ -5510,29 +5312,18 @@ export interface components {
         };
         /** RecipeLifecycle */
         RecipeLifecycle: {
-            failure?: components["schemas"]["RecipeFailurePolicy"] | null;
-            /** Post Stop */
-            post_stop: string[][];
-            /** Pre Start */
-            pre_start: string[][];
             /** Stop Timeout Seconds */
             stop_timeout_seconds: number;
         };
-        /** RecipeMemoryResources */
+        /**
+         * RecipeMemoryResources
+         * @description Unified (DGX Spark) memory one role needs.
+         */
         RecipeMemoryResources: {
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "unified" | "host" | "accelerator";
-            /** Runtime Growth Bytes */
-            runtime_growth_bytes: number;
-            /** Startup Peak Bytes */
-            startup_peak_bytes: number;
-            /** Steady State Bytes */
-            steady_state_bytes: number;
-            /** System Reserve Bytes */
-            system_reserve_bytes: number;
+            /** Peak Bytes */
+            peak_bytes: number;
+            /** Reserve Bytes */
+            reserve_bytes: number;
         };
         /** RecipeMetadata */
         RecipeMetadata: {
@@ -5565,11 +5356,6 @@ export interface components {
         };
         /** RecipeMount */
         RecipeMount: {
-            /**
-             * Read Only
-             * @constant
-             */
-            read_only: true;
             /** Target */
             target: string;
         };
@@ -5693,8 +5479,6 @@ export interface components {
             pipeline: number;
             /** Tensor */
             tensor: number;
-            /** World Size */
-            world_size: number;
         };
         /** RecipePresence */
         RecipePresence: {
@@ -5737,11 +5521,6 @@ export interface components {
         RecipeProvenance: {
             /** Attribution */
             attribution: string[];
-            /**
-             * Source Kind
-             * @enum {string}
-             */
-            source_kind: "local" | "workload_run" | "global" | "fork";
             /** Source Reference */
             source_reference?: string | null;
         };
@@ -5799,42 +5578,18 @@ export interface components {
              */
             removed_bytes: number;
         };
-        /** RecipeRelease */
+        /**
+         * RecipeRelease
+         * @description The version this recipe runs.
+         *
+         *     When the upstream project publishes versions, this is the upstream version
+         *     and its release date (for example ``1.6`` released 2026-09-17). A recipe
+         *     whose upstream has no versions carries its own semantic version instead.
+         *     The recipe library's own version follows the contract, not recipe content.
+         */
         RecipeRelease: {
-            /** History */
-            history: components["schemas"]["RecipeReleaseHistoryEntry"][];
             /** Released At */
             released_at: string;
-            /** Version */
-            version: string;
-        };
-        /** RecipeReleaseChange */
-        RecipeReleaseChange: {
-            /** Details */
-            details?: string | null;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "initial" | "model" | "runtime" | "performance" | "fix" | "security" | "compatibility" | "breaking" | "metadata";
-            /** References */
-            references?: string[];
-            /** Summary */
-            summary: string;
-        };
-        /** RecipeReleaseHistoryEntry */
-        RecipeReleaseHistoryEntry: {
-            /** Changes */
-            changes: components["schemas"]["RecipeReleaseChange"][];
-            /** Prior Recipe Content Sha256 */
-            prior_recipe_content_sha256?: string | null;
-            /** Released At */
-            released_at: string;
-            /**
-             * Upgrade Effect
-             * @enum {string}
-             */
-            upgrade_effect: "none" | "restart" | "reprepare" | "rebuild";
             /** Version */
             version: string;
         };
@@ -5949,10 +5704,8 @@ export interface components {
         RecipeRuntimeEnvironment: {
             /** Name */
             name: string;
-            /** Secret */
-            secret?: string | null;
             /** Value */
-            value?: string | number | boolean | null;
+            value: string | number | boolean;
         };
         /** RecipeSelectorIntent */
         RecipeSelectorIntent: {
@@ -6152,14 +5905,15 @@ export interface components {
              */
             stopped: true;
         };
-        /** RecipeTopology */
+        /**
+         * RecipeTopology
+         * @description Roles and their start order; everything else follows from node_count.
+         *
+         *     One node runs alone. More nodes share one connected fabric: losing a rank
+         *     withdraws the endpoint, recovery restarts the workers and then the
+         *     entrypoint, and stopping always starts with the endpoint owner.
+         */
         RecipeTopology: {
-            fabric: components["schemas"]["RecipeFabric"];
-            /**
-             * Mode
-             * @enum {string}
-             */
-            mode: "single" | "distributed" | "tensor_parallel" | "pipeline_parallel" | "data_parallel" | "hybrid" | "ray" | "mpi";
             /** Name */
             name: string;
             /** Node Count */
@@ -6169,8 +5923,6 @@ export interface components {
             roles: components["schemas"]["RecipeTopologyRole"][];
             /** Start Order */
             start_order: string[];
-            /** Stop Order */
-            stop_order: string[];
         };
         /** RecipeTopologyRole */
         RecipeTopologyRole: {
@@ -6306,8 +6058,6 @@ export interface components {
         };
         /** RecipeValidation */
         RecipeValidation: {
-            /** Benchmarks */
-            benchmarks: components["schemas"]["RecipeBenchmark"][];
             serving: components["schemas"]["RecipeServingValidation"];
         };
         /** RecipeValidationCheck */

@@ -420,9 +420,10 @@ def test_package_with_an_incompatible_document_does_not_block_other_packages(
     model_path = next(
         path for path in files if path.startswith("models/") and path.endswith(".json")
     )
-    # A field a newer contract added: signed and intact, but unreadable here.
+    # A required field this contract no longer finds: signed and intact, but
+    # unreadable here.
     model = json.loads(files[model_path])
-    model["future_field"] = "added by a newer contract"
+    del model["files"]
     files[model_path] = json.dumps(
         model, sort_keys=True, separators=(",", ":")
     ).encode()
@@ -452,5 +453,5 @@ def test_package_with_an_incompatible_document_does_not_block_other_packages(
     with pytest.raises(RecipePackageError) as caught:
         client.fetch(skipped.uri)
     assert caught.value.code == "recipe_package.document_incompatible"
-    assert "future_field" in caught.value.detail
+    assert "files" in caught.value.detail
     client.close()

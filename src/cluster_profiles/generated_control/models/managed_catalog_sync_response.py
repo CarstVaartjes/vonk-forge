@@ -53,6 +53,8 @@ class ManagedCatalogSyncResponse:
             commit (None | str | Unset):
             expected_commit (None | str | Unset):
             last_error (ManagedCatalogSyncFailure | None | Unset):
+            library_updated_at (None | str | Unset):
+            library_version (None | str | Unset):
      """
 
     completed_at: None | str
@@ -75,6 +77,8 @@ class ManagedCatalogSyncResponse:
     commit: None | str | Unset = UNSET
     expected_commit: None | str | Unset = UNSET
     last_error: ManagedCatalogSyncFailure | None | Unset = UNSET
+    library_updated_at: None | str | Unset = UNSET
+    library_version: None | str | Unset = UNSET
 
 
 
@@ -155,6 +159,18 @@ class ManagedCatalogSyncResponse:
         else:
             last_error = self.last_error
 
+        library_updated_at: None | str | Unset
+        if isinstance(self.library_updated_at, Unset):
+            library_updated_at = UNSET
+        else:
+            library_updated_at = self.library_updated_at
+
+        library_version: None | str | Unset
+        if isinstance(self.library_version, Unset):
+            library_version = UNSET
+        else:
+            library_version = self.library_version
+
 
         field_dict: dict[str, Any] = {}
 
@@ -183,6 +199,10 @@ class ManagedCatalogSyncResponse:
             field_dict["expected_commit"] = expected_commit
         if last_error is not UNSET:
             field_dict["last_error"] = last_error
+        if library_updated_at is not UNSET:
+            field_dict["library_updated_at"] = library_updated_at
+        if library_version is not UNSET:
+            field_dict["library_version"] = library_version
 
         return field_dict
 
@@ -305,6 +325,26 @@ class ManagedCatalogSyncResponse:
         last_error = _parse_last_error(d.pop("last_error", UNSET))
 
 
+        def _parse_library_updated_at(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        library_updated_at = _parse_library_updated_at(d.pop("library_updated_at", UNSET))
+
+
+        def _parse_library_version(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        library_version = _parse_library_version(d.pop("library_version", UNSET))
+
+
         managed_catalog_sync_response = cls(
             completed_at=completed_at,
             created_at=created_at,
@@ -326,6 +366,8 @@ class ManagedCatalogSyncResponse:
             commit=commit,
             expected_commit=expected_commit,
             last_error=last_error,
+            library_updated_at=library_updated_at,
+            library_version=library_version,
         )
 
         return managed_catalog_sync_response

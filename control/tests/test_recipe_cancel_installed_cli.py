@@ -42,7 +42,7 @@ def test_installed_recipe_cancel_recovers_dropped_acceptance_and_settles(
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = uuid.uuid4().hex[:24]
     now = datetime.now(UTC)
     with sessions.begin() as session:

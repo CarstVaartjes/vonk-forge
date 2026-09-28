@@ -789,7 +789,7 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
         source_bundles=SourceBundleStore(tmp_path / "bundles"),
     )
     services.artifact_root.mkdir()
-    original_recipe = canonical_example("recipe-image.json")
+    original_recipe = canonical_example("recipe-source-build.json")
     from vonk_forge_contracts import RecipeDefinition, document_sha256
 
     original = RecipeDefinition.model_validate(original_recipe)

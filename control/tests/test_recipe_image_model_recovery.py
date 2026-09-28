@@ -71,7 +71,7 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
 
     recipe_raw = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text()
     )
     recipe_raw["models"][0]["model"]["content_sha256"] = model_digest

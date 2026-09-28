@@ -219,7 +219,10 @@ def _exit_after_recipe_image_unlink(database_url: str, artifact_root: str) -> No
     service = RecipeImageAvailabilityService(
         sessions,
         storage=_ExitAfterImageUnlinkStorage(Path(artifact_root)),
-        authority=lambda *_args, **_kwargs: (_recipe("recipe-image.json"), _runtime()),
+        authority=lambda *_args, **_kwargs: (
+            _recipe("recipe-source-build.json"),
+            _runtime(),
+        ),
         clock=lambda: datetime.now(UTC),
     )
     service.advance_removals(limit=1)
@@ -440,7 +443,7 @@ def _successor(recipe: RecipeDefinition, title: str) -> RecipeDefinition:
 def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions(
     tmp_path,
 ):
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     old_recipe = recipe.model_copy(
         update={
             "metadata": recipe.metadata.model_copy(
@@ -513,7 +516,7 @@ def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions
 
 
 def test_selector_replay_keeps_original_revision_and_issuer(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     newer = recipe.model_copy(
         update={
             "metadata": recipe.metadata.model_copy(update={"description": "New head"})
@@ -562,7 +565,7 @@ def test_selector_replay_keeps_original_revision_and_issuer(tmp_path: Path) -> N
 
 
 def test_replay_does_not_collapse_different_image_actions(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -588,7 +591,7 @@ def test_replay_does_not_collapse_different_image_actions(tmp_path: Path) -> Non
 def test_force_download_skips_verified_cache_but_preserves_archive(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     storage = FilesystemRuntimeImageStorage(tmp_path)
     transport = Transport()
     first = prepare_runtime_image(
@@ -610,7 +613,7 @@ def test_force_download_skips_verified_cache_but_preserves_archive(
 def test_download_after_cache_removal_restores_only_unrevoked_authority(
     tmp_path, revoked
 ):
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -693,7 +696,7 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
 
 
 def test_forced_digest_failure_does_not_replace_valid_archive(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     storage = FilesystemRuntimeImageStorage(tmp_path)
     transport = Transport()
     first = prepare_runtime_image(
@@ -1134,7 +1137,7 @@ def test_recipe_removal_reference_scan_enforces_accumulated_owner_budget(
 def test_recipe_removal_fails_closed_on_symlinked_archive(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'symlink-removal.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -1201,7 +1204,7 @@ def test_recipe_removal_fails_closed_on_symlinked_archive(
 def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'retry-removal.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -1345,7 +1348,7 @@ def _empty_recipe_removal_owner(
     RecipeImageAvailabilityService,
     str,
 ]:
-    image_recipe = _recipe("recipe-image.json")
+    image_recipe = _recipe("recipe-source-build.json")
     job_recipe = _recipe("recipe-job.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -1460,7 +1463,7 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
 ) -> None:
     """An existing deletion fence is visible, while its accepted key still recovers."""
 
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'active-review.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1554,7 +1557,7 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     receipt = _reference_receipt()
     now = datetime.now(UTC)
     with sessions.begin() as session:
@@ -1644,7 +1647,7 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     receipt = _reference_receipt()
     now = datetime.now(UTC)
     with sessions.begin() as session:
@@ -1740,7 +1743,7 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     receipt = _reference_receipt()
     now = [datetime.now(UTC)]
     with sessions.begin() as session:
@@ -2010,7 +2013,7 @@ def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> N
 
 
 def test_expired_claim_is_reclaimable_after_restart(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2039,7 +2042,7 @@ def test_expired_claim_is_reclaimable_after_restart(tmp_path: Path) -> None:
 
 
 def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2084,7 +2087,7 @@ def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
 def test_claim_identity_uses_authoritative_image_and_running_claim_is_not_repeated(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2106,7 +2109,7 @@ def test_claim_identity_uses_authoritative_image_and_running_claim_is_not_repeat
 def test_publication_contention_reschedules_without_spending_transfer_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2167,7 +2170,7 @@ def test_postgres_claims_are_fenced_and_respect_build_capacity(
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    image_recipe = _recipe("recipe-image.json")
+    image_recipe = _recipe("recipe-source-build.json")
     build_recipe = _recipe("recipe-source-build.json")
     now = datetime.now(UTC)
     with sessions.begin() as session:
@@ -2276,7 +2279,7 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     now = [datetime.now(UTC)]
     with sessions.begin() as session:
         revision = _add_revision(session, "revision-pg-model-lock", recipe)
@@ -2455,7 +2458,7 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
 def test_same_immutable_image_reuses_preparation_across_recipe_revisions(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     recipe_b_raw = recipe.model_dump(mode="json")
     recipe_b_raw["metadata"]["title"] = "Synthetic Tiny Image (notes update)"
     recipe_b = RecipeDefinition.model_validate(recipe_b_raw)
@@ -2491,7 +2494,7 @@ def test_same_immutable_image_reuses_preparation_across_recipe_revisions(
 def test_newer_preparation_intent_cancels_the_older_queued_preparation(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     successor = _successor(recipe, "Successor recipe revision")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -2549,7 +2552,7 @@ def test_newer_preparation_intent_cancels_the_older_queued_preparation(
 def test_active_head_advance_cancels_a_queued_older_preparation_at_dispatch(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     successor = _successor(recipe, "Successor recipe revision")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -2639,7 +2642,7 @@ def test_running_preparation_for_an_older_revision_is_not_cancelled(
 def test_request_replay_returns_original_before_metadata_refresh(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2670,7 +2673,7 @@ def test_request_replay_returns_original_before_metadata_refresh(
 def test_same_work_identity_keeps_distinct_authorization_operations(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2698,7 +2701,7 @@ def test_same_work_identity_keeps_distinct_authorization_operations(
 def test_model_child_and_image_complete_through_one_sql_operation(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2810,7 +2813,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(
 def test_model_and_image_children_advance_independently_and_reuse_image(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -2976,7 +2979,7 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
         authority=lambda recipe_revision_id, *, force=False: (
-            _recipe("recipe-image.json"),
+            _recipe("recipe-source-build.json"),
             _runtime(),
         ),
         model_cache=cache,
@@ -2995,7 +2998,7 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
 def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3164,7 +3167,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
 def test_accepted_cancellation_is_idempotent_and_prevents_queued_dispatch(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite:///{tmp_path / 'cancel-queued.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3217,7 +3220,7 @@ def test_accepted_cancellation_is_idempotent_and_prevents_queued_dispatch(
 def test_late_verified_image_result_cannot_publish_after_cancellation(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(
         f"sqlite+pysqlite:///{tmp_path / 'cancel-late.sqlite'}",
         connect_args={"check_same_thread": False},
@@ -3285,7 +3288,7 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
 def test_cancelling_image_reference_intent_is_counted_until_claim_release(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'cancel-reference.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3403,7 +3406,7 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
 def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
     tmp_path: Path, mutation: str
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(
         f"sqlite+pysqlite:///{tmp_path / f'cancel-reference-{mutation}.sqlite'}"
     )
@@ -3460,7 +3463,7 @@ def test_cancelling_reference_intent_rejects_stale_or_fenced_claim(
 def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine(
         f"sqlite+pysqlite:///{tmp_path / 'cancel-shared-model.sqlite'}",
         connect_args={"check_same_thread": False},
@@ -3554,7 +3557,7 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
 def test_force_download_is_a_distinct_operation_for_same_revision(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3584,7 +3587,7 @@ def test_force_download_is_a_distinct_operation_for_same_revision(
 def test_parent_progress_retains_ready_image_while_model_is_incomplete(
     tmp_path: Path, model_state: str
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3673,7 +3676,7 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
 def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
     tmp_path: Path,
 ) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -3715,7 +3718,7 @@ def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
 
 
 def test_archive_integrity_failure_downloads_the_image_again(tmp_path: Path) -> None:
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)

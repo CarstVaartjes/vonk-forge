@@ -9,7 +9,6 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.recipe_build_definition import RecipeBuildDefinition
@@ -18,20 +17,19 @@ if TYPE_CHECKING:
 
 
 
-T = TypeVar("T", bound="RecipeBuildExecution")
+T = TypeVar("T", bound="RecipeExecution")
 
 
 
 @_attrs_define
-class RecipeBuildExecution:
-    """
+class RecipeExecution:
+    """ The platform builds every recipe image from its pinned base and context.
+
         Attributes:
             build (RecipeBuildDefinition):
-            mode (Literal['build']):
      """
 
     build: RecipeBuildDefinition
-    mode: Literal['build']
 
 
 
@@ -41,14 +39,11 @@ class RecipeBuildExecution:
         from ..models.recipe_build_definition import RecipeBuildDefinition # noqa: PLC0415
         build = self.build.to_dict()
 
-        mode = self.mode
-
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
             "build": build,
-            "mode": mode,
         })
 
         return field_dict
@@ -64,13 +59,8 @@ class RecipeBuildExecution:
 
 
 
-        mode = cast(Literal['build'] , d.pop("mode"))
-        if mode != 'build':
-            raise ValueError(f"mode must match const 'build', got '{mode}'")
-
-        recipe_build_execution = cls(
+        recipe_execution = cls(
             build=build,
-            mode=mode,
         )
 
-        return recipe_build_execution
+        return recipe_execution

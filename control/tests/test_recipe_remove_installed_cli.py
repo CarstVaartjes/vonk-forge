@@ -59,7 +59,7 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     now = datetime.now(UTC)
     codec = TokenCodec(_TOKEN_KEY)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     revision_id = "rev-cli-rm-263"
     recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     receipt = _reference_receipt().model_copy(

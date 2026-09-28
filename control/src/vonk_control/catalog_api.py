@@ -96,6 +96,8 @@ class ManagedCatalogSyncResponse(StrictModel):
     repository: str = Field(min_length=1, max_length=200)
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     expected_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
+    library_version: str | None = Field(default=None, max_length=32)
+    library_updated_at: str | None = None
     total_count: int = Field(ge=0)
     processed_count: int = Field(ge=0)
     imported_count: int = Field(ge=0)
@@ -157,6 +159,12 @@ def _managed_sync(value: CatalogSyncView) -> dict[str, object]:
         "repository": value.repository,
         "commit": value.commit,
         "expected_commit": value.expected_commit,
+        "library_version": value.library_version,
+        "library_updated_at": (
+            value.library_updated_at.isoformat()
+            if value.library_updated_at is not None
+            else None
+        ),
         "total_count": value.total_count,
         "processed_count": value.processed_count,
         "imported_count": value.imported_count,

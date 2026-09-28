@@ -8,12 +8,9 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.recipe_topology_mode import check_recipe_topology_mode
-from ..models.recipe_topology_mode import RecipeTopologyMode
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.recipe_fabric import RecipeFabric
   from ..models.recipe_parallelism import RecipeParallelism
   from ..models.recipe_topology_role import RecipeTopologyRole
 
@@ -27,39 +24,33 @@ T = TypeVar("T", bound="RecipeTopology")
 
 @_attrs_define
 class RecipeTopology:
-    """
+    """ Roles and their start order; everything else follows from node_count.
+
+    One node runs alone. More nodes share one connected fabric: losing a rank
+    withdraws the endpoint, recovery restarts the workers and then the
+    entrypoint, and stopping always starts with the endpoint owner.
+
         Attributes:
-            fabric (RecipeFabric):
-            mode (RecipeTopologyMode):
             name (str):
             node_count (int):
             parallelism (RecipeParallelism):
             roles (list[RecipeTopologyRole]):
             start_order (list[str]):
-            stop_order (list[str]):
      """
 
-    fabric: RecipeFabric
-    mode: RecipeTopologyMode
     name: str
     node_count: int
     parallelism: RecipeParallelism
     roles: list[RecipeTopologyRole]
     start_order: list[str]
-    stop_order: list[str]
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_fabric import RecipeFabric # noqa: PLC0415
         from ..models.recipe_parallelism import RecipeParallelism # noqa: PLC0415
         from ..models.recipe_topology_role import RecipeTopologyRole # noqa: PLC0415
-        fabric = self.fabric.to_dict()
-
-        mode: str = self.mode
-
         name = self.name
 
         node_count = self.node_count
@@ -77,22 +68,15 @@ class RecipeTopology:
 
 
 
-        stop_order = self.stop_order
-
-
-
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "fabric": fabric,
-            "mode": mode,
             "name": name,
             "node_count": node_count,
             "parallelism": parallelism,
             "roles": roles,
             "start_order": start_order,
-            "stop_order": stop_order,
         })
 
         return field_dict
@@ -101,20 +85,9 @@ class RecipeTopology:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_fabric import RecipeFabric # noqa: PLC0415
         from ..models.recipe_parallelism import RecipeParallelism # noqa: PLC0415
         from ..models.recipe_topology_role import RecipeTopologyRole # noqa: PLC0415
         d = dict(src_dict)
-        fabric = RecipeFabric.from_dict(d.pop("fabric"))
-
-
-
-
-        mode = check_recipe_topology_mode(d.pop("mode"))
-
-
-
-
         name = d.pop("name")
 
         node_count = d.pop("node_count")
@@ -137,18 +110,12 @@ class RecipeTopology:
         start_order = cast(list[str], d.pop("start_order"))
 
 
-        stop_order = cast(list[str], d.pop("stop_order"))
-
-
         recipe_topology = cls(
-            fabric=fabric,
-            mode=mode,
             name=name,
             node_count=node_count,
             parallelism=parallelism,
             roles=roles,
             start_order=start_order,
-            stop_order=stop_order,
         )
 
         return recipe_topology

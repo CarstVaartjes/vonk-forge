@@ -58,11 +58,7 @@ def _model(data: bytes) -> ModelDefinition:
     document["identity"]["slug"] = "github-release-cache"
     document["identity"]["model"]["publisher"] = "vonk-forge"
     document["identity"]["model"]["slug"] = "github-release-cache"
-    document["access"] = {
-        "visibility": "public",
-        "gated": False,
-        "authentication": "none",
-    }
+    document["requires_token"] = False
     document["source"] = {
         "provider": "github-release",
         "repository": REPOSITORY,

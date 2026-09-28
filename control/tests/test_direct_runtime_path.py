@@ -49,7 +49,7 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -75,7 +75,7 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(
         clock=lambda: datetime.now(UTC),
     )
     with Session(engine) as session:
-        _add_revision(session, revision_id, _recipe("recipe-image.json"))
+        _add_revision(session, revision_id, _recipe("recipe-source-build.json"))
         persist_runtime_image_receipt(
             session,
             recipe_revision_id=revision_id,
@@ -202,7 +202,7 @@ def _archive_gate_service(tmp_path: Path):
 
     storage = FilesystemRuntimeImageStorage(tmp_path)
     receipt = prepare_runtime_image(
-        _recipe("recipe-image.json"),
+        _recipe("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
@@ -211,7 +211,7 @@ def _archive_gate_service(tmp_path: Path):
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with Session(engine) as session:
-        _add_revision(session, "gate-revision", _recipe("recipe-image.json"))
+        _add_revision(session, "gate-revision", _recipe("recipe-source-build.json"))
         persist_runtime_image_receipt(
             session,
             recipe_revision_id="gate-revision",

@@ -363,7 +363,7 @@ def _seed(
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    recipe_document = canonical_example("recipe-image.json")
+    recipe_document = canonical_example("recipe-source-build.json")
     node_ids = (NODE_ID, "spk_" + "2" * 32) if dual else (NODE_ID,)
     capabilities = ["runtime.vonk.v1", "recipe.operations.v1"]
     if dual:
@@ -391,12 +391,8 @@ def _seed(
     model_document = ModelDefinition.model_validate(model_document).model_dump(
         mode="json"
     )
-    recipe_digest = document_sha256(
-        RecipeDefinition.model_validate(recipe_document).model_dump(mode="json")
-    )
-    model_digest = document_sha256(
-        ModelDefinition.model_validate(model_document).model_dump(mode="json")
-    )
+    recipe_digest = document_sha256(recipe_document)
+    model_digest = document_sha256(model_document)
     assert model_digest == EXAMPLE_MODEL_DIGEST
     with sessions.begin() as session:
         entities = CatalogEntityService(session, clock=lambda: NOW)
@@ -482,7 +478,9 @@ def _make_service(
         # launch then prepares the same archive again and records the compiled
         # identity the Spark agent compares against.
         availability_receipt = prepare_runtime_image(
-            RecipeDefinition.model_validate(canonical_example("recipe-image.json")),
+            RecipeDefinition.model_validate(
+                canonical_example("recipe-source-build.json")
+            ),
             runtime={"architecture": "linux-arm64", "interface": "vonk.runtime.v1"},
             storage=storage,
             transport=_Transport(events),

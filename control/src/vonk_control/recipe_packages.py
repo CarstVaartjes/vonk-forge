@@ -12,12 +12,14 @@ import tarfile
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 import httpx2
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from vonk_forge_contracts import (
+    CONTRACT_MAJOR,
     ModelDefinition,
     RecipeDefinition,
     document_sha256,
@@ -55,6 +57,7 @@ RELEASE_DOWNLOAD_ORIGIN = "https://github.com"
 RELEASE_ASSET_HOST = "release-assets.githubusercontent.com"
 RELEASE_ASSET_ORIGIN = f"https://{RELEASE_ASSET_HOST}"
 MAX_RELEASE_BYTES = 2 * 1024 * 1024
+MAX_RELEASE_LIST_BYTES = 16 * 1024 * 1024
 MAX_INDEX_BYTES = 12 * 1024 * 1024
 MAX_PACKAGE_BYTES = 256 * 1024 * 1024
 MAX_PACKAGE_FILES = 2048
@@ -63,7 +66,8 @@ MAX_PACKAGE_TOTAL_BYTES = 256 * 1024 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
-_RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+_RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+_CONTRACT_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _REDIRECTS = {301, 302, 303, 307, 308}
 _ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PACKAGE_MEDIA_TYPES = {"application/octet-stream", PACKAGE_MEDIA_TYPE}
@@ -82,6 +86,27 @@ class _ReleaseResponse(BaseModel):
     tag_name: str
     draft: bool
     assets: list[_ReleaseAsset]
+
+
+_RELEASE_LIST = TypeAdapter(list[_ReleaseResponse])
+
+
+def _select_release(
+    releases: list[_ReleaseResponse], selector: str
+) -> _ReleaseResponse | None:
+    """Pick the newest published release within this Controller's contract major."""
+
+    best: tuple[tuple[int, int], _ReleaseResponse] | None = None
+    for release in releases:
+        tag = _RELEASE_TAG.fullmatch(release.tag_name)
+        if release.draft or tag is None or int(tag[1]) != CONTRACT_MAJOR:
+            continue
+        if selector != "latest" and release.tag_name != selector:
+            continue
+        key = (int(tag[2]), int(tag[3]))
+        if best is None or key > best[0]:
+            best = (key, release)
+    return None if best is None else best[1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,25 +178,24 @@ def _validate_package_paths(
     recipe: RecipeDefinition, package_paths: set[str], build_inputs: object
 ) -> None:
     """Validate source and fixture closure using BuildContext as a prefix."""
-    if recipe.execution.mode == "build":
-        build = recipe.execution.build
-        context = build.context.path.rstrip("/")
-        if not any(
-            path == context or path.startswith(f"{context}/") for path in package_paths
-        ):
-            raise ValueError("build context is missing from package")
-        required = {build.dockerfile, *(patch.path for patch in build.patches)}
-        missing = sorted(required - package_paths)
-        if missing:
-            raise ValueError(f"build package files are missing: {', '.join(missing)}")
-        if not isinstance(build_inputs, list) or not any(
-            isinstance(value, Mapping)
-            and value.get("kind") == "oci-image"
-            and isinstance(value.get("reference"), str)
-            and value["reference"].endswith(f"@sha256:{build.base_image.digest}")
-            for value in build_inputs
-        ):
-            raise ValueError("build base image digest is not in package inputs")
+    build = recipe.execution.build
+    context = build.context.path.rstrip("/")
+    if not any(
+        path == context or path.startswith(f"{context}/") for path in package_paths
+    ):
+        raise ValueError("build context is missing from package")
+    required = {build.dockerfile, *(patch.path for patch in build.patches)}
+    missing = sorted(required - package_paths)
+    if missing:
+        raise ValueError(f"build package files are missing: {', '.join(missing)}")
+    if not isinstance(build_inputs, list) or not any(
+        isinstance(value, Mapping)
+        and value.get("kind") == "oci-image"
+        and isinstance(value.get("reference"), str)
+        and value["reference"].endswith(f"@sha256:{build.base_image.digest}")
+        for value in build_inputs
+    ):
+        raise ValueError("build base image digest is not in package inputs")
     for check in recipe.validation.serving.checks:
         request = check.request
         fixture = getattr(request, "fixture", None)
@@ -188,8 +212,10 @@ def _validate_package_paths(
 class RecipePackageClient:
     """Fetch complete recipe packages and persist verified bytes by digest.
 
-    The reader consumes signed GitHub releases of the recipe repository: the
-    configured release (``latest`` or an exact tag) is trusted only after its
+    The reader consumes signed GitHub releases of the recipe repository. The
+    library's release version is its contract version, so ``latest`` follows
+    the newest published release whose major version is this Controller's
+    contract major (an exact tag pins one). A release is trusted only after its
     ``SHA256SUMS`` verifies against the pinned Sigstore publisher identity, and
     every index and package byte is then checked against the digest
     ``SHA256SUMS`` lists.
@@ -241,10 +267,12 @@ class RecipePackageClient:
             raise RecipePackageError(
                 "recipe_package.url_invalid", "recipe package API URL is invalid"
             )
-        if release != "latest" and not _RELEASE_TAG.fullmatch(release):
+        tag = _RELEASE_TAG.fullmatch(release)
+        if release != "latest" and (tag is None or int(tag[1]) != CONTRACT_MAJOR):
             raise RecipePackageError(
                 "recipe_package.release_invalid",
-                "recipe release must be latest or an exact vMAJOR.MINOR.PATCH tag",
+                "recipe release must be latest or an exact "
+                f"v{CONTRACT_MAJOR}.MINOR.PATCH tag",
             )
         self._api_url = api_url.rstrip("/")
         self._download_origin = origin
@@ -330,11 +358,11 @@ class RecipePackageClient:
         )
 
     def _resolve_release(self) -> tuple[str, frozenset[str]]:
-        path = (
-            "releases/latest"
-            if self._release_selector == "latest"
-            else f"releases/tags/{self._release_selector}"
-        )
+        if self._release_selector == "latest":
+            path, maximum = "releases?per_page=100", MAX_RELEASE_LIST_BYTES
+        else:
+            path = f"releases/tags/{self._release_selector}"
+            maximum = MAX_RELEASE_BYTES
         response = self._client.get(
             f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/{path}",
             headers={"Accept": "application/vnd.github+json"},
@@ -343,27 +371,26 @@ class RecipePackageClient:
             raise RecipePackageError(
                 "recipe_package.unavailable", "recipe release is unavailable"
             )
-        if len(response.content) > MAX_RELEASE_BYTES:
+        if len(response.content) > maximum:
             raise RecipePackageError(
                 "recipe_package.response_invalid", "recipe release response is invalid"
             )
         try:
-            release = _ReleaseResponse.model_validate(_json(response.content))
+            payload = _json(response.content)
+            releases = (
+                _RELEASE_LIST.validate_python(payload)
+                if self._release_selector == "latest"
+                else [_ReleaseResponse.model_validate(payload)]
+            )
         except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as error:
             raise RecipePackageError(
                 "recipe_package.response_invalid", "recipe release response is invalid"
             ) from error
-        if (
-            release.draft
-            or not _RELEASE_TAG.fullmatch(release.tag_name)
-            or (
-                self._release_selector != "latest"
-                and release.tag_name != self._release_selector
-            )
-        ):
+        release = _select_release(releases, self._release_selector)
+        if release is None:
             raise RecipePackageError(
-                "recipe_package.response_invalid",
-                "recipe release identity is invalid",
+                "recipe_package.unavailable",
+                f"no published recipe library release for contract v{CONTRACT_MAJOR}",
             )
         assets: set[str] = set()
         for asset in release.assets:
@@ -457,6 +484,7 @@ class RecipePackageClient:
         )
         raw_entities = index.get("catalog_entities")
         contract = index.get("package_contract")
+        version, updated_at = _library_release(index)
         if (
             repository != PACKAGE_REPOSITORY
             or not isinstance(commit, str)
@@ -657,6 +685,8 @@ class RecipePackageClient:
             commit=commit,
             items=tuple(items),
             repository=repository,
+            version=version,
+            updated_at=updated_at,
             catalog_entities=tuple(catalog_entities),
             problems=tuple(problems),
         ), packages
@@ -1049,23 +1079,20 @@ class RecipePackageClient:
                 else Path(".")
             )
         closure_path = self._materialize_closure(files, package_digest, archive_path)
-        source_bundle: bytes | None = None
-        source_bundle_sha256: str | None = None
-        if recipe.execution.mode == "build":
-            context = recipe.execution.build.context.path.rstrip("/")
-            context_files = {
-                path.removeprefix(f"{context}/"): content
-                for path, content in files.items()
-                if path.startswith(f"{context}/")
-            }
-            try:
-                bundle = generate_source_bundle(context_files)
-            except (SourceBundleError, ValueError) as error:
-                raise RecipePackageError(
-                    "recipe_package.package_invalid",
-                    "recipe build source closure is invalid",
-                ) from error
-            source_bundle, source_bundle_sha256 = bundle.archive, bundle.sha256
+        context = recipe.execution.build.context.path.rstrip("/")
+        context_files = {
+            path.removeprefix(f"{context}/"): content
+            for path, content in files.items()
+            if path.startswith(f"{context}/")
+        }
+        try:
+            bundle = generate_source_bundle(context_files)
+        except (SourceBundleError, ValueError) as error:
+            raise RecipePackageError(
+                "recipe_package.package_invalid",
+                "recipe build source closure is invalid",
+            ) from error
+        source_bundle, source_bundle_sha256 = bundle.archive, bundle.sha256
         handle = RecipePackageHandle(
             publication_commit=publication_commit,
             source_commit=item.library_commit,
@@ -1136,6 +1163,31 @@ class RecipePackageClient:
                         path.rmdir()
                 temporary.rmdir()
         return target
+
+
+def _library_release(index: Mapping[str, object]) -> tuple[str, datetime]:
+    """Read the library version and last recipe update from the index."""
+
+    version, updated = index.get("contract_version"), index.get("updated_at")
+    match = _CONTRACT_VERSION.fullmatch(version) if isinstance(version, str) else None
+    if match is None or int(match[1]) != CONTRACT_MAJOR:
+        raise RecipePackageError(
+            "recipe_package.schema_incompatible",
+            f"recipe library index is not a contract v{CONTRACT_MAJOR} release",
+        )
+    try:
+        parsed = datetime.fromisoformat(str(updated))
+    except ValueError as error:
+        raise RecipePackageError(
+            "recipe_package.response_invalid",
+            "recipe library index update time is invalid",
+        ) from error
+    if parsed.tzinfo is None:
+        raise RecipePackageError(
+            "recipe_package.response_invalid",
+            "recipe library index update time is invalid",
+        )
+    return str(version), parsed.astimezone(UTC)
 
 
 def _entry_uri(entry: Mapping[str, object]) -> str | None:

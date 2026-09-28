@@ -72,6 +72,14 @@ class FreshnessPolicy(_StrictModel):
     telemetry_delayed_seconds: int = Field(default=20, ge=1, le=300)
 
 
+class LibraryRelease(_StrictModel):
+    """The recipe library release this Controller last synchronized."""
+
+    version: Text64
+    updated_at: datetime
+    commit: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
+
+
 class LibraryRecipeIdentity(_StrictModel):
     recipe_id: UuidId
     recipe_revision_id: UuidId
@@ -102,42 +110,6 @@ class LibraryRunSummary(_StrictModel):
     healthy: bool
 
 
-class LibraryCapabilityProvenance(_StrictModel):
-    """Exact source identity and bounded location for one capability inventory."""
-
-    source_kind: Literal["model", "recipe", "model-capability-evidence"]
-    publisher: Text128
-    slug: Text128
-    content_sha256: Digest | None
-    path: Text256 | None
-    evidence_digest: Digest | None
-    revision_id: UuidId | None = None
-    source_url: Text512 | None = None
-    source_revision: Text80 | None = None
-
-
-class LibraryCapabilityFact(_StrictModel):
-    """One explicit capability assertion; absence is never represented as support."""
-
-    capability: Text64
-    support: Literal["supported", "unsupported", "unknown"]
-    evidence_status: Literal["declared", "tested", "contradicted", "unknown"]
-    evidence_digest: Digest | None
-    provenance: LibraryCapabilityProvenance
-
-
-class LibraryCapabilityInventory(_StrictModel):
-    """Compare-friendly model or recipe capability assertions with evidence state."""
-
-    schema_version: Literal[2] = 2
-    state: Literal["declared", "unknown", "contradictory"] = "unknown"
-    facts: list[LibraryCapabilityFact] = Field(
-        default_factory=list, max_length=_MAX_PROJECTED_CAPABILITIES
-    )
-    provenance: LibraryCapabilityProvenance | None = None
-    reasons: list[ProjectionReason] = Field(default_factory=list, max_length=16)
-
-
 class LibraryModelIdentity(_StrictModel):
     """Content-addressed identity for a canonical Model document."""
 
@@ -160,9 +132,6 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     run_returned_count: int = Field(ge=0, le=64)
     runs_truncated: bool
     reasons: list[ProjectionReason] = Field(max_length=16)
-    recipe_capabilities: LibraryCapabilityInventory = Field(
-        default_factory=lambda: LibraryCapabilityInventory()
-    )
 
 
 class LibraryLocalProgress(_StrictModel):
@@ -250,6 +219,7 @@ class LibraryFilterValues(_StrictModel):
 
 class ModelLibraryResponse(_StrictModel):
     generated_at: datetime
+    library: LibraryRelease | None = None
     models: list[LibraryModelProjection] = Field(max_length=_MAX_PAGE_RECIPES)
     facets: LibraryFacetValues
     next_cursor: Annotated[str, StringConstraints(max_length=MAX_CURSOR_LENGTH)] | None
@@ -303,6 +273,7 @@ class LibraryRecipeProjection(_StrictModel):
 
 class RecipeLibraryResponse(_StrictModel):
     generated_at: datetime
+    library: LibraryRelease | None = None
     recipes: list[LibraryRecipeProjection] = Field(max_length=_MAX_PAGE_RECIPES)
     facets: LibraryFacetValues
     next_cursor: Annotated[str, StringConstraints(max_length=MAX_CURSOR_LENGTH)] | None
@@ -555,12 +526,6 @@ class LibraryRecipeAuthoringDetail(_StrictModel):
     placement: list[TopologyPlacement] = Field(max_length=1)
     reasons: list[ProjectionReason] = Field(max_length=16)
     model_documents: list[LibraryRecipeModel] = Field(max_length=32)
-    model_capabilities: LibraryCapabilityInventory = Field(
-        default_factory=lambda: LibraryCapabilityInventory()
-    )
-    recipe_capabilities: LibraryCapabilityInventory = Field(
-        default_factory=lambda: LibraryCapabilityInventory()
-    )
 
 
 def _utc(value: datetime) -> datetime:

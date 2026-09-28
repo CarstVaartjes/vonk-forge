@@ -49,7 +49,6 @@ export type LibraryViewRecipe = {
   model_selectors?: string[];
   installations?: unknown[];
   runs?: unknown[];
-  recipe_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
   installation_returned_count?: number;
   installation_total_count?: number;
   installations_truncated?: boolean;
@@ -65,7 +64,7 @@ export type LibraryViewModel = {
   page_local?: boolean;
   model: {kind: "model"; publisher: string; slug: string; content_sha256: string};
   model_document: ModelDefinition;
-  model_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
+  model_capabilities?: string[];
   local: components["schemas"]["LibraryLocalState"];
   // Projected facets, named exactly as the CLI filter flags and the
   // /api/model/library query parameters: --usage --family --version
@@ -81,6 +80,7 @@ export type LibraryViewModel = {
 export type LibraryViewSnapshot = {
   generated_at: string;
   freshness_policy: components["schemas"]["FreshnessPolicy"];
+  library?: components["schemas"]["LibraryRelease"] | null;
   models: LibraryViewModel[];
   unlinked_recipes: LibraryViewRecipe[];
 };
@@ -89,8 +89,6 @@ export type LibraryViewRecipeDetail = {
   definition: RecipeDefinition;
   recipe: LibraryViewRecipe;
   model_documents: LibraryViewRecipeModel[];
-  model_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
-  recipe_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
   operational_state: {builds: unknown[]; installations: unknown[]; mappings: unknown[]; runs: unknown[]};
   placement: {recommendations: LibraryViewPlacementGroup[]; rejected_groups: LibraryViewPlacementGroup[]; search_complete: boolean}[];
   reasons: {code: string; severity: string; detail: string}[];

@@ -1331,6 +1331,10 @@ class RecipeLibrarySyncRun(Base):
     repository: Mapped[str] = mapped_column(String(200), nullable=False)
     expected_commit: Mapped[str | None] = mapped_column(String(40))
     observed_commit: Mapped[str | None] = mapped_column(String(40), index=True)
+    # The recipe library release (its contract version) and when its recipes
+    # last changed, read from the signed catalog index.
+    library_version: Mapped[str | None] = mapped_column(String(32))
+    library_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     imported_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

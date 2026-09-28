@@ -22,11 +22,9 @@ T = TypeVar("T", bound="RecipeMount")
 class RecipeMount:
     """
         Attributes:
-            read_only (bool):
             target (str):
      """
 
-    read_only: bool
     target: str
 
 
@@ -34,15 +32,12 @@ class RecipeMount:
 
 
     def to_dict(self) -> dict[str, Any]:
-        read_only = self.read_only
-
         target = self.target
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "read_only": read_only,
             "target": target,
         })
 
@@ -53,12 +48,9 @@ class RecipeMount:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        read_only = d.pop("read_only")
-
         target = d.pop("target")
 
         recipe_mount = cls(
-            read_only=read_only,
             target=target,
         )
 

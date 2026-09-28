@@ -160,7 +160,7 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
     recipe = RecipeDefinition.model_validate(
         json.loads(
             files("vonk_forge_contracts")
-            .joinpath("examples", "recipe-image.json")
+            .joinpath("examples", "recipe-source-build.json")
             .read_text()
         )
     )

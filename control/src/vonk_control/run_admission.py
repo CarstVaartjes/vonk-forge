@@ -452,8 +452,6 @@ class RunAdmissionService:
                         f"model {run_alias} ({run_id}); reconcile it before placing work.",
                     )
                 )
-            if legal_admission.blocker is not None:
-                blockers.append(AdmissionReason(*legal_admission.blocker))
             if legal_admission.warning is not None:
                 warnings.append(AdmissionReason(*legal_admission.warning))
             snapshot = snapshots.get(placement.node_id)

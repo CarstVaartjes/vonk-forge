@@ -208,7 +208,7 @@ def test_recipe_duplicate_insert_adopts_only_identical_original_intent(
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     with sessions.begin() as session:
         _add_head(session, _add_revision(session, "race-recipe", recipe))
     services = [
@@ -265,7 +265,7 @@ def test_recipe_lookup_preserves_id_visibility_and_private_request_correlation(
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
-    recipe = _recipe("recipe-image.json")
+    recipe = _recipe("recipe-source-build.json")
     with sessions.begin() as session:
         _add_head(session, _add_revision(session, "lookup-recipe", recipe))
     service = RecipeImageAvailabilityService(

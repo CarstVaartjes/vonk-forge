@@ -17,7 +17,7 @@ def _recipe(
     """Return a complete canonical recipe document for Library fixtures."""
     document = json.loads(
         resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     document["identity"]["publisher"] = "vonk"  # type: ignore[index]

@@ -27,7 +27,7 @@ def test_production_app_recipe_download_auth_and_status(
     recipe = RecipeDefinition.model_validate(
         json.loads(
             files("vonk_forge_contracts")
-            .joinpath("examples", "recipe-image.json")
+            .joinpath("examples", "recipe-source-build.json")
             .read_text()
         )
     )

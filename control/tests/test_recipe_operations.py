@@ -253,9 +253,7 @@ def _synthetic_model_content_sha256() -> str:
         .joinpath("examples", "model-definition.json")
         .read_text()
     )
-    return document_sha256(
-        ModelDefinition.model_validate(document).model_dump(mode="json")
-    )
+    return document_sha256(document)
 
 
 def test_recipe_model_identities_include_canonical_companion_dependencies() -> None:
@@ -551,18 +549,10 @@ def setup_services(
         "disk": {
             "image_bytes": 30,
             "artifact_bytes": 1024,
-            "staging_bytes": 20,
-            "cache_bytes": 0,
-            "rollback_bytes": 0,
+            "working_bytes": 20,
             "safety_margin_bytes": 10,
         },
-        "memory": {
-            "kind": "unified",
-            "startup_peak_bytes": 225,
-            "steady_state_bytes": 200,
-            "runtime_growth_bytes": 25,
-            "system_reserve_bytes": 0,
-        },
+        "memory": {"peak_bytes": 225, "reserve_bytes": 0},
     }
     if nodes > 1:
         worker = json.loads(json.dumps(role))
@@ -573,33 +563,20 @@ def setup_services(
         document["topology"] = {
             **document["topology"],
             "name": f"nodes_{nodes}",
-            "mode": "tensor_parallel",
             "node_count": nodes,
             "parallelism": {
-                "world_size": nodes,
                 "tensor": nodes,
                 "pipeline": 1,
                 "data": 1,
                 "backend": "tcp",
             },
             "roles": roles,
-            "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
             "start_order": list(start_order or ("worker", "entrypoint")),
-            "stop_order": ["entrypoint", "worker"],
         }
         document["models"][0]["files"][0]["roles"] = ["entrypoint", "worker"]
         if distributed_lifecycle:
-            document["topology"]["mode"] = "distributed"
             document["topology"]["parallelism"]["backend"] = "mp"
-            document["runtime"]["lifecycle"] = {
-                "failure": {
-                    "rank_loss": "withdraw-endpoint",
-                    "recovery": "restart-worker-then-entrypoint",
-                },
-                "pre_start": [],
-                "post_stop": [],
-                "stop_timeout_seconds": 30,
-            }
+            document["runtime"]["lifecycle"] = {"stop_timeout_seconds": 30}
     if recipe_transform is not None:
         recipe_transform(document)
     if model_transform is not None:

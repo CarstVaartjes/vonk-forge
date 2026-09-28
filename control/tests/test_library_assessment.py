@@ -39,7 +39,7 @@ from vonk_control.recipe_runtime_specs import (
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles.cli import main
 from cluster_profiles.cli_render import render_payload
@@ -59,9 +59,7 @@ def assessed_library(tmp_path: Path):
         .read_text()
     )
     model["source"]["repository"] = "https://huggingface.co/vonk-forge/synthetic-tiny"
-    digest = document_sha256(
-        ModelDefinition.model_validate(model).model_dump(mode="json")
-    )
+    digest = document_sha256(model)
 
     def bind_model(recipe):
         recipe["models"][0]["model"]["content_sha256"] = digest
@@ -432,7 +430,7 @@ def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_libra
         assert first is not None
         document = json.loads(json.dumps(first.document))
         memory = document["topology"]["roles"][0]["resources"]["memory"]
-        memory.update(startup_peak_bytes=20_000, steady_state_bytes=20_000)
+        memory.update(peak_bytes=20_000)
         canonical = RecipeDefinition.model_validate(document)
         successor = CatalogDocumentRevision(
             id=str(uuid.uuid4()),

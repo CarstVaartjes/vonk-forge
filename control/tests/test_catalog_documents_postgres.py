@@ -24,7 +24,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from vonk_forge_contracts import ModelDefinition, document_sha256
+from vonk_forge_contracts import document_sha256
 
 NOW = datetime(2026, 9, 5, tzinfo=UTC)
 
@@ -82,10 +82,8 @@ def _model() -> dict[str, object]:
 
 
 def _recipe(model: dict[str, object]) -> dict[str, object]:
-    recipe = _example("recipe-image.json")
-    _selected_model_reference(recipe)["content_sha256"] = document_sha256(
-        ModelDefinition.model_validate(model).model_dump(mode="json")
-    )
+    recipe = _example("recipe-source-build.json")
+    _selected_model_reference(recipe)["content_sha256"] = document_sha256(model)
     return recipe
 
 
@@ -123,9 +121,7 @@ def test_fresh_postgres_migration_builds_canonical_schema(postgres_engine) -> No
 def test_valid_model_write_read_and_projection_is_postgres_backed(catalog) -> None:
     revision = catalog.create_draft(_model(), actor="operator")
     active = catalog.resolve(revision.id, actor="operator", expected_revision=1)
-    assert active.content_digest == document_sha256(
-        ModelDefinition.model_validate(_model()).model_dump(mode="json")
-    )
+    assert active.content_digest == document_sha256(_model())
     assert active.download_bytes == 1024
     assert active.installed_bytes == 1024
     assert active.artifact_key
