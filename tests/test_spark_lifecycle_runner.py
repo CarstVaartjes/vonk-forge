@@ -320,7 +320,7 @@ def test_agent_identity_wait_requires_recipe_builder_capability(monkeypatch) -> 
     run._self_test = lambda: self_test
     run._installed_package_version = lambda: "1.2.3"
     run._psql = lambda _query: [
-        ["linux-arm64", "1.2.3", "sha256:" + "a" * 64, "b" * 64, "1", "1234567890"]
+        ["linux-arm64", "1.2.3", "sha256:" + "a" * 64, "b" * 64, "1234567890"]
     ]
     monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
 
@@ -1364,8 +1364,6 @@ def test_recipe_download_consumes_typed_terminal_receipt() -> None:
         result=RecipeImageAvailabilityResult(
             recipe_content_sha256=recipe_digest,
             model_content_digests=[model_digest],
-            source="controller-build",
-            platform_manifest_digest=image_digest,
             image_digest=image_digest,
             oci_archive_sha256=archive_digest,
             image_bytes=3,

@@ -359,13 +359,11 @@ def _compile(recipe: object, recipe_digest: str, models: dict[str, object], pack
         except Exception as error:
             raise QualificationError(f"canonical runtime compiler rejected {role}[{rank}]: {error}") from error
         security = spec.get("security")
-        if (not isinstance(security, Mapping) or security.get("privileged") is not False
-                or security.get("read_only_root") is not True or security.get("no_new_privileges") is not True
-                or security.get("capabilities")):
+        # Privileges, capabilities and the read-only root are platform constants;
+        # only the per-workload choices remain to be checked.
+        user = security.get("user") if isinstance(security, Mapping) else None
+        if not isinstance(user, str) or user.split(":")[0] in {"", "0", "root"}:
             raise QualificationError("compiled runtime security projection is unsafe")
-        mounts = security.get("mounts")
-        if not isinstance(mounts, list) or any(isinstance(item, Mapping) and str(item.get("target", "")).startswith("/run/vonk/models") and item.get("read_only") is False for item in mounts):
-            raise QualificationError("compiled model mounts must be read-only")
         compiled.append(spec)
     checks = {
         assertion

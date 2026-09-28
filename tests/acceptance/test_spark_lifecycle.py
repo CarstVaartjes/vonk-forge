@@ -2172,8 +2172,6 @@ class SparkLifecycle:
                 != fixture.recipe_content_sha256
                 or fixture.model_content_sha256
                 not in download_result.get("model_content_digests", [])
-                or not isinstance(download_result.get("source"), str)
-                or not download_result["source"]
                 or re.fullmatch(
                     r"sha256:[0-9a-f]{64}", str(download_result.get("image_digest"))
                 )
@@ -3267,7 +3265,7 @@ class SparkLifecycle:
                         if package_version == self.graph["baseline_version"]
                         else self.graph["candidate_package_sha256"]
                     ),
-                    "serial": rows[0][5],
+                    "serial": rows[0][4],
                     "version": package_version,
                 }
             except (LifecycleError, SliceError, TypeError) as error:
