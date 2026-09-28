@@ -6,7 +6,6 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 
-from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .endpoint_contract import inference_gateway_api_base
 from .fleet_profile_contract import (
@@ -51,7 +50,6 @@ def install_fleet_profile_routes(
     actor_dependency: Any,
     profiles: Any | None,
     operations: Any | None = None,
-    audits: Any,
 ) -> None:
     from .operation_api import _ADMIN_OPERATION_IDS
 
@@ -66,13 +64,6 @@ def install_fleet_profile_routes(
     def require_mutation(actor: Actor, method: str, route: str) -> None:
         if actor.role not in MUTATION_ROLES[(method, route)]:
             raise HTTPException(status_code=403, detail="insufficient role")
-
-    def audit(
-        request: Request, actor: Actor, action: str, targets: tuple[str, ...]
-    ) -> None:
-        audits.append(
-            AuditRecord(request.state.request_id, actor.subject, action, None, targets)
-        )
 
     @app.get(
         "/api/profile",
@@ -167,7 +158,6 @@ def install_fleet_profile_routes(
         operation_id="autosaveProfile",
     )
     def autosave_profile(
-        request: Request,
         number: Annotated[int, Path(ge=1)],
         body: FleetProfileInput,
         actor: Actor = authenticated,
@@ -185,7 +175,6 @@ def install_fleet_profile_routes(
             raise HTTPException(
                 status_code=503, detail="Profile save unavailable"
             ) from None
-        audit(request, actor, "profile.autosave", (str(number),))
         return result
 
     @app.post(
@@ -217,7 +206,6 @@ def install_fleet_profile_routes(
         operation_id="loadProfile",
     )
     def load_profile(
-        request: Request,
         number: Annotated[int, Path(ge=1)],
         body: FleetProfileLoadRequest,
         actor: Actor = authenticated,
@@ -246,7 +234,6 @@ def install_fleet_profile_routes(
             raise HTTPException(
                 status_code=503, detail="Profile load unavailable"
             ) from None
-        audit(request, actor, "profile.load", (str(number), result.id))
         return result
 
     @app.get(

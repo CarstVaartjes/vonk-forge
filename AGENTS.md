@@ -114,7 +114,7 @@ boundary before effects.
 Read the [ownership boundary](docs/architecture-overview.md#state-ownership)
 before changing persistence. PostgreSQL remains the authority for identity,
 permissions, accepted catalog revisions, saved profiles, desired fleet state,
-operation intent, leases, cancellation, reservations, and audit. It coordinates
+operation intent, leases, cancellation, and reservations. It coordinates
 API and worker decisions transactionally; LiteLLM also uses this PostgreSQL
 service through its own database. Replacing PostgreSQL is outside this change.
 

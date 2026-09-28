@@ -135,7 +135,7 @@ binding. Model availability and the runtime-image receipt already live in
 managed storage. Deployed recovery and physical Spark acceptance remain separate
 checks. Future ownership changes must update all consumers and retire the old
 path together, while retaining control intent, exact selected identities,
-authorization, reservations, and audit.
+authorization, and reservations.
 
 ## Artifact recovery
 
@@ -353,9 +353,7 @@ dependency for local execution, and a Spark-local copy never changes profile
 authority. TUF remains the authority for signed platform release artifacts;
 desired platform topology and policy are persisted in PostgreSQL.
 
-For the current platform path, the API owns the PostgreSQL authority head,
-immutable revisions, persisted proposals, and eligibility policy. The catalog
-owns exact model versions, execution harnesses, recipe revisions,
+For the current platform path, the catalog owns exact model versions, execution harnesses, recipe revisions,
 installations, mappings, and runs. Recipe route publication derives LiteLLM
 configuration from the accepted v1 run itself; no external repository or
 Hermes fallback policy participates. Platform plans remain canonical and
@@ -382,9 +380,9 @@ fabric recovery, and explicit break-glass inspection.
 | Component | Responsibility |
 | --- | --- |
 | Caddy | Tailnet web/API routing, distinct enrollment and agent SNI boundaries, agent mTLS verification, and denial of internal routes. |
-| Control API | Admin API/web backend, PostgreSQL authority and policy, trusted profile-cache resolution and admission, desired-state planning, agent enrollment/claims/results, audit, and metrics. |
+| Control API | Admin API/web backend, PostgreSQL authority and policy, trusted profile-cache resolution and admission, desired-state planning, agent enrollment/claims/results, and metrics. |
 | Control worker | Durable reconciliation, dependency waves, compensation, fail-closed withdrawal, and atomic route/LiteLLM publication. |
-| PostgreSQL | Control intent, immutable resolved plans, operation/attempt fences, identity, authorization, reservations, cancellation, audit, and retained telemetry; current artifact bookkeeping awaits the ownership cutover above. |
+| PostgreSQL | Control intent, immutable resolved plans, operation/attempt fences, identity, authorization, reservations, cancellation, and retained telemetry; current artifact bookkeeping awaits the ownership cutover above. |
 | Managed artifact storage | Model files, runnable image archives, and native transfer caches; target owner of typed verification manifests and local recovery checkpoints. |
 | LiteLLM | OpenAI-compatible aliases and quotas generated only from the last published route bundle; LiteLLM keeps serving it while the worker is stalled, and routes leave only through an explicit republish. |
 | Hermes Agent | Persistent tools/UI service that reaches inference only through the Caddy-gated LiteLLM route published by an exact v1 `RecipeRun` named `hermes-agent`. |

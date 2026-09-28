@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import FastAPI, HTTPException, Path, Query, Request, status
+from fastapi import FastAPI, HTTPException, Path, Query, status
 from pydantic import ConfigDict, Field, model_serializer
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,10 +20,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
-from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor, CursorError
 from .bounded_json import BoundedJSONError
-from .deployment_provenance_contract import DeploymentProvenance
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
@@ -114,7 +112,6 @@ class FleetActionResponse(StrictJSONModel):
     request_key: EnrollmentId | None = None
     targets: list[str] = Field(default_factory=list, max_length=64)
     grant: EnrollmentGrantResponse | None = None
-    provenance: DeploymentProvenance | None = None
     detail: str | None = Field(default=None, max_length=256)
 
     @model_serializer(mode="wrap")
@@ -156,10 +153,6 @@ class FleetLogProvider(Protocol):
         source: str | None,
         follow: bool,
     ) -> FleetLogResponse | Mapping[str, object]: ...
-
-
-class FleetProvenanceProvider(Protocol):
-    def snapshot(self) -> DeploymentProvenance: ...
 
 
 class FleetEnrollmentProvider(Protocol):
@@ -218,18 +211,10 @@ class FleetOperatorServices:
         enrollment: FleetEnrollmentProvider | None = None,
         upgrades: FleetUpgradeProvider | None = None,
         logs: FleetLogProvider | None = None,
-        provenance: FleetProvenanceProvider | None = None,
     ) -> None:
         self.enrollment = enrollment
         self.upgrades = upgrades
         self.logs = logs
-        self.provenance = provenance
-
-
-class FleetNodeDetailResponse(FleetNode):
-    """Current Fleet node projection with supply-chain evidence attached."""
-
-    provenance: DeploymentProvenance | None = None
 
 
 class _AgentEnrollmentAdapter:
@@ -669,7 +654,6 @@ def build_fleet_operator_services(
     agent_services: AgentApiServices | None,
     upgrades: AgentUpgradeService | None,
     logs: FleetLogProvider | None = None,
-    provenance: FleetProvenanceProvider | None = None,
     sessions: sessionmaker[Session] | None = None,
     job_logs: Any | None = None,
 ) -> FleetOperatorServices:
@@ -691,7 +675,6 @@ def build_fleet_operator_services(
         enrollment=enrollment,
         upgrades=upgrades,
         logs=retained_logs,
-        provenance=provenance,
     )
 
 
@@ -770,24 +753,6 @@ def _operator_error(error: Exception) -> HTTPException:
     return HTTPException(status_code=503, detail="operator projection unavailable")
 
 
-def _deployment_provenance(
-    provider: FleetProvenanceProvider | None,
-) -> DeploymentProvenance | None:
-    """Read configured deployment provenance, keeping absence distinct.
-
-    ``None`` means the provenance feature is not configured. A configured
-    provider that returns a document which no longer validates is corruption
-    and must fail loudly instead of being reported as no provenance.
-    """
-
-    if provider is None:
-        return None
-    try:
-        return DeploymentProvenance.model_validate(provider.snapshot())
-    except (OSError, RuntimeError, TypeError, ValueError) as error:
-        raise _operator_error(error) from None
-
-
 def _require_mutation(actor: Actor, method: str, route: str) -> None:
     """Use the shared role table for both cookie and bearer actors."""
 
@@ -803,7 +768,6 @@ def install_operator_projection_routes(
     fleet_projection: Any | None,
     library_projection: Any | None,
     fleet_services: FleetOperatorServices | None = None,
-    audits: Any | None = None,
 ) -> None:
     """Install the singular operator route hierarchy.
 
@@ -825,25 +789,6 @@ def install_operator_projection_routes(
         if fleet_projection is None:
             raise HTTPException(status_code=503, detail="fleet projection unavailable")
         return fleet_projection
-
-    def audit(
-        request: Request, actor: Actor, action: str, targets: tuple[str, ...]
-    ) -> None:
-        if audits is not None:
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    actor.subject,
-                    action,
-                    None,
-                    targets,
-                )
-            )
-
-    def provenance() -> DeploymentProvenance | None:
-        return _deployment_provenance(
-            None if fleet_services is None else fleet_services.provenance
-        )
 
     def snapshot() -> FleetSnapshot:
         try:
@@ -905,18 +850,15 @@ def install_operator_projection_routes(
 
     @app.get(
         "/api/fleet/{selector}",
-        response_model=FleetNodeDetailResponse,
+        response_model=FleetNode,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getFleetNode",
     )
     def fleet_detail(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         _actor: Actor = authenticated,
-    ) -> FleetNodeDetailResponse:
-        node = selected(selector)
-        return FleetNodeDetailResponse.model_validate(
-            node.model_dump() | {"provenance": provenance()}
-        )
+    ) -> FleetNode:
+        return selected(selector)
 
     @app.post(
         "/api/fleet/{selector}/rename",
@@ -927,7 +869,6 @@ def install_operator_projection_routes(
     def fleet_rename(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         body: FleetRenameRequest,
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetNodeIdentity:
         _require_mutation(actor, "POST", "/api/fleet/{selector}/rename")
@@ -936,7 +877,6 @@ def install_operator_projection_routes(
             result = fleet().update_display_name(node.id, body.display_name)
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
-        audit(request, actor, "fleet.node.rename", (node.id,))
         return result
 
     @app.post(
@@ -948,7 +888,6 @@ def install_operator_projection_routes(
     )
     def fleet_enroll(
         body: FleetEnrollRequest,
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/enroll")
@@ -962,7 +901,6 @@ def install_operator_projection_routes(
                 request_id=body.request_key,
             )
             result = FleetActionResponse.model_validate({"action": "enroll", **value})
-            audit(request, actor, "fleet.node.enroll", (body.name,))
             return result
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
@@ -976,7 +914,6 @@ def install_operator_projection_routes(
     def fleet_reenroll(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         body: FleetReenrollRequest,
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/{selector}/re-enroll")
@@ -990,7 +927,6 @@ def install_operator_projection_routes(
             result = FleetActionResponse.model_validate(
                 {"action": "re-enroll", "node_id": node.id, **value}
             )
-            audit(request, actor, "fleet.node.re-enroll", (node.id,))
             return result
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
@@ -1029,7 +965,6 @@ def install_operator_projection_routes(
     )
     def revoke_enrollment(
         grant_id: Annotated[str, Path(pattern=ENROLLMENT_ID_PATTERN)],
-        request: Request,
         actor: Actor = authenticated,
     ) -> EnrollmentGrantStatus:
         _require_mutation(actor, "POST", "/api/fleet/enrollments/{grant_id}/revoke")
@@ -1039,7 +974,6 @@ def install_operator_projection_routes(
             result = fleet_services.enrollment.revoke_grant(
                 grant_id, actor=actor.subject
             )
-            audit(request, actor, "fleet.enrollment.revoke", (grant_id,))
             return result
         except (
             KeyError,
@@ -1060,7 +994,6 @@ def install_operator_projection_routes(
     )
     def fleet_remove(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/{selector}/remove")
@@ -1072,7 +1005,6 @@ def install_operator_projection_routes(
             result = FleetActionResponse(
                 action="remove", state="accepted", node_id=node.id
             )
-            audit(request, actor, "fleet.node.remove", (node.id,))
             return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
@@ -1086,7 +1018,6 @@ def install_operator_projection_routes(
     )
     def fleet_upgrade(
         body: FleetUpgradeRequest,
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/upgrade")
@@ -1109,9 +1040,7 @@ def install_operator_projection_routes(
                     plan_digest=str(getattr(existing, "payload_digest", "")) or None,
                     request_key=body.request_key,
                     targets=list(getattr(existing, "targets", ())),
-                    provenance=provenance(),
                 )
-                audit(request, actor, "fleet.upgrade", tuple(result.targets))
                 return result
             fleet_snapshot = snapshot()
             nodes = (
@@ -1143,9 +1072,7 @@ def install_operator_projection_routes(
                 plan_digest=str(getattr(job, "payload_digest", plan.plan_digest)),
                 request_key=body.request_key,
                 targets=list(getattr(job, "targets", node_ids)),
-                provenance=provenance(),
             )
-            audit(request, actor, "fleet.upgrade", tuple(result.targets))
             return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
@@ -1158,9 +1085,7 @@ __all__ = [
     "FleetLogEntry",
     "FleetLogProvider",
     "FleetLogResponse",
-    "FleetNodeDetailResponse",
     "FleetOperatorServices",
-    "FleetProvenanceProvider",
     "FleetRenameRequest",
     "FleetUpgradeProvider",
     "FleetUpgradeRequest",

@@ -11,7 +11,6 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrade_status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
-    AGENT_UPGRADE_AWAITING_IDENTITY_REASON,
 )
 from vonk_control.agent_upgrades import (
     _AGENT_UPGRADE_RECOVERY_FENCE,
@@ -169,7 +168,6 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
         sessions,
         operations,
         clock=lambda: now,
-        current_revision=lambda: REVISION,
     )
 
     ordinary = upgrades.preview([NODE_A], REPAIR_PACKAGE)
@@ -216,7 +214,6 @@ def test_repair_plan_requires_one_explicit_bound_spark(tmp_path, node_ids) -> No
         sessions,
         operations,
         clock=lambda: now,
-        current_revision=lambda: REVISION,
     )
     with pytest.raises(AgentUpgradeConflict, match="exactly its explicit Spark"):
         upgrades.preview(
@@ -252,7 +249,6 @@ def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_lea
         sessions,
         operations,
         clock=lambda: now,
-        current_revision=lambda: REVISION,
     )
     mutable = json.loads(json.dumps(REPAIR_MANIFEST))
     mutable["package"]["package_url"] = (
@@ -318,7 +314,6 @@ def test_rollout_queues_only_one_spark_until_new_identity_is_proven(tmp_path) ->
         sessions,
         operations,
         clock=lambda: now,
-        current_revision=lambda: REVISION,
     )
     operations.set_result_consumer(upgrades.consume_agent_result)
     plan = upgrades.preview(None, PACKAGE)
@@ -512,7 +507,6 @@ def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
         sessions,
         restarted_operations,
         clock=clock,
-        current_revision=lambda: REVISION,
     )
     restarted_operations.set_result_consumer(restarted_upgrades.consume_agent_result)
 
@@ -1444,7 +1438,6 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(
         sessions,
         operations,
         clock=lambda: datetime(2026, 8, 27, tzinfo=UTC),
-        current_revision=lambda: REVISION,
         release_api_url="http://caddy:8084",
         transport=httpx2.MockTransport(handler),
     )
@@ -1568,7 +1561,6 @@ def _rollout(
         sessions,
         operations,
         clock=service_clock,
-        current_revision=lambda: REVISION,
     )
     operations.set_result_consumer(upgrades.consume_agent_result)
     plan = upgrades.preview(None, PACKAGE)
@@ -1887,97 +1879,6 @@ def test_predecessor_agent_handoff_is_reconcilable_not_a_failed_upgrade(
         operation = session.get(AgentOperation, first.operation_id)
         assert operation is not None and operation.state == "succeeded"
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
-
-
-def test_reconciled_upgrade_past_preserved_helper_failure_binds_its_package_receipt(
-    tmp_path,
-):
-    """A proven upgrade must leave its authorized package bound.
-
-    The Rust agent cannot prove its own restart, so the successful install
-    reports the by-design awaiting-identity handoff instead of a result
-    document.  Exact authenticated contact then reconciles the operation to
-    succeeded while the attempt keeps that truthful handoff audit, so the bound
-    package identity only survives on the succeeded operation.  A projection
-    that reads the receipt from a succeeded attempt alone silently reports the
-    node as never having had a receipt, and falls back to the previous
-    upgrade's now-mismatching receipt.
-    """
-    from vonk_control.deployment_provenance import DeploymentProvenanceService
-
-    sessions, operations, _upgrades, _job = _rollout(tmp_path, "receipt-binding")
-    # An earlier authorized upgrade left a receipt bound to the old binary.
-    with sessions.begin() as session:
-        earlier = AgentOperation(
-            parent_job_id=str(uuid.uuid4()),
-            node_id=NODE_A,
-            kind="agent.upgrade.v1",
-            payload_digest="a" * 64,
-            payload={},
-            authority_revision="a" * 64,
-            state="succeeded",
-            created_at=datetime(2026, 8, 26, tzinfo=UTC),
-            updated_at=datetime(2026, 8, 26, tzinfo=UTC),
-        )
-        session.add(earlier)
-        session.flush()
-        session.add(
-            AgentOperationAttempt(
-                operation_id=earlier.id,
-                attempt=1,
-                fence=str(uuid.uuid4()),
-                lease_deadline=datetime(2026, 8, 26, tzinfo=UTC),
-                agent_certificate_serial="serial-a",
-                state="succeeded",
-                result={
-                    "architecture": "linux-arm64",
-                    "binary_digest": OLD_IDENTITY["binary_digest"],
-                    "build_digest": OLD_IDENTITY["build_digest"],
-                    "package_sha256": "a" * 64,
-                    "package_version": "0.1.0",
-                    "self_test_passed": True,
-                    "status": "upgraded",
-                    "activation_receipt": {
-                        **ACTIVATION_RECEIPT,
-                        "candidate_binary_sha256": OLD_IDENTITY["binary_digest"],
-                        "candidate_package_sha256": "a" * 64,
-                    },
-                },
-            )
-        )
-
-    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    operations.fail(first, AGENT_UPGRADE_AWAITING_IDENTITY_REASON)
-    assert (
-        operations.claim(
-            NODE_A,
-            "serial-a",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity=NEW_IDENTITY,
-        )
-        is None
-    )
-    with sessions() as session:
-        operation = session.scalar(
-            select(AgentOperation)
-            .where(AgentOperation.node_id == NODE_A)
-            .order_by(AgentOperation.updated_at.desc())
-        )
-        assert operation is not None and operation.state == "succeeded"
-        attempt = session.scalar(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id
-            )
-        )
-        assert attempt is not None and attempt.state == "failed"
-
-    now = datetime(2026, 8, 27, tzinfo=UTC)
-    evidence = DeploymentProvenanceService(sessions, clock=lambda: now).snapshot()
-    agent = next(entry for entry in evidence.agents if entry.node_id == NODE_A)
-    assert agent.package_sha256 == PACKAGE["package_sha256"]
-    assert agent.package_evidence.source == "Authenticated package upgrade receipt"
-    assert agent.package_evidence.freshness == "current"
 
 
 def test_fleet_upgrade_all_treats_an_already_current_spark_as_a_no_op(

@@ -18,7 +18,6 @@ from vonk_agent_protocol import DistributionObject
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import AgentSource, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import CatalogEntityService
@@ -1033,7 +1032,6 @@ def _read_spec_endpoint(
     app = create_app(
         jobs=_NoopJobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
         now=lambda: int(NOW.timestamp()),
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,

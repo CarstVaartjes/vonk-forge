@@ -380,7 +380,6 @@ def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
 
 def test_composed_controller_exposes_exact_download_on_operation_projection(service):
     from vonk_control.api import create_app
-    from vonk_control.audit import MemoryAuditStore
     from vonk_control.auth import Actor, TokenCodec
     from vonk_control.operation_api import (
         OperationApiServices,
@@ -420,7 +419,6 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
-        audits=MemoryAuditStore(),
         now=lambda: 10,
         operations=operations,
         failure_evidence=service,

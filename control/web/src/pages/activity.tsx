@@ -2,15 +2,16 @@ import {availabilityProgress, LibraryAvailabilityProgress} from "../components/l
 import {availabilityFailure, LibraryAvailabilityFeedback} from "../components/library-availability-feedback";
 import {useCallback, useEffect, useId, useMemo, useRef, useState} from "react";
 import type {SyntheticEvent} from "react";
-import type {AuditSummary, ControlApi, JobDetail, JobSummary, OperationDetail, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, JobDetail, JobSummary, OperationDetail, VisualFleetSnapshot} from "../api/types";
 import {StatusPill} from "../components/status-pill";
 import {nodeDisplayName} from "../lib/fleet";
 
 type ActivityView = "timeline" | "table";
 type ActivityStatus = "recorded" | "in_progress" | "attention" | "unsuccessful" | "unknown";
-type ActivityRecord = AuditSummary & {occurred_at?: string | null; source: "audit" | "job" | "operation"; target_names?: string[]; operation?: OperationDetail};
+type ActivitySummary = {request_id: string; actor: string; action: string; targets: string[]};
+type ActivityRecord = ActivitySummary & {occurred_at?: string | null; source: "job" | "operation"; target_names?: string[]; operation?: OperationDetail};
 type TimestampedJob = JobSummary & {created_at?: string};
-type ActivityApi = Pick<ControlApi, "audit" | "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation">;
+type ActivityApi = Pick<ControlApi, "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation">;
 
 const VIEW_PREFERENCE_KEY = "vonk.activity.view";
 
@@ -27,51 +28,7 @@ function failureText(failure: OperationDetail["failure"]): string {
     "code" in failure ? failure.code : failure.error_code].filter(Boolean).join(" ");
 }
 
-const ACTION_LABELS: Record<string, string> = {
-  "agent.enrollment.grant.create": "Created enrollment grant",
-  "agent.enrollment.submit.approved": "Approved Spark enrollment",
-  "agent.enrollment.submit.rejected": "Rejected Spark enrollment",
-  "agent.enrollment.submit.uncertain": "Spark enrollment needs review",
-  "agent.node.revoke": "Revoked Spark access",
-  "authority.change.submit": "Submitted authority change",
-  "auth.login.failed": "Sign-in failed",
-  "auth.login.succeeded": "Signed in",
-  "auth.login.throttled": "Sign-in rate limited",
-  "auth.logout": "Signed out",
-  "catalog.entity.create": "Created catalog item",
-  "catalog.entity.resolve": "Resolved catalog item",
-  "catalog.entity.revise": "Revised catalog item",
-  "catalog.global.import": "Imported public catalog item",
-  "catalog.publication.export": "Exported catalog publication",
-  "catalog.recipe.create": "Created recipe",
-  "catalog.recipe.fork": "Forked recipe",
-  "catalog.recipe.resolve": "Resolved recipe",
-  "catalog.recipe.update": "Updated recipe",
-  "catalog.recipe_library.import": "Imported recipe library",
-  "catalog.source_bundle.upload": "Uploaded source bundle",
-  "catalog.test_report.attach": "Attached validation report",
-  "fleet.revoke": "Revoked Spark access",
-  "job.resume": "Resumed operation",
-  "recipe.build": "Built recipe image",
-  "recipe.image.distribute": "Distributed recipe image",
-  "recipe.install": "Installed recipe",
-  "recipe.installation.reconcile": "Requested installation cleanup",
-  "recipe.mapping.create": "Created recipe placement",
-  "recipe.retry": "Retried recipe operation",
-  "recipe.start": "Started recipe",
-  "recipe.stop": "Stopped recipe",
-  "recipe.uninstall": "Uninstalled recipe",
-};
-
 const CATEGORY_LABELS: Record<string, string> = {
-  agent: "Sparks",
-  auth: "Authentication",
-  authority: "Authority",
-  catalog: "Catalog",
-  fleet: "Fleet",
-  job: "Operations",
-  library: "Library",
-  recipe: "Recipes",
   operation: "Operations",
 };
 
@@ -103,20 +60,18 @@ export function activityActionLabel(action: string): string {
     };
     return `${kind} · ${stateLabels[state] ?? titleCase(state)}`;
   }
-  const explicit = ACTION_LABELS[action];
-  if (explicit) return explicit;
   const parts = action.split(".").filter(Boolean);
   const useful = parts.length > 1 ? parts.slice(1) : parts;
   const label = titleCase(useful.join(" "));
   return label ? `${label.charAt(0).toUpperCase()}${label.slice(1).toLowerCase()}` : "Recorded activity";
 }
 
-export function activityCategory(event: AuditSummary): string {
+export function activityCategory(event: ActivitySummary): string {
   const category = event.action.split(".")[0] || "other";
   return CATEGORY_LABELS[category] ?? titleCase(category);
 }
 
-export function activityStatus(event: AuditSummary): ActivityStatus {
+export function activityStatus(event: ActivitySummary): ActivityStatus {
   if (event.action.startsWith("operation.")) {
     const state = event.action.split(".").at(-1) ?? "";
     const knownStates: Record<string, ActivityStatus> = {
@@ -199,10 +154,10 @@ export function relativeTime(value: string, now: Date): string | null {
 }
 
 function EventTime({event, now}: {event: ActivityRecord; now: Date}) {
-  if (!event.occurred_at) return <span className="activity-time is-unavailable"><strong>Time not recorded</strong><small>The current audit record has no timestamp</small></span>;
+  if (!event.occurred_at) return <span className="activity-time is-unavailable"><strong>Time not recorded</strong><small>The current record has no timestamp</small></span>;
   const exact = exactTime(event.occurred_at);
   const relative = relativeTime(event.occurred_at, now);
-  if (!exact || !relative) return <span className="activity-time is-unavailable"><strong>Time not recorded</strong><small>The audit timestamp is invalid</small></span>;
+  if (!exact || !relative) return <span className="activity-time is-unavailable"><strong>Time not recorded</strong><small>The recorded timestamp is invalid</small></span>;
   return <time className="activity-time" dateTime={event.occurred_at} title={exact}><strong>{relative}</strong><small>{exact}</small></time>;
 }
 
@@ -236,7 +191,6 @@ function TechnicalDetails({event}: {event: ActivityRecord}) {
     <summary>Technical details</summary>
     <dl>
       <CopyableValue label={event.source === "operation" ? "Operation ID" : "Request ID"} value={event.request_id}/>
-      {event.source === "audit" && <CopyableValue label="Authority revision" value={event.authority_revision}/>}
       {event.targets.length === 0
         ? <div><dt>Targets</dt><dd>None recorded</dd></div>
         : event.targets.map((target, index) => <CopyableValue key={`${target}:${index}`} label={event.targets.length === 1 ? "Target" : `Target ${index + 1}`} value={target}/>)}
@@ -602,14 +556,12 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
   const [view, setView] = useState<ActivityView>(readViewPreference);
   const [sort, setSort] = useState<"recent" | "attention">("recent");
   const [targetNames, setTargetNames] = useState(new Map<string, string>());
-  const [auditCount, setAuditCount] = useState(0);
   const [loadedJobCount, setLoadedJobCount] = useState(0);
   const [jobTotal, setJobTotal] = useState(0);
   const [jobCursor, setJobCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [paginationError, setPaginationError] = useState("");
   const [partialWarning, setPartialWarning] = useState("");
-  const [auditAvailable, setAuditAvailable] = useState(true);
   const [jobsAvailable, setJobsAvailable] = useState(true);
   const operationIds = useRef(new Set<string>());
   const canonicalIds = useRef(new Set<string>());
@@ -628,28 +580,23 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     setPartialWarning("");
     const controller = new AbortController();
     void Promise.allSettled([
-      api.audit(),
       api.jobs(),
       api.operations(undefined, controller.signal),
       api.visualFleet(controller.signal).catch(() => null),
-    ]).then(([auditResult, operationsResult, canonicalResult, fleetResult]) => {
+    ]).then(([operationsResult, canonicalResult, fleetResult]) => {
       if (!active) return;
-      const audit = auditResult.status === "fulfilled" ? auditResult.value : null;
       const operations = operationsResult.status === "fulfilled" ? operationsResult.value : null;
-      const auditError = auditResult.status === "rejected" ? (auditResult.reason instanceof Error ? auditResult.reason.message : "Unable to load audit history.") : "";
       const operationsError = operationsResult.status === "rejected" ? (operationsResult.reason instanceof Error ? operationsResult.reason.message : "Unable to load operations.") : "";
       const canonical = canonicalResult.status === "fulfilled" ? canonicalResult.value : null;
       const canonicalError = canonicalResult.status === "rejected" ? (canonicalResult.reason instanceof Error ? canonicalResult.reason.message : "Unable to load operations.") : "";
       setCanonicalAvailable(Boolean(canonical));
-      setAuditAvailable(Boolean(audit));
       setJobsAvailable(Boolean(operations));
-      if (!audit && !operations && !canonical) {
+      if (!operations && !canonical) {
         setEvents(null);
-        setError(`Unable to load audit history, jobs, or operations. ${[auditError, operationsError, canonicalError].filter(Boolean).join(" ")}`);
+        setError(`Unable to load jobs or operations. ${[operationsError, canonicalError].filter(Boolean).join(" ")}`);
         return;
       }
       const warnings = [
-        !audit ? `Audit history could not be loaded (${auditError}).` : "",
         !operations ? `Jobs could not be loaded (${operationsError}).` : "",
         !canonical ? `Operations could not be loaded (${canonicalError}).` : "",
       ].filter(Boolean);
@@ -662,14 +609,12 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
       const names = targetNameLookup(fleet);
       setTargetNames(names);
       operationIds.current = new Set((operations?.jobs ?? []).map(job => job.id));
-      setAuditCount(audit?.events.length ?? 0);
       setLoadedJobCount(operationIds.current.size);
       setJobTotal(operations?.total ?? 0);
       setJobCursor(operations?.next_cursor ?? null);
       setPaginationError("");
       setEvents([
         ...(canonical?.operations ?? []).filter((operation, index, all) => all.findIndex(item => item.id === operation.id) === index).map(operation => canonicalRecord(operation, names)),
-        ...(audit?.events ?? []).map(event => ({...event, source: "audit" as const, target_names: event.targets.map(target => names.get(target) ?? "")})),
         ...(operations?.jobs ?? []).filter((job, index, jobs) => jobs.findIndex(candidate => candidate.id === job.id) === index).map(job => jobRecord(job as TimestampedJob)),
       ].sort(sortActivityByTime));
     }).catch(value => {
@@ -738,7 +683,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
       if (actor && event.actor !== actor) return false;
       if (status && activityStatus(event) !== status) return false;
       if (!normalized) return true;
-      return [activityActionLabel(event.action), activityCategory(event), event.action, event.actor, event.request_id, event.authority_revision ?? "", failureText(event.operation?.failure), ...event.targets, ...(event.target_names ?? [])]
+      return [activityActionLabel(event.action), activityCategory(event), event.action, event.actor, event.request_id, failureText(event.operation?.failure), ...event.targets, ...(event.target_names ?? [])]
         .some(value => value.toLocaleLowerCase().includes(normalized));
     });
   }, [actor, category, events, query, status]);
@@ -782,7 +727,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
 
     {events && <section className="library-pagination" aria-label="Activity history coverage">
       <p role="status">Showing {events.length} loaded {events.length === 1 ? "event" : "events"}.{(jobCursor || canonicalCursor) ? " Load older activity below." : ""}</p>
-      <details className="activity-technical"><summary>History coverage</summary><p>{auditAvailable ? `Loaded ${auditCount} audit ${auditCount === 1 ? "record" : "records"} from the latest-100 API window` : "Audit history is unavailable"} and {jobsAvailable ? `${loadedJobCount} of ${jobTotal} jobs` : "jobs are unavailable"}, plus {canonicalAvailable ? `${canonicalCount} of ${canonicalTotal} operations` : "operations are unavailable"}. Summary counts and filters cover only these loaded records; older audit history is not available from this API.</p></details>
+      <details className="activity-technical"><summary>History coverage</summary><p>{jobsAvailable ? `Loaded ${loadedJobCount} of ${jobTotal} jobs` : "Jobs are unavailable"}, plus {canonicalAvailable ? `${canonicalCount} of ${canonicalTotal} operations` : "operations are unavailable"}. Summary counts and filters cover only these loaded records.</p></details>
       {(jobCursor || canonicalCursor) && <button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => void loadMoreOperations()}>{loadingMore ? "Loading older operations…" : "Load older operations"}</button>}
       {jobsAvailable && !jobCursor && loadedJobCount < jobTotal && <p role="status">The jobs API reports additional records but did not provide a continuation cursor.</p>}
       {canonicalAvailable && !canonicalCursor && canonicalCount < canonicalTotal && <p role="status">The operations API reports additional records but did not provide a continuation cursor.</p>}
@@ -811,7 +756,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
 
     {loading && !events && <section className="activity-state" role="status"><strong>Loading activity…</strong><p>Reading the latest operator and system events.</p></section>}
     {error && <section className="activity-state is-error" role="alert"><div><strong>Activity unavailable</strong><p>{error}</p></div><button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => setAttempt(value => value + 1)}>Try again</button></section>}
-    {!loading && !error && events?.length === 0 && <section className="activity-state"><strong>{partialWarning ? "No activity from available sources" : "No activity in the loaded window"}</strong><p>{partialWarning ? "The available activity source returned no records. Retry to check the unavailable source." : "No audit or operation records were returned by the current API windows."}</p></section>}
+    {!loading && !error && events?.length === 0 && <section className="activity-state"><strong>{partialWarning ? "No activity from available sources" : "No activity in the loaded window"}</strong><p>{partialWarning ? "The available activity source returned no records. Retry to check the unavailable source." : "No job or operation records were returned by the current API windows."}</p></section>}
     {events && filtered.length === 0 && events.length > 0 && <section className="activity-state"><strong>No matching activity</strong><p>Try a broader search or remove one or more filters.</p><button type="button" className="button secondary" onClick={clearFilters}>Clear filters</button></section>}
     {displayed.length > 0 && (view === "timeline" ? <ActivityTimeline api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} targetNames={targetNames}/> : <ActivityTable api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} targetNames={targetNames}/>)}
   </div>;

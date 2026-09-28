@@ -46,7 +46,6 @@ def schema_application(*, browser_auth: bool = True) -> FastAPI:
     from sqlalchemy.orm import sessionmaker
 
     from .api import create_app
-    from .audit import MemoryAuditStore
     from .auth import TokenCodec
     from .browser_auth import BrowserAuthService
     from .jobs import JobService
@@ -55,7 +54,6 @@ def schema_application(*, browser_auth: bool = True) -> FastAPI:
     return create_app(
         jobs=JobService(sessionmaker(), clock=lambda: datetime(2026, 9, 7, tzinfo=UTC)),
         tokens=TokenCodec(key),
-        audits=MemoryAuditStore(),
         browser_auth=BrowserAuthService(
             sessionmaker(),
             token_signing_key=key,

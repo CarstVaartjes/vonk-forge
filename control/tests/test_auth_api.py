@@ -12,7 +12,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService, LoginRateLimiter
 from vonk_control.models import Base, User
@@ -57,9 +56,7 @@ class Jobs:
         raise AssertionError
 
 
-def _client(
-    *, maximum_subject_failures: int = 5
-) -> tuple[TestClient, MemoryAuditStore, str]:
+def _client(*, maximum_subject_failures: int = 5) -> tuple[TestClient, str]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -88,15 +85,13 @@ def _client(
             maximum_subject_failures=maximum_subject_failures,
         ),
     )
-    audits = MemoryAuditStore()
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(signing_key),
-        audits=audits,
         now=lambda: int(NOW.timestamp()),
         browser_auth=service,
     )
-    return TestClient(app, base_url=ORIGIN), audits, ADMIN_VERIFIER
+    return TestClient(app, base_url=ORIGIN), ADMIN_VERIFIER
 
 
 def _login(client: TestClient, password: str = ADMIN_PASSWORD):
@@ -108,7 +103,7 @@ def _login(client: TestClient, password: str = ADMIN_PASSWORD):
 
 
 def test_auth_openapi_documents_every_runtime_error_status() -> None:
-    client, _audits, _verifier = _client()
+    client, _verifier = _client()
 
     app = client.app
     assert isinstance(app, FastAPI)
@@ -193,7 +188,7 @@ def _chunked_asgi_login(
 
 def test_login_returns_only_a_session_summary_and_exact_secure_cookies() -> None:
     """Dropping bounded cookie flags or exposing credentials must break login."""
-    client, audits, verifier = _client()
+    client, verifier = _client()
 
     response = _login(client)
 
@@ -220,13 +215,6 @@ def test_login_returns_only_a_session_summary_and_exact_secure_cookies() -> None
     assert ADMIN_PASSWORD not in serialized
     assert verifier not in serialized
     assert bearer not in serialized
-    event = audits.for_request(response.headers["x-request-id"])
-    assert (event.actor, event.action, event.authority_revision, event.targets) == (
-        "admin",
-        "auth.login.succeeded",
-        None,
-        (),
-    )
 
 
 @pytest.mark.parametrize(
@@ -245,7 +233,7 @@ def test_login_rejects_non_exact_or_unbounded_strict_documents(
     document: dict[str, object],
 ) -> None:
     """Coercion, extra fields, or out-of-bound credentials must fail pre-auth."""
-    client, audits, _verifier = _client()
+    client, _verifier = _client()
 
     response = client.post("/api/auth/login", headers={"origin": ORIGIN}, json=document)
 
@@ -254,7 +242,6 @@ def test_login_rejects_non_exact_or_unbounded_strict_documents(
     password = document.get("password")
     if isinstance(password, str) and password:
         assert password not in response.text
-    assert audits.list() == []
 
 
 @pytest.mark.parametrize(
@@ -268,7 +255,7 @@ def test_login_rejects_duplicate_or_malformed_json_without_echoing_it(
     document: str,
 ) -> None:
     """Invalid JSON structure must fail before auth without reflecting secrets."""
-    client, audits, _verifier = _client()
+    client, _verifier = _client()
 
     response = client.post(
         "/api/auth/login",
@@ -279,7 +266,6 @@ def test_login_rejects_duplicate_or_malformed_json_without_echoing_it(
     assert response.status_code == 422
     assert response.json() == {"detail": "login request is invalid"}
     assert "secret" not in response.text
-    assert audits.list() == []
 
 
 @pytest.mark.parametrize(
@@ -293,13 +279,12 @@ def test_login_stops_reading_asgi_chunks_at_the_actual_request_limit(
     headers: tuple[tuple[bytes, bytes], ...],
 ) -> None:
     """Missing or false length metadata must not let login buffer an oversized body."""
-    client, audits, _verifier = _client()
+    client, _verifier = _client()
 
     status, reads = _chunked_asgi_login(client.app, extra_headers=headers)
 
     assert status == 413
     assert reads == 2
-    assert audits.list() == []
 
 
 @pytest.mark.parametrize(
@@ -308,7 +293,7 @@ def test_login_stops_reading_asgi_chunks_at_the_actual_request_limit(
 )
 def test_login_requires_the_exact_https_request_origin(origin: str | None) -> None:
     """Missing, non-HTTPS, or cross-origin login requests must fail closed."""
-    client, audits, _verifier = _client()
+    client, _verifier = _client()
     headers = {} if origin is None else {"origin": origin}
 
     response = client.post(
@@ -319,32 +304,24 @@ def test_login_requires_the_exact_https_request_origin(origin: str | None) -> No
 
     assert response.status_code == 403
     assert response.json() == {"detail": "origin validation failed"}
-    assert audits.list() == []
 
 
-def test_login_uses_generic_credential_failure_and_bounded_audit() -> None:
+def test_login_uses_generic_credential_failure() -> None:
     """Credential failures must reveal neither cause nor submitted material."""
-    client, audits, verifier = _client()
+    client, verifier = _client()
 
     response = _login(client, "wrong password")
 
     assert response.status_code == 401
     assert response.json() == {"detail": "authentication failed"}
-    serialized = repr((response.headers.items(), response.content, audits.list()))
+    serialized = repr((response.headers.items(), response.content))
     assert "wrong password" not in serialized
     assert verifier not in serialized
-    event = audits.for_request(response.headers["x-request-id"])
-    assert (event.actor, event.action, event.authority_revision, event.targets) == (
-        "anonymous",
-        "auth.login.failed",
-        None,
-        (),
-    )
 
 
-def test_login_uses_generic_throttle_response_and_bounded_audit() -> None:
+def test_login_uses_generic_throttle_response() -> None:
     """Rate limiting must be a generic 429 with no credential disclosure."""
-    client, audits, _verifier = _client(maximum_subject_failures=1)
+    client, _verifier = _client(maximum_subject_failures=1)
     assert _login(client, "first wrong password").status_code == 401
 
     response = _login(client, "second wrong password")
@@ -352,20 +329,13 @@ def test_login_uses_generic_throttle_response_and_bounded_audit() -> None:
     assert response.status_code == 429
     assert response.json() == {"detail": "authentication temporarily unavailable"}
     assert "second wrong password" not in repr(
-        (response.headers.items(), response.content, audits.list())
-    )
-    event = audits.for_request(response.headers["x-request-id"])
-    assert (event.actor, event.action, event.authority_revision, event.targets) == (
-        "anonymous",
-        "auth.login.throttled",
-        None,
-        (),
+        (response.headers.items(), response.content)
     )
 
 
 def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
     """Status must summarize the session and logout must revoke it without a body."""
-    client, audits, _verifier = _client()
+    client, _verifier = _client()
     assert _login(client).status_code == 200
 
     status = client.get("/api/auth/session")
@@ -409,19 +379,12 @@ def test_session_status_and_logout_use_the_durable_cookie_session() -> None:
     assert cleared[1].startswith('vonk_csrf="";')
     assert "HttpOnly" not in cleared[1]
     assert "Max-Age=0" in cleared[1]
-    event = audits.for_request(logout.headers["x-request-id"])
-    assert (event.actor, event.action, event.authority_revision, event.targets) == (
-        "admin",
-        "auth.logout",
-        None,
-        (),
-    )
     assert client.get("/api/auth/session").status_code == 401
 
 
 def test_cli_token_is_a_browser_session_only_download_with_expiry() -> None:
     """The account menu can mint a file without exposing a token in JSON or URLs."""
-    client, audits, _verifier = _client()
+    client, _verifier = _client()
     assert _login(client).status_code == 200
 
     response = client.post(
@@ -442,17 +405,10 @@ def test_cli_token_is_a_browser_session_only_download_with_expiry() -> None:
     assert TokenCodec(b"test-token-signing-key-for-auth-api").verify(
         token, now=int(NOW.timestamp())
     ) == Actor("admin", "administrator")
-    event = audits.for_request(response.headers["x-request-id"])
-    assert (event.actor, event.action, event.authority_revision, event.targets) == (
-        "admin",
-        "auth.cli_token.issued",
-        None,
-        (),
-    )
 
 
 def test_cli_token_cannot_be_minted_with_a_bearer_or_without_csrf() -> None:
-    client, _audits, _verifier = _client()
+    client, _verifier = _client()
     bearer = TokenCodec(b"test-token-signing-key-for-auth-api").issue(
         Actor("admin", "administrator"),
         ttl_seconds=60,

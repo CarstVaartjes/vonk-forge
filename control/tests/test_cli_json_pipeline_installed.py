@@ -14,13 +14,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.jobs import JobService
 from vonk_control.models import AgentNode, Base, FleetProfileApplication, Job, RecipeRun
 
-from .test_cli_first_connection_endpoints_installed import _Authority
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
@@ -80,8 +78,7 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
     app = create_app(
         jobs=JobService(sessions, clock=lambda: now),
         tokens=tokens,
-        audits=MemoryAuditStore(),
-        fleet_projection=FleetProjection(_Authority(), sessions, clock=lambda: now),
+        fleet_projection=FleetProjection(sessions, clock=lambda: now),
         now=lambda: 100,
     )
     headers = {

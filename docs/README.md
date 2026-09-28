@@ -36,11 +36,11 @@ flowchart LR
 ```
 
 - Local PostgreSQL owns recipes, installations, placements, runs, profiles, and
-  audit state. The trusted Controller/NAS cache owns the exact verified model
+  operation state. The trusted Controller/NAS cache owns the exact verified model
   artifact sets and recipe images used by profile choices and apply. It remains
   usable without a hosted catalog or Git remote.
 - The target [ownership boundary](architecture-overview.md#state-ownership)
-  keeps control intent, permissions, coordination, and audit in PostgreSQL while
+  keeps control intent, permissions, and coordination in PostgreSQL while
   moving physical artifact state and local checkpoints to self-descriptive
   managed storage. The implementation plan records that cutover as implemented
   in the repository; deployed recovery and physical acceptance remain separate.

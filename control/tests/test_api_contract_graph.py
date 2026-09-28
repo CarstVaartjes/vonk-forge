@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.jobs import JobService
@@ -46,7 +45,6 @@ def _application():
     return create_app(
         jobs=JobService(sessionmaker(), clock=lambda: datetime(2026, 9, 7, tzinfo=UTC)),
         tokens=TokenCodec(key),
-        audits=MemoryAuditStore(),
         browser_auth=BrowserAuthService(
             sessionmaker(),
             token_signing_key=key,

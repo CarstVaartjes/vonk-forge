@@ -133,7 +133,6 @@ class AgentUpgradeService:
         operations: AgentJobService,
         *,
         clock: Callable[[], datetime],
-        current_revision: Callable[[], str],
         channel: str = "dev",
         release_api_url: str = "https://install.vonkforge.ai",
         transport: httpx2.BaseTransport | None = None,
@@ -142,7 +141,6 @@ class AgentUpgradeService:
         self._operations = operations
         self._clock = clock
         operations.set_rollout_owner(self._advance, self.advance_node)
-        self._current_revision = current_revision
         if channel not in {"dev", "stable"}:
             raise ValueError("agent upgrade channel is invalid")
         self._channel = channel
@@ -242,7 +240,9 @@ class AgentUpgradeService:
             raise AgentUpgradeConflict(
                 "agent repair requires exactly its explicit Spark and one-at-a-time rollout"
             )
-        authority_revision = self._current_revision()
+        # The agent wire requires a 64-hex authority revision on every
+        # upgrade operation; the signed package digest names what it installs.
+        authority_revision = str(payload["package_sha256"])
         requested = None if node_ids is None else tuple(node_ids)
         if requested is not None and (
             not requested

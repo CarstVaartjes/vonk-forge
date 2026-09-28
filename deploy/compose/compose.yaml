@@ -70,7 +70,6 @@ services:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
       - route-publications:/routes
-      - deployment-observations:/run/vonk-deployment-observations
       - litellm-supervisor-state:/supervisor
       - normalized-private-keys:/normalized
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
@@ -369,6 +368,5 @@ volumes:
   grafana-data: {}
   registry-data: {}
   route-publications: {}
-  deployment-observations: {}
   normalized-private-keys: {}
   step-ca-data: {}

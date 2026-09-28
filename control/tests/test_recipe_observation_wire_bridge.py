@@ -27,7 +27,6 @@ from vonk_agent_protocol import (
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
@@ -347,7 +346,6 @@ def _production_controller_app(
     app = create_app(
         jobs=_UnusedJobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
         now=lambda: 0,
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,

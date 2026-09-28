@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_agent_protocol import RecipeReconcilePayload, canonical_message
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.install_admission import installation_plan_digest_from_stored_document
 from vonk_control.installation_reconciliation_api import (
@@ -46,9 +45,7 @@ def _actor(role: str = "administrator") -> Actor:
     return Actor("test-actor", role)
 
 
-def _client(
-    operations: Mock, *, role: str = "administrator"
-) -> tuple[TestClient, MemoryAuditStore]:
+def _client(operations: Mock, *, role: str = "administrator") -> TestClient:
     app = FastAPI()
 
     @app.middleware("http")
@@ -56,14 +53,12 @@ def _client(
         request.state.request_id = "00000000-0000-4000-8000-000000000004"
         return await call_next(request)
 
-    audits = MemoryAuditStore()
     install_installation_reconciliation_routes(
         app,
         actor_dependency=Depends(lambda: _actor(role)),
         operations=operations,
-        audits=audits,
     )
-    return TestClient(app), audits
+    return TestClient(app)
 
 
 def _prepare_exact_legacy_install_for_reconciliation(
@@ -153,7 +148,6 @@ def test_reconciliation_routes_are_typed_and_discoverable() -> None:
         app,
         actor_dependency=Depends(_actor),
         operations=None,
-        audits=MemoryAuditStore(),
     )
 
     schema = app.openapi()
@@ -186,7 +180,7 @@ def test_reconciliation_routes_are_typed_and_discoverable() -> None:
 
 def test_preview_requires_path_identity_and_explicit_reconcile_mode() -> None:
     operations = Mock()
-    client, _audits = _client(operations)
+    client = _client(operations)
     path = f"/api/recipe/installations/{INSTALLATION_ID}/reconcile/preview"
 
     wrong_installation = client.post(
@@ -212,7 +206,7 @@ def test_preview_delegates_reconcile_mode_to_existing_run_switch_owner() -> None
     operations.preview_cleanup.side_effect = RunSwitchOperationConflict(
         "run-switch.reconciliation-unavailable"
     )
-    client, _audits = _client(operations)
+    client = _client(operations)
 
     response = client.post(
         f"/api/recipe/installations/{INSTALLATION_ID}/reconcile/preview",
@@ -235,7 +229,7 @@ def test_apply_is_administrator_only_and_preserves_reviewed_request_identity() -
     operations.apply_cleanup.side_effect = RunSwitchOperationConflict(
         "run-switch.reconciliation-stale-plan"
     )
-    client, audits = _client(operations, role="operator")
+    client = _client(operations, role="operator")
     path = f"/api/recipe/installations/{INSTALLATION_ID}/reconcile"
     body = {
         "schema_version": 2,
@@ -249,7 +243,7 @@ def test_apply_is_administrator_only_and_preserves_reviewed_request_identity() -
     assert forbidden.status_code == 403
     operations.apply_cleanup.assert_not_called()
 
-    admin_client, admin_audits = _client(operations)
+    admin_client = _client(operations)
     rejected = admin_client.post(path, json=body)
 
     assert rejected.status_code == 409
@@ -258,14 +252,12 @@ def test_apply_is_administrator_only_and_preserves_reviewed_request_identity() -
     assert request.cleanup_mode == "reconcile"
     assert request.plan_digest == PLAN_DIGEST
     assert request.request_key == REQUEST_KEY
-    assert audits.list() == []
-    assert admin_audits.list() == []
 
 
 def test_run_switch_status_is_a_typed_exact_id_lookup() -> None:
     operations = Mock()
     operations.get.side_effect = KeyError(OPERATION_ID)
-    client, _audits = _client(operations)
+    client = _client(operations)
 
     response = client.get(f"/api/run-switch/operations/{OPERATION_ID}")
 
@@ -297,7 +289,6 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
     app = create_app(
         jobs=cast(Any, queue),
         tokens=tokens,
-        audits=MemoryAuditStore(),
         operations=operation_api,
         run_switch_operations=service,
         now=lambda: int(NOW.timestamp()),

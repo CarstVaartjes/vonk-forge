@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor
 from vonk_control.catalog_api import install_catalog_routes
 
@@ -15,7 +14,6 @@ def test_catalog_api_exposes_canonical_import_and_sync_only() -> None:
     install_catalog_routes(
         app,
         actor_dependency=_administrator,
-        audits=MemoryAuditStore(),
         service=None,
     )
 

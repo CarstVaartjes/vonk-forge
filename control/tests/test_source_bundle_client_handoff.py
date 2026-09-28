@@ -10,7 +10,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_api import install_catalog_routes
 from vonk_control.catalog_service import CatalogService
@@ -49,7 +48,6 @@ def test_generated_admin_upload_roundtrips_actual_canonical_bundle(tmp_path):
     install_catalog_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "administrator")),
-        audits=MemoryAuditStore(),
         service=catalog,
     )
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n", "empty": b""})

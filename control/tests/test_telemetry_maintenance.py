@@ -232,7 +232,6 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
     events = FleetEventRepository(sessions, clock=lambda: NOW)
     telemetry = TelemetryRepository(sessions, clock=lambda: NOW)
     projection = FleetProjection(
-        Repository(),
         sessions,
         clock=lambda: NOW,
         events=events,

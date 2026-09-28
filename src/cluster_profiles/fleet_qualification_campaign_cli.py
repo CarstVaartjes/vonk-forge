@@ -67,7 +67,6 @@ from .fleet_qualification_recovery import (
     review_lane_cleanup,
     review_lane_transition,
 )
-from .generated_control.models.fleet_node_detail_response import FleetNodeDetailResponse
 from .generated_control.models.fleet_profile_application_view import (
     FleetProfileApplicationView,
 )
@@ -1741,31 +1740,21 @@ def _typed_fleet(client: Any) -> dict[str, object]:
         raise QualificationError("Controller Fleet snapshot is invalid") from error
 
 
-def _deployment_provenance_by_node(
-    client: Any, node_ids: Sequence[str]
-) -> dict[str, Mapping[str, object]]:
-    provenance_by_node: dict[str, Mapping[str, object]] = {}
-    for node_id in sorted(set(node_ids)):
-        selector = urllib.parse.quote(node_id, safe="")
-        raw = client.request("GET", f"/api/fleet/{selector}")
-        try:
-            detail = FleetNodeDetailResponse.from_dict(raw)
-            typed = detail.to_dict()
-        except (KeyError, TypeError, ValueError) as error:
-            raise QualificationError(
-                f"Controller deployment provenance for {node_id} is invalid"
-            ) from error
-        if typed.get("id") != node_id:
-            raise QualificationError(
-                "Controller deployment provenance changed Spark identity"
-            )
-        provenance = typed.get("provenance")
-        if not isinstance(provenance, Mapping):
-            raise QualificationError(
-                f"Controller deployment provenance is unavailable for {node_id}"
-            )
-        provenance_by_node[node_id] = dict(provenance)
-    return provenance_by_node
+def _deployment_build_identities(
+    node_ids: Sequence[str],
+) -> tuple[str, dict[str, str]]:
+    """Return the Controller build and each Spark's agent build identity.
+
+    Recovery coverage receipts bind both identities.  The Controller no longer
+    publishes deployment provenance, so the campaign has no source for them and
+    refuses instead of inventing them.
+    """
+
+    del node_ids
+    raise QualificationError(
+        "recovery coverage receipts need Controller and agent build identities, "
+        "which the Controller no longer publishes"
+    )
 
 
 def _nodes(fleet: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
@@ -4472,7 +4461,7 @@ def _recovery_coverage_receipts(
         str(_object(item, "recovery coverage definition").get("coverage_id")): item
         for item in manifest.authority.recovery_coverage
     }
-    deployment_by_node = _deployment_provenance_by_node(client, lane.node_ids)
+    platform_build_sha256, agent_builds = _deployment_build_identities(lane.node_ids)
     receipt_schema = _campaign_contract_validator(
         "recovery-coverage-receipt-v1.schema.json"
     ).schema
@@ -4510,7 +4499,8 @@ def _recovery_coverage_receipts(
             lane_id=lane.assignment.lane,
             ledger_records=ledger_records,
             exact_preparation=exact_preparation,
-            deployment_provenance_by_node=deployment_by_node,
+            platform_build_sha256=platform_build_sha256,
+            agent_build_sha256_by_node=agent_builds,
             receipt_schema=receipt_schema,
         )
         validate_recovery_coverage_receipt(

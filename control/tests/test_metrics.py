@@ -6,7 +6,6 @@ import pytest
 from fastapi.testclient import TestClient
 from vonk_control import api as control_api
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_projection import (
     CapacityReservations,
@@ -310,7 +309,6 @@ def test_metrics_endpoint_is_separately_authenticated() -> None:
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
         metrics=metrics,
         metrics_token="metrics-token-long",
     )
@@ -348,7 +346,6 @@ def test_metrics_endpoint_projects_typed_fleet_snapshot() -> None:
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
         metrics=metrics,
         metrics_token="metrics-token-long",
         metrics_refresh=refresh,

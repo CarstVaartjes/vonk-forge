@@ -54,7 +54,6 @@ from vonk_control.agent_api import (
 )
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, AgentSource, TokenCodec
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
@@ -79,7 +78,6 @@ from vonk_control.models import (
     Job,
     NodeInventorySnapshot,
     NodeTelemetrySample,
-    Observation,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -413,16 +411,13 @@ def make_agent_system(tmp_path, *, engine=None):
     )
     services.artifact_root.mkdir()
     codec = TokenCodec(b"k" * 32)
-    audits = MemoryAuditStore()
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
-        audits=audits,
         now=lambda: 0,
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,
     )
-    app.state.test_audits = audits
     return CurrentAgentClient(app), services, codec, clock
 
 
@@ -1661,7 +1656,6 @@ def test_spoofed_agent_header_is_rejected() -> None:
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
     )
 
     response = TestClient(app).post(
@@ -1675,7 +1669,6 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
     )
     sent: list[Message] = []
     body_reads = 0
@@ -1720,7 +1713,6 @@ def test_agent_routes_do_not_require_human_bearer_tokens() -> None:
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
     )
 
     response = TestClient(app).post(
@@ -1746,9 +1738,7 @@ def test_untrusted_proxy_and_malformed_forwarded_identity_are_rejected(
         == 401
     )
 
-    app = create_app(
-        jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore()
-    )
+    app = create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32))
     assert (
         TestClient(app)
         .post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
@@ -2201,8 +2191,6 @@ def test_failed_stop_result_never_writes_health_observation(agent_system) -> Non
         ).status_code
         == 204
     )
-    with services.sessions() as session:
-        assert session.scalar(select(Observation)) is None
 
 
 def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) -> None:
@@ -2796,7 +2784,6 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
-    audits = client.app.state.test_audits
     fixture = json.loads(
         (
             Path(__file__).parents[2]
@@ -2811,10 +2798,6 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
 
     assert response.status_code == 200
     assert response.json()["node_id"] == NODE_C
-    event = audits.for_request(response.headers["x-request-id"])
-    assert event.action == "agent.enrollment.submit.approved"
-    assert event.targets[1] == NODE_C
-    assert body["grant_token"] not in repr(event)
 
 
 def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
@@ -2837,9 +2820,6 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
 
     assert first.status_code == replay.status_code == 503
     assert calls == 1
-    event = client.app.state.test_audits.for_request(first.headers["x-request-id"])
-    assert event.action == "agent.enrollment.submit.uncertain"
-    assert body["grant_token"] not in repr(event)
 
 
 @pytest.mark.parametrize("source", ["published", "controller-build"])
@@ -3853,7 +3833,6 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
-        audits=MemoryAuditStore(),
         agent=services,
         enrollment_rate_limiter=limiter,
     )
@@ -4521,7 +4500,6 @@ def test_cli_enrollment_file_and_recovery_use_the_actual_authority(
         create_app(
             jobs=Jobs(),
             tokens=codec,
-            audits=MemoryAuditStore(),
             now=lambda: 0,
             fleet_services=build_fleet_operator_services(
                 agent_services=services, upgrades=None

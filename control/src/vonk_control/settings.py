@@ -31,9 +31,6 @@ class SettingsError(ValueError):
 
 # Fixed file locations inside the Controller containers.
 SECRETS_ROOT = Path("/run/vonk-normalized-secrets")
-DEPLOYMENT_OBSERVATIONS_PATH = Path(
-    "/run/vonk-deployment-observations/observations.json"
-)
 STATE_ROOT = Path("/state")
 AGENT_ARTIFACT_ROOT = Path("/state/agent-artifacts")
 MODEL_CACHE_ROOT = Path("/state/model-cache")

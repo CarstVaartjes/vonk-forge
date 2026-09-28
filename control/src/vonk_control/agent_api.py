@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import (
@@ -65,7 +65,6 @@ from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
-from .audit import AuditRecord
 from .auth import (
     AgentIdentity,
     AgentSource,
@@ -255,10 +254,6 @@ def _runtime_image_authorization_matches(
             and getattr(authorization, "registry_manifest_digest", None) is None
         )
     return False
-
-
-class _AuditSink(Protocol):
-    def append(self, event: AuditRecord) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -944,7 +939,6 @@ class _SnapshotResponse(StreamingResponse):
 def install_agent_routes(
     app: Any,
     *,
-    audits: _AuditSink,
     services: AgentApiServices | None,
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
 ) -> None:
@@ -1057,50 +1051,10 @@ def install_agent_routes(
                 submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
             )
         except EnrollmentIssuanceUncertain as error:
-            token_identifier = hashlib.sha256(
-                submitted.grant_token.encode("utf-8")
-            ).hexdigest()
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    "agent-enrollment",
-                    "agent.enrollment.submit.uncertain",
-                    None,
-                    (f"token-sha256:{token_identifier}",),
-                )
-            )
             raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
-            token_identifier = hashlib.sha256(
-                submitted.grant_token.encode("utf-8")
-            ).hexdigest()
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    "agent-enrollment",
-                    "agent.enrollment.submit.rejected",
-                    None,
-                    (f"token-sha256:{token_identifier}", f"reason:{error}"),
-                )
-            )
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=403, detail=str(error)) from None
-        token_identifier = hashlib.sha256(
-            submitted.grant_token.encode("utf-8")
-        ).hexdigest()
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                "agent-enrollment",
-                "agent.enrollment.submit.approved",
-                None,
-                (
-                    f"token-sha256:{token_identifier}",
-                    outcome.node_id,
-                    f"certificate-serial:{outcome.serial}",
-                ),
-            )
-        )
         return _json_response(_issued_response(outcome))
 
     @agent.post(

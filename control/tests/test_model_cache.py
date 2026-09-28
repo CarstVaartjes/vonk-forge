@@ -652,7 +652,7 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
     actor = Actor("operator", "administrator")
     app = FastAPI()
     install_model_operator_routes(
-        app, actor_dependency=Depends(lambda: actor), service=restarted, audits=None
+        app, actor_dependency=Depends(lambda: actor), service=restarted
     )
     with TestClient(app) as api:
         observed = api.get(f"/api/model/requests/{key}")

@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.jobs import JobService
@@ -139,7 +138,6 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
     api = create_app(
         jobs=JobService(sessions, clock=lambda: _NOW, cursors=cursor_codec),
         tokens=codec,
-        audits=MemoryAuditStore(),
         library_projection=library,
         model_cache=cache,
         now=lambda: 100,

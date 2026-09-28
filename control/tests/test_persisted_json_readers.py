@@ -1,34 +1,6 @@
-from datetime import UTC, datetime
-
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.route_activation import ActivationMarker
-from vonk_control.audit import AuditRecord, SqlAuditStore
-from vonk_control.models import (
-    AuditEvent,
-    Base,
-)
 from vonk_control.operation_api import _stored_activation_marker
-
-NOW = datetime(2026, 8, 7, tzinfo=UTC)
-
-
-@pytest.fixture
-def sessions():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    return sessionmaker(engine, expire_on_commit=False)
-
-
-def test_sql_audit_store_rejects_malformed_persisted_targets(sessions) -> None:
-    store = SqlAuditStore(sessions, clock=lambda: NOW)
-    store.append(AuditRecord("req", "actor", "action", None, ("node-a",), NOW))
-    with sessions.begin() as session:
-        session.get(AuditEvent, session.query(AuditEvent).one().id).targets = "node-a"
-
-    with pytest.raises(ValueError, match="audit targets are invalid"):
-        store.list()
 
 
 def test_route_publication_reader_rejects_malformed_activation_marker() -> None:

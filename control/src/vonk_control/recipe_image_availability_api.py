@@ -389,7 +389,6 @@ def install_recipe_operator_routes(
     *,
     actor_dependency: Any,
     service: RecipeImageAvailabilityService | None,
-    audits: Any | None = None,
 ) -> None:
     """Install current singular Recipe download/remove/update mutations."""
 

@@ -14,7 +14,6 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.jobs import JobService
 from vonk_control.models import (
@@ -114,7 +113,6 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
     api = create_app(
         jobs=JobService(sessions, clock=lambda: now, cursors=codec.cursor_codec()),
         tokens=codec,
-        audits=MemoryAuditStore(),
         recipe_image_availability=service,
         now=lambda: 100,
     )

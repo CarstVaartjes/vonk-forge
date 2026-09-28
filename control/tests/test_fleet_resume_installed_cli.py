@@ -17,7 +17,6 @@ from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.jobs import JobService
@@ -32,8 +31,7 @@ from vonk_control.models import (
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.operator_projection_api import FleetOperatorServices
 
-from .test_agent_upgrades import NODE_A, OLD_IDENTITY, PACKAGE, REVISION, SOURCE
-from .test_cli_first_connection_endpoints_installed import _Authority
+from .test_agent_upgrades import NODE_A, OLD_IDENTITY, PACKAGE, SOURCE
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
@@ -82,9 +80,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         lambda *_: AgentPackageSource.model_validate(SOURCE),
     )
     operations = AgentJobService(sessions, clock=clock)
-    upgrades = AgentUpgradeService(
-        sessions, operations, clock=clock, current_revision=lambda: REVISION
-    )
+    upgrades = AgentUpgradeService(sessions, operations, clock=clock)
     # Package publication is outside this route and installed-CLI acceptance.
     monkeypatch.setattr(upgrades, "current_package", lambda: dict(PACKAGE))
     operations.set_result_consumer(upgrades.consume_agent_result)
@@ -99,8 +95,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
     app = create_app(
         jobs=JobService(sessions, clock=clock),
         tokens=tokens,
-        audits=MemoryAuditStore(),
-        fleet_projection=FleetProjection(_Authority(), sessions, clock=clock),
+        fleet_projection=FleetProjection(sessions, clock=clock),
         fleet_services=FleetOperatorServices(upgrades=upgrades),
         operations=projected,
         now=lambda: 100,

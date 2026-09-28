@@ -134,31 +134,6 @@ def test_rename_reports_the_new_name_of_the_renamed_spark(capsys):
     assert "Studio" in output and identity["id"] in output
 
 
-def test_fleet_detail_surfaces_invalid_history_without_hiding_online_state(capsys):
-    render_payload(
-        {
-            "id": "spk_" + "a" * 32,
-            "display_name": "Atlas",
-            "connection": {"online_state": "online"},
-            "inventory": None,
-            "telemetry": None,
-            "loaded": [],
-            "installed": [],
-            "warnings": [],
-            "provenance": {
-                "invalid_operation_evidence": [{"document": "payload"}],
-                "invalid_operation_evidence_omitted_count": 2,
-            },
-        },
-        "fleet",
-        action="detail",
-    )
-    output = capsys.readouterr()
-    assert "Connection: online" in output.out
-    assert "3 invalid historical evidence records" in output.err
-    assert "--json" in output.err
-
-
 def test_node_state_and_blocker_survive_narrow_output(monkeypatch, capsys):
     monkeypatch.setattr(
         "cluster_profiles.cli_render.shutil.get_terminal_size",

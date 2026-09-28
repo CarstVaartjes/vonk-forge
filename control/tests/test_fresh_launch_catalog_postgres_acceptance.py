@@ -27,7 +27,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, AuthError, TokenCodec
 from vonk_control.catalog_api import install_catalog_routes
 from vonk_control.catalog_service import CatalogService
@@ -177,7 +176,6 @@ def _app(
     install_catalog_routes(
         app,
         actor_dependency=Depends(actor),
-        audits=MemoryAuditStore(),
         service=catalog,
         managed_sync=sync,
     )
