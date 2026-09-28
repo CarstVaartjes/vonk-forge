@@ -182,12 +182,14 @@ macOS `cargo build` fails on platform-gated code such as
 `rustix::fs::openat2`, so run those suites in the Linux/OrbStack or designated
 CI lane instead of reading the failure as a regression.
 
-PostgreSQL tests share one disposable server per test process. It starts when
-collection finishes (only if a selected test needs it), so its start-up is not
-charged to a test, and each test still gets its own database. The server keeps
-its data on tmpfs with `fsync` off because it is thrown away after the session;
-the process-death tests kill client processes, not the server. A server whose
-test process died without teardown is stopped by the next session.
+PostgreSQL tests share one disposable server per pytest session, including
+across xdist workers. It starts when collection finishes (only if a selected
+test needs it), so its start-up is not charged to a test, and each test still
+gets its own database. The server keeps its data on tmpfs with `fsync` off
+because it is thrown away after the session; the process-death tests kill
+client processes, not the server. Each server is labelled with its owning
+session, which stops it at the end; the next session stops any server whose
+owner died without teardown.
 
 ### Focused PostgreSQL and security lanes
 
