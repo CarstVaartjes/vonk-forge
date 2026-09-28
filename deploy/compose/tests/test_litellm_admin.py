@@ -170,9 +170,9 @@ def test_every_runtime_config_enables_ui_but_keeps_database_models_disabled() ->
 
 
 def test_controller_key_relay_forwards_only_litellm_key_routes() -> None:
-    relay = _server_on_port(_adapted_caddy(_environment()), 8086)
+    relay = _server_on_port(_adapted_caddy(_environment()), 8087)
 
-    assert relay["listen"] == [":8086"]
+    assert relay["listen"] == [":8087"]
     assert [route.get("match") for route in relay["routes"]] == [
         [{"path": ["/key/generate", "/key/list", "/key/info", "/key/delete"]}],
         None,

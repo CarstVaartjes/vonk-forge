@@ -31,7 +31,7 @@ from .strict_json import StrictJSONModel
 _LOGGER = logging.getLogger(__name__)
 
 # Caddy relays only LiteLLM's key routes on this internal listener.
-LITELLM_KEY_ADMIN_URL = "http://caddy:8086"
+LITELLM_KEY_ADMIN_URL = "http://caddy:8087"
 MASTER_KEY_FILE = Path("/run/secrets/litellm-master-key")
 # A host bind mount: the operator finds the default key in secrets/gateway/.
 DEFAULT_KEY_FILE = Path("/gateway-secrets/client-key")
