@@ -41,7 +41,10 @@ from .admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from .agent_upgrade_status import operator_agent_upgrade_reason
+from .agent_upgrade_status import (
+    AGENT_UPGRADE_AWAITING_IDENTITY_REASONS,
+    operator_agent_upgrade_reason,
+)
 from .auth import AgentSource
 from .failure_evidence import safe_text, sanitize_diagnostics
 from .install_admission import InstallAdmissionBusy
@@ -311,22 +314,63 @@ def schedule_agent_upgrade_retry(
         attempt.lease_deadline = max(_aware(attempt.lease_deadline), not_before)
 
 
+def agent_upgrade_in_flight(
+    session: Session, operation: StoredOperation, now: datetime
+) -> bool:
+    """Whether this agent-upgrade order still occupies the fleet's one slot.
+
+    A dispatched install is in flight until its attempt reports, or until the
+    dpkg safety fence has elapsed after its lease (a Spark that went dark
+    mid-install cannot hold every other Spark forever).  A handed-off install
+    awaiting its new identity stays in flight until its fence elapses.  An
+    explicit failure retries later but does not hold the fleet.
+    """
+
+    if operation.kind != AgentOperation.AGENT_UPGRADE.value:
+        return False
+    if operation.state not in {"running", "waiting-for-operator"}:
+        return False
+    if operation.current_attempt < 1:
+        return False
+    attempt = session.scalar(
+        select(AgentOperationAttempt).where(
+            AgentOperationAttempt.operation_id == operation.id,
+            AgentOperationAttempt.attempt == operation.current_attempt,
+        )
+    )
+    if attempt is None:
+        return operation.state == "running"
+    deadline = _aware(attempt.lease_deadline)
+    current = _aware(now)
+    if operation.state == "running":
+        return deadline + AGENT_UPGRADE_RECOVERY_FENCE > current
+    if deadline <= current:
+        return False
+    reason = attempt.result.get("reason") if isinstance(attempt.result, dict) else None
+    return attempt.state in {"waiting-for-operator", "expired"} or (
+        reason in AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
+    )
+
+
+def other_agent_upgrade_in_flight(
+    session: Session, operation: StoredOperation, now: datetime
+) -> bool:
+    """Whether any other Spark's agent upgrade, in any rollout, is in flight."""
+
+    return any(
+        agent_upgrade_in_flight(session, other, now)
+        for other in session.scalars(
+            select(StoredOperation).where(
+                StoredOperation.kind == AgentOperation.AGENT_UPGRADE.value,
+                StoredOperation.id != operation.id,
+                StoredOperation.state.in_({"running", "waiting-for-operator"}),
+            )
+        )
+    )
+
+
 class StaleAgentAttempt(RuntimeError):
     """An agent attempted to update an operation it no longer owns."""
-
-
-class OperatorRetryExhausted(ValueError):
-    """Retained for the API error mapping; resume no longer exhausts a budget."""
-
-    def __init__(self, operation_id: str, kind: str, attempt: int, limit: int) -> None:
-        self.operation_id = operation_id
-        self.kind = kind
-        self.attempt = attempt
-        self.limit = limit
-        super().__init__(
-            f"operation {operation_id} ({kind}) exhausted its {limit}-attempt "
-            f"retry budget at attempt {attempt}"
-        )
 
 
 class OperatorRetirementRefused(ValueError):
@@ -2815,19 +2859,11 @@ class AgentJobService:
                 return None
             if (
                 operation.kind == AgentOperation.AGENT_UPGRADE.value
-                and session.scalar(
-                    select(StoredOperation.id)
-                    .where(
-                        StoredOperation.parent_job_id == operation.parent_job_id,
-                        StoredOperation.id != operation.id,
-                        StoredOperation.state == "running",
-                    )
-                    .limit(1)
-                )
-                is not None
+                and other_agent_upgrade_in_flight(session, operation, now)
             ):
-                # One Spark of a rollout installs at a time: a fenced retry
-                # waits for the Spark currently in flight to settle.
+                # One Spark installs at a time across every rollout, including
+                # a superseded one still finishing and a fenced retry: this
+                # order waits for the Spark currently in flight to settle.
                 return None
             if operation.kind == AgentOperation.AGENT_UPGRADE.value:
                 import secrets

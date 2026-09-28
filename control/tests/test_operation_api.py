@@ -15,11 +15,7 @@ from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control import operation_api
-from vonk_control.agent_jobs import (
-    AgentJobService,
-    OperatorRetirementRefused,
-    OperatorRetryExhausted,
-)
+from vonk_control.agent_jobs import AgentJobService, OperatorRetirementRefused
 from vonk_control.agent_upgrade_status import (
     agent_upgrade_next_action,
     operator_agent_upgrade_reason,
@@ -839,31 +835,6 @@ def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
     assert response.json() == {"id": job_id, "state": "queued"}
     assert resumed == [job_id]
     assert audits.for_request(request_id).action == "job.resume"
-
-
-def test_operator_resume_reports_an_exhausted_retry_budget() -> None:
-    """A spent budget is a loud typed conflict, not a queued no-op."""
-
-    def exhausted(_job_id: str) -> None:
-        raise OperatorRetryExhausted("op-1", "recipe.stop", 5, 5)
-
-    services = OperationApiServices(
-        endpoint=lambda _alias: {},
-        agents=lambda: (),
-        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
-            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
-        ),
-        resume_job=exhausted,
-    )
-    client, operator, *_ = _client(operations=services)
-    job_id = "11111111-1111-4111-8111-111111111111"
-
-    response = client.post(f"/api/jobs/{job_id}/resume", headers=operator)
-
-    assert response.status_code == 409
-    assert response.json()["detail"] == (
-        "operation op-1 (recipe.stop) exhausted its 5-attempt retry budget at attempt 5"
-    )
 
 
 def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:

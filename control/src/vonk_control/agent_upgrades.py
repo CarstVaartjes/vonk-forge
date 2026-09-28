@@ -21,10 +21,10 @@ from vonk_agent_protocol.package_source import AgentPackageSource
 from .agent_jobs import (
     AGENT_UPGRADE_RECOVERY_FENCE,
     AgentJobService,
+    agent_upgrade_in_flight,
     schedule_agent_upgrade_retry,
 )
 from .agent_package_source import load_package_source
-from .agent_upgrade_status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
 from .bounded_json import require_integer
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 
@@ -795,8 +795,8 @@ class AgentUpgradeService:
             )
         )
         if any(
-            operation.state in {"queued", "running"}
-            or self._awaiting_identity(session, operation, now)
+            operation.state == "queued"
+            or agent_upgrade_in_flight(session, operation, now)
             for operation in operations
         ):
             return
@@ -860,7 +860,9 @@ class AgentUpgradeService:
         retrying = [
             operation
             for operation in operations
-            if operation.state == "waiting-for-operator"
+            # A dispatched order whose Spark went dark past its fence no
+            # longer holds the fleet, but it is not settled either.
+            if operation.state in {"waiting-for-operator", "running"}
         ]
         parent.updated_at = now
         if deferred or retrying:
@@ -880,34 +882,6 @@ class AgentUpgradeService:
             f"{failed[0].status_reason or 'see operation evidence'}"
             if failed
             else _summary(skipped)
-        )
-
-    @staticmethod
-    def _awaiting_identity(
-        session: Session, operation: AgentOperation, now: datetime
-    ) -> bool:
-        """Whether a handed-off install may still prove its new identity.
-
-        The signed helper accepted the package, so the Spark is mid-upgrade:
-        the rollout keeps it as the one Spark in flight until its safety fence
-        elapses.  An explicit failure does not hold the rollout.
-        """
-
-        if operation.state != "waiting-for-operator" or operation.current_attempt < 1:
-            return False
-        attempt = session.scalar(
-            select(AgentOperationAttempt).where(
-                AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == operation.current_attempt,
-            )
-        )
-        if attempt is None or _aware(attempt.lease_deadline) <= _aware(now):
-            return False
-        reason = (
-            attempt.result.get("reason") if isinstance(attempt.result, dict) else None
-        )
-        return attempt.state in {"waiting-for-operator", "expired"} or (
-            reason in AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
         )
 
     @staticmethod
