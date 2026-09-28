@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import fcntl
 import importlib.util
+import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -36,6 +40,8 @@ from .api_response_witness import (
 POSTGRES_IMAGE = "postgres:18.3"
 _POSTGRES_PASSWORD = "postgres"
 _POSTGRES_OWNER_LABEL = "dev.vonk-forge.control-tests.owner"
+_POSTGRES_NAME_PREFIX = "vonk-control-tests-"
+_POSTGRES_STALE_AFTER = timedelta(hours=1)
 _POSTGRES_PORT_TEMPLATE = (
     '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}'
 )
@@ -135,23 +141,54 @@ def _run(
     )
 
 
-class _PostgresServer:
-    """One disposable PostgreSQL server per test process.
+def _session_owner_pid() -> int:
+    """The process that owns this pytest session and its PostgreSQL server.
 
-    It starts when collection finishes, and only if a selected test needs it,
-    so container start-up and ``initdb`` are not charged to whichever test
-    happens to request the fixture first. The data directory is a tmpfs and
-    durability is off: the server is discarded after the session, and tests
-    that kill client processes rely on committed rows, not on crash safety of
-    the server itself.
+    xdist workers are children of the controller process, which outlives them
+    and runs the final session teardown.
     """
 
-    container: str | None = None
+    return os.getppid() if os.environ.get("PYTEST_XDIST_WORKER") else os.getpid()
+
+
+def _session_state(owner: int) -> Path:
+    return Path(tempfile.gettempdir()) / (
+        f"vonk-control-postgres-{socket.gethostname()}-{owner}.json"
+    )
+
+
+def _process_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+class _PostgresServer:
+    """One disposable PostgreSQL server per pytest session.
+
+    The first xdist worker that needs it starts it when collection finishes;
+    the others attach to the same server, and each test still gets its own
+    database. Start-up and ``initdb`` therefore happen once and are not charged
+    to whichever test first requests the fixture. The session owner (the xdist
+    controller, or the only process) stops it at session end.
+
+    The data directory is a tmpfs and durability is off: the server is
+    discarded after the session, and tests that kill client processes rely on
+    committed rows, not on crash safety of the server itself. The next
+    session stops a server whose owning session died without teardown, and
+    an unlabelled test server (from before owner labels) older than
+    ``_POSTGRES_STALE_AFTER``.
+    """
+
     engine: Engine | None = None
     unavailable: str | None = None
 
     @classmethod
-    def start(cls) -> None:
+    def attach(cls) -> None:
         if shutil.which("docker") is None:
             cls.unavailable = "Docker is required for PostgreSQL integration tests"
             return
@@ -164,47 +201,22 @@ class _PostgresServer:
             detail = docker_info.stderr.strip() or docker_info.stdout.strip()
             cls.unavailable = f"Docker is unavailable: {detail}"
             return
-        cls._stop_orphans()
-        try:
-            started = _run(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "-d",
-                    "--name",
-                    f"vonk-control-tests-{uuid.uuid4().hex[:12]}",
-                    "--label",
-                    f"{_POSTGRES_OWNER_LABEL}={socket.gethostname()}:{os.getpid()}",
-                    "-e",
-                    f"POSTGRES_PASSWORD={_POSTGRES_PASSWORD}",
-                    "--tmpfs",
-                    "/var/lib/postgresql",
-                    "-p",
-                    "127.0.0.1::5432",
-                    POSTGRES_IMAGE,
-                    "-c",
-                    "fsync=off",
-                    "-c",
-                    "synchronous_commit=off",
-                    "-c",
-                    "full_page_writes=off",
-                ],
-                timeout=180,
-            )
-        except (
-            OSError,
-            subprocess.CalledProcessError,
-            subprocess.TimeoutExpired,
-        ) as error:
-            cls.unavailable = f"disposable PostgreSQL failed to start: {error}"
-            return
-        cls.container = started.stdout.strip()
-        inspected = _run(
-            ["docker", "inspect", "-f", _POSTGRES_PORT_TEMPLATE, cls.container],
-            timeout=15,
-        )
-        port = inspected.stdout.strip()
+        owner = _session_owner_pid()
+        state = _session_state(owner)
+        with open(state.with_suffix(".lock"), "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            _stop_stale_servers()
+            port = cls._running_port(state)
+            if port is None:
+                try:
+                    port = cls._start(owner, state)
+                except (
+                    OSError,
+                    subprocess.CalledProcessError,
+                    subprocess.TimeoutExpired,
+                ) as error:
+                    cls.unavailable = f"disposable PostgreSQL failed to start: {error}"
+                    return
         engine = create_engine(
             "postgresql+psycopg://"
             f"postgres:{_POSTGRES_PASSWORD}@127.0.0.1:{port}/postgres",
@@ -226,56 +238,118 @@ class _PostgresServer:
                 time.sleep(0.1)
         cls.engine = engine
 
-    @classmethod
-    def _stop_orphans(cls) -> None:
-        """Stop servers whose test process died without its session teardown."""
-
-        listed = _run(
-            [
-                "docker",
-                "ps",
-                "--filter",
-                f"label={_POSTGRES_OWNER_LABEL}",
-                "--format",
-                f'{{{{.ID}}}} {{{{.Label "{_POSTGRES_OWNER_LABEL}"}}}}',
-            ],
+    @staticmethod
+    def _running_port(state: Path) -> str | None:
+        try:
+            recorded = json.loads(state.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        running = _run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", recorded["container"]],
             timeout=15,
             check=False,
         )
-        orphans = []
-        for line in listed.stdout.splitlines():
-            container, _, owner = line.partition(" ")
-            host, _, pid = owner.rpartition(":")
-            if host != socket.gethostname() or not pid.isdigit():
-                continue
-            try:
-                os.kill(int(pid), 0)
-            except ProcessLookupError:
-                orphans.append(container)
-            except PermissionError:
-                continue
-        if orphans:
-            _run(["docker", "stop", *orphans], timeout=60, check=False)
+        return recorded["port"] if running.stdout.strip() == "true" else None
+
+    @staticmethod
+    def _start(owner: int, state: Path) -> str:
+        started = _run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-d",
+                "--name",
+                f"{_POSTGRES_NAME_PREFIX}{uuid.uuid4().hex[:12]}",
+                "--label",
+                f"{_POSTGRES_OWNER_LABEL}={socket.gethostname()}:{owner}",
+                "-e",
+                f"POSTGRES_PASSWORD={_POSTGRES_PASSWORD}",
+                "--tmpfs",
+                "/var/lib/postgresql",
+                "-p",
+                "127.0.0.1::5432",
+                POSTGRES_IMAGE,
+                "-c",
+                "fsync=off",
+                "-c",
+                "synchronous_commit=off",
+                "-c",
+                "full_page_writes=off",
+            ],
+            timeout=180,
+        )
+        container = started.stdout.strip()
+        port = _run(
+            ["docker", "inspect", "-f", _POSTGRES_PORT_TEMPLATE, container],
+            timeout=15,
+        ).stdout.strip()
+        state.write_text(
+            json.dumps({"container": container, "port": port}), encoding="utf-8"
+        )
+        return port
 
     @classmethod
-    def stop(cls) -> None:
+    def release(cls) -> None:
         if cls.engine is not None:
             cls.engine.dispose()
             cls.engine = None
-        if cls.container is not None:
-            _run(["docker", "stop", cls.container], timeout=30, check=False)
-            cls.container = None
+        if os.environ.get("PYTEST_XDIST_WORKER"):
+            return
+        state = _session_state(os.getpid())
+        try:
+            recorded = json.loads(state.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        _run(["docker", "stop", recorded["container"]], timeout=30, check=False)
+        state.unlink(missing_ok=True)
+        state.with_suffix(".lock").unlink(missing_ok=True)
+
+
+def _stop_stale_servers() -> None:
+    """Stop test servers that no live session owns."""
+
+    listed = _run(
+        [
+            "docker",
+            "ps",
+            "--filter",
+            f"name={_POSTGRES_NAME_PREFIX}",
+            "--format",
+            f'{{{{.ID}}}}\t{{{{.CreatedAt}}}}\t{{{{.Label "{_POSTGRES_OWNER_LABEL}"}}}}',
+        ],
+        timeout=15,
+        check=False,
+    )
+    now = datetime.now(UTC)
+    stale = []
+    for line in listed.stdout.splitlines():
+        container, created_at, owner = (line.split("\t") + ["", ""])[:3]
+        try:
+            created = datetime.strptime(created_at[:25], "%Y-%m-%d %H:%M:%S %z")
+        except ValueError:
+            created = now
+        host, _, pid = owner.rpartition(":")
+        if pid.isdigit():
+            # A labelled server is in use exactly while its session lives.
+            if host == socket.gethostname() and not _process_is_alive(int(pid)):
+                stale.append(container)
+        elif now - created > _POSTGRES_STALE_AFTER:
+            # Unlabelled servers predate owner labels; only age tells.
+            stale.append(container)
+    if stale:
+        _run(["docker", "stop", *stale], timeout=120, check=False)
 
 
 def pytest_collection_finish(session: pytest.Session) -> None:
     if any(item.get_closest_marker("postgres") for item in session.items) and (
         sys.platform.startswith("linux")
     ):
-        _PostgresServer.start()
+        _PostgresServer.attach()
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    _PostgresServer.stop()
+    _PostgresServer.release()
     _api_response_sessionfinish(session, exitstatus)
 
 
