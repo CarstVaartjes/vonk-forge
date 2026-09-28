@@ -505,10 +505,12 @@ its SQL receipt `evicted`.
 Admission rejects that receipt until preparation verifies the same immutable
 image and restores it to `verified`. Cache removal preserves recipe
 authorizations and any explicit `revoked` state; re-downloading bytes cannot
-restore revoked authority. This state belongs to the current fresh database
-schema, not an automatic migration of an existing Controller database. The
-planned ownership cutover moves physical availability to managed storage while
-retaining revocation and recipe authorization in PostgreSQL.
+restore revoked authority. Controller startup reconciles existing PostgreSQL
+schemas to current model metadata under a transaction and the serialized
+startup advisory lock. Safe schema differences converge automatically;
+integrity and authorization data are not weakened to make that convergence
+succeed. The planned ownership cutover moves physical availability to managed
+storage while retaining revocation and recipe authorization in PostgreSQL.
 Model weights and other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
 start. Run/Switch waits at most 180 seconds for each pending runtime-preflight
