@@ -74,7 +74,6 @@ from .models import (
 from .operation_contract import (
     AvailabilityOperationFailure,
     OperationEvidenceDownload,
-    OperationEvidenceProvenance,
     OperationFailure,
     OperationFailureEvidence,
     OperationRecovery,
@@ -311,14 +310,13 @@ class JobOperationResponse(StrictModel):
     progress: JobOperationProgress | None = None
     updated_at: str | None = None
     failure: OperationFailure | None = None
-    provenance: OperationEvidenceProvenance | None = None
     evidence_download: OperationEvidenceDownload | None = None
     recovery: OperationRecovery | None = None
 
     @model_serializer(mode="wrap")
     def _serialize_without_unset_evidence(self, handler):
         document = handler(self)
-        for key in ("failure", "provenance", "evidence_download", "recovery"):
+        for key in ("failure", "evidence_download", "recovery"):
             if document.get(key) is None:
                 document.pop(key, None)
         return document
@@ -351,7 +349,6 @@ class OperationDetailResponse(StrictModel):
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str | None = None
     failure: OperationFailure | None = None
-    provenance: OperationEvidenceProvenance | None = None
     evidence_download: OperationEvidenceDownload | None = None
     cancellation: FleetProfileApplicationCancellationView | None = None
     recovery: OperationRecovery | None = None
@@ -366,7 +363,6 @@ class OperationDetailResponse(StrictModel):
         document = handler(self)
         for key in (
             "failure",
-            "provenance",
             "evidence_download",
             "cancellation",
             "recovery",
@@ -1119,8 +1115,7 @@ def _job_operation_response(item: Mapping[str, object]) -> JobOperationResponse:
             item.get("updated_at"), "operation updated_at is invalid"
         ),
         failure=_item_failure(item),
-        provenance=_provenance_projection(result, operation_id),
-        evidence_download=_evidence_download_projection(result, operation_id),
+        evidence_download=_evidence_download_projection(item, operation_id),
         recovery=recovery_for_operation(
             state,
             supported_actions=item.get("supported_actions"),
@@ -1304,13 +1299,7 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
         value = item["result"]
         if not isinstance(value, Mapping):
             raise ValueError("agent result must be a JSON object")
-        # The evidence collector adds these separate, typed read decorations.
-        result = {
-            key: child
-            for key, child in value.items()
-            if key not in {"provenance", "evidence_download"}
-        }
-        parsed = validate_result_for_operation(kind, result, state=state)
+        parsed = validate_result_for_operation(kind, dict(value), state=state)
         if isinstance(parsed, AgentFailureResult):
             return parsed
         # A job process receipt has its own canonical result contract. Its
@@ -1326,39 +1315,14 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
     return _failure_projection(item.get("result"))
 
 
-def _provenance_projection(
-    value: object, operation_id: str
-) -> OperationEvidenceProvenance | None:
-    """Project stored evidence provenance, keeping absence distinct.
-
-    A missing key or an explicit ``null`` means no provenance was attached.
-    A present value that is not the canonical document is corruption and must
-    not be reported as absent. The failure names the operation, because the
-    route that reports it serves a whole list.
-    """
-
-    if not isinstance(value, Mapping) or "provenance" not in value:
-        return None
-    stored = value["provenance"]
-    if stored is None:
-        return None
-    detail = f"stored provenance for operation {operation_id} is invalid"
-    if not isinstance(stored, Mapping):
-        raise BoundedJSONError(detail)
-    try:
-        return OperationEvidenceProvenance.model_validate(stored, strict=True)
-    except ValidationError as error:
-        raise BoundedJSONError(detail) from error
-
-
 def _evidence_download_projection(
     value: object, operation_id: str
 ) -> OperationEvidenceDownload | None:
-    """Project the stored evidence download, keeping absence distinct.
+    """Project the evidence download the failure-evidence service attached.
 
     A missing key or an explicit ``null`` means no download was attached. A
-    present value that is not the canonical document is corruption and must
-    not be reported as absent. As above, the failure names the operation.
+    present value that is not the canonical document fails loudly, naming the
+    operation, because the route that reports it serves a whole list.
     """
 
     if not isinstance(value, Mapping) or "evidence_download" not in value:
@@ -1366,7 +1330,7 @@ def _evidence_download_projection(
     stored = value["evidence_download"]
     if stored is None:
         return None
-    detail = f"stored evidence download for operation {operation_id} is invalid"
+    detail = f"evidence download for operation {operation_id} is invalid"
     if not isinstance(stored, Mapping):
         raise BoundedJSONError(detail)
     try:
@@ -1451,8 +1415,7 @@ def operation_detail_response(
             item.get("updated_at"), "operation updated_at is invalid"
         ),
         failure=failure,
-        provenance=_provenance_projection(result, operation_id),
-        evidence_download=_evidence_download_projection(result, operation_id),
+        evidence_download=_evidence_download_projection(item, operation_id),
         cancellation=cancellation,
         status_reason=_optional_text(
             item.get("status_reason"), "operation status reason is invalid"

@@ -28,7 +28,7 @@ from vonk_control.artifact_reference_scan import (
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import _build_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
-from vonk_control.failure_evidence import failure_receipt
+from vonk_control.failure_evidence import failure_code
 from vonk_control.model_cache import ModelCacheError, ModelCacheService
 from vonk_control.model_cache_contract import (
     ModelCacheDownloadPayload,
@@ -899,10 +899,10 @@ def test_database_integrity_failure_names_the_violated_constraint(
     # The operator-facing evidence bundle reuses this contract, so it must
     # carry the failure instead of a summary of "[]" -- including the table
     # name, which names the constraint the operator has to repair.
-    receipt = failure_receipt(failure)
-    assert receipt.error_code == "integrityerror"
-    assert receipt.summary != "[]"
-    assert "runtime_image_authorizations" in receipt.summary
+    code, evidence_detail = failure_code(failure)
+    assert code == "integrityerror"
+    assert evidence_detail is not None and evidence_detail != "[]"
+    assert "runtime_image_authorizations" in evidence_detail
 
 
 def test_model_cache_error_coerces_a_non_string_detail() -> None:

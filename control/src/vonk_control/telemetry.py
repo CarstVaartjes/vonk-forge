@@ -8,36 +8,19 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
-from .models import (
-    AgentNode,
-    NodeTelemetryLatest,
-    NodeTelemetryRollupBucket,
-    NodeTelemetryRollupMetric,
-    NodeTelemetrySample,
-)
+from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
 from .telemetry_contract import TelemetryDetails, TelemetryMetrics
-from .telemetry_maintenance import mark_rollup_dirty
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 _MAX_BYTES = 16 * 1024**4
 _MAX_RATE = 1_000_000_000_000_000.0
-_MAX_HISTORY_POINTS = 3_000
 _MAX_BATCH_SAMPLES = 16
-TelemetryResolution = Literal["raw", "minute", "fifteen-minute", "daily"]
-_HISTORY_WINDOWS: dict[str, timedelta] = {
-    "raw": timedelta(hours=24),
-    "minute": timedelta(days=30),
-    "fifteen-minute": timedelta(days=365),
-    "daily": timedelta(days=365),
-}
-_ROLLUP_SECONDS: dict[str, int] = {"minute": 60, "fifteen-minute": 900}
 
 
 def _finite_number(
@@ -236,83 +219,6 @@ class TelemetrySampleView:
     metrics: TelemetryMetrics
 
 
-@dataclass(frozen=True, slots=True)
-class TelemetryMetricView:
-    count: int
-    minimum: float
-    mean: float
-    maximum: float
-    # metric_name is an opaque bounded storage key; history keeps the full
-    # identity and provenance with the values for unambiguous consumers.
-    key: str | None = None
-    scope: str | None = None
-    device_id: str | None = None
-    process_id: int | None = None
-    process_name: str | None = None
-    interface_name: str | None = None
-    run_id: str | None = None
-    unit: str = "unknown"
-    source: str = "controller-derived"
-    measurement_kind: str = "measured"
-    aggregation: str = "mean"
-
-
-def _merge_metric_views(
-    left: TelemetryMetricView, right: TelemetryMetricView
-) -> TelemetryMetricView:
-    """Merge rollup values while preserving their series identity."""
-
-    count = left.count + right.count
-    minimum = min(left.minimum, right.minimum)
-    maximum = max(left.maximum, right.maximum)
-    if left.aggregation == "max" or right.aggregation == "max":
-        return replace(
-            right,
-            count=count,
-            minimum=minimum,
-            mean=maximum,
-            maximum=maximum,
-            key=right.key or left.key,
-            scope=right.scope or left.scope,
-            device_id=right.device_id or left.device_id,
-            process_id=right.process_id
-            if right.process_id is not None
-            else left.process_id,
-            process_name=right.process_name or left.process_name,
-            interface_name=right.interface_name or left.interface_name,
-            run_id=right.run_id or left.run_id,
-            aggregation="max",
-        )
-    return replace(
-        right,
-        count=count,
-        minimum=minimum,
-        mean=(left.mean * left.count + right.mean * right.count) / count,
-        maximum=maximum,
-        key=right.key or left.key,
-        scope=right.scope or left.scope,
-        device_id=right.device_id or left.device_id,
-        process_id=right.process_id
-        if right.process_id is not None
-        else left.process_id,
-        process_name=right.process_name or left.process_name,
-        interface_name=right.interface_name or left.interface_name,
-        run_id=right.run_id or left.run_id,
-        aggregation="mean",
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class TelemetryRollupPointView:
-    node_id: str
-    resolution: Literal["minute", "fifteen-minute", "daily"]
-    bucket_start: datetime
-    bucket_end: datetime
-    source_sample_count: int
-    gap_samples: int
-    metrics: dict[str, TelemetryMetricView]
-
-
 def _canonical_sample(
     value: TelemetrySampleInput, now: datetime
 ) -> TelemetrySampleInput:
@@ -486,12 +392,6 @@ class TelemetryRepository:
                 )
                 session.add(row)
                 session.flush()
-                mark_rollup_dirty(
-                    session,
-                    60,
-                    node_id,
-                    value.observed_at,
-                )
                 stored.append(row)
                 boot_heads[value.boot_id] = row
                 if latest is None:
@@ -549,233 +449,3 @@ class TelemetryRepository:
                 )
             ).all()
         return {row.id: _view(row) for row in rows}
-
-    def history(
-        self,
-        node_id: str,
-        start: datetime,
-        end: datetime,
-        maximum_points: int,
-        *,
-        resolution: TelemetryResolution,
-    ) -> tuple[TelemetrySampleView | TelemetryRollupPointView, ...]:
-        if not isinstance(node_id, str) or _NODE_ID.fullmatch(node_id) is None:
-            raise ValueError("telemetry history node ID is invalid")
-        if (
-            type(maximum_points) is not int
-            or not 1 <= maximum_points <= _MAX_HISTORY_POINTS
-        ):
-            raise ValueError("telemetry history maximum points is invalid")
-        start_utc = _aware_utc(start, label="telemetry history start")
-        end_utc = _aware_utc(end, label="telemetry history end")
-        if start_utc >= end_utc:
-            raise ValueError("telemetry history window is invalid")
-        if resolution not in _HISTORY_WINDOWS:
-            raise ValueError("telemetry history resolution is invalid")
-        if end_utc - start_utc > _HISTORY_WINDOWS[resolution]:
-            window = {
-                "raw": "24 hours",
-                "minute": "30 days",
-                "fifteen-minute": "365 days",
-                "daily": "365 days",
-            }[resolution]
-            raise ValueError(f"telemetry history {resolution} window exceeds {window}")
-        if resolution == "daily":
-            return self._daily_history(
-                node_id,
-                start_utc,
-                end_utc,
-                maximum_points,
-            )
-        with self._sessions() as session:
-            if resolution == "raw":
-                rows = session.scalars(
-                    select(NodeTelemetrySample)
-                    .where(
-                        NodeTelemetrySample.node_id == node_id,
-                        NodeTelemetrySample.observed_at >= start_utc,
-                        NodeTelemetrySample.observed_at < end_utc,
-                    )
-                    .order_by(
-                        NodeTelemetrySample.observed_at.desc(),
-                        NodeTelemetrySample.id.desc(),
-                    )
-                    .limit(maximum_points)
-                ).all()
-                rows = list(reversed(rows))
-                return tuple(_view(row) for row in rows)
-
-            resolution_seconds = _ROLLUP_SECONDS[resolution]
-            buckets = session.scalars(
-                select(NodeTelemetryRollupBucket)
-                .where(
-                    NodeTelemetryRollupBucket.resolution_seconds == resolution_seconds,
-                    NodeTelemetryRollupBucket.node_id == node_id,
-                    NodeTelemetryRollupBucket.bucket_start >= start_utc,
-                    NodeTelemetryRollupBucket.bucket_start < end_utc,
-                )
-                .order_by(NodeTelemetryRollupBucket.bucket_start.desc())
-                .limit(maximum_points)
-            ).all()
-            buckets = list(reversed(buckets))
-            starts = [_stored_utc(row.bucket_start) for row in buckets]
-            metrics_by_bucket: dict[datetime, dict[str, TelemetryMetricView]] = {
-                start: {} for start in starts
-            }
-            if starts:
-                metric_rows = session.scalars(
-                    select(NodeTelemetryRollupMetric)
-                    .where(
-                        NodeTelemetryRollupMetric.resolution_seconds
-                        == resolution_seconds,
-                        NodeTelemetryRollupMetric.node_id == node_id,
-                        NodeTelemetryRollupMetric.bucket_start.in_(starts),
-                    )
-                    .order_by(
-                        NodeTelemetryRollupMetric.bucket_start,
-                        NodeTelemetryRollupMetric.metric_name,
-                    )
-                ).all()
-                for metric in metric_rows:
-                    metrics_by_bucket[_stored_utc(metric.bucket_start)][
-                        metric.metric_name
-                    ] = TelemetryMetricView(
-                        count=int(metric.sample_count),
-                        minimum=float(metric.minimum),
-                        mean=float(metric.mean),
-                        maximum=float(metric.maximum),
-                        key=metric.key or metric.metric_name,
-                        scope=metric.scope,
-                        device_id=metric.device_id,
-                        process_id=(
-                            None
-                            if metric.process_id is None
-                            else int(metric.process_id)
-                        ),
-                        process_name=metric.process_name,
-                        interface_name=metric.interface_name,
-                        run_id=metric.run_id,
-                        unit=metric.unit,
-                        source=metric.source,
-                        measurement_kind=metric.measurement_kind,
-                        aggregation=metric.aggregation,
-                    )
-            return tuple(
-                TelemetryRollupPointView(
-                    node_id=node_id,
-                    resolution=resolution,
-                    bucket_start=_stored_utc(bucket.bucket_start),
-                    bucket_end=_stored_utc(bucket.bucket_start)
-                    + timedelta(seconds=resolution_seconds),
-                    source_sample_count=int(bucket.source_sample_count),
-                    gap_samples=int(bucket.gap_samples),
-                    metrics=metrics_by_bucket[_stored_utc(bucket.bucket_start)],
-                )
-                for bucket in buckets
-            )
-
-    def _daily_history(
-        self,
-        node_id: str,
-        start: datetime,
-        end: datetime,
-        maximum_points: int,
-    ) -> tuple[TelemetryRollupPointView, ...]:
-        """Aggregate bounded 15-minute rollups into UTC-local calendar days."""
-
-        # A year contains at most 35,040 quarter-hour buckets.  Cap the
-        # source scan so a large point request cannot turn an export into an
-        # unbounded JSON/SQL operation; the requested day count remains the
-        # response bound.
-        source_limit = min(maximum_points * 96, 35_040)
-        with self._sessions() as session:
-            buckets = session.scalars(
-                select(NodeTelemetryRollupBucket)
-                .where(
-                    NodeTelemetryRollupBucket.resolution_seconds == 900,
-                    NodeTelemetryRollupBucket.node_id == node_id,
-                    NodeTelemetryRollupBucket.bucket_start >= start,
-                    NodeTelemetryRollupBucket.bucket_start < end,
-                )
-                .order_by(NodeTelemetryRollupBucket.bucket_start.desc())
-                .limit(source_limit)
-            ).all()
-            buckets = list(reversed(buckets))
-            starts = [_stored_utc(row.bucket_start) for row in buckets]
-            metrics_by_bucket: dict[datetime, dict[str, TelemetryMetricView]] = {
-                value: {} for value in starts
-            }
-            if starts:
-                metric_rows = session.scalars(
-                    select(NodeTelemetryRollupMetric)
-                    .where(
-                        NodeTelemetryRollupMetric.resolution_seconds == 900,
-                        NodeTelemetryRollupMetric.node_id == node_id,
-                        NodeTelemetryRollupMetric.bucket_start.in_(starts),
-                    )
-                    .order_by(
-                        NodeTelemetryRollupMetric.bucket_start,
-                        NodeTelemetryRollupMetric.metric_name,
-                    )
-                ).all()
-                for metric in metric_rows:
-                    metrics_by_bucket[_stored_utc(metric.bucket_start)][
-                        metric.metric_name
-                    ] = TelemetryMetricView(
-                        count=int(metric.sample_count),
-                        minimum=float(metric.minimum),
-                        mean=float(metric.mean),
-                        maximum=float(metric.maximum),
-                        key=metric.key or metric.metric_name,
-                        scope=metric.scope,
-                        device_id=metric.device_id,
-                        process_id=(
-                            None
-                            if metric.process_id is None
-                            else int(metric.process_id)
-                        ),
-                        process_name=metric.process_name,
-                        interface_name=metric.interface_name,
-                        run_id=metric.run_id,
-                        unit=metric.unit,
-                        source=metric.source,
-                        measurement_kind=metric.measurement_kind,
-                        aggregation=metric.aggregation,
-                    )
-
-        grouped: dict[
-            datetime,
-            tuple[int, int, dict[str, TelemetryMetricView]],
-        ] = {}
-        for bucket in buckets:
-            start_of_day = _stored_utc(bucket.bucket_start).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-            source_count, gaps, metrics = grouped.get(start_of_day, (0, 0, {}))
-            source_count += int(bucket.source_sample_count)
-            gaps += int(bucket.gap_samples)
-            for name, metric in metrics_by_bucket[
-                _stored_utc(bucket.bucket_start)
-            ].items():
-                prior = metrics.get(name)
-                if prior is None:
-                    metrics[name] = metric
-                else:
-                    metrics[name] = _merge_metric_views(prior, metric)
-            grouped[start_of_day] = (source_count, gaps, metrics)
-
-        points: list[TelemetryRollupPointView] = []
-        for day in sorted(grouped)[-maximum_points:]:
-            source_count, gaps, values = grouped[day]
-            points.append(
-                TelemetryRollupPointView(
-                    node_id=node_id,
-                    resolution="daily",
-                    bucket_start=day,
-                    bucket_end=day + timedelta(days=1),
-                    source_sample_count=source_count,
-                    gap_samples=gaps,
-                    metrics=values,
-                )
-            )
-        return tuple(points)

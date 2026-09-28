@@ -1807,22 +1807,6 @@ def test_stored_evidence_projections_keep_absence_and_corruption_distinct() -> N
 
     identifier = "11111111-1111-4111-8111-111111111111"
 
-    assert operation_api._provenance_projection(None, identifier) is None
-    assert operation_api._provenance_projection({}, identifier) is None
-    assert (
-        operation_api._provenance_projection({"provenance": None}, identifier) is None
-    )
-    with pytest.raises(
-        BoundedJSONError, match="provenance for operation .* is invalid"
-    ):
-        operation_api._provenance_projection({"provenance": {"source": 7}}, identifier)
-    with pytest.raises(
-        BoundedJSONError, match="provenance for operation .* is invalid"
-    ):
-        operation_api._provenance_projection(
-            {"provenance": ["not", "an", "object"]}, identifier
-        )
-
     assert operation_api._evidence_download_projection(None, identifier) is None
     assert operation_api._evidence_download_projection({}, identifier) is None
     assert (
@@ -1835,15 +1819,15 @@ def test_stored_evidence_projections_keep_absence_and_corruption_distinct() -> N
         BoundedJSONError, match="evidence download for operation .* is invalid"
     ):
         operation_api._evidence_download_projection(
-            {"evidence_download": {"media_type": "application/json"}}, identifier
+            {"evidence_download": {"href": 7}}, identifier
         )
 
 
 def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None:
     """The operation detail route must not answer a corrupt decoration with 200.
 
-    The route declares 503, so a stored provenance document that no longer
-    validates is reported there instead of escaping as an undeclared 500.
+    The route declares 503, so an evidence download that no longer validates
+    is reported there instead of escaping as an undeclared 500.
     """
 
     now = datetime(2026, 8, 5, tzinfo=UTC)
@@ -1855,7 +1839,7 @@ def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None
         "state": "succeeded",
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
-        "result": {"provenance": {"source": 7}},
+        "evidence_download": {"href": 7},
     }
 
     def unavailable(*_args: object) -> NoReturn:
@@ -1876,7 +1860,7 @@ def test_corrupt_stored_evidence_decoration_is_a_declared_server_fault() -> None
     detail = client.get(f"/api/operations/{value['id']}", headers=operator)
     assert detail.status_code == 503
     assert detail.json()["detail"] == (
-        f"stored provenance for operation {value['id']} is invalid"
+        f"evidence download for operation {value['id']} is invalid"
     )
 
     listed = client.get("/api/operations", headers=operator)

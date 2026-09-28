@@ -532,7 +532,7 @@ test("retains actionable cache failure guidance and retry timing in Activity", a
 });
 
 test("downloads diagnostics for the exact failed attempt without losing the error", async () => {
-  const operation = canonicalOperation({attempt: 3, evidence_download: {media_type: "application/json", size_bytes: 128, sha256: "a".repeat(64), href: "/api/operations/profile-attempt-1/evidence?attempt=3"}});
+  const operation = canonicalOperation({attempt: 3, evidence_download: {href: "/api/operations/profile-attempt-1/evidence?attempt=3"}});
   render(<ActivityPage api={canonicalApi([operation])} now={NOW}/>);
   expect(await screen.findByText("Profile load failed")).toBeVisible();
   expect(screen.getByRole("link", {name: "Download diagnostics"})).toHaveAttribute("href", "/api/operations/profile-attempt-1/evidence?attempt=3");

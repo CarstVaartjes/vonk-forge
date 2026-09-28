@@ -6,15 +6,12 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
-import pytest
-from sqlalchemy import event, func, select, text
+from sqlalchemy import event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.models import (
     AgentNode,
     Base,
-    NodeTelemetryRollupBucket,
-    NodeTelemetryRollupDirty,
     NodeTelemetrySample,
 )
 from vonk_control.telemetry import (
@@ -22,9 +19,8 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
-from vonk_control.telemetry_maintenance import TelemetryMaintenance, bucket_start
 
-from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
+from .telemetry_fixtures import telemetry_metrics
 
 NODE_A = "spk_" + "a" * 32
 BOOT_A = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -143,145 +139,3 @@ def test_postgres_out_of_order_commits_cannot_regress_latest(
     latest = repository.latest((NODE_A,))[NODE_A]
     assert latest.boot_id == BOOT_B
     assert latest.observed_at == newer.observed_at
-
-
-def test_postgres_node_first_maintenance_avoids_late_ingestion_deadlock(
-    postgres_engine: Engine,
-) -> None:
-    repository, sessions = _repository(postgres_engine)
-    with sessions.begin() as session:
-        session.add(
-            NodeTelemetrySample(
-                id="00000000-0000-4000-8000-000000000099",
-                node_id=NODE_A,
-                boot_id=str(BOOT_B),
-                observed_at=NOW - timedelta(hours=24, seconds=1),
-                received_at=NOW - timedelta(hours=24, seconds=1),
-                cpu_utilization_percent=None,
-                load_average_1m=None,
-                memory_total_bytes=None,
-                memory_available_bytes=None,
-                disk_total_bytes=None,
-                disk_free_bytes=None,
-                gpu_utilization_percent=None,
-                gpu_memory_total_bytes=None,
-                gpu_memory_free_bytes=None,
-                temperature_c=None,
-                power_watts=None,
-                network_receive_bytes_per_second=None,
-                network_transmit_bytes_per_second=None,
-                gap_samples=0,
-                details={},
-                metrics=telemetry_metrics_document(),
-            )
-        )
-    repository.record_batch(
-        NODE_A,
-        (
-            _sample(
-                boot_id=BOOT_A,
-                sequence=1,
-                observed_at=NOW - timedelta(seconds=50),
-            ),
-        ),
-    )
-    maintenance = TelemetryMaintenance(sessions, clock=lambda: NOW)
-    claim_deleted = threading.Event()
-    allow_maintenance = threading.Event()
-    late_node_lock_started = threading.Event()
-    role = threading.local()
-    backend_pids: dict[str, int] = {}
-
-    def before_statement(
-        connection, _cursor, statement, _parameters, _context, _many
-    ) -> None:
-        current_role = getattr(role, "value", None)
-        if current_role in {"maintenance", "late"}:
-            backend_pids.setdefault(
-                current_role,
-                connection.connection.driver_connection.info.backend_pid,
-            )
-        normalized = " ".join(statement.lower().split())
-        if (
-            current_role == "late"
-            and "from agent_nodes" in normalized
-            and "for update" in normalized
-        ):
-            late_node_lock_started.set()
-
-    def after_statement(
-        _connection, _cursor, statement, _parameters, _context, _many
-    ) -> None:
-        if getattr(
-            role, "value", None
-        ) == "maintenance" and statement.lstrip().startswith(
-            "DELETE FROM node_telemetry_rollup_dirty"
-        ):
-            claim_deleted.set()
-            assert allow_maintenance.wait(timeout=10)
-
-    def run_maintenance() -> None:
-        role.value = "maintenance"
-        maintenance.run_once(dirty_limit=1)
-
-    def record_late() -> None:
-        role.value = "late"
-        repository.record_batch(
-            NODE_A,
-            (
-                _sample(
-                    boot_id=BOOT_A,
-                    sequence=2,
-                    observed_at=NOW - timedelta(seconds=30),
-                ),
-            ),
-        )
-
-    event.listen(postgres_engine, "before_cursor_execute", before_statement)
-    event.listen(postgres_engine, "after_cursor_execute", after_statement)
-    try:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            first = pool.submit(run_maintenance)
-            assert claim_deleted.wait(timeout=10)
-            second = pool.submit(record_late)
-            assert late_node_lock_started.wait(timeout=10)
-
-            deadline = time.monotonic() + 10
-            while True:
-                with postgres_engine.connect() as connection:
-                    blockers, wait_event_type = connection.execute(
-                        text(
-                            "SELECT pg_blocking_pids(pid), wait_event_type "
-                            "FROM pg_stat_activity WHERE pid = :pid"
-                        ),
-                        {"pid": backend_pids["late"]},
-                    ).one()
-                if blockers:
-                    break
-                if time.monotonic() >= deadline:
-                    pytest.fail("late dirty insert never became lock blocked")
-            assert backend_pids["maintenance"] in blockers
-            assert wait_event_type == "Lock"
-
-            allow_maintenance.set()
-            first.result(timeout=10)
-            second.result(timeout=10)
-    finally:
-        allow_maintenance.set()
-        event.remove(postgres_engine, "before_cursor_execute", before_statement)
-        event.remove(postgres_engine, "after_cursor_execute", after_statement)
-
-    start = bucket_start(NOW - timedelta(seconds=30), 60)
-    with sessions() as session:
-        assert (
-            session.get(
-                NodeTelemetryRollupDirty,
-                (60, NODE_A, start),
-            )
-            is not None
-        )
-
-    maintenance.run_once(dirty_limit=2)
-    with sessions() as session:
-        bucket = session.get(NodeTelemetryRollupBucket, (60, NODE_A, start))
-        assert bucket.source_sample_count == 2

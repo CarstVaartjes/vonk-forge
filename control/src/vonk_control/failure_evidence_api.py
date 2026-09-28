@@ -1,7 +1,10 @@
-"""Authenticated stable JSON download for one durable operation attempt."""
+"""Authenticated JSON download for one failed operation attempt."""
+
+import re
 
 from fastapi import HTTPException, Query, Response
 
+from .bounded_json import BoundedJSONError
 from .failure_evidence import FailureEvidenceBundle, FailureEvidenceService
 from .operation_api import bounded_error_responses
 
@@ -21,20 +24,22 @@ def install_failure_evidence_routes(
         if service is None:
             raise HTTPException(503, "failure evidence service unavailable")
         try:
-            content, digest, _ = service.read(operation_id, attempt)
+            bundle = service.read(operation_id, attempt)
         except KeyError:
             raise HTTPException(
                 404, "failure evidence unavailable for this attempt"
             ) from None
-        except (ValueError, OSError):
-            raise HTTPException(503, "failure evidence validation failed") from None
+        except (BoundedJSONError, ValueError, OSError):
+            raise HTTPException(503, "failure evidence unavailable") from None
+        name = re.sub(r"[^A-Za-z0-9_-]", "_", operation_id)[:64]
         return Response(
-            content=content,
+            content=bundle.model_dump_json(),
             media_type="application/json",
             headers={
-                "ETag": f'"sha256:{digest}"',
                 "Cache-Control": "private, no-store",
-                "Content-Disposition": f'attachment; filename="failure-evidence-{digest[:16]}.json"',
+                "Content-Disposition": (
+                    f'attachment; filename="failure-evidence-{name}-{attempt}.json"'
+                ),
                 "X-Content-Type-Options": "nosniff",
             },
         )

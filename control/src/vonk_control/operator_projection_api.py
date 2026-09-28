@@ -36,7 +36,6 @@ from .enrollment_contract import (
     EnrollmentId,
 )
 from .failure_evidence import (
-    EvidenceRetention,
     FailureEvidenceBundle,
     collect_failure,
     failed_attempt_condition,
@@ -45,10 +44,6 @@ from .fleet_projection import (
     FleetNode,
     FleetNodeIdentity,
     FleetSnapshot,
-    TelemetryCapabilitiesResponse,
-    TelemetryCurrentResponse,
-    TelemetryHistoryResponse,
-    TelemetryWorkloadsResponse,
 )
 from .library_projection import LibrarySelectorAmbiguous
 from .logging import redact_text
@@ -56,7 +51,6 @@ from .models import AgentOperation, AgentOperationAttempt, Job, JobLogEntry
 from .operation_api import bounded_error_responses
 from .request_fault import RequestFault
 from .strict_json import StrictJSONModel, stored_document_detail
-from .telemetry import TelemetryResolution
 
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 LogSource = Literal["client", "monitor", "runtime", "job"]
@@ -66,13 +60,6 @@ _SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
 FLEET_OPERATION_IDS = {
     ("get", "/api/fleet"): "getFleetStatus",
     ("get", "/api/fleet/{selector}"): "getFleetNode",
-    ("get", "/api/fleet/{selector}/metrics/history"): "getFleetMetricsHistory",
-    ("get", "/api/fleet/{selector}/metrics/current"): "getFleetMetricsCurrent",
-    (
-        "get",
-        "/api/fleet/{selector}/metrics/capabilities",
-    ): "getFleetMetricsCapabilities",
-    ("get", "/api/fleet/{selector}/metrics/workloads"): "getFleetMetricsWorkloads",
     ("get", "/api/fleet/{selector}/loginfo"): "getFleetLogInfo",
     ("post", "/api/fleet/{selector}/rename"): "renameFleetNode",
     ("post", "/api/fleet/enroll"): "enrollFleetNode",
@@ -320,20 +307,18 @@ class _AgentEnrollmentAdapter:
         services.enrollment.revoke_node(node_id, actor)
 
 
-#: The failure-evidence retention window is owned by ``EvidenceRetention``; the
-#: log projection never scans further back than the evidence it can still read.
-_EVIDENCE_RETENTION = EvidenceRetention()
+#: How far back the log projection narrates failed agent attempts by default.
+_AGENT_LOG_LOOKBACK = timedelta(days=14)
 #: A fixed number of Controller job-log blobs per query, matching the previous
 #: bounded read.
 _JOB_LOG_SCAN_LIMIT = 512
-#: A fixed number of failed agent attempts per query.  Retention, not this
-#: projection, owns how long they stay readable.
+#: A fixed number of failed agent attempts per query.
 _AGENT_LOG_SCAN_LIMIT = 128
 #: A hard ceiling on projected agent entries before the caller's ``lines`` cut.
 _AGENT_LOG_ENTRY_LIMIT = 4_096
 #: Which attempts an operator must be able to read back is owned by
 #: ``failed_attempt_condition`` in the failure-evidence module, so this
-#: projection and the durable evidence collector cannot disagree about it.
+#: projection and the diagnostics download cannot disagree about it.
 #: The headline and level one attempt state narrates.  A lapse and a wait are
 #: things an operator must act on, not errors that claim the start died.
 _ATTEMPT_OUTCOME: Mapping[str, tuple[str, LogLevel]] = {
@@ -467,9 +452,9 @@ def _failure_log_entries(
     # no receipt at all, so the default "operation_failed" would name a refusal
     # that never happened.
     if has_receipt:
-        add(f"error_code={bundle.receipt.error_code}")
-    if bundle.receipt.detail:
-        add(f"detail={bundle.receipt.detail}")
+        add(f"error_code={bundle.error_code}")
+    if bundle.detail:
+        add(f"detail={bundle.detail}")
     # The Controller's own record of the wait, which the agent's receipt cannot
     # carry: it is what says the effect is unobserved rather than dead.
     if controller_reason is not None and controller_reason != bundle.summary:
@@ -592,11 +577,7 @@ class ControllerJobLogProvider:
         self, node_id: str, *, since: datetime | None
     ) -> list[FleetLogEntry]:
         now = _aware(self._clock())
-        cutoff = (
-            _aware(since)
-            if since is not None
-            else now - timedelta(days=_EVIDENCE_RETENTION.days)
-        )
+        cutoff = _aware(since) if since is not None else now - _AGENT_LOG_LOOKBACK
         with self._sessions() as session:
             rows = list(
                 session.execute(
@@ -639,8 +620,6 @@ class ControllerJobLogProvider:
                 "attempt": attempt.attempt,
                 "kind": operation.kind,
                 "node_ids": [operation.node_id],
-                "authority_revision": operation.authority_revision,
-                "payload_digest": operation.payload_digest,
                 "updated_at": observed_at.isoformat(),
                 "source": "agent",
                 "progress": attempt.progress,
@@ -888,116 +867,6 @@ def install_operator_projection_routes(
     )
     def fleet_status(_actor: Actor = authenticated) -> FleetSnapshot:
         return snapshot()
-
-    @app.get(
-        "/api/fleet/{selector}/metrics/history",
-        response_model=TelemetryHistoryResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetMetricsHistory",
-    )
-    def fleet_metrics_history(
-        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        start: Annotated[datetime, Query()],
-        end: Annotated[datetime, Query()],
-        resolution: Annotated[TelemetryResolution, Query()],
-        maximum_points: Annotated[int, Query(ge=1, le=3_000)] = 1_500,
-        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
-        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[
-            str | None, Query(min_length=1, max_length=64)
-        ] = None,
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        _actor: Actor = authenticated,
-    ) -> TelemetryHistoryResponse:
-        node = selected(selector)
-        try:
-            return fleet().telemetry_history(
-                node.id,
-                start=start,
-                end=end,
-                resolution=resolution,
-                maximum_points=maximum_points,
-                key=key,
-                device_id=device_id,
-                interface_name=interface_name,
-                run_id=run_id,
-            )
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _operator_error(error) from None
-
-    @app.get(
-        "/api/fleet/{selector}/metrics/current",
-        response_model=TelemetryCurrentResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetMetricsCurrent",
-    )
-    def fleet_metrics_current(
-        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
-        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[
-            str | None, Query(min_length=1, max_length=64)
-        ] = None,
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        _actor: Actor = authenticated,
-    ) -> TelemetryCurrentResponse:
-        node = selected(selector)
-        try:
-            return fleet().telemetry_current(
-                node.id,
-                key=key,
-                device_id=device_id,
-                interface_name=interface_name,
-                run_id=run_id,
-            )
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _operator_error(error) from None
-
-    @app.get(
-        "/api/fleet/{selector}/metrics/capabilities",
-        response_model=TelemetryCapabilitiesResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetMetricsCapabilities",
-    )
-    def fleet_metrics_capabilities(
-        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
-        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[
-            str | None, Query(min_length=1, max_length=64)
-        ] = None,
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        _actor: Actor = authenticated,
-    ) -> TelemetryCapabilitiesResponse:
-        node = selected(selector)
-        try:
-            return fleet().telemetry_capabilities(
-                node.id,
-                key=key,
-                device_id=device_id,
-                interface_name=interface_name,
-                run_id=run_id,
-            )
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _operator_error(error) from None
-
-    @app.get(
-        "/api/fleet/{selector}/metrics/workloads",
-        response_model=TelemetryWorkloadsResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetMetricsWorkloads",
-    )
-    def fleet_metrics_workloads(
-        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        state: Annotated[str | None, Query(min_length=1, max_length=32)] = None,
-        _actor: Actor = authenticated,
-    ) -> TelemetryWorkloadsResponse:
-        node = selected(selector)
-        try:
-            return fleet().telemetry_workloads(node.id, run_id=run_id, state=state)
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _operator_error(error) from None
 
     @app.get(
         "/api/fleet/{selector}/loginfo",
