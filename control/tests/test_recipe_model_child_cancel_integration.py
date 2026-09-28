@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.bounded_json import require_mapping
@@ -233,6 +234,9 @@ def _controller(
     return response
 
 
+# Slow by design: it restarts the Controller as a real process between the
+# parent request and the child effect.
+@pytest.mark.slow(30)
 def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
     tmp_path: Path, postgres_engine
 ) -> None:

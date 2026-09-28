@@ -10,7 +10,7 @@ AREAS = ("rust", "repository", "control", "web", "generated", "compose")
 AREA_JOBS = {
     "rust": ("rust-tests", "rust-platform"),
     "repository": ("repository",),
-    "control": ("control",),
+    "control": ("control", "control-image-build"),
     "web": ("web",),
     "generated": ("generated",),
     "compose": ("compose",),

@@ -323,6 +323,9 @@ def test_frozen_corpus_closure_is_dynamic_and_keeps_unlinked_models() -> None:
     assert model_keys - selected
 
 
+# Slow by design: migrates a fresh PostgreSQL database and imports the whole
+# frozen corpus through the real package reader before reading the API.
+@pytest.mark.slow(30)
 def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
@@ -456,7 +459,15 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         for item in library_recipes
     } == expected_recipe_documents
     multi_model_detail_seen = False
-    for row in corpus.index["recipes"]:
+    # The listing above already compares every recipe document. Detail adds
+    # per-selection Model resolution, whose paths are single- and multi-Model
+    # bindings, so one of each covers it. Each detail read re-projects the whole
+    # catalog; reading all of them cost over a minute without another way to fail.
+    detail_rows = [
+        next(r for r in corpus.index["recipes"] if len(r["document"]["models"]) == 1),
+        next(r for r in corpus.index["recipes"] if len(r["document"]["models"]) > 1),
+    ]
+    for row in detail_rows:
         digest = _recipe_key(row)[2]
         detail_response = api.get(f"/api/recipe/{by_digest[digest].selector}")
         assert detail_response.status_code == 200, detail_response.text

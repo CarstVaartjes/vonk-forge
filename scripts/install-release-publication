@@ -1496,6 +1496,8 @@ def _validate_existing_pointer(
         current = _parse_channel_manifest(current_raw, public_key)
         if current["channel"] != plan["channel"]:
             raise PublicationError("published channel manifest is inconsistent")
+        if plan["channel"] == "dev":
+            _require_dev_descendant(current["source_sha"], plan["source_sha"])
         if plan["channel"] == "stable":
             current_version = tuple(int(part) for part in current["version"].split("."))
             next_version = tuple(int(part) for part in plan["version"].split("."))
@@ -1506,6 +1508,31 @@ def _validate_existing_pointer(
                 raise PublicationError(
                     "refusing to regress or replace a stable release"
                 )
+
+
+def _require_dev_descendant(current_source: str, next_source: str) -> None:
+    """Refuse to move the dev pointer back to an older main source.
+
+    A dev generation may promote after main advanced past it, so promotion
+    order is not source order. The published source must be the new source or
+    one of its ancestors.
+    """
+    if current_source == next_source:
+        return
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", current_source, next_source],
+        cwd=Path(__file__).resolve().parents[1],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=30,
+        check=False,
+    ).returncode
+    if ancestry == 1:
+        raise PublicationError(
+            "refusing to regress the dev channel to an older source"
+        )
+    if ancestry != 0:
+        raise PublicationError("cannot establish dev source ancestry")
 
 
 def publish_candidate(arguments: argparse.Namespace) -> None:

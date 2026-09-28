@@ -2,37 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
 from vonk_control.source_bundles import generate_source_bundle
 
+from tests.wire_probes import prebuilt_probe
+
 
 @pytest.fixture(scope="session")
 def source_bundle_probe() -> Path:
-    configured = os.environ.get("VONK_SOURCE_BUNDLE_WIRE_PROBE")
-    if configured:
-        return Path(configured)
-    repository = Path(__file__).resolve().parents[2]
-    subprocess.run(
-        [
-            "cargo",
-            "build",
-            "--locked",
-            "-p",
-            "vonk-agent",
-            "--example",
-            "source_bundle_wire_probe",
-        ],
-        cwd=repository,
-        check=True,
-    )
-    return (
-        Path(os.environ.get("CARGO_TARGET_DIR", repository / "target"))
-        / "debug/examples/source_bundle_wire_probe"
-    )
+    return prebuilt_probe("VONK_SOURCE_BUNDLE_WIRE_PROBE")
 
 
 def test_python_source_bundle_digest_and_bytes_reach_rust_materializer(

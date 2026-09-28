@@ -53,6 +53,8 @@ from vonk_control.recipe_routes import RecipeRouteService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.source_bundles import SourceBundleStore
 
+from tests.wire_probes import prebuilt_probe
+
 from .test_recipe_operations import (
     NOW,
     ConcurrentPublisher,
@@ -140,66 +142,12 @@ def _singleton_recovery_process_tick(database_url: str, now_value: str) -> None:
 
 @pytest.fixture(scope="session")
 def recipe_observation_wire_probe() -> Path:
-    configured = os.environ.get("VONK_RECIPE_OBSERVATION_WIRE_PROBE")
-    repository = Path(__file__).resolve().parents[2]
-    if configured:
-        path = Path(configured)
-        if not path.is_absolute():
-            path = repository / path
-        path = path.resolve()
-    else:
-        subprocess.run(
-            [
-                "cargo",
-                "build",
-                "--locked",
-                "--package",
-                "vonk-agent",
-                "--example",
-                "recipe_observation_wire_probe",
-            ],
-            cwd=repository,
-            check=True,
-        )
-        target_root = Path(os.environ.get("CARGO_TARGET_DIR", repository / "target"))
-        if not target_root.is_absolute():
-            target_root = repository / target_root
-        path = target_root / "debug" / "examples" / "recipe_observation_wire_probe"
-    if not path.is_file() or not os.access(path, os.X_OK):
-        raise AssertionError(f"observation wire probe is not executable: {path}")
-    return path
+    return prebuilt_probe("VONK_RECIPE_OBSERVATION_WIRE_PROBE")
 
 
 @pytest.fixture(scope="session")
 def host_helper_wire_probe() -> Path:
-    configured = os.environ.get("VONK_HOST_HELPER_WIRE_PROBE")
-    repository = Path(__file__).resolve().parents[2]
-    if configured:
-        path = Path(configured)
-        if not path.is_absolute():
-            path = repository / path
-        path = path.resolve()
-    else:
-        subprocess.run(
-            [
-                "cargo",
-                "build",
-                "--locked",
-                "--package",
-                "vonk-agent-helper",
-                "--example",
-                "host_helper_wire_probe",
-            ],
-            cwd=repository,
-            check=True,
-        )
-        target_root = Path(os.environ.get("CARGO_TARGET_DIR", repository / "target"))
-        if not target_root.is_absolute():
-            target_root = repository / target_root
-        path = target_root / "debug" / "examples" / "host_helper_wire_probe"
-    if not path.is_file() or not os.access(path, os.X_OK):
-        raise AssertionError(f"host helper wire probe is not executable: {path}")
-    return path
+    return prebuilt_probe("VONK_HOST_HELPER_WIRE_PROBE")
 
 
 @overload

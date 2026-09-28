@@ -40,6 +40,54 @@ For the complete local repository and Controller pytest suites, run:
 scripts/test-local
 ```
 
+While iterating, run only the test files that directly exercise your change:
+
+```bash
+scripts/test-local --changed          # changes since the merge base with origin/main
+scripts/test-local --changed HEAD~3   # or since an explicit base
+```
+
+`scripts/select-changed-tests` maps each changed path (committed, staged,
+unstaged or untracked) to test files: a changed test file selects itself, a
+changed Python module selects the test files that import it directly, and any
+other file selects the test files that name its path. It ignores transitive
+imports, so it is a pre-check; run the full suites before requesting review.
+
+### Per-test time budget
+
+Every test in the repository, Controller and Compose suites must finish its
+setup and body within 10 seconds. `tools/pytest_budget.py` checks this after
+each test and fails the test that went over, with its measured time. Setting up
+a fixture shared beyond one test (session, module or class scope, such as the
+PostgreSQL server or the installed CLI) is not charged to the test that first
+requests it: doing expensive work once is the intended fix. It does
+not interrupt the test: an alarm at an arbitrary point can leave shared state
+half-built and fail unrelated tests. pytest-timeout's `timeout = 120` in the
+pytest configuration is only the hang guard.
+
+A test that needs longer because its subject is inherently expensive (a real
+process death, the whole published corpus) carries `@pytest.mark.slow(<seconds>)`
+with at most 60 seconds and a comment saying why. Tests that drive the
+installed `vonkctl` as separate processes against an HTTPS Controller peer get
+20 seconds from one rule in `control/tests/conftest.py`. Keep that set small: first
+remove repeated work (build or start once per session, inject clocks instead
+of sleeping, shrink fixtures to the boundary under test). On a machine that is
+knowingly overloaded, `--test-budget-scale=2` (or `0` to disable) relaxes the
+check locally; CI always runs at the default scale.
+
+No test builds a container image. Checks that need the real Controller or
+worker image carry `@pytest.mark.built_image` and take the image from
+`VONK_TEST_CONTROLLER_IMAGE` or `VONK_TEST_WORKER_IMAGE`: each is a quick
+`docker run` against an image that is already built, well inside the normal
+budget. The "Controller image build tests" CI job builds both targets of
+`control/Dockerfile` once (buildx with the GitHub Actions cache), then runs
+`pytest -q -m built_image control/tests`; the control suite shards deselect
+them with `-m "not built_image"`, and the CI gate requires that job whenever
+the control suite is selected. Without the variable such a test skips locally
+and fails in CI. `scripts/test-local --with-image-build` builds the two images
+first and includes the checks; by default they are skipped. Prefer a static
+check of the Dockerfile or build inputs where that proves the property.
+
 The local `control` project refers to the ignored protocol wheel under
 `inventory/wheels`. `scripts/test-local` builds and verifies it automatically.
 For direct `uv sync --project control` or `uv run --project control` commands,
@@ -145,10 +193,21 @@ running the root or control suites.
 
 The native Rust agent and its wire contract build only for Linux. The
 `control/tests/*_wire_bridge.py` suites consume probes produced by
-`scripts/tests/run_agent_wire_contracts.py`; on macOS `cargo build` fails on
-platform-gated code such as `rustix::fs::openat2`, so run those suites in the
-Linux/OrbStack or designated CI lane instead of reading the failure as a
-regression.
+`scripts/tests/run_agent_wire_contracts.py`, which builds every probe in one
+Cargo invocation and exports their paths. The tests never build probes
+themselves: without the exported path they skip locally and fail in CI. On
+macOS `cargo build` fails on platform-gated code such as
+`rustix::fs::openat2`, so run those suites in the Linux/OrbStack or designated
+CI lane instead of reading the failure as a regression.
+
+PostgreSQL tests share one disposable server per pytest session, including
+across xdist workers. It starts when collection finishes (only if a selected
+test needs it), so its start-up is not charged to a test, and each test still
+gets its own database. The server keeps its data on tmpfs with `fsync` off
+because it is thrown away after the session; the process-death tests kill
+client processes, not the server. Each server is labelled with its owning
+session, which stops it at the end; the next session stops any server whose
+owner died without teardown.
 
 ### Focused PostgreSQL and security lanes
 
@@ -295,7 +354,8 @@ otherwise have to reason about by hand:
 - **Keep the fast tier fast and hermetic.** A host-dependent test belongs in the
   lane tier, which the collection-time marker applies automatically, rather than
   being skipped or made conditional. The fast tier should stay under a couple of
-  minutes so it is genuinely the thing you run while iterating.
+  minutes so it is genuinely the thing you run while iterating, and every test
+  stays within the per-test time budget above.
 
 ## When the longer jobs run
 

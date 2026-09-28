@@ -22,7 +22,12 @@ verify_authority() {
   git fetch --force --no-tags origin +refs/heads/main:refs/remotes/origin/main
   if [[ $channel == dev ]]; then
     [[ $authority_ref == refs/heads/main ]]
-    [[ $source_sha == "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
+    # Acceptance takes longer than main stays still. A fully accepted source
+    # that main has since moved past still promotes; it must be on main, and
+    # install-release-publication refuses to move the signed dev pointer to a
+    # source that is not a descendant of the published one.
+    git rev-parse --verify refs/remotes/origin/main^{commit} >/dev/null
+    git merge-base --is-ancestor "$source_sha" refs/remotes/origin/main
   else
     [[ $authority_ref == refs/tags/* ]]
     git fetch --force --tags origin

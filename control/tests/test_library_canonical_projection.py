@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor, CursorError, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.library_api import install_library_routes
+from vonk_control.library_contract import _MAX_PAGE_RECIPES
 from vonk_control.library_projection import LibraryProjection, LibraryProjectionError
 from vonk_control.models import (
     AgentNode,
@@ -132,6 +133,10 @@ def _insert_canonical_rows(
         session.add_all(heads)
 
 
+# Slow by design: it projects the whole published corpus (every frontier
+# recipe and model) through ~17 filtered reads, and each read re-validates the
+# full catalog. A subset would stop proving the real library projects.
+@pytest.mark.slow(30)
 def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     tmp_path: Path,
 ) -> None:
@@ -618,13 +623,13 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
         sessions,
         kind="model",
         template=index["catalog_entities"][0]["document"],
-        count=513,
+        count=5,
     )
     _insert_canonical_rows(
         sessions,
         kind="recipe",
         template=index["recipes"][0]["document"],
-        count=513,
+        count=5,
     )
     projection = LibraryProjection(
         sessions,
@@ -632,10 +637,17 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
         clock=lambda: datetime(2026, 9, 6, tzinfo=UTC),
     )
 
+    # Five rows at two per page cross two page boundaries; the largest
+    # accepted limit still returns everything in one page.
+    assert len(projection.models(limit=_MAX_PAGE_RECIPES).models) == 5
+    assert (
+        len(projection.recipe_library(limit=_MAX_PAGE_RECIPES, all_models=True).recipes)
+        == 5
+    )
     model_pages = []
     cursor = None
     while True:
-        page = projection.models(limit=512, cursor=cursor)
+        page = projection.models(limit=2, cursor=cursor)
         model_pages.extend(page.models)
         if page.next_cursor is None:
             break
@@ -643,7 +655,7 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
     recipe_pages = []
     cursor = None
     while True:
-        page = projection.recipe_library(limit=512, cursor=cursor, all_models=True)
+        page = projection.recipe_library(limit=2, cursor=cursor, all_models=True)
         recipe_pages.extend(page.recipes)
         if page.next_cursor is None:
             break
@@ -651,10 +663,10 @@ def test_library_pagination_covers_more_than_one_page_without_gaps(
 
     model_digests = [item.identity.content_sha256 for item in model_pages]
     recipe_digests = [item.identity.content_sha256 for item in recipe_pages]
-    assert len(model_digests) == 513
-    assert len(recipe_digests) == 513
-    assert len(set(model_digests)) == 513
-    assert len(set(recipe_digests)) == 513
+    assert len(model_digests) == 5
+    assert len(recipe_digests) == 5
+    assert len(set(model_digests)) == 5
+    assert len(set(recipe_digests)) == 5
 
     with sessions() as session:
         revision = session.scalar(
@@ -835,15 +847,32 @@ def test_model_detail_resolves_every_model_cache_selector_form(tmp_path: Path) -
             assert response.json()["identity"]["content_sha256"] == expected_digest
 
 
+# Paging by wire bytes is the same algorithm at any budget. A 64 KiB budget
+# crosses several page boundaries with a few dozen rows instead of the hundreds
+# the 1 MiB production budget needs, which kept these tests over a minute.
+_SMALL_WIRE_BUDGET = 64 * 1024
+
+
+@pytest.fixture
+def small_wire_budget(monkeypatch: pytest.MonkeyPatch) -> int:
+    from vonk_control import library_projection
+
+    monkeypatch.setattr(
+        library_projection, "MAX_CONTROL_DOCUMENT_BYTES", _SMALL_WIRE_BUDGET
+    )
+    return _SMALL_WIRE_BUDGET
+
+
 def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
     tmp_path: Path,
+    small_wire_budget: int,
 ) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     template = index["recipes"][0]["document"]
     engine = create_engine(f"sqlite:///{tmp_path / 'large-recipe-library.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    count = 300
+    count = 24
     _insert_canonical_rows(
         sessions,
         kind="recipe",
@@ -874,7 +903,7 @@ def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
                 params["cursor"] = cursor
             response = client.get("/api/recipe/library", params=params)
             assert response.status_code == 200, response.text
-            assert len(response.content) <= MAX_CONTROL_DOCUMENT_BYTES
+            assert len(response.content) <= small_wire_budget
             payload = response.json()
             assert payload["filters"]["sort"] == "name"
             page = payload["recipes"]
@@ -921,7 +950,7 @@ def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
                             separators=(",", ":"),
                         ).encode("utf-8")
                     )
-                    > MAX_CONTROL_DOCUMENT_BYTES
+                    > small_wire_budget
                 )
                 changed_limit = client.get(
                     "/api/recipe/library",
@@ -942,13 +971,14 @@ def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
 
 def test_model_library_pages_by_wire_bytes_without_losing_entries(
     tmp_path: Path,
+    small_wire_budget: int,
 ) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     template = index["catalog_entities"][0]["document"]
     engine = create_engine(f"sqlite:///{tmp_path / 'large-model-library.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    count = 160
+    count = 16
     _insert_canonical_rows(
         sessions,
         kind="model",
@@ -977,7 +1007,7 @@ def test_model_library_pages_by_wire_bytes_without_losing_entries(
                 params["cursor"] = cursor
             response = client.get("/api/model/library", params=params)
             assert response.status_code == 200, response.text
-            assert len(response.content) <= MAX_CONTROL_DOCUMENT_BYTES
+            assert len(response.content) <= small_wire_budget
             payload = response.json()
             collected.extend(item["selector"] for item in payload["models"])
             cursor = payload["next_cursor"]

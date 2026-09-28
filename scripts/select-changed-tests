@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Select the pytest files that exercise a set of changed repository paths.
+
+This is the fast inner loop for ``scripts/test-local --changed``: a changed
+test file selects itself, a changed module selects the test files that import
+it directly, and any other changed file selects the test files that name its
+path. It deliberately ignores transitive imports, so it is a pre-check, not a
+substitute for the full suites before review.
+
+Reads changed paths (one per line) on stdin and prints ``<suite> <test file>``
+lines, where suite is ``repository``, ``control`` or ``compose``.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from functools import cache
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SUITES = {
+    "repository": ROOT / "tests",
+    "control": ROOT / "control" / "tests",
+    "compose": ROOT / "deploy" / "compose" / "tests",
+}
+PACKAGE_ROOTS = {
+    ROOT / "src": "",
+    ROOT / "control" / "src": "",
+    ROOT / "agent_protocol" / "src": "",
+}
+
+
+@cache
+def _test_files() -> dict[str, list[Path]]:
+    return {
+        suite: sorted(directory.rglob("test_*.py"))
+        for suite, directory in SUITES.items()
+    }
+
+
+@cache
+def _source(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def _module_name(path: Path) -> str | None:
+    if path.suffix != ".py":
+        return None
+    for package_root in PACKAGE_ROOTS:
+        if path.is_relative_to(package_root):
+            parts = list(path.relative_to(package_root).with_suffix("").parts)
+            if parts[-1] == "__init__":
+                parts.pop()
+            return ".".join(parts) if parts else None
+    return None
+
+
+def _importers(module: str) -> re.Pattern[str]:
+    package, _, leaf = module.rpartition(".")
+    alternatives = [re.escape(module) + r"\b"]
+    if package:
+        alternatives.append(
+            rf"from\s+{re.escape(package)}\s+import\s+(?:\([^)]*\b|[^\n]*\b){re.escape(leaf)}\b"
+        )
+    return re.compile("|".join(alternatives))
+
+
+def select(changed: list[str]) -> list[tuple[str, Path]]:
+    selected: set[tuple[str, Path]] = set()
+    for name in changed:
+        path = (ROOT / name).resolve()
+        suite = next(
+            (key for key, directory in SUITES.items() if path.is_relative_to(directory)),
+            None,
+        )
+        if suite is not None and path.name.startswith("test_") and path.suffix == ".py":
+            if path.is_file():
+                selected.add((suite, path))
+            continue
+        module = _module_name(path)
+        if module is not None:
+            pattern = _importers(module)
+            matches = lambda text: pattern.search(text) is not None  # noqa: E731
+        else:
+            needle = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else name
+            stem = Path(needle).name
+            matches = lambda text: needle in text or (  # noqa: E731
+                "/" in needle and f'"{stem}"' in text
+            )
+        for suite_name, files in _test_files().items():
+            for test_file in files:
+                if matches(_source(test_file)):
+                    selected.add((suite_name, test_file))
+    return sorted(selected)
+
+
+def main() -> int:
+    changed = [line.strip() for line in sys.stdin if line.strip()]
+    for suite, path in select(changed):
+        print(suite, path.relative_to(ROOT).as_posix())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

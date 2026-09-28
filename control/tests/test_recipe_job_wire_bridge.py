@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import subprocess
 from pathlib import Path
 
@@ -19,6 +18,8 @@ from vonk_agent_protocol import (
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import AgentNode, AgentOperation
 
+from tests.wire_probes import prebuilt_probe
+
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import running_artifact_service
 from .test_recipe_operations import NOW
@@ -26,36 +27,7 @@ from .test_recipe_operations import NOW
 
 @pytest.fixture(scope="session")
 def recipe_job_wire_probe() -> Path:
-    configured = os.environ.get("VONK_RECIPE_JOB_WIRE_PROBE")
-    repository = Path(__file__).resolve().parents[2]
-    if configured:
-        probe = Path(configured)
-        if not probe.is_absolute():
-            probe = repository / probe
-    else:
-        target_root = Path(os.environ.get("CARGO_TARGET_DIR", repository / "target"))
-        if not target_root.is_absolute():
-            target_root = repository / target_root
-        subprocess.run(
-            [
-                "cargo",
-                "build",
-                "--locked",
-                "--package",
-                "vonk-agent-protocol",
-                "--example",
-                "recipe_job_wire_probe",
-            ],
-            cwd=repository,
-            check=True,
-        )
-        probe = target_root / "debug" / "examples" / "recipe_job_wire_probe"
-    probe = probe.resolve()
-    if not probe.is_file() or not os.access(probe, os.X_OK):
-        raise AssertionError(
-            f"configured recipe-job wire probe is not executable: {probe}"
-        )
-    return probe
+    return prebuilt_probe("VONK_RECIPE_JOB_WIRE_PROBE")
 
 
 def test_controller_artifact_job_result_crosses_rust_and_python(

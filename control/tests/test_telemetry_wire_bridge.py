@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
@@ -11,6 +10,8 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentProtocolError, TelemetryRequest
 from vonk_control.models import NodeTelemetrySample
+
+from tests.wire_probes import prebuilt_probe
 
 from .test_agent_api import NODE_A, agent_headers
 from .test_agent_api import agent_system as _agent_system
@@ -20,41 +21,7 @@ agent_system = _agent_system
 
 @pytest.fixture(scope="session")
 def telemetry_wire_probe() -> Path:
-    configured = os.environ.get("VONK_TELEMETRY_WIRE_PROBE")
-    if configured:
-        path = Path(configured).expanduser()
-        if not path.is_absolute():
-            path = Path(__file__).resolve().parents[2] / path
-        path = path.resolve()
-        if not path.is_file() or not os.access(path, os.X_OK):
-            raise AssertionError(
-                f"configured telemetry wire probe is not executable: {path}"
-            )
-        return path
-
-    repository = Path(__file__).resolve().parents[2]
-    target_root = Path(os.environ.get("CARGO_TARGET_DIR", repository / "target"))
-    if not target_root.is_absolute():
-        target_root = repository / target_root
-    subprocess.run(
-        [
-            "cargo",
-            "build",
-            "--locked",
-            "--package",
-            "vonk-agent",
-            "--example",
-            "telemetry_wire_probe",
-        ],
-        cwd=repository,
-        check=True,
-    )
-    target = target_root / "debug" / "examples" / "telemetry_wire_probe"
-    if not target.is_file() or not os.access(target, os.X_OK):
-        raise AssertionError(
-            f"cargo did not produce an executable wire probe: {target}"
-        )
-    return target
+    return prebuilt_probe("VONK_TELEMETRY_WIRE_PROBE")
 
 
 def _sample(observed_at: str, *, metric_value: object = 25.0) -> dict[str, object]:

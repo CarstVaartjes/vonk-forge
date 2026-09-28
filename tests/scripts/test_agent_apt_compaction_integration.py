@@ -265,6 +265,9 @@ def run_channel(
     shutil.which("aptly") is None or shutil.which("dpkg-deb") is None,
     reason="real aptly integration requires Linux aptly and dpkg-deb",
 )
+# Drives the real aptly binary through repeated publish/compaction cycles on a
+# real on-disk pool; ~25 s on CI runners.
+@pytest.mark.slow(40)
 def test_real_aptly_compaction_is_bounded_and_preserves_public_pool(
     tmp_path: Path,
 ) -> None:

@@ -430,30 +430,13 @@ def test_control_environment_preserves_the_canonical_zero_byte_model_contract() 
     assert result.stdout.strip() == "True"
 
 
-@pytest.mark.lane  # Builds the root-context control image.
-@pytest.mark.linux_only
-@pytest.mark.needs_buildx
+# Checks the Controller image the image-build CI job built once from the root
+# context; it never builds one.
+@pytest.mark.built_image
+@pytest.mark.lane  # Runs the prebuilt root-context Controller image.
 def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
-    control_image_build_args: list[str],
+    controller_image: str,
 ) -> None:
-    image = "vonk-control:test-packaging-contracts"
-    build = subprocess.run(
-        [
-            "docker",
-            "build",
-            "--file",
-            "control/Dockerfile",
-            *control_image_build_args,
-            "--tag",
-            image,
-            ".",
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert build.returncode == 0, build.stderr
     result = subprocess.run(
         [
             "docker",
@@ -461,7 +444,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
             "--rm",
             "--entrypoint",
             "python",
-            image,
+            controller_image,
             "-c",
             dedent(
                 """

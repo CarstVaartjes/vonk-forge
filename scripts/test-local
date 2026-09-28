@@ -3,13 +3,85 @@ set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+
+usage() {
+    cat <<'USAGE'
+Usage: scripts/test-local [--changed [BASE]] [--with-image-build]
+
+Without arguments, run the complete repository and Controller suites (Linux
+lanes go to the vonk-ci OrbStack VM on macOS).
+
+--changed [BASE]    Fast inner loop: run only the test files that directly
+                    exercise files changed since BASE (default: the merge base
+                    with origin/main), including uncommitted and untracked
+                    changes. Not a substitute for the full run before review.
+--with-image-build  Build the Controller and worker images once from
+                    control/Dockerfile and also run the built_image checks
+                    against them (CI does this in its own job). Skipped by
+                    default.
+USAGE
+}
+
+changed_mode=false
+changed_base=
+include_image_build=false
+while (($#)); do
+    case "$1" in
+        --changed)
+            changed_mode=true
+            if [[ -n "${2:-}" && "$2" != --* ]]; then
+                changed_base=$2
+                shift
+            fi
+            ;;
+        --with-image-build)
+            include_image_build=true
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+# Adds the built_image deselection to a marker expression unless requested.
+with_image_build_selection() {
+    local expression=$1
+    if [[ "$include_image_build" == true ]]; then
+        printf '%s' "$expression"
+    elif [[ -n "$expression" ]]; then
+        printf '(%s) and not built_image' "$expression"
+    else
+        printf 'not built_image'
+    fi
+}
+
+# Builds each image once; the built_image tests only inspect and run them.
+build_test_images() {
+    export VONK_TEST_CONTROLLER_IMAGE=vonk-control:test-local
+    export VONK_TEST_WORKER_IMAGE=vonk-control-worker:test-local
+    docker build --file control/Dockerfile --target api \
+        --tag "$VONK_TEST_CONTROLLER_IMAGE" .
+    docker build --file control/Dockerfile --target worker \
+        --tag "$VONK_TEST_WORKER_IMAGE" .
+}
+
 scripts/build-control-wheel
+if [[ "$include_image_build" == true ]]; then
+    build_test_images
+fi
 recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
 linux_markers='linux_only or needs_systemd or postgres'
 portable_markers='not linux_only and not needs_systemd and not needs_rust_probe and not postgres'
 
 run_python_suites() {
-    local marker_expression=$1
+    local marker_expression
+    marker_expression=$(with_image_build_selection "$1")
     local uv_project_environment=${UV_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-root-venv"}
     local uv_control_environment=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"}
     local uv_cache_dir=${UV_CACHE_DIR:-"/private/tmp/vonk-test-local-uv-cache"}
@@ -30,14 +102,13 @@ run_python_suites() {
     fi
 
     UV_CACHE_DIR="$uv_cache_dir" UV_PROJECT_ENVIRONMENT="$uv_project_environment" \
-        uv run --python 3.14 --frozen --with pytest==9.1.1 \
-        --with pytest-xdist==3.8.0 "${recipe_args[@]}" \
+        uv run --python 3.14 --frozen "${recipe_args[@]}" \
         pytest -q -n auto --dist loadfile --durations=40 "${marker_args[@]}"
 
     UV_CACHE_DIR="$uv_cache_dir" UV_PROJECT_ENVIRONMENT="$uv_control_environment" \
         uv run --project control --frozen --with-editable . \
-        --with pytest-xdist==3.8.0 pytest -q -n 4 --dist loadfile --durations=40 \
-        "${marker_args[@]}" control/tests
+        pytest -q -n auto --dist loadfile --durations=40 \
+        --ignore-glob='*_wire_bridge.py' "${marker_args[@]}" control/tests
 }
 
 run_ci_wire_boundary() {
@@ -79,6 +150,72 @@ run_ci_wire_boundary() {
         uv run --project control --frozen --with-editable . \
         python scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile
 }
+
+run_changed_tests() {
+    local base=${changed_base:-$(git merge-base HEAD origin/main)}
+    local uv_cache_dir=${UV_CACHE_DIR:-"/private/tmp/vonk-test-local-uv-cache"}
+    local selection
+    selection=$(
+        {
+            git diff --name-only "$base"
+            git ls-files --others --exclude-standard
+        } | sort -u | scripts/select-changed-tests
+    )
+    if [[ -z "$selection" ]]; then
+        echo "No test files exercise the changes since $base"
+        return 0
+    fi
+    local repository_files=() control_files=() compose_files=()
+    local suite path
+    while read -r suite path; do
+        case "$suite" in
+            repository) repository_files+=("$path") ;;
+            control) control_files+=("${path#control/}") ;;
+            compose) compose_files+=("$path") ;;
+        esac
+    done <<< "$selection"
+    if [[ -d "$recipe_root/contracts" ]]; then
+        export VONK_RECIPE_LIBRARY_ROOT="$recipe_root"
+    fi
+    local status=0
+    local marker_args=()
+    local marker_expression
+    marker_expression=$(with_image_build_selection "")
+    if [[ -n "$marker_expression" ]]; then
+        marker_args=(-m "$marker_expression")
+    fi
+    if ((${#repository_files[@]})); then
+        echo "Repository suite: ${#repository_files[@]} changed-path test files"
+        UV_CACHE_DIR="$uv_cache_dir" \
+            UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-root-venv"} \
+            uv run --python 3.14 --frozen \
+            ${VONK_RECIPE_LIBRARY_ROOT:+--with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts"} \
+            pytest -q -n auto --dist loadfile "${marker_args[@]}" "${repository_files[@]}" || status=1
+    fi
+    if ((${#control_files[@]})); then
+        echo "Controller suite: ${#control_files[@]} changed-path test files"
+        (
+            cd control
+            UV_CACHE_DIR="$uv_cache_dir" \
+                UV_PROJECT_ENVIRONMENT=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"} \
+                uv run --frozen --with-editable .. \
+                pytest -q -n auto --dist loadfile "${marker_args[@]}" "${control_files[@]}"
+        ) || status=1
+    fi
+    if ((${#compose_files[@]})); then
+        echo "Compose suite: ${#compose_files[@]} changed-path test files"
+        UV_CACHE_DIR="$uv_cache_dir" \
+            UV_PROJECT_ENVIRONMENT=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"} \
+            uv run --project control --frozen --with-editable . \
+            pytest -q "${marker_args[@]}" "${compose_files[@]}" || status=1
+    fi
+    return "$status"
+}
+
+if [[ "$changed_mode" == true ]]; then
+    run_changed_tests
+    exit
+fi
 
 if [[ "$(uname -s)" != Darwin ]]; then
     run_python_suites "${VONK_TEST_LOCAL_MARKERS:-}"
