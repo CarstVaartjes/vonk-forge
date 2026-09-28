@@ -4,7 +4,7 @@ set -eu
 source=${LITELLM_DATABASE_PASSWORD_FILE:-/run/secrets/litellm-database-password}
 runtime_directory=/run/vonk-postgres-secrets
 target=$runtime_directory/litellm-database-password
-init_source=/run/vonk-source-assets/postgres/init-databases.sh
+init_source=/run/vonk-runtime-assets/postgres/init-databases.sh
 init_target=/docker-entrypoint-initdb.d/10-vonk-forge-databases.sh
 
 # Standalone Compose implements secrets as read-only bind mounts. Their host

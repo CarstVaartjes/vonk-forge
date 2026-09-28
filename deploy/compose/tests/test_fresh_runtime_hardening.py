@@ -31,16 +31,15 @@ def test_fresh_postgres_initializes_the_litellm_database() -> None:
     postgres = canonical["services"]["postgres"]
 
     assert "litellm-database-password" in postgres["secrets"]
-    assert postgres["entrypoint"] == ["/usr/local/bin/vonk-postgres-entrypoint"]
+    # The Controller image ships the entrypoint; PostgreSQL runs the staged copy.
+    assert postgres["entrypoint"][:2] == ["/bin/sh", "-c"]
+    assert (
+        "/run/vonk-runtime-assets/postgres/entrypoint.sh" in postgres["entrypoint"][2]
+    )
     assert postgres["command"] == ["postgres"]
-    assert (
-        "./postgres/entrypoint.sh:"
-        "/usr/local/bin/vonk-postgres-entrypoint:ro" in postgres["volumes"]
-    )
-    assert (
-        "./postgres/init-databases.sh:"
-        "/run/vonk-source-assets/postgres/init-databases.sh:ro" in postgres["volumes"]
-    )
+    assert "runtime-assets:/run/vonk-runtime-assets:ro" in postgres["volumes"]
+    api_root = _final_stage("api-root")
+    assert "COPY deploy/compose/postgres/ " in api_root
     assert canonical["secrets"]["litellm-database-password"] == {
         "file": "./secrets/litellm-database-password"
     }
@@ -135,3 +134,52 @@ def test_api_image_bounds_root_to_preexec_and_seals_source_secret_directory() ->
     assert 'ENTRYPOINT ["python", "-m", "vonk_control.api_preexec"]' in api
     assert 'CMD ["python", "-m", "vonk_control.api"]' in api
     assert "install -d -o 0 -g 0 -m 0700 /run/secrets" in _final_stage("api-root")
+
+
+def test_every_staged_runtime_asset_a_service_reads_ships_in_the_controller_image() -> (
+    None
+):
+    """Catches a config a pulled release cannot deliver (it would drift)."""
+    prefix = "/usr/local/share/vonk-forge/runtime-assets/"
+    shipped: set[str] = set()
+    for line in _final_stage("api-root").splitlines():
+        if not line.startswith("COPY deploy/compose/") or prefix not in line:
+            continue
+        *sources, destination = line.split()[1:]
+        target = destination.removeprefix(prefix)
+        for source in sources:
+            path = ROOT / source
+            files = sorted(p for p in path.rglob("*") if p.is_file())
+            if path.is_file():
+                files = [path]
+            for file in files:
+                inner = (
+                    file.relative_to(path).as_posix() if path.is_dir() else file.name
+                )
+                shipped.add(target + inner)
+    readers = [
+        COMPOSE_ROOT / "compose.yaml",
+        COMPOSE_ROOT / "tailscale/compose.yaml",
+        COMPOSE_ROOT / "hermes-agent/compose.yaml",
+        COMPOSE_ROOT / "caddy/entrypoint.sh",
+        COMPOSE_ROOT / "postgres/entrypoint.sh",
+        COMPOSE_ROOT / "litellm/entrypoint.sh",
+        COMPOSE_ROOT / "litellm/config_supervisor.py",
+        COMPOSE_ROOT / "prometheus/prometheus.yml",
+        COMPOSE_ROOT / "grafana/provisioning/dashboards/default.yaml",
+    ]
+    referenced = {
+        match
+        for reader in readers
+        for match in re.findall(
+            r"/run/vonk-runtime-assets/([A-Za-z0-9_./-]+)",
+            reader.read_text(encoding="utf-8"),
+        )
+    }
+    assert {"caddy/Caddyfile", "postgres/entrypoint.sh"} <= shipped
+    assert referenced
+    for path in referenced:
+        path = path.rstrip("/")
+        assert path in shipped or any(
+            item.startswith(path + "/") for item in shipped
+        ), path

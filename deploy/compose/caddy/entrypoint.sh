@@ -93,6 +93,6 @@ if [ "${#proxy_auth}" -lt 32 ]; then
 fi
 export VONK_AGENT_PROXY_AUTH="$proxy_auth"
 if [ "$#" -eq 0 ]; then
-  set -- caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+  set -- caddy run --config /run/vonk-runtime-assets/caddy/Caddyfile --adapter caddyfile
 fi
 exec "$@"

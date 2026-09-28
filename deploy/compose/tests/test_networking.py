@@ -134,7 +134,7 @@ def test_litellm_runs_the_docker_staged_entrypoint_through_shell() -> None:
 
     assert litellm["entrypoint"] == [
         "/bin/sh",
-        "/run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh",
+        "/run/vonk-runtime-assets/litellm/entrypoint.sh",
     ]
 
 
@@ -221,11 +221,9 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
 
     assert "control-secret-init" not in services
     assert "control-bootstrap" not in services
-    assert api["depends_on"]["postgres"] == {
-        "condition": "service_healthy",
-        "required": True,
-    }
-    assert "step-ca" not in api["depends_on"]
+    # PostgreSQL waits for the entrypoint the API stages, so the API starts
+    # without waiting for it and retries the database instead.
+    assert "depends_on" not in api
     api_secrets = {secret["source"] for secret in api["secrets"]}
     assert {
         "package-helper-grant-private-key",
@@ -258,10 +256,9 @@ def test_former_bootstrap_dependants_wait_for_real_service_health() -> None:
     services = _rendered()["services"]
 
     for name in ("control-worker", "litellm", "step-ca"):
-        assert services[name]["depends_on"]["control-api"] == {
-            "condition": "service_healthy",
-            "required": True,
-        }
+        dependency = services[name]["depends_on"]["control-api"]
+        assert dependency["condition"] == "service_healthy"
+        assert dependency["required"] is True
 
 
 def test_caddy_has_readiness_checks() -> None:

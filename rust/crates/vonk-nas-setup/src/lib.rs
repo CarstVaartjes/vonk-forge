@@ -87,8 +87,6 @@ pub struct CanonicalTemplatePayload {
     secrets: Vec<SecretPrompt>,
     #[serde(default)]
     generated_secrets: GeneratedSecrets,
-    #[serde(default)]
-    runtime_files: Vec<RuntimeFile>,
     install_modes: Option<InstallModes>,
     step_ca_controller: Option<StepCaControllerRequest>,
     hermes: Option<HermesPrompt>,
@@ -153,14 +151,6 @@ struct PostgresUrlRequest {
     host: String,
     port: u16,
     database: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RuntimeFile {
-    file: String,
-    content: String,
-    mode: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -381,19 +371,6 @@ impl CanonicalTemplatePayload {
                 )));
             }
             validate_postgres_url_request(request)?;
-        }
-        for runtime_file in &self.runtime_files {
-            if !runtime_file.file.starts_with("runtime-configs/")
-                || runtime_file.content.contains('\0')
-                || runtime_file.content.len() > 1024 * 1024
-                || !matches!(runtime_file.mode, 0o644 | 0o755)
-            {
-                return Err(SetupError::InvalidPayload(format!(
-                    "runtime file {} is invalid",
-                    runtime_file.file
-                )));
-            }
-            validate_generated_file(&runtime_file.file, &mut secrets)?;
         }
         if let Some(request) = &self.step_ca_controller {
             if request.provisioner_name.trim().is_empty()
@@ -1020,14 +997,6 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
                 secret_file_content(value)
             };
             write_secret_file(&secret_directory, &name, &content)?;
-        }
-        for runtime_file in &payload.runtime_files {
-            write_runtime_file(
-                &secret_directory,
-                &runtime_file.file,
-                runtime_file.content.as_bytes(),
-                runtime_file.mode,
-            )?;
         }
         sync_directory(&secret_directory)?;
         sync_directory(&staging)?;
@@ -1890,14 +1859,6 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         };
         write_secret_file(&secret_root, &name, &content)?;
     }
-    for runtime_file in &payload.runtime_files {
-        replace_runtime_file(
-            &secret_root,
-            &runtime_file.file,
-            runtime_file.content.as_bytes(),
-            runtime_file.mode,
-        )?;
-    }
     if let Some(replacement) = controller_leaf_replacement {
         atomic_replace_controller_leaf(&secret_root, replacement)?;
     }
@@ -1907,6 +1868,7 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         payload.docker_compose_yaml.as_bytes(),
         0o644,
     )?;
+    remove_retired_runtime_configs(&secret_root)?;
     Ok(SetupOutcome {
         root: bundle.to_path_buf(),
         hermes_enabled,
@@ -2353,15 +2315,6 @@ fn write_secret_file(root: &Path, relative: &str, content: &[u8]) -> Result<(), 
     write_nested_file(root, relative, content, 0o600)
 }
 
-fn write_runtime_file(
-    root: &Path,
-    relative: &str,
-    content: &[u8],
-    mode: u32,
-) -> Result<(), SetupError> {
-    write_nested_file(root, relative, content, mode)
-}
-
 fn write_nested_file(
     root: &Path,
     relative: &str,
@@ -2403,26 +2356,14 @@ fn ensure_nested_parent(root: &Path, path: &Path, relative: &str) -> Result<(), 
     Ok(())
 }
 
-fn replace_runtime_file(
-    root: &Path,
-    relative: &str,
-    content: &[u8],
-    mode: u32,
-) -> Result<(), SetupError> {
-    let relative_path = Path::new(relative);
-    ensure_nested_parent(root, relative_path, relative)?;
-    let target = root.join(relative_path);
-    match fs::symlink_metadata(&target) {
-        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
-            atomic_replace(&target, content, mode)
-        }
-        Ok(_) => Err(SetupError::UnsafeDestination(format!(
-            "{} is not a regular runtime file",
-            target.display()
-        ))),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            write_runtime_file(root, relative, content, mode)
-        }
+/// Earlier bundles carried rendered runtime configs here. They now ship in
+/// the Controller image, so an upgrade drops the stale copies.
+fn remove_retired_runtime_configs(secret_root: &Path) -> Result<(), SetupError> {
+    let retired = secret_root.join("runtime-configs");
+    match fs::symlink_metadata(&retired) {
+        Ok(metadata) if metadata.is_dir() => Ok(fs::remove_dir_all(&retired)?),
+        Ok(_) => Ok(fs::remove_file(&retired)?),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
 }

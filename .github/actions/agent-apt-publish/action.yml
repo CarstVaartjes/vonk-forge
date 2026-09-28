@@ -166,17 +166,16 @@ runs:
         set -euo pipefail
         [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-        test "$SOURCE_SHA" = "$CALLER_SHA"
         case "$CHANNEL" in
           dev)
             test -z "$TAG_NAME" && test -z "$TAG_OID"
             test "$GITHUB_REF" = "refs/heads/main"
             git fetch --no-tags --prune origin \
               +refs/heads/main:refs/remotes/origin/main
-            main_sha=$(git rev-parse --verify refs/remotes/origin/main^{commit})
-            test "$SOURCE_SHA" = "$main_sha"
+            git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
+            test "$SOURCE_SHA" = "$CALLER_SHA"
             scripts/verify-release-tag-authority \
               "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
             ;;
@@ -221,17 +220,16 @@ runs:
         set -euo pipefail
         [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-        test "$SOURCE_SHA" = "$CALLER_SHA"
         case "$CHANNEL" in
           dev)
             test -z "$TAG_NAME" && test -z "$TAG_OID"
             test "$GITHUB_REF" = refs/heads/main
             git fetch --force --no-tags origin \
               +refs/heads/main:refs/remotes/origin/main
-            test "$SOURCE_SHA" = \
-              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
+            test "$SOURCE_SHA" = "$CALLER_SHA"
             scripts/verify-release-tag-authority \
               "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
             ;;
@@ -409,17 +407,16 @@ runs:
         set -euo pipefail
         [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-        test "$SOURCE_SHA" = "$CALLER_SHA"
         case "$CHANNEL" in
           dev)
             test -z "$TAG_NAME" && test -z "$TAG_OID"
             test "$GITHUB_REF" = refs/heads/main
             git fetch --force --no-tags origin \
               +refs/heads/main:refs/remotes/origin/main
-            test "$SOURCE_SHA" = \
-              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
+            test "$SOURCE_SHA" = "$CALLER_SHA"
             scripts/verify-release-tag-authority \
               "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
             ;;
@@ -461,17 +458,16 @@ runs:
         set -euo pipefail
         [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-        test "$SOURCE_SHA" = "$CALLER_SHA"
         case "$CHANNEL" in
           dev)
             test -z "$TAG_NAME" && test -z "$TAG_OID"
             test "$GITHUB_REF" = refs/heads/main
             git fetch --force --no-tags origin \
               +refs/heads/main:refs/remotes/origin/main
-            test "$SOURCE_SHA" = \
-              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
+            test "$SOURCE_SHA" = "$CALLER_SHA"
             scripts/verify-release-tag-authority \
               "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
             ;;

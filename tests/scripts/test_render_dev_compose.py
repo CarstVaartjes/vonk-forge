@@ -78,7 +78,7 @@ def _run_renderer(
     )
 
 
-def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
+def test_render_produces_a_single_self_contained_compose_file(
     tmp_path: Path,
 ) -> None:
     """Catches a deployment bundle that needs files beside docker-compose.yaml."""
@@ -100,8 +100,13 @@ def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
     assert document["services"]["control-worker"]["image"] == WORKER_IMAGE
     assert document["services"]["litellm"]["image"] == LITELLM_IMAGE
     assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
-    assert document["services"]["caddy"]["configs"]
-    assert "configs:" in text
+    # Runtime configuration ships in the Controller image instead.
+    assert "configs" not in document
+    assert not any(
+        isinstance(volume, str) and volume.startswith("./")
+        for service in document["services"].values()
+        for volume in service.get("volumes", [])
+    )
     images = [service["image"] for service in document["services"].values()]
     # Every image is a literal: Vonk images carry their digest and third-party
     # images an explicit version tag.
@@ -136,66 +141,10 @@ def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
         assert config.returncode == 0, config.stderr
 
 
-def test_runtime_config_identity_changes_with_content(tmp_path: Path) -> None:
-    renderer = _renderer_module()
-    source = tmp_path / "runtime.sh"
-    source.write_text("#!/bin/sh\nprintf first\\n\n", encoding="utf-8")
-    first = renderer._runtime_config_name(source)
-    source.write_text("#!/bin/sh\nprintf second\\n\n", encoding="utf-8")
-    second = renderer._runtime_config_name(source)
-
-    assert first.startswith("vonk_runtime_")
-    assert second.startswith("vonk_runtime_")
-    assert first != second
-
-
-def test_render_preserves_runtime_asset_executability_with_safe_config_modes(
-    tmp_path: Path,
-) -> None:
-    """Catches embedded scripts becoming non-executable or data becoming writable."""
-    output = tmp_path / "docker-compose.yaml"
-
-    result = _run_renderer(output)
-
-    assert result.returncode == 0, result.stderr
-    document = yaml.safe_load(output.read_text(encoding="utf-8"))
-    expected = {
-        "caddy": {
-            "/etc/caddy/Caddyfile": "0444",
-            "/usr/local/bin/vonk-caddy-entrypoint": "0555",
-        },
-        "control-api": {
-            "/run/vonk-source-assets/litellm/bootstrap-config.json": "0444",
-            "/run/vonk-source-assets/litellm/entrypoint.sh": "0444",
-            "/run/vonk-source-assets/litellm/config_supervisor.py": "0444",
-            "/run/vonk-source-assets/prometheus/prometheus.yml": "0444",
-            "/run/vonk-source-assets/prometheus/alerts.yaml": "0444",
-        },
-        "tailscale-configurator": {
-            "/usr/local/bin/configure-tailscale": "0555",
-        },
-        "hermes-litellm-key-provisioner": {
-            "/usr/local/bin/provision-hermes-litellm-key": "0444",
-        },
-        "postgres": {
-            "/run/vonk-source-assets/postgres/init-databases.sh": "0444",
-        },
-    }
-
-    for service_name, expected_modes in expected.items():
-        mounts = document["services"][service_name]["configs"]
-        actual_modes = {
-            mount["target"]: mount.get("mode")
-            for mount in mounts
-            if mount["target"] in expected_modes
-        }
-        assert actual_modes == expected_modes, service_name
-
-
 # Starts a real PostgreSQL container and runs initdb (~8-12 s on CI runners).
 @pytest.mark.slow(30)
 @pytest.mark.lane
-def test_rendered_postgres_configs_start_with_an_inert_initializer(
+def test_rendered_postgres_starts_with_an_inert_initializer(
     tmp_path: Path,
 ) -> None:
     if shutil.which("docker") is None:
@@ -219,13 +168,19 @@ def test_rendered_postgres_configs_start_with_an_inert_initializer(
     assert result.returncode == 0, result.stderr
     document = yaml.safe_load(rendered.read_text(encoding="utf-8"))
     postgres = document["services"]["postgres"]
-    config_names = {mount["source"] for mount in postgres["configs"]}
     backups = tmp_path / "backups"
     backups.mkdir()
-    # tmpfs data: initdb's fsyncs dominate the test on a Docker volume.
+    # tmpfs data: initdb's fsyncs dominate the test on a Docker volume. The
+    # Controller normally stages the PostgreSQL assets; bind the sources here.
     postgres["volumes"] = [
         {"type": "tmpfs", "target": "/var/lib/postgresql"},
         {"type": "bind", "source": str(backups), "target": "/backups"},
+        {
+            "type": "bind",
+            "source": str(ROOT / "deploy/compose/postgres"),
+            "target": "/run/vonk-runtime-assets/postgres",
+            "read_only": True,
+        },
     ]
     postgres.pop("networks")
     postgres["healthcheck"] = {
@@ -247,11 +202,6 @@ def test_rendered_postgres_configs_start_with_an_inert_initializer(
     litellm_password.write_text("c" * 64 + "\n", encoding="ascii")
     compose = {
         "services": {"postgres": postgres},
-        "configs": {
-            name: config
-            for name, config in document["configs"].items()
-            if name in config_names
-        },
         "secrets": {
             "postgres-password": {"file": str(postgres_password)},
             "litellm-database-password": {"file": str(litellm_password)},

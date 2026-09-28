@@ -403,7 +403,7 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
     assert not configurator.get("cap_add")
     volumes = _volume_targets(configurator)
     assert volumes["/var/run/tailscale"]["type"] == "volume"
-    assert volumes["/usr/local/bin/configure-tailscale"]["read_only"] is True
+    assert volumes["/run/vonk-runtime-assets"]["read_only"] is True
     assert {secret["target"] for secret in configurator["secrets"]} == {
         "/run/secrets/hermes-api-key"
     }
@@ -414,6 +414,11 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
     assert configurator["healthcheck"]["timeout"] == "8s"
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
+        "control-api": {
+            "condition": "service_healthy",
+            "required": True,
+            "restart": True,
+        },
         "tailscale-gateway": {
             "condition": "service_healthy",
             "required": True,

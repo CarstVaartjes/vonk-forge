@@ -494,74 +494,51 @@ fn payload_rejects_multiline_preflight_items() {
         .expect_err("multiline checklist rejected");
 }
 
-fn runtime_file_payload(compose: &str, content: &str, mode: u32) -> CanonicalTemplatePayload {
+fn compose_payload(compose: &str) -> CanonicalTemplatePayload {
     CanonicalTemplatePayload::from_json(
         &serde_json::to_vec(&serde_json::json!({
             "schema_version": 2,
             "docker_compose_yaml": compose,
             "required_values": [],
-            "secrets": [],
-            "runtime_files": [
-                {
-                    "file": "runtime-configs/service.conf",
-                    "content": content,
-                    "mode": mode
-                }
-            ]
+            "secrets": []
         }))
-        .expect("runtime payload JSON"),
+        .expect("payload JSON"),
     )
-    .expect("valid runtime-file payload")
+    .expect("valid payload")
 }
 
 #[test]
-fn runtime_files_are_materialized_and_replaced_beneath_the_bundle() {
+fn upgrade_replaces_compose_and_drops_retired_runtime_configs() {
     let temporary = tempdir().expect("temporary directory");
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::new()), &mut output);
     let installed = prepare(
-        &runtime_file_payload("services: {}\n", "first\n", 0o644),
+        &compose_payload("services: {}\n"),
         SetupRequest::install(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
     )
-    .expect("runtime file installed");
-    let runtime_file = installed.root.join("secrets/runtime-configs/service.conf");
-    assert_eq!(
-        std::fs::read_to_string(&runtime_file).expect("runtime file"),
-        "first\n"
-    );
+    .expect("bundle installed");
+    // Earlier releases rendered runtime configs into the bundle.
+    let retired = installed.root.join("secrets/runtime-configs");
+    std::fs::create_dir(&retired).expect("retired runtime configs");
+    std::fs::write(retired.join("vonk_runtime_0123456789abcdef"), "old\n")
+        .expect("retired runtime config");
 
     let upgraded = prepare(
-        &runtime_file_payload("services:\n  upgraded: {}\n", "second\n", 0o755),
+        &compose_payload("services:\n  upgraded: {}\n"),
         SetupRequest::upgrade(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
     )
-    .expect("runtime file upgraded");
+    .expect("bundle upgraded");
     assert_eq!(upgraded.root, installed.root);
-    assert_eq!(
-        std::fs::read_to_string(&runtime_file).expect("runtime file"),
-        "second\n"
-    );
     assert_eq!(
         std::fs::read_to_string(upgraded.root.join("docker-compose.yaml"))
             .expect("upgraded compose"),
         "services:\n  upgraded: {}\n"
     );
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(runtime_file)
-                .expect("runtime file metadata")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o755
-        );
-    }
+    assert!(!retired.exists());
 }
 
 #[test]
@@ -570,7 +547,7 @@ fn upgrade_adds_private_backup_directories_to_an_existing_bundle() {
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::new()), &mut output);
     let installed = prepare(
-        &runtime_file_payload("services: {}\n", "first\n", 0o644),
+        &compose_payload("services: {}\n"),
         SetupRequest::install(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
@@ -581,7 +558,7 @@ fn upgrade_adds_private_backup_directories_to_an_existing_bundle() {
     }
 
     prepare(
-        &runtime_file_payload("services: {}\n", "second\n", 0o644),
+        &compose_payload("services: {}\n"),
         SetupRequest::upgrade(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
@@ -603,33 +580,12 @@ fn upgrade_adds_private_backup_directories_to_an_existing_bundle() {
 
     // A bundle that already has both directories upgrades again.
     prepare(
-        &runtime_file_payload("services: {}\n", "third\n", 0o644),
+        &compose_payload("services: {}\n"),
         SetupRequest::upgrade(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
     )
     .expect("repeat upgrade accepts the backup directories");
-}
-
-#[test]
-fn runtime_files_reject_unsafe_paths_and_modes() {
-    for (file, mode) in [
-        ("../outside", 0o644),
-        ("runtime-configs/../outside", 0o644),
-        ("runtime-configs/service.conf", 0o777),
-    ] {
-        let payload = serde_json::json!({
-            "schema_version": 2,
-            "docker_compose_yaml": "services: {}\n",
-            "required_values": [],
-            "secrets": [],
-            "runtime_files": [{"file": file, "content": "safe\n", "mode": mode}]
-        });
-        CanonicalTemplatePayload::from_json(
-            &serde_json::to_vec(&payload).expect("runtime payload JSON"),
-        )
-        .expect_err("unsafe runtime file rejected");
-    }
 }
 
 fn write_existing_bundle(root: &Path) {

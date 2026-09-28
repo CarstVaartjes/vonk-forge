@@ -36,9 +36,7 @@ from route_activation import (
 ROOT = Path("/routes")
 ACTIVATION = ROOT / "activation.json"
 GENERATIONS = ROOT / "generations"
-BOOTSTRAP = Path(
-    "/run/vonk-normalized-secrets/runtime-assets/litellm/bootstrap-config.json"
-)
+BOOTSTRAP = Path("/run/vonk-runtime-assets/litellm/bootstrap-config.json")
 ACK_ROOT = Path("/supervisor")
 ACK = ACK_ROOT / "ack.json"
 POLL_SECONDS = 2

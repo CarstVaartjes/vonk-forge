@@ -146,4 +146,8 @@ def test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurat
         )
     secure_remote = _rendered()["services"]
     configurator = secure_remote["tailscale-configurator"]
-    assert set(configurator["depends_on"]) == {"caddy", "tailscale-gateway"}
+    assert set(configurator["depends_on"]) == {
+        "caddy",
+        "control-api",
+        "tailscale-gateway",
+    }

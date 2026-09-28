@@ -1445,16 +1445,12 @@ def test_compose_mounts_one_read_only_route_volume_and_starts_bounded_supervisor
     source = SUPERVISOR.read_text()
 
     assert "route-publications:/routes" in compose
+    assert "runtime-assets:/run/vonk-runtime-assets:ro" in compose
+    dockerfile = (ROOT / "control/Dockerfile").read_text()
+    assert "deploy/compose/litellm/config_supervisor.py" in dockerfile
+    assert "deploy/compose/litellm/bootstrap-config.json" in dockerfile
     assert (
-        "config_supervisor.py:/run/vonk-source-assets/litellm/config_supervisor.py:ro"
-        in compose
-    )
-    assert (
-        "bootstrap-config.json:/run/vonk-source-assets/litellm/bootstrap-config.json:ro"
-        in compose
-    )
-    assert (
-        "exec python /run/vonk-normalized-secrets/runtime-assets/litellm/config_supervisor.py"
+        "exec python /run/vonk-runtime-assets/litellm/config_supervisor.py"
         in entrypoint
     )
     assert "POLL_SECONDS = 2" in source
@@ -1499,6 +1495,7 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
     assert services["litellm"]["depends_on"]["control-api"] == {
         "condition": "service_healthy",
         "required": True,
+        "restart": True,
     }
     litellm = services["litellm"]
     assert litellm["user"] == "10002:10001"
@@ -1543,7 +1540,7 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
 
     assert litellm["entrypoint"] == [
         "/bin/sh",
-        "/run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh",
+        "/run/vonk-runtime-assets/litellm/entrypoint.sh",
     ]
     assert volumes["/routes"]["read_only"] is True
     assert volumes["/supervisor"].get("read_only", False) is False

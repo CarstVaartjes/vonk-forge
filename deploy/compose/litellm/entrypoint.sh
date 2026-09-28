@@ -29,4 +29,4 @@ else
 fi
 export LITELLM_UPSTREAM_KEY
 read_secret LITELLM_DATABASE_URL "${LITELLM_DATABASE_URL_FILE:-/run/secrets/litellm-database-url}"
-exec python /run/vonk-normalized-secrets/runtime-assets/litellm/config_supervisor.py
+exec python /run/vonk-runtime-assets/litellm/config_supervisor.py
