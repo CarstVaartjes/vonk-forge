@@ -305,6 +305,9 @@ fn runtime_policy() -> Result<RuntimePolicy, OciError> {
     .map_err(OciError::Json)
 }
 
+/// One run directory's inspection outcome; a failure names the run it belongs to.
+type RunInspectionResult = Result<Option<RecipeRunInspectionPlan>, (String, OciError)>;
+
 impl<R: ProcessRunner> OciRuntime<'_, R> {
     pub fn job_input_destination(&self, run_id: &str, name: &str) -> Result<PathBuf, OciError> {
         if name.is_empty()
@@ -1431,7 +1434,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     pub(crate) fn recipe_run_inspection_results(
         &self,
-    ) -> Result<Vec<Result<Option<RecipeRunInspectionPlan>, (String, OciError)>>, OciError> {
+    ) -> Result<Vec<RunInspectionResult>, OciError> {
         let runs = self.data_root.join("runs");
         let metadata = match fs::symlink_metadata(&runs) {
             Ok(metadata) => metadata,
