@@ -267,7 +267,12 @@ def _parked_retry_evidence(
     if attempt.state == "expired":
         # Expiry never proves the old executor stopped. Only exact-resume
         # operations qualify, whose agent reconciles the old effect first.
-        return attempt.result is None and _aware(attempt.lease_deadline) <= _aware(now)
+        # A late result retained under the expired fence stays diagnostic
+        # evidence; it is not a reason to park. It proves only that the old
+        # executor finished, which makes the exact re-issue safer. Requiring
+        # its absence parked a start whose result arrived after its lease
+        # behind an operator forever.
+        return _aware(attempt.lease_deadline) <= _aware(now)
     if attempt.state not in {"failed", "waiting-for-operator"}:
         return False
     try:

@@ -4759,6 +4759,123 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
         assert exact_worker.state == "running"
 
 
+def test_unowned_run_probe_grant_is_read_only_node_bound_and_never_for_owned_runs(
+    tmp_path: Path,
+) -> None:
+    """A run this Controller never recorded gets only a read-only probe.
+
+    Live regression: after the Controller database was rebuilt, each Spark
+    asked for an observation grant for its pre-reset run every sweep and was
+    refused forever, so the run could neither be observed nor retired.
+    """
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="7" * 36
+    )
+    start = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="8" * 36,
+        alias="observed-unowned",
+    )
+    with sessions() as session:
+        run = _required(session.get(RecipeRun, start.owner_id))
+        installed = _required(session.get(RecipeInstallation, run.installation_id))
+        run_node = _required(
+            session.scalar(
+                select(RunNode).where(
+                    RunNode.run_id == run.id, RunNode.node_id == nodes[0]
+                )
+            )
+        )
+        start_job = _required(session.get(Job, start.id))
+        launch = require_mapping(
+            require_mapping(
+                _required(start_job.result)["launch_evidence"], "launch evidence"
+            )[nodes[0]],
+            "node launch evidence",
+        )
+        owned = {
+            "schema_version": 1,
+            "node_id": nodes[0],
+            "run_id": run.id,
+            "installation_id": run.installation_id,
+            "recipe_revision_id": installed.recipe_revision_id,
+            "recipe_content_sha256": launch["recipe_content_sha256"],
+            "mapping_id": run.mapping_id,
+            "mapping_generation": run.mapping_generation,
+            "run_generation": run.run_generation,
+            "image_digest": installed.image_digest.removeprefix("sha256:"),
+            "artifact_set_digest": launch["artifact_set_digest"],
+            "model_identity": launch["model_identity"],
+            "rank": run_node.rank,
+            "role": run_node.role,
+            "world_size": launch["world_size"],
+            "local_address": launch["local_address"],
+            "master_address": launch["master_address"],
+            "master_port": launch["master_port"],
+            "port": run_node.port,
+            "runtime_arguments_sha256": launch["runtime_arguments_sha256"],
+        }
+    authority = HostRuntimeAuthorityService(
+        sessions,
+        HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=lambda: NOW),
+        clock=lambda: NOW,
+    )
+
+    def probe(identity, **overrides):
+        values = {
+            "node_id": nodes[0],
+            "certificate_serial": "serial-0",
+            "identity": identity,
+            "job_id": identity["run_id"],
+            "operation_id": str(uuid.uuid4()),
+            "attempt": identity["run_generation"],
+            "fence": str(uuid.uuid4()),
+            "request_sha256": "d" * 64,
+            "expires_in_seconds": 10,
+        }
+        values.update(overrides)
+        return authority.issue_unowned_recipe_run_probe_grant(**values)
+
+    # An owned run is never probed this way: ordinary observation decides.
+    assert probe(owned) is None
+
+    orphan = {**owned, "run_id": str(uuid.uuid4())}
+    issued = probe(orphan)
+    assert issued is not None
+    identity_sha256, grant = issued
+    operation = grant.claims.operation
+    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+    assert operation.action == "run-inspect"
+    assert operation.job_id == orphan["run_id"]
+    assert grant.claims.node_id == nodes[0]
+    assert grant.claims.expires_at - grant.claims.issued_at == 10
+    assert (
+        operation.observation_identity_sha256
+        == identity_sha256
+        == hashlib.sha256(canonical_message(orphan)).hexdigest()
+    )
+    # A probe is read-only and holds no pending slot, so the next sweep may ask.
+    assert probe(orphan) is not None
+
+    with pytest.raises(HostHelperAuthorityError):
+        probe(orphan, node_id=nodes[1], certificate_serial="serial-1")
+    with pytest.raises(HostHelperAuthorityError):
+        probe(orphan, job_id=str(uuid.uuid4()))
+    with pytest.raises(HostHelperAuthorityError):
+        probe(orphan, attempt=orphan["run_generation"] + 1)
+    with pytest.raises(HostHelperAuthorityError):
+        probe(orphan, certificate_serial="serial-1")
+    with pytest.raises(HostHelperAuthorityError):
+        probe(orphan, expires_in_seconds=30)
+
+
 @pytest.mark.parametrize("node_index", [0, 1])
 def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
     tmp_path: Path, node_index: int

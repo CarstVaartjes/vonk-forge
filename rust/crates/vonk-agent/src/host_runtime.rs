@@ -271,6 +271,9 @@ pub struct RecipeRunInspectionOutcome {
     pub observation_identity_sha256: String,
     pub receipt: RecipeRunObservationReceipt,
     pub process_running: bool,
+    /// The Controller has no record of this run (see
+    /// [`crate::client::RecipeRunInspectionGrant::unowned`]).
+    pub unowned: bool,
 }
 
 pub struct HostRuntimeBoundary<'a> {
@@ -362,6 +365,7 @@ impl HostRuntimeBoundary<'_> {
             observation_identity_sha256: authorization.observation_identity_sha256,
             receipt,
             process_running,
+            unowned: authorization.unowned,
         })
     }
 

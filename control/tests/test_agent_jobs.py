@@ -2517,6 +2517,82 @@ def test_late_result_is_retained_under_expired_fence_without_completing_operatio
     assert jobs.record_late_result(late) is True
 
 
+def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
+    service,
+) -> None:
+    """A result that arrives after the lease is evidence, not an operator gate.
+
+    Live regression: a two-phase start's readiness failure reached the
+    Controller an hour after its lease; the retained late result disqualified
+    the parked order from exact re-issue, so the job, its run and every
+    observation of that run waited for an operator indefinitely.
+    """
+
+    from vonk_agent_protocol import AgentResult
+
+    jobs, sessions, clock = service
+    capabilities = [
+        "agent.runtime.rust.v1",
+        "recipe.stop",
+        "agent.lifecycle.resume.exact.v1",
+    ]
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30, capabilities=capabilities)
+    assert claim is not None
+    clock.advance(seconds=31)
+    late = AgentResult.model_validate(
+        {
+            **{
+                key: claim.model_dump(mode="json")[key]
+                for key in (
+                    "schema_version",
+                    "job_id",
+                    "operation_id",
+                    "attempt",
+                    "fence",
+                    "node_id",
+                    "deadline",
+                )
+            },
+            "state": "failed",
+            "result": {
+                "status": "failed",
+                "error_code": "recipe_stop_failed",
+                "reason": "runtime process exited",
+            },
+        }
+    )
+    assert jobs.record_late_result(late) is True
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == "waiting-for-operator"
+    resumed = None
+    for _ in range(4):
+        resumed = claim_agent(jobs, NODE_A, "serial-a", 30, capabilities=capabilities)
+        if resumed is not None:
+            break
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            assert stored is not None
+            assert stored.retry_disposition == "retry"
+            assert stored.retry_due_at is not None
+            clock.now = max(clock.now, stored.retry_due_at.replace(tzinfo=UTC))
+    assert resumed is not None
+    assert resumed.operation_id == operation.id and resumed.attempt == 2
+    with sessions() as session:
+        previous = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.fence == claim.fence
+            )
+        )
+        assert previous is not None and previous.state == "expired"
+        assert previous.result is not None
+    jobs.succeed(resumed, STOP_RESULT)
+    assert job_state(sessions, operation.parent_job_id).state == "succeeded"
+
+
 def test_transient_distribution_failure_recovers_after_repeated_faults_and_restart(
     service,
 ) -> None:

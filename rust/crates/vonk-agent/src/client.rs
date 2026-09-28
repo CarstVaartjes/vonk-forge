@@ -360,7 +360,15 @@ pub fn build_exact_recipe_run_observations(
 pub struct RecipeRunInspectionGrant {
     pub grant: SignedHostHelperGrant,
     pub observation_identity_sha256: String,
+    /// The Controller has no record of this run: the grant authorizes only a
+    /// read-only probe, and no observation of the run can ever be accepted.
+    pub unowned: bool,
 }
+
+/// Response header naming a run the Controller has no record of.
+pub const RECIPE_RUN_DISPOSITION_HEADER: &str = "x-vonk-recipe-run-disposition";
+/// The only disposition value: the Controller never owned this run.
+pub const RECIPE_RUN_UNOWNED: &str = "unowned";
 
 #[derive(Debug, Clone)]
 pub struct DistributionDownloadEvidence {
@@ -811,6 +819,11 @@ impl AgentHttpClient {
             return Err(ClientError::ObservationNotReady);
         }
         classify_response(&response)?;
+        let unowned = match response.headers().get(RECIPE_RUN_DISPOSITION_HEADER) {
+            None => false,
+            Some(value) if value.as_bytes() == RECIPE_RUN_UNOWNED.as_bytes() => true,
+            Some(_) => return Err(ClientError::Protocol),
+        };
         let body = bounded_body(response).await?;
         let response: RecipeRunObservationGrantWire =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -849,6 +862,7 @@ impl AgentHttpClient {
         Ok(RecipeRunInspectionGrant {
             grant: response.grant,
             observation_identity_sha256: response.observation_identity_sha256,
+            unowned,
         })
     }
 
@@ -4947,12 +4961,13 @@ mod tests {
             }
         }))
         .unwrap();
-        let (client, server) = request_capture_client(200, vec![], response, None);
+        let (client, server) = request_capture_client(200, vec![], response.clone(), None);
 
-        client
+        let owned = client
             .recipe_run_inspection_grant(&binding, &request, &digest)
             .await
             .unwrap();
+        assert!(!owned.unowned);
         let raw = server.join().unwrap();
         let (headers, body) = raw
             .windows(4)
@@ -4971,6 +4986,37 @@ mod tests {
         assert_eq!(body["run_generation"], binding.run_generation);
         assert_eq!(body["request_sha256"], digest);
         assert_eq!(body["expires_in_seconds"], 10);
+
+        // A run the Controller has no record of gets a read-only probe grant
+        // that names itself, so the agent can retire the stopped run.
+        let (client, server) = request_capture_client(
+            200,
+            vec!["x-vonk-recipe-run-disposition: unowned".to_owned()],
+            response.clone(),
+            None,
+        );
+        assert!(
+            client
+                .recipe_run_inspection_grant(&binding, &request, &digest)
+                .await
+                .unwrap()
+                .unowned
+        );
+        server.join().unwrap();
+        // Any other disposition is outside the contract and never guessed at.
+        let (client, server) = request_capture_client(
+            200,
+            vec!["x-vonk-recipe-run-disposition: retired".to_owned()],
+            response,
+            None,
+        );
+        assert!(matches!(
+            client
+                .recipe_run_inspection_grant(&binding, &request, &digest)
+                .await,
+            Err(ClientError::Protocol)
+        ));
+        server.join().unwrap();
 
         let (client, server) = request_capture_client(425, vec![], vec![], None);
         assert!(matches!(
