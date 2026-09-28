@@ -49,7 +49,9 @@ Useful flags:
 - **The CI command, not a paraphrase.** It runs
   `uv run --project control --frozen --with-editable . python
   scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile`, the exact
-  `controller-spark-wire` step. Before starting Docker it extracts that step,
+  `controller-spark-wire` step. Run `scripts/build-control-wheel` before using
+  the control environment locally; CI builds and digest-checks this wheel before
+  its control sync/run steps. Before starting Docker it extracts that step,
   the Rust/uv/Python pins and the recipe-revision file from
   `.github/workflows/ci.yml` and refuses to run when they disagree with the
   lane. `tests/scripts/test_dev_agent_wire_linux.py` asserts the same in the

@@ -82,20 +82,24 @@ def _server_process(
 ) -> tuple[subprocess.Popen[str], Path]:
     ready = tmp_path / f"api-ready-{uuid.uuid4().hex}"
     helper = Path(__file__).with_name("_profile_https_process.py")
-    environment = {
-        **os.environ,
-        "PYTHONPATH": os.pathsep.join(
-            str(path)
-            for path in (
-                Path(__file__).resolve().parents[1],
-                Path(__file__).resolve().parents[1] / "src",
-                Path(__file__).resolve().parents[2] / "src",
-                Path("/opt/vonk-forge-recipes/contracts/src"),
-            )
-        ),
-        "VONK_TEST_DATABASE_URL": database_url,
-        "VONK_RECIPE_LIBRARY_ROOT": "/opt/vonk-forge-recipes",
-    }
+    from tests.subprocess_environment import isolated_environment
+
+    environment = isolated_environment(
+        tmp_path / "api-home",
+        extra={
+            "PYTHONPATH": os.pathsep.join(
+                str(path)
+                for path in (
+                    Path(__file__).resolve().parents[1],
+                    Path(__file__).resolve().parents[1] / "src",
+                    Path(__file__).resolve().parents[2] / "src",
+                    Path("/opt/vonk-forge-recipes/contracts/src"),
+                )
+            ),
+            "VONK_TEST_DATABASE_URL": database_url,
+            "VONK_RECIPE_LIBRARY_ROOT": "/opt/vonk-forge-recipes",
+        },
+    )
     process = subprocess.Popen(
         [
             sys.executable,

@@ -103,6 +103,8 @@ def test_production_worker_has_no_cluster_egress_network() -> None:
 
 
 @pytest.mark.lane  # Builds and runs the worker image.
+@pytest.mark.linux_only
+@pytest.mark.needs_buildx
 def test_built_worker_image_contains_no_direct_transport_executable(
     control_image_build_args: list[str],
 ) -> None:

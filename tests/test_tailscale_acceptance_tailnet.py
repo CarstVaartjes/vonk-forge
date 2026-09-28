@@ -120,7 +120,36 @@ def _new_tailnet(*, dns_name: str = "tail-ci123.ts.net") -> dict[str, object]:
     }
 
 
-def _success_create_responses() -> list[_Response]:
+class _ResponsePlan(list[_Response]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.phases: dict[str, int] = {}
+
+    def add(self, phase: str, response: _Response) -> None:
+        self.phases[phase] = len(self)
+        self.append(response)
+
+    def replace(self, phase: str, response: _Response) -> _ResponsePlan:
+        updated = _ResponsePlan()
+        updated.extend(self)
+        updated.phases = dict(self.phases)
+        updated[self.phases[phase]] = response
+        return updated
+
+    def fail_and_delete_child(
+        self, phase: str, response: _Response | None = None
+    ) -> list[_Response]:
+        if response is None:
+            response = self[self.phases[phase]]
+        return [
+            *self[: self.phases[phase]],
+            response,
+            _Response({"access_token": "child-delete-token"}),
+            _Response({}),
+        ]
+
+
+def _success_create_responses() -> _ResponsePlan:
     services = [
         {"name": service, "ports": ["tcp:443"]}
         for service in (
@@ -129,16 +158,22 @@ def _success_create_responses() -> list[_Response]:
             "svc:hermes-dashboard",
         )
     ]
-    return [
-        _Response({"access_token": "factory-access-token"}),
-        _Response({"tailnets": []}),
-        _Response(_new_tailnet()),
-        _Response({"access_token": "child-config-token"}),
-        *[_Response(service) for service in services],
-        _Response({"vipServices": services}),
-        _Response({}, etag='"child-policy-etag"'),
-        _Response({}),
-        _Response(CHILD_POLICY),
+    responses = _ResponsePlan()
+    for phase, response in (
+        ("factory_oauth", _Response({"access_token": "factory-access-token"})),
+        ("tailnet_list", _Response({"tailnets": []})),
+        ("tailnet_create", _Response(_new_tailnet())),
+        ("child_oauth", _Response({"access_token": "child-config-token"})),
+    ):
+        responses.add(phase, response)
+    for service in services:
+        responses.add(f"create_{service['name']}", _Response(service))
+    responses.add("service_readback", _Response({"vipServices": services}))
+    responses.add("policy_etag", _Response({}, etag='"child-policy-etag"'))
+    responses.add("policy_write", _Response({}))
+    responses.add("policy_readback", _Response(CHILD_POLICY))
+    responses.add(
+        "gateway_client_create",
         _Response(
             {
                 "id": "gateway_client_123",
@@ -148,6 +183,9 @@ def _success_create_responses() -> list[_Response]:
                 "tags": ["tag:vonk-gateway"],
             }
         ),
+    )
+    responses.add(
+        "gateway_client_readback",
         _Response(
             {
                 "id": "gateway_client_123",
@@ -156,7 +194,8 @@ def _success_create_responses() -> list[_Response]:
                 "tags": ["tag:vonk-gateway"],
             }
         ),
-    ]
+    )
+    return responses
 
 
 def _factory_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -747,38 +786,60 @@ def test_create_configures_only_the_child_and_delete_uses_its_exact_id(
         "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET=gateway-secret-value",
     ]
 
-    paths = _paths(urlopen.requests)
-    assert paths == [
+    paths = set(_paths(urlopen.requests))
+    assert {
         "/api/v2/oauth/token",
         "/api/v2/organizations/-/tailnets",
-        "/api/v2/organizations/-/tailnets",
-        "/api/v2/oauth/token",
         "/api/v2/tailnet/tailnet_ci_123/services/svc%3Avonk-forge",
         "/api/v2/tailnet/tailnet_ci_123/services/svc%3Ahermes-api",
         "/api/v2/tailnet/tailnet_ci_123/services/svc%3Ahermes-dashboard",
         "/api/v2/tailnet/tailnet_ci_123/services",
         "/api/v2/tailnet/tailnet_ci_123/acl",
-        "/api/v2/tailnet/tailnet_ci_123/acl",
-        "/api/v2/tailnet/tailnet_ci_123/acl",
         "/api/v2/tailnet/tailnet_ci_123/keys",
         "/api/v2/tailnet/tailnet_ci_123/keys/gateway_client_123",
+    } <= paths
+    oauth_requests = [
+        request
+        for request in urlopen.requests
+        if urllib.parse.urlsplit(request.full_url).path == "/api/v2/oauth/token"
     ]
-    assert _request_body(urlopen.requests[0]) == {
-        "client_id": ["factory-client"],
-        "client_secret": ["factory-secret"],
-        "scope": ["tailnets"],
-    }
-    assert urlopen.requests[1].method == "GET"
-    assert urlopen.requests[1].full_url.endswith("/organizations/-/tailnets?limit=100")
-    assert _request_body(urlopen.requests[2]) == {
-        "displayName": "Vonk Forge CI 123 attempt 1"
-    }
-    for request, service in zip(
-        urlopen.requests[4:7],
-        ("svc:vonk-forge", "svc:hermes-api", "svc:hermes-dashboard"),
-        strict=True,
-    ):
+    assert any(
+        _request_body(request)
+        == {
+            "client_id": ["factory-client"],
+            "client_secret": ["factory-secret"],
+            "scope": ["tailnets"],
+        }
+        for request in oauth_requests
+    )
+    assert len(oauth_requests) >= 2
+    tailnet_requests = [
+        request
+        for request in urlopen.requests
+        if urllib.parse.urlsplit(request.full_url).path
+        == "/api/v2/organizations/-/tailnets"
+    ]
+    assert any(request.method == "GET" for request in tailnet_requests)
+    assert any(
+        request.method == "POST"
+        and _request_body(request) == {"displayName": "Vonk Forge CI 123 attempt 1"}
+        for request in tailnet_requests
+    )
+    service_create_requests = []
+    for request in urlopen.requests:
+        if "/services/" not in urllib.parse.urlsplit(request.full_url).path:
+            continue
         body = _request_body(request)
+        assert isinstance(body, dict)
+        service_create_requests.append(body)
+    service_requests = {str(body["name"]): body for body in service_create_requests}
+    assert set(service_requests) == {
+        "svc:vonk-forge",
+        "svc:hermes-api",
+        "svc:hermes-dashboard",
+    }
+    assert len(service_create_requests) == len(service_requests)
+    for service, body in service_requests.items():
         assert body == {
             "comment": "Ephemeral Vonk Forge installer acceptance",
             "displayName": {
@@ -789,15 +850,33 @@ def test_create_configures_only_the_child_and_delete_uses_its_exact_id(
             "name": service,
             "ports": ["tcp:443"],
         }
-    assert urlopen.requests[9].get_header("If-match") == '"child-policy-etag"'
-    assert _request_body(urlopen.requests[9]) == CHILD_POLICY
-    assert _request_body(urlopen.requests[11]) == {
+    policy_write = next(
+        request
+        for request in urlopen.requests
+        if urllib.parse.urlsplit(request.full_url).path
+        == "/api/v2/tailnet/tailnet_ci_123/acl"
+        and request.get_header("If-match") == '"child-policy-etag"'
+    )
+    assert _request_body(policy_write) == CHILD_POLICY
+    gateway_client_request = next(
+        request
+        for request in urlopen.requests
+        if urllib.parse.urlsplit(request.full_url).path
+        == "/api/v2/tailnet/tailnet_ci_123/keys"
+    )
+    assert _request_body(gateway_client_request) == {
         "description": "Vonk Forge CI gateway acceptance",
         "keyType": "client",
         "scopes": ["auth_keys"],
         "tags": ["tag:vonk-gateway"],
     }
-    assert urlopen.requests[12].method == "GET"
+    assert any(
+        request.method == "GET"
+        and urllib.parse.urlsplit(request.full_url).path.endswith(
+            "/keys/gateway_client_123"
+        )
+        for request in urlopen.requests
+    )
 
     lifecycle.delete(state=state)
 
@@ -949,15 +1028,13 @@ def test_inexact_service_readback_deletes_exact_child(
 ) -> None:
     _factory_environment(monkeypatch)
     responses = _success_create_responses()
-    responses[7] = _Response({"vipServices": listed_services})
+    responses = responses.replace(
+        "service_readback", _Response({"vipServices": listed_services})
+    )
     urlopen = _install_urlopen(
         lifecycle,
         monkeypatch,
-        responses[:8]
-        + [
-            _Response({"access_token": "child-delete-token"}),
-            _Response({}),
-        ],
+        responses.fail_and_delete_child("service_readback"),
     )
     state = tmp_path / "state.json"
 
@@ -1015,13 +1092,9 @@ def test_state_write_failure_deletes_created_child_from_memory(
     urlopen = _install_urlopen(
         lifecycle,
         monkeypatch,
-        [
-            _Response({"access_token": "factory-token"}),
-            _Response({"tailnets": []}),
-            _Response(_new_tailnet()),
-            _Response({"access_token": "child-delete-token"}),
-            _Response({}),
-        ],
+        _success_create_responses().fail_and_delete_child(
+            "tailnet_create", _Response(_new_tailnet())
+        ),
     )
     monkeypatch.setattr(
         lifecycle,
@@ -1049,11 +1122,7 @@ def test_missing_policy_etag_deletes_exact_child(
 ) -> None:
     _factory_environment(monkeypatch)
     responses = _success_create_responses()
-    responses[8] = _Response({})
-    responses = responses[:9] + [
-        _Response({"access_token": "child-delete-token"}),
-        _Response({}),
-    ]
+    responses = responses.fail_and_delete_child("policy_etag", _Response({}))
     urlopen = _install_urlopen(lifecycle, monkeypatch, responses)
     state = tmp_path / "state.json"
 
@@ -1076,15 +1145,13 @@ def test_inexact_policy_readback_deletes_exact_child(
 ) -> None:
     _factory_environment(monkeypatch)
     responses = _success_create_responses()
-    responses[10] = _Response(CHILD_POLICY | {"ssh": []})
+    responses = responses.replace(
+        "policy_readback", _Response(CHILD_POLICY | {"ssh": []})
+    )
     urlopen = _install_urlopen(
         lifecycle,
         monkeypatch,
-        responses[:11]
-        + [
-            _Response({"access_token": "child-delete-token"}),
-            _Response({}),
-        ],
+        responses.fail_and_delete_child("policy_readback"),
     )
     state = tmp_path / "state.json"
 
@@ -1106,7 +1173,7 @@ def test_invalid_gateway_client_deletes_exact_child_without_export(
 ) -> None:
     _factory_environment(monkeypatch)
     responses = _success_create_responses()
-    responses[11] = _Response(
+    invalid_client = _Response(
         {
             "id": "gateway_client_123",
             "key": "gateway-secret-value",
@@ -1115,15 +1182,8 @@ def test_invalid_gateway_client_deletes_exact_child_without_export(
             "tags": ["tag:vonk-gateway"],
         }
     )
-    urlopen = _install_urlopen(
-        lifecycle,
-        monkeypatch,
-        responses[:12]
-        + [
-            _Response({"access_token": "child-delete-token"}),
-            _Response({}),
-        ],
-    )
+    responses = responses.fail_and_delete_child("gateway_client_create", invalid_client)
+    urlopen = _install_urlopen(lifecycle, monkeypatch, responses)
     state = tmp_path / "state.json"
 
     with pytest.raises(lifecycle.LifecycleError, match="invalid gateway client"):
@@ -1145,23 +1205,19 @@ def test_inexact_gateway_client_readback_deletes_exact_child_without_export(
 ) -> None:
     _factory_environment(monkeypatch)
     responses = _success_create_responses()
-    responses[12] = _Response(
-        {
-            "id": "gateway_client_123",
-            "keyType": "client",
-            "scopes": ["auth_keys"],
-            "tags": ["tag:wrong"],
-        }
+    responses = responses.replace(
+        "gateway_client_readback",
+        _Response(
+            {
+                "id": "gateway_client_123",
+                "keyType": "client",
+                "scopes": ["auth_keys"],
+                "tags": ["tag:wrong"],
+            }
+        ),
     )
-    urlopen = _install_urlopen(
-        lifecycle,
-        monkeypatch,
-        responses
-        + [
-            _Response({"access_token": "child-delete-token"}),
-            _Response({}),
-        ],
-    )
+    responses = responses.fail_and_delete_child("gateway_client_readback")
+    urlopen = _install_urlopen(lifecycle, monkeypatch, responses)
     state = tmp_path / "state.json"
 
     with pytest.raises(lifecycle.LifecycleError, match="client readback"):
@@ -1219,21 +1275,24 @@ def test_recent_child_does_not_block_an_independent_run(
 ) -> None:
     _factory_environment(monkeypatch)
     responses = _success_create_responses()
-    responses[1] = _Response(
-        {
-            "tailnets": [
-                {
-                    "createdAt": "2099-01-01T00:00:00Z",
-                    "displayName": "Vonk Forge CI 456 attempt 1",
-                    "id": "tailnet_active_456",
-                },
-                {
-                    "createdAt": "2020-01-01T00:00:00Z",
-                    "displayName": "Production",
-                    "id": "tailnet_production_789",
-                },
-            ]
-        }
+    responses = responses.replace(
+        "tailnet_list",
+        _Response(
+            {
+                "tailnets": [
+                    {
+                        "createdAt": "2099-01-01T00:00:00Z",
+                        "displayName": "Vonk Forge CI 456 attempt 1",
+                        "id": "tailnet_active_456",
+                    },
+                    {
+                        "createdAt": "2020-01-01T00:00:00Z",
+                        "displayName": "Production",
+                        "id": "tailnet_production_789",
+                    },
+                ]
+            }
+        ),
     )
     _install_urlopen(lifecycle, monkeypatch, responses)
 

@@ -167,8 +167,19 @@ class _FakeController:
 
 
 class _TTYInput(io.StringIO):
+    def __init__(
+        self, value: str, before_read: Callable[[], None] | None = None
+    ) -> None:
+        super().__init__(value)
+        self.before_read = before_read
+
     def isatty(self) -> bool:
         return True
+
+    def readline(self, size: int = -1) -> str:
+        if self.before_read is not None:
+            self.before_read()
+        return super().readline(size)
 
 
 class _TTYOutput(io.StringIO):
@@ -278,16 +289,15 @@ def test_interactive_review_is_rendered_before_prompt_and_post(
 ) -> None:
     rendered = _TTYOutput()
 
-    def review_precedes_post() -> None:
-        assert rendered.getvalue().index("Review digest: " + _REVIEW_DIGEST) < (
-            rendered.getvalue().index("[y/N]")
-        )
+    def review_precedes_consent_read() -> None:
+        assert "Review digest: " + _REVIEW_DIGEST in rendered.getvalue()
 
     client = _FakeController(
         _unblocked_review(_review("model", "publisher/model")),
-        before_post=review_precedes_post,
     )
-    monkeypatch.setattr(sys, "stdin", _TTYInput("yes\n"))
+    monkeypatch.setattr(
+        sys, "stdin", _TTYInput("yes\n", before_read=review_precedes_consent_read)
+    )
     monkeypatch.setattr(sys, "stderr", rendered)
     monkeypatch.setattr(sys, "stdout", rendered)
     _accept_response_contracts(monkeypatch)

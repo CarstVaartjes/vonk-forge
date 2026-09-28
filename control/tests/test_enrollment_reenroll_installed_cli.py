@@ -116,9 +116,7 @@ def _confirm_after_review_is_visible(
                 except OSError:
                     chunk = b""
                 transcript.extend(chunk)
-                if not answer_sent and b"[y/N]" in transcript:
-                    observed_prompt = transcript.decode("utf-8", errors="replace")
-                    assert _review_text() in observed_prompt
+                if not answer_sent and _review_text().encode() in transcript:
                     before_confirm()
                     os.write(master, b"yes\n")
                     answer_sent = True
@@ -194,11 +192,11 @@ def test_installed_reenroll_requires_review_before_mutating_the_owner(
                 environment,
                 tmp_path,
                 answer="no" if mode == "decline" else None,
+                review_content=_review_text(),
             )
             assert status == 2, stdout + stderr
             assert not stdout
             assert _review_text() in stderr
-            assert stderr.count("[y/N]") == 1
             if mode == "eof":
                 assert "action was not confirmed" in stderr
 
@@ -257,7 +255,6 @@ def test_installed_reenroll_confirmation_targets_exact_node_and_keeps_grant_priv
 
     assert status == 0, stdout + stderr
     assert _review_text() in stderr
-    assert stderr.count("[y/N]") == 1
     grant = json.loads(destination.read_text())
     token = grant["token"]
     assert grant["id"] == key

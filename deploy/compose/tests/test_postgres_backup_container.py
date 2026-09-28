@@ -13,6 +13,8 @@ import pytest
     os.environ.get("VONK_RUN_BACKUP_CONTAINER_TEST") != "1",
     reason="requires Docker; set VONK_RUN_BACKUP_CONTAINER_TEST=1",
 )
+@pytest.mark.needs_docker
+@pytest.mark.needs_backup_container
 def test_postgres_backup_restore():
     root = pathlib.Path(__file__).resolve().parents[3]
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="vonk-backup-test-"))

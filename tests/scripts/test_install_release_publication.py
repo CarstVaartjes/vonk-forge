@@ -15,6 +15,8 @@ import pytest
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+pytestmark = pytest.mark.needs_dpkg_deb
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/install-release-publication"
 DIGEST = "a" * 64
@@ -2647,6 +2649,7 @@ def test_public_cli_endpoint_verifies_the_signed_wheel_before_uv_install(
     assert not receipt.exists()
 
 
+@pytest.mark.needs_installer_release_probe
 def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
     tmp_path: Path,
 ) -> None:

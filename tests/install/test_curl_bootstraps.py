@@ -106,8 +106,7 @@ def _run_bootstrap(
         )
     receipt = tmp_path / "receipt"
     environment = {
-        **os.environ,
-        "PATH": f"{commands}:{os.environ['PATH']}",
+        "PATH": f"{commands}:{os.defpath}",
         "TMPDIR": str(tmp_path),
         "VONK_INSTALL_BASE_URL": "https://install.example.test/artifacts",
         "VONK_TEST_ARTIFACT": str(artifact),
@@ -134,7 +133,16 @@ def _run_bootstrap(
 
 @pytest.mark.parametrize(
     ("kind", "system", "machine", "arguments", "expected_arguments"),
-    (("spark", "Linux", "aarch64", (), "--package"),),
+    (
+        pytest.param(
+            "spark",
+            "Linux",
+            "aarch64",
+            (),
+            "--package",
+            marks=pytest.mark.linux_only,
+        ),
+    ),
 )
 def test_curl_bootstrap_verifies_and_runs_the_native_installer(
     tmp_path: Path,
@@ -301,6 +309,7 @@ def test_spark_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
     assert not forbidden.exists()
 
 
+@pytest.mark.linux_only
 def test_spark_bootstrap_passes_only_explicit_enrollment_mode(tmp_path: Path) -> None:
     result, receipt, forbidden = _run_bootstrap(
         tmp_path,
@@ -316,6 +325,7 @@ def test_spark_bootstrap_passes_only_explicit_enrollment_mode(tmp_path: Path) ->
     assert not forbidden.exists()
 
 
+@pytest.mark.linux_only
 def test_bootstrap_never_executes_an_unpinned_download(tmp_path: Path) -> None:
     result, receipt, forbidden = _run_bootstrap(
         tmp_path, "spark", system="Linux", machine="aarch64"

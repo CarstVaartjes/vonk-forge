@@ -17,7 +17,7 @@ on:
       - scripts/dev-image-metadata
       - scripts/dev-image-inputs
       - scripts/reuse-development-image
-      - agent_protocol/src/vonk_agent_protocol/route_activation.py
+      - agent_protocol/**
       - scripts/promote-image-aliases
       - scripts/publish-immutable-image
       - scripts/render-dev-compose
@@ -65,6 +65,16 @@ jobs:
             "$GITHUB_REF" "$GITHUB_SHA" \
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})" \
             >> "$GITHUB_OUTPUT"
+
+      - name: Install uv and build protocol wheel
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: agent_protocol/pyproject.toml
+      - name: Build protocol wheel and verify Controller lock hash
+        run: scripts/build-control-wheel
 
       - name: Scan public image source inputs
         run: scripts/verify-public-image-inputs

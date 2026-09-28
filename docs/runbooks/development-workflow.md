@@ -136,13 +136,19 @@ producer/generation; never promote a guessed tag for a tip that did not build.
 
 ## Generated artifacts and release evidence
 
-Two artifacts are called the manifest:
+Dependency SBOMs and their lock digest manifest are generated in CI from the
+checked-in lockfiles and image lock. They are uploaded as a run artifact and
+included in the matching GitHub Release after verification; they are not
+committed or staged by the local hook. The authored inputs remain the lockfiles,
+image lock, and reviewed upstream artifact pins. See the
+[supply-chain procedure](supply-chain.md).
 
-- `inventory/sbom/manifest.json` is the curated file-to-digest map over declared
-  inputs, with no `source_sha`. Regenerate it last through the
-  [supply-chain procedure](supply-chain.md). No change is expected when curated
-  inputs did not change. After incorporating remote `main`, regenerate affected
-  inventory instead of choosing one side of a generated conflict.
+- `install.vonkforge.ai/artifacts/dev/current.manifest` is the signed release
+  document carrying version, source, generation, and release path. Scheduled
+  re-signing can refresh `source_sha` without rebuilding artifacts. Check the
+  build commit in the package version and the provenance of the particular
+  image; reused components or separately rebuilt images may have different
+  build revisions. A refreshed source field alone does not prove new code runs.
 - `install.vonkforge.ai/artifacts/dev/current.manifest` is the signed release
   document carrying version, source, generation, and release path. Scheduled
   re-signing can refresh `source_sha` without rebuilding artifacts. Check the
@@ -157,10 +163,9 @@ evidence is regenerated and staged before each commit:
 scripts/install-git-hooks
 ```
 
-The hook requires tracked edits to be staged together before it updates
-`inventory/sbom/manifest.json`; this keeps the digest map bound to the bytes
-that will actually be committed. It also runs the pinned Ruff lint, format,
-and Python type checks. CI remains the authoritative verification.
+The hook validates authored supply-chain inputs and runs the pinned Ruff lint,
+format, and Python type checks. It does not generate or stage inventory files.
+CI remains the authoritative verification and release evidence producer.
 
 ## Remove landed worktrees
 
