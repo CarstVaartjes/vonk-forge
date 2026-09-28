@@ -92,7 +92,12 @@ def add_artifact_job_commands(
 ) -> None:
     """Attach the current artifact-job leaves below ``recipe job``."""
 
-    job = recipe_actions.add_parser("job", help="Create and retrieve recipe outputs")
+    job = recipe_actions.add_parser(
+        "job",
+        help="Create and retrieve recipe outputs",
+        description="Jobs send input files to a running recipe and collect its "
+        "result files.",
+    )
     add_output(job)
     actions = job.add_subparsers(dest="recipe_job_action", parser_class=type(job))
 

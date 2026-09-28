@@ -89,12 +89,6 @@
 	}
 }
 
-(litellm_route_lease) {
-	forward_auth litellm:4001 {
-		uri /vonk/route-lease
-	}
-}
-
 # Container readiness must not depend on a virtual host or any upstream. This
 # listener is loopback-only and is never published by Compose.
 http://127.0.0.1:8082 {
@@ -212,7 +206,6 @@ http://:8087 {
 		}
 		handle /v1/* {
 			import browser_proxy_headers
-			import litellm_route_lease
 			reverse_proxy litellm:4000
 		}
 		@litellm_repository_authority {
@@ -224,7 +217,6 @@ http://:8087 {
 		}
 		handle_path /litellm/* {
 			import browser_proxy_headers
-			import litellm_route_lease
 			reverse_proxy litellm:4000
 		}
 		handle /grafana/* {
@@ -245,11 +237,10 @@ https://{$VONK_CONTROL_HOSTNAME}:{$VONK_BACKEND_PORT:8443} {
 	reverse_proxy 127.0.0.1:8080
 }
 
-# Internal inference clients use the same request-time lease authority without
-# exposing LiteLLM's native listener or management routes.
+# Internal inference clients reach the published routes without exposing
+# LiteLLM's native listener or management routes.
 :8081 {
 	handle /v1/* {
-		import litellm_route_lease
 		reverse_proxy litellm:4000
 	}
 	respond 404

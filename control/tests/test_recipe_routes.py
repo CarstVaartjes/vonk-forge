@@ -1612,7 +1612,7 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
     service = atomic_service(base, root, clock)
     first = service.publish_run(run_id)
     bundle = verify_active_route_bundle(root, clock=clock)
-    request = _supervisor(monkeypatch, root)._active_request(now=clock.now)
+    request = _supervisor(monkeypatch, root)._active_request()
     assert request is not None and request.activation_sha256 == bundle.marker.digest
     with service.sessions() as session:
         owner = _publication_owner(session)
@@ -1639,7 +1639,7 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
     assert withdrawn.marker.state == "maintenance"
     assert withdrawn.marker.generation > renewed.marker.generation
     assert withdrawn.routes["routes"] == {}
-    assert _supervisor(monkeypatch, root)._active_request(now=clock.now) is not None
+    assert _supervisor(monkeypatch, root)._active_request() is not None
 
 
 def test_postgres_expired_empty_route_renews_once_and_restores_supervisor_access(
@@ -1667,7 +1667,8 @@ def test_postgres_expired_empty_route_renews_once_and_restores_supervisor_access
         expires_at = publication.lease_expires_at.replace(tzinfo=UTC)
     clock.now = expires_at + timedelta(seconds=1)
     supervisor = _supervisor(monkeypatch, root)
-    assert supervisor._active_request(now=clock.now) is None
+    # The supervisor keeps serving the expired marker; renewal is Controller-side.
+    assert supervisor._active_request() is not None
 
     # Independent workers serialize through the real PostgreSQL owner row.
     # Only the first tick activates a new empty bundle.
@@ -1695,7 +1696,7 @@ def test_postgres_expired_empty_route_renews_once_and_restores_supervisor_access
         assert publication.lease_expires_at.replace(tzinfo=UTC) == (
             clock.now + timedelta(seconds=ROUTE_LEASE_SECONDS)
         )
-    request = supervisor._active_request(now=clock.now)
+    request = supervisor._active_request()
     assert request is not None
     assert request.marker["generation"] == renewed.marker.generation
 
@@ -1805,7 +1806,7 @@ def test_postgres_empty_route_renewal_recovers_exact_unprojected_activation(
     assert routes.maintain() is True
     recovered = verify_active_route_bundle(root, clock=clock)
     assert recovered.marker == unprojected
-    assert _supervisor(monkeypatch, root)._active_request(now=clock.now) is not None
+    assert _supervisor(monkeypatch, root)._active_request() is not None
     with routes.sessions() as session:
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)

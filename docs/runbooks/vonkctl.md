@@ -48,17 +48,34 @@ vonkctl --help
 For development from a source checkout, install that checkout with
 `uv tool install .` before setting these connection variables.
 
-Use `--json` for one parseable object on stdout. Use `--profile N` to select a
+Use `--json` for one parseable object on stdout: indented when stdout is a
+terminal, one compact line when it is piped (the same document either way).
+Use `--profile N` to select a
 stable numbered Profile for that invocation; the default is Profile 1.
 Profile edits and loads require an explicit `--profile N`; there is no saved
-selection. Running `vonkctl` without a command shows offline orientation.
+selection.
+
+Help is a map of the command tree and works offline. `vonkctl` (or
+`vonkctl --help`) lists where to start, every command group, and the global
+flags. `vonkctl GROUP --help` lists that group's commands as full invocations
+with their arguments, for example `vonkctl fleet detail <spark>`, and no
+options. `vonkctl GROUP COMMAND --help` shows that command's arguments and
+flags. A group run on its own shows its current state: `vonkctl fleet`,
+`vonkctl model`, `vonkctl recipe`, `vonkctl profile` and `vonkctl key` are
+overviews. Groups
+without a view of their own (`fleet enrollment`, `recipe installation`,
+`recipe job`, `completion`) print their help. A mistyped command gets a
+suggestion (`unknown command 'detal' for 'vonkctl fleet'. Did you mean
+'detail'?`), a missing argument gets the usage line, and both name the help
+command to run next. With `--json` the error document carries `usage` and
+`recovery_actions`.
 `vonkctl --version` reports the installed build without Controller credentials.
 The [accepted CLI update command](../operators/cli-updates.md) checks the signed
 installer publication and applies an update only when requested.
 
 Human output shows current state, complete identifiers, blockers, and the next
-available action. Narrow terminals use stacked records; tables are used when
-their values fit. `--wide` includes more resource or node detail. Unknown
+available action. Terminals too narrow for a table get stacked records; piped
+output keeps one table row per line. `--wide` includes more resource or node detail. Unknown
 measurements are labelled unavailable, and zero remains zero. Lists disclose
 whether another page exists; retain the same filters when continuing its cursor.
 
@@ -108,7 +125,7 @@ queries the Controller.
 
 ```bash
 vonkctl fleet
-vonkctl fleet --health stale --health offline --warnings-only
+vonkctl fleet --wide
 vonkctl fleet detail Atlas --metrics all --range 24h
 vonkctl fleet detail Atlas --watch --interval-seconds 2
 vonkctl fleet node-profile Atlas
@@ -163,12 +180,19 @@ cursors, malformed rows, and ambiguous choices save nothing. If a catalog
 continuation becomes invalid because its matching collection changed, repeat
 the command; for an explicit list page, restart without `--cursor`.
 
-The Fleet overview counts each run once by its immutable run ID and groups its
-member Sparks together. Controller run state, observed group health, rank state,
-freshness, and route state stay distinct. `--wide` also groups installed
-placements by installation ID. A filtered view names reported members outside
-the selection; it does not treat omitted members as healthy or absent. Saved
-desired assignments remain visible through the Profile view.
+`vonkctl fleet` is the fleet overview. It shows one row per Spark (connection
+and telemetry status, memory used of total, free disk, CPU, and how many
+workloads it runs), then each workload once by its run ID: Controller run
+state, observed group health, route state, ranks reported of expected, the
+model name clients use, and its member Sparks by name with rank and role.
+Installed recipes that are not running are listed after that. **Needs
+attention** collects what the owners report as unhealthy: offline Sparks with
+their reason and last-seen time, telemetry or inventory that is not current,
+Spark warnings, and runs that are not running, not healthy, not published,
+missing ranks, or reporting stale ranks. `--wide` adds Spark, run, and
+installation IDs and the observation time; `--json` returns the complete
+Controller document. Saved desired assignments remain visible through the
+Profile view. For API base URLs, use `vonkctl profile endpoint`.
 
 Enrollment and re-enrollment require a new `--output FILE`. The CLI reserves
 that private file before asking the Controller for a grant. The grant document
@@ -233,7 +257,11 @@ vonkctl model remove qwen-3.8-nvfp4 --review
 vonkctl model remove qwen-3.8-nvfp4
 ```
 
-The overview combines downloading, cached, and running variants. Reusing the
+`vonkctl model` lists cached models, and `model library` the published
+ones, one row each: the exact selector to use, cache state (with progress
+while it prepares), disk size, and whether it runs. `--wide` prints the full
+record of every row; `model detail` shows one. The overview combines
+downloading, cached, and running variants. Reusing the
 same download request key returns its original operation. A new request has
 its own identity; the cache owner reuses verified assets and compatible partial
 work and refreshes completed work when requested.
@@ -296,6 +324,10 @@ vonkctl recipe remove qwen-code --keep-model
 vonkctl recipe remove qwen-code --with-model
 vonkctl recipe installation reconcile INSTALLATION_UUID --review
 ```
+
+`vonkctl recipe` and `recipe library` list recipes the same way, adding the
+Spark count and the Controller's readiness verdict; `recipe detail` explains
+the verdict.
 
 Recipe removal requires an explicit `--keep-model` or `--with-model` choice.
 The read-only `--review` form reports the exact recipe revision and affected
@@ -845,7 +877,7 @@ or prove physical model quality.
 The client endpoint is the Controller's inference gateway, not a Spark:
 `API base` is `https://<controller host>/v1` (the same origin as
 `VONK_CONTROL_URL`; over Tailscale, the `svc:vonk-forge` service), where Caddy
-routes `/v1/*` to LiteLLM behind the route-lease check. Use it with the
+routes `/v1/*` to LiteLLM. Use it with the
 `Client model identifier` as the OpenAI `model`. `Spark backend (diagnostic)`
 is the Spark-local serving address LiteLLM forwards to; it is usually
 unreachable from a client and is never the endpoint. The web Profiles view
@@ -915,8 +947,8 @@ Change them only together with the tests that pin them.
   domains; `update` maintains the CLI itself. Use the existing verbs
   (`detail`, `download`, `load`, `progress`, `remove`) instead of adding
   synonyms or aliases.
-- **Selectors.** Lists lead with friendly names and show the exact reusable
-  selector. Fuzzy matching may help a search but never chooses the target of a
+- **Selectors.** Lists lead with the exact reusable selector; detail views
+  and `--wide` add the friendly name. Fuzzy matching may help a search but never chooses the target of a
   mutation; an ambiguous name fails and lists the exact candidates.
 - **Profile number.** Read commands may default to Profile 1 and say so.
   Saving, importing, loading or cancelling profile work needs an explicit
