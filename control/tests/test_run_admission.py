@@ -29,6 +29,7 @@ from vonk_control.run_admission import (
     RunAdmissionBusy,
     RunAdmissionService,
     RunPlanConflict,
+    require_admissible,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -434,6 +435,10 @@ def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
         "topology.runtime_capability_missing",
         "run.port_occupied",
     } <= codes
+    with pytest.raises(RunPlanConflict) as conflict:
+        require_admissible(plan)
+    assert conflict.value.code == "run.plan_invalid"
+    assert "under current authority" not in str(conflict.value)
 
 
 def test_queue_rejects_reservation_mutation_after_preview(tmp_path) -> None:

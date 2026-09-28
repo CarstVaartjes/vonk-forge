@@ -116,13 +116,19 @@ class InstallPlan:
 
 
 class InstallPlanConflict(RuntimeError):
-    pass
+    code = "install.plan_invalid"
 
 
 class InstallAdmissionBusy(InstallPlanConflict):
     """A capacity writer owns the row; retry only after releasing this transaction."""
 
     code = "install.capacity_busy"
+
+
+class InstallPreflightExpired(InstallAdmissionBusy):
+    """The exact plan is admissible except that its runtime evidence expired."""
+
+    code = "runtime_preflight.stale"
 
 
 _RETRYABLE_INSTALL_BLOCKERS = {
@@ -136,14 +142,24 @@ _RETRYABLE_INSTALL_BLOCKERS = {
     "runtime_preflight.stale",
 }
 
+_REFRESHABLE_PREFLIGHT_BLOCKERS = {
+    "runtime_preflight.host_changed",
+    "runtime_preflight.requirements_changed",
+    "runtime_preflight.stale",
+}
+
 
 def require_admissible(plan: InstallPlan) -> None:
     if plan.allowed:
         return
     codes = {reason.code for node in plan.nodes for reason in node.blockers}
+    if codes and codes <= _REFRESHABLE_PREFLIGHT_BLOCKERS:
+        raise InstallPreflightExpired("runtime_preflight.stale")
     if codes and codes <= _RETRYABLE_INSTALL_BLOCKERS:
         raise InstallAdmissionBusy("install is waiting for inventory or capacity")
-    raise InstallPlanConflict("install plan is invalid under current authority")
+    raise InstallPlanConflict(
+        "install.plan_invalid: install plan is blocked by current admission evidence"
+    )
 
 
 def _active_recipe_revision(

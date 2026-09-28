@@ -13,6 +13,7 @@ from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
     InstallAdmissionBusy,
     InstallAdmissionService,
+    InstallPreflightExpired,
     installation_plan_digest_from_stored_document,
 )
 from vonk_control.inventory_repository import (
@@ -968,7 +969,7 @@ def test_expired_preflight_waits_then_accepts_the_same_request(
 
     later = now + timedelta(seconds=716)
     _record_inventory(sessions, node, later)
-    with pytest.raises(InstallAdmissionBusy):
+    with pytest.raises(InstallPreflightExpired):
         service.accept_install(plan, actor="admin", now=later)
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
@@ -1045,7 +1046,7 @@ def test_moved_host_fingerprint_refreshes_instead_of_failing_the_identical_plan(
             if not value.startswith("runtime.preflight.fingerprint.")
         ] + ["runtime.preflight.fingerprint." + "b" * 64]
 
-    with pytest.raises(InstallAdmissionBusy):
+    with pytest.raises(InstallPreflightExpired):
         service.accept_install(plan, actor="admin", now=later)
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []

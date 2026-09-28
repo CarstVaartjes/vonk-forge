@@ -181,7 +181,7 @@ def run_port_blockers(
 
 
 class RunPlanConflict(RuntimeError):
-    pass
+    code = "run.plan_invalid"
 
 
 class RunAdmissionBusy(RunPlanConflict):
@@ -206,7 +206,9 @@ def require_admissible(plan: RunPlan) -> None:
     codes = {reason.code for item in plan.nodes for reason in item.blockers}
     if codes and codes <= _RETRYABLE_PLAN_BLOCKERS:
         raise RunAdmissionBusy("run is waiting for current inventory or capacity")
-    raise RunPlanConflict("run plan is invalid under current authority")
+    raise RunPlanConflict(
+        "run.plan_invalid: run plan is blocked by current admission evidence"
+    )
 
 
 def _active_recipe_revision(

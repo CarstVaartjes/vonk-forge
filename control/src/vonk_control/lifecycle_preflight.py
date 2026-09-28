@@ -146,7 +146,17 @@ class LifecyclePreflight:
             for node_id, source_build in ordered_nodes:
                 node = session.get(AgentNode, node_id, with_for_update=True)
                 if node is None:
-                    return retry_probe(node_id, "runtime_preflight.node_missing")
+                    checkpoint.pending_job_id = None
+                    checkpoint.pending_node_id = None
+                    checkpoint.receipts.pop(node_id, None)
+                    checkpoint.next_check_at = None
+                    return (
+                        checkpoint,
+                        (
+                            "runtime_preflight.node_missing: node was removed from "
+                            "Controller authority"
+                        ),
+                    )
                 if node.revoked_at is not None:
                     return checkpoint, "runtime_preflight.node_revoked"
                 request = recipe_requirements(

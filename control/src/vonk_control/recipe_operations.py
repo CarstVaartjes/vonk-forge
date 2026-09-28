@@ -700,10 +700,11 @@ class RecipeOperationService:
         force: bool = False,
         admission_guard: Callable[[Session], None] | None = None,
     ) -> RecipeOperationView:
-        # A build preview is a snapshot of mutable builder and input state. Keep
-        # the recipe revision as the request identity, then resolve current
-        # builder inputs when accepting the work.
-        if self._builds is not None:
+        # An independent build request may refresh mutable builder inputs when
+        # accepted. A parent Run/Switch request already binds the exact build
+        # identity in its accepted plan, so its admission guard keeps that
+        # identity fixed while reserve_in_session rechecks current capacity.
+        if self._builds is not None and admission_guard is None:
             builder_node_id = plan.builder_node_id
             with self._sessions() as session:
                 previous_build = session.get(RecipeBuild, plan.build_id)
@@ -1659,7 +1660,12 @@ class RecipeOperationService:
         workload_intent_ordinal: int | None = None,
         profile_application_id: str | None = None,
     ) -> RecipeOperationView:
-        existing = self._idempotent(request_id, "recipe.start", None)
+        existing = self._idempotent(
+            request_id,
+            "recipe.start",
+            None,
+            installation_id=plan.installation_id,
+        )
         if existing is not None:
             return existing
         now = self._clock()
@@ -1683,7 +1689,11 @@ class RecipeOperationService:
             except AdmissionLockBusy as error:
                 raise RunAdmissionBusy("run capacity writer is busy") from error
             replay = self._idempotent_in_session(
-                session, request_id, "recipe.start", None
+                session,
+                request_id,
+                "recipe.start",
+                None,
+                installation_id=plan.installation_id,
             )
             if replay is not None:
                 return replay
@@ -1950,11 +1960,25 @@ class RecipeOperationService:
         request_id: str,
     ) -> RecipeOperationView:
         """Reserve an installed artifact recipe without starting a service container."""
-        existing = self._idempotent(request_id, "recipe.job.activate.v1", None)
+        existing = self._idempotent(
+            request_id,
+            "recipe.job.activate.v1",
+            None,
+            installation_id=plan.installation_id,
+        )
         if existing is not None:
             return existing
         now = self._clock()
         with self._sessions.begin() as session:
+            replay = self._idempotent_in_session(
+                session,
+                request_id,
+                "recipe.job.activate.v1",
+                None,
+                installation_id=plan.installation_id,
+            )
+            if replay is not None:
+                return replay
             plan = self._run_admission.plan_run(
                 plan.installation_id, plan.alias, now=now, _session=session
             )
@@ -6963,6 +6987,7 @@ class RecipeOperationService:
         *,
         owner_kind: str | None = None,
         owner_id: str | None = None,
+        installation_id: str | None = None,
     ) -> RecipeOperationView | None:
         with self._sessions() as session:
             return self._idempotent_in_session(
@@ -6972,6 +6997,7 @@ class RecipeOperationService:
                 plan_digest,
                 owner_kind=owner_kind,
                 owner_id=owner_id,
+                installation_id=installation_id,
             )
 
     def _idempotent_in_session(
@@ -6983,6 +7009,7 @@ class RecipeOperationService:
         *,
         owner_kind: str | None = None,
         owner_id: str | None = None,
+        installation_id: str | None = None,
     ) -> RecipeOperationView | None:
         existing = self._idempotent_job_in_session(
             session,
@@ -6991,6 +7018,7 @@ class RecipeOperationService:
             plan_digest,
             owner_kind=owner_kind,
             owner_id=owner_id,
+            installation_id=installation_id,
         )
         return self._view(existing) if existing is not None else None
 
@@ -7003,6 +7031,7 @@ class RecipeOperationService:
         *,
         owner_kind: str | None = None,
         owner_id: str | None = None,
+        installation_id: str | None = None,
     ) -> Job | None:
         existing = session.scalar(select(Job).where(Job.request_id == request_id))
         if existing is None:
@@ -7018,6 +7047,19 @@ class RecipeOperationService:
             or (owner_id is not None and existing.payload.get("owner_id") != owner_id)
         ):
             raise RecipeOperationConflict("request key was already used differently")
+        if installation_id is not None:
+            if (
+                existing.kind not in {"recipe.start", "recipe.job.activate.v1"}
+                or existing.payload.get("owner_kind") != "run"
+            ):
+                raise RecipeOperationConflict(
+                    "request key was already used differently"
+                )
+            run = session.get(RecipeRun, existing.payload.get("owner_id"))
+            if run is None or run.installation_id != installation_id:
+                raise RecipeOperationConflict(
+                    "request key was already used differently"
+                )
         return existing
 
     def _queue(

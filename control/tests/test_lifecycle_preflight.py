@@ -134,6 +134,20 @@ def test_failed_probe_is_reissued_after_backoff(tmp_path):
     assert retried.pending_job_id != checkpoint.pending_job_id
 
 
+def test_removed_node_is_a_terminal_preflight_blocker(tmp_path):
+    _sessions, _queue, _clock, _node, service, arguments = _setup(tmp_path)
+    missing_node = "spk_" + "f" * 32
+    arguments["nodes"] = {missing_node: False}
+
+    checkpoint, blocked = service.ensure(previous=None, **arguments)
+
+    assert blocked == (
+        "runtime_preflight.node_missing: node was removed from Controller authority"
+    )
+    assert checkpoint.pending_job_id is None
+    assert checkpoint.next_check_at is None
+
+
 def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path):
     from cryptography.hazmat.primitives.asymmetric import ed25519
     from vonk_agent_protocol import (

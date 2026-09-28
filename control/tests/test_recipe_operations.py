@@ -7,6 +7,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, wait
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -2663,6 +2664,70 @@ def test_start_uses_current_alias_and_replays_by_request_identity(
     assert len(runs) == len(jobs) == len(operations) == 1
     assert len(reservations) == 2
     assert queue.available == 2
+
+
+def test_start_and_activate_replay_require_the_same_installation(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="0" * 35 + "3"
+    )
+    plan = service.preview_run(installation.owner_id, "qwen")
+    started = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="0" * 35 + "4",
+    )
+    activation_request_id = "0" * 35 + "5"
+    activation_payload = {
+        "schema_version": 1,
+        "owner_kind": "run",
+        "owner_id": started.owner_id,
+        "plan_digest": plan.plan_digest,
+        "execution_mode": "one-shot-jobs",
+    }
+    with sessions.begin() as session:
+        session.add(
+            Job(
+                id=str(uuid.uuid4()),
+                request_id=activation_request_id,
+                kind="recipe.job.activate.v1",
+                state="succeeded",
+                actor="admin",
+                authority_revision="",
+                targets=list(nodes),
+                payload_digest=hashlib.sha256(
+                    canonical_message(activation_payload)
+                ).hexdigest(),
+                payload=activation_payload,
+                result={"activated": True},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    other_installation_id = str(uuid.uuid4())
+    other_plan = replace(plan, installation_id=other_installation_id)
+    with pytest.raises(
+        RecipeOperationConflict, match="request key was already used differently"
+    ):
+        service.start(
+            other_plan,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="0" * 35 + "4",
+        )
+    with pytest.raises(
+        RecipeOperationConflict, match="request key was already used differently"
+    ):
+        service.activate_job_run(
+            other_plan,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=activation_request_id,
+        )
 
 
 def test_adopt_start_binds_the_durable_child_without_reproducing_its_digest(

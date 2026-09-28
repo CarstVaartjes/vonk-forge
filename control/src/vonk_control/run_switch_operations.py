@@ -53,7 +53,7 @@ from .cluster_mappings import (
     validate_mapping_parameters,
 )
 from .disk_reservations import outstanding_disk_reservation_bytes
-from .install_admission import InstallAdmissionBusy
+from .install_admission import InstallAdmissionBusy, InstallPreflightExpired
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .logging import log_event, redact_text
@@ -1665,7 +1665,7 @@ class RecipeLifecyclePhaseExecutor:
                     ),
                     workload_intent_ordinal=_bound_workload_intent(progress),
                 )
-            except RecipeInstallPreflightExpired as error:
+            except (RecipeInstallPreflightExpired, InstallPreflightExpired) as error:
                 # Compiling the launch document above can outlast the runtime
                 # preflight window this phase was admitted on.  Nothing else
                 # about the install changed, so ask the caller to rerun the
