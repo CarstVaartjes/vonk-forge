@@ -6819,8 +6819,15 @@ class RunSwitchOperationService:
                     # Final verification observes an existing run and route;
                     # reopening this checkpoint cannot issue a new workload.
                     # Newer intent was checked above, and the persisted start
-                    # deadline remains immutable.
-                    if progress.get("phase") != "final_verify":
+                    # deadline remains immutable. Background runtime-image
+                    # preparation is owned by the executor: reopening observes
+                    # its in-process result or resumes the durable checkpoint
+                    # after a restart, and publishes nothing new by itself.
+                    reopenable = progress.get("phase") == "final_verify" or (
+                        progress.get("phase") == "prepare"
+                        and progress.get("subphase") == "runtime-image"
+                    )
+                    if not reopenable:
                         return False
                     job.state = "running"
                     job.updated_at = now
@@ -9705,7 +9712,9 @@ def _persist_run_switch_runtime_image_reference(
             job is None
             or job.kind != "recipe.run-switch.v2"
             or job.actor != actor
-            or job.state not in {"queued", "running"}
+            # Background preparation publishes while its operation waits on
+            # it; the exact checkpoint below still binds ownership.
+            or job.state not in {"queued", "running", "waiting"}
             or tuple(sorted(job.targets)) != target_nodes
             or job.payload.get("workload_intent_ordinal") != ordinal
             or job.payload.get("plan_digest") != plan.plan_digest
@@ -9731,7 +9740,12 @@ def _persist_run_switch_runtime_image_reference(
             or _string_or_none(current.get("profile_application_id"))
             != profile_application_id
             or current.get("cancellation") is not None
-            or not _checkpoint_matches(job, current, phase.index, item_index, None)
+            # The operation waits on this very background preparation, so the
+            # same phase/item checkpoint also owns publication while waiting.
+            or job.state not in {"queued", "running", "waiting"}
+            or current.get("phase_index", 0) != phase.index
+            or current.get("item_index", 0) != item_index
+            or current.get("child_operation_id") is not None
             or RunSwitchOperationService._scope_intent_status(session, job) != "current"
         ):
             raise owner_changed("RunSwitch phase was cancelled or superseded")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -1330,6 +1331,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                         request_key=request_key,
                         progress=progress,
                         transfer_progress=record_progress,
+                        wait_for_busy_owner=True,
                     )
                     return PhaseExecution(
                         waiting=True,
@@ -1517,6 +1519,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         request_key: str,
         progress: Mapping[str, object],
         transfer_progress: Callable[[str, int, int | None], None] | None = None,
+        wait_for_busy_owner: bool = False,
     ) -> Mapping[str, object] | None:
         """Prepare one Controller image and authorize every target execution.
 
@@ -1604,6 +1607,24 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         execution_keys = tuple(sorted(runtime_specs))
 
         def before_publish(receipt: RuntimeImageReceipt) -> None:
+            # Background preparation runs beside the tick that owns the
+            # operation row, which may still hold it when a reused image is
+            # ready at once. Off the tick thread, wait for that short
+            # transaction instead of failing the whole preparation.
+            attempts = 150 if wait_for_busy_owner else 1
+            for attempt in range(attempts):
+                try:
+                    persist_reference(receipt)
+                    return
+                except RuntimeImagePreparationError as error:
+                    if (
+                        error.code != "artifact.reference_busy"
+                        or attempt + 1 >= attempts
+                    ):
+                        raise
+                    time.sleep(0.2)
+
+        def persist_reference(receipt: RuntimeImageReceipt) -> None:
             _persist_run_switch_runtime_image_reference(
                 self._sessions,
                 plan,
