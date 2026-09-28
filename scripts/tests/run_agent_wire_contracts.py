@@ -41,6 +41,11 @@ def main() -> int:
         type=Path,
         help="directory containing already-built Rust probe executables",
     )
+    parser.add_argument(
+        "--build-only",
+        action="store_true",
+        help="build the probes and exit, so CI can overlap the build with other checks",
+    )
     parser.add_argument("pytest_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
@@ -79,6 +84,8 @@ def main() -> int:
                 cwd=repository,
                 check=True,
             )
+    if args.build_only:
+        return 0
     for key, (_, name) in PROBES.items():
         probe = Path(environment.get(key, probe_directory / name))
         if not probe.is_absolute():

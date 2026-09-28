@@ -312,24 +312,31 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Prepare locked Controller dependencies
         run: scripts/retry-dependency-fetch uv sync --project control --frozen
-      - name: Validate every canonical recipe launch projection
-        run: >-
-          uv run --project control --frozen --with-editable .
-          python scripts/tests/check_recipe_launch_contracts.py "$VONK_RECIPE_LIBRARY_ROOT"
-      - name: Discover every mounted API contract and exported agent root
-        run: |
-          uv run --project control --frozen --with-editable . python scripts/tests/check_api_contract_completeness.py
-          uv run --project control --frozen --with-editable . pytest -q control/tests/test_api_contract_completeness.py control/tests/test_api_contract_graph.py
-      - name: Validate emitted lifecycle and transfer responses
-        run: >-
-          uv run --project control --frozen --with-editable . pytest -q
-          control/tests/test_api_response_witness.py
-          control/tests/test_source_bundle_client_handoff.py
-          control/tests/test_artifact_job_api.py
-          control/tests/test_fleet_profile_api.py::test_profile_operator_routes_are_singular_and_unversioned
-          control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route
-          control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status
-          --api-response-witness=${{ runner.temp }}/api-response-witnesses.json
+      # The probe build is the longest step; the Python contract checks do not
+      # need it, so they run while Cargo compiles.
+      - parallel:
+          - name: Build Rust wire probes
+            run: >-
+              uv run --project control --frozen --with-editable .
+              python scripts/tests/run_agent_wire_contracts.py --build-only
+          - name: Check Controller contracts
+            run: |
+              set -euo pipefail
+              uv run --project control --frozen --with-editable . \
+                python scripts/tests/check_recipe_launch_contracts.py "$VONK_RECIPE_LIBRARY_ROOT"
+              uv run --project control --frozen --with-editable . \
+                python scripts/tests/check_api_contract_completeness.py
+              uv run --project control --frozen --with-editable . pytest -q -n 2 \
+                control/tests/test_api_contract_completeness.py \
+                control/tests/test_api_contract_graph.py
+              uv run --project control --frozen --with-editable . pytest -q \
+                control/tests/test_api_response_witness.py \
+                control/tests/test_source_bundle_client_handoff.py \
+                control/tests/test_artifact_job_api.py \
+                control/tests/test_fleet_profile_api.py::test_profile_operator_routes_are_singular_and_unversioned \
+                control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
+                control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
+                --api-response-witness="$RUNNER_TEMP/api-response-witnesses.json"
       - name: Check generated Rust wire contracts
         run: >-
           uv run --project control --frozen --with-editable .
@@ -602,9 +609,8 @@ jobs:
       fail-fast: false
       matrix:
         shard:
-          - {index: 0, label: 1-of-3}
-          - {index: 1, label: 2-of-3}
-          - {index: 2, label: 3-of-3}
+          - {index: 0, label: 1-of-2}
+          - {index: 1, label: 2-of-2}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -685,7 +691,7 @@ jobs:
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 3
+          SHARD_TOTAL: 2
           TIMING_DATA: ${{ needs.changes.outputs.repository_timings }}
           VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
         run: |
@@ -709,7 +715,7 @@ jobs:
           ((${#shard_files[@]} > 0))
           uv run --python 3.14 --frozen --with pytest==9.1.1 \
             --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
-            pytest -q -o junit_family=xunit1 \
+            pytest -q -n auto --dist loadfile -o junit_family=xunit1 \
             --junitxml="$RUNNER_TEMP/repository-junit.xml" --basetemp="$RUNNER_TEMP/repository-pytest" \
             "${shard_files[@]}"
 
