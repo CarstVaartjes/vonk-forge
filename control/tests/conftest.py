@@ -52,48 +52,35 @@ _POSTGRES_PORT_TEMPLATE = (
     '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}'
 )
 
-_REGISTERED_MARKERS = (
-    "linux_only: requires a Linux operating system or Linux container behavior",
-    "needs_dpkg_deb: requires the Debian package builder at /usr/bin/dpkg-deb",
-    "needs_buildx: requires the Docker Buildx plugin for image builds",
-    "built_image: checks a prebuilt Controller or worker image named by VONK_TEST_CONTROLLER_IMAGE or VONK_TEST_WORKER_IMAGE; runs only in the Controller image build CI job",
-    "needs_systemd: requires systemd tools or a systemd host",
-    "needs_recipe_library: requires VONK_RECIPE_LIBRARY_ROOT to name the canonical recipe checkout",
-    "needs_rust_probe: requires Rust wire probes built by scripts/tests/run_agent_wire_contracts.py",
-    "needs_uv_cache: requires cached wheels for offline installed-CLI tests",
-    "postgres: provisions a disposable PostgreSQL server through Docker",
-)
 
-
-def _load_budget_plugin():
-    """Load the shared per-test budget without exposing the repository root.
+def _load_tools_plugin(name: str):
+    """Load a shared tools/ pytest plugin without exposing the repository root.
 
     The repository root also has a ``tests`` package, so it cannot go on this
     suite's import path.
     """
 
-    name = "vonk_pytest_budget"
-    if name not in sys.modules:
-        path = Path(__file__).resolve().parents[2] / "tools" / "pytest_budget.py"
-        spec = importlib.util.spec_from_file_location(name, path)
+    module_name = f"vonk_{name}"
+    if module_name not in sys.modules:
+        path = Path(__file__).resolve().parents[2] / "tools" / f"{name}.py"
+        spec = importlib.util.spec_from_file_location(module_name, path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
+        sys.modules[module_name] = module
         spec.loader.exec_module(module)
-    return sys.modules[name]
+    return sys.modules[module_name]
 
 
 def pytest_addoption(
     parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager
 ) -> None:
     _api_response_addoption(parser)
-    _load_budget_plugin().register(pluginmanager)
+    _load_tools_plugin("pytest_budget").register(pluginmanager)
+    _load_tools_plugin("pytest_prereqs").register(pluginmanager)
 
 
 def pytest_configure(config: pytest.Config) -> None:
     _api_response_pytest_configure(config)
-    for marker in _REGISTERED_MARKERS:
-        config.addinivalue_line("markers", marker)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -388,92 +375,19 @@ def postgres_engine(postgres_server_engine: Engine) -> Iterator[Engine]:
             connection.exec_driver_sql(f'DROP DATABASE "{database}" WITH (FORCE)')
 
 
-# Test-lane taxonomy.
-#
-# The fast tier runs only tests that need nothing beyond the Python
-# environment.  Anything that starts Docker, creates a PostgreSQL cluster,
-# builds a Rust probe or drives a Linux host tool is tagged ``lane`` and runs
-# in the container or designated CI lane instead.  PostgreSQL fixtures and
-# ``*_wire_bridge.py`` Rust probes are inferred from what a test requests.  A
-# test that shells out to Docker carries an explicit ``@pytest.mark.lane`` in
-# the module next to the Docker call, so the reason stays visible where the
-# container starts and a module is never tagged wholesale.
+# Prerequisite markers the suite infers from what a test requests. Their
+# skip-locally/fail-in-CI policy and the ``lane`` marker come from
+# tools/pytest_prereqs.py. A test that shells out to Docker carries its marker
+# in the module next to the Docker call.
 
 _POSTGRES_FIXTURES = frozenset({"postgres_engine", "postgres_server_engine"})
 
 
-def _is_ci() -> bool:
-    return os.getenv("CI", "").lower() == "true"
-
-
-def _missing_prerequisite(marker: str, item: pytest.Item) -> str | None:
-    if marker == "linux_only" and not sys.platform.startswith("linux"):
-        return f"{marker} tests require Linux (current platform: {sys.platform})"
-    if marker == "needs_dpkg_deb" and not Path("/usr/bin/dpkg-deb").is_file():
-        return "needs_dpkg_deb tests require /usr/bin/dpkg-deb"
-    if marker == "needs_systemd":
-        if not sys.platform.startswith("linux"):
-            return f"{marker} tests require Linux (current platform: {sys.platform})"
-        if shutil.which("systemd-analyze") is None:
-            return "needs_systemd tests require systemd-analyze"
-    if marker == "needs_buildx":
-        if shutil.which("docker") is None:
-            return "needs_buildx tests require Docker and its Buildx plugin"
-        buildx = subprocess.run(
-            ["docker", "buildx", "version"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if buildx.returncode != 0:
-            return "needs_buildx tests require the Docker Buildx plugin"
-    if marker == "needs_recipe_library":
-        configured = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
-        if not configured or not (Path(configured) / "catalog-index.json").is_file():
-            return "needs_recipe_library tests require VONK_RECIPE_LIBRARY_ROOT with a built catalog-index.json (scripts/build-recipe-library)"
-    if marker == "needs_rust_probe" and not sys.platform.startswith("linux"):
-        return "needs_rust_probe tests drive Linux-only agent wire probes"
-    if marker == "postgres":
-        if not sys.platform.startswith("linux"):
-            return (
-                "postgres tests require the Linux Docker lane for reliable concurrent "
-                "PostgreSQL/process recovery"
-            )
-        if shutil.which("docker") is None:
-            return "postgres tests require Docker to provision a disposable PostgreSQL server"
-    return None
-
-
-_PREREQUISITE_MARKERS = (
-    "linux_only",
-    "needs_dpkg_deb",
-    "needs_systemd",
-    "needs_buildx",
-    "needs_recipe_library",
-    "needs_rust_probe",
-    "needs_uv_cache",
-    "postgres",
-)
-
-
 def pytest_runtest_setup(item: pytest.Item) -> None:
-    """Skip unavailable integration lanes locally and fail loudly in CI."""
-
     _api_response_runtest_setup(item)
-    for marker in _PREREQUISITE_MARKERS:
-        if item.get_closest_marker(marker) is None:
-            continue
-        reason = _missing_prerequisite(marker, item)
-        if reason is None:
-            continue
-        if _is_ci():
-            pytest.fail(f"CI prerequisite missing: {reason}", pytrace=False)
-        pytest.skip(reason)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Tag every test that cannot run in the fast, hermetic tier."""
-
     for item in items:
         if isinstance(item, pytest.Function) and _POSTGRES_FIXTURES.intersection(
             item.fixturenames
@@ -483,7 +397,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             isinstance(item, pytest.Function)
             and "installed_vonkctl" in item.fixturenames
         ):
-            item.add_marker(pytest.mark.needs_uv_cache)
+            item.add_marker(pytest.mark.needs_cli_dependencies)
             # Installed-CLI tests are process-boundary tests by definition: each
             # runs vonkctl several times as a separate process against a real
             # HTTPS Controller peer. They get one shared, explicit allowance.
@@ -494,17 +408,3 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         module_namespace = getattr(getattr(item, "module", None), "__dict__", {})
         if "recipe_library_root" in module_namespace:
             item.add_marker(pytest.mark.needs_recipe_library)
-        if any(
-            item.get_closest_marker(marker)
-            for marker in (
-                "postgres",
-                "needs_rust_probe",
-                "needs_uv_cache",
-                "needs_recipe_library",
-                "needs_systemd",
-                "needs_buildx",
-                "linux_only",
-                "needs_dpkg_deb",
-            )
-        ):
-            item.add_marker(pytest.mark.lane)

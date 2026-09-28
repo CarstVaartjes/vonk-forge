@@ -96,8 +96,10 @@ def _reconciliation_receipt(payload: RecipeReconcilePayload) -> dict[str, object
 
 
 @pytest.fixture
-def pg_service(request: pytest.FixtureRequest):
-    return request.getfixturevalue("postgres_service")
+def pg_service(postgres_service):  # noqa: F811 - the imported fixture, requested statically
+    # A static request keeps postgres_engine in this test's fixture closure,
+    # so the suite marks it ``postgres`` and starts the shared server for it.
+    return postgres_service
 
 
 @pytest.mark.parametrize(

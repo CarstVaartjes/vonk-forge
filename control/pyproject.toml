@@ -63,6 +63,4 @@ pythonpath = ["src"]
 # Hang guard only. The per-test time budget (10 s, or @pytest.mark.slow up to
 # 60 s) lives in tools/pytest_budget.py and is checked after each test.
 timeout = 120
-markers = [
-    "lane: requires Docker, PostgreSQL, cargo or a Linux host tool; excluded from the fast tier",
-]
+# Markers: tools/pytest_prereqs.py (prerequisites) and tools/pytest_budget.py (slow).
