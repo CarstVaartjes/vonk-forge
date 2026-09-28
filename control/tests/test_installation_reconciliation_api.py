@@ -192,14 +192,13 @@ def test_preview_requires_path_identity_and_explicit_reconcile_mode() -> None:
     wrong_installation = client.post(
         path,
         json={
-            "schema_version": 2,
             "installation_id": OPERATION_ID,
             "cleanup_mode": "reconcile",
         },
     )
     wrong_mode = client.post(
         path,
-        json={"schema_version": 2, "installation_id": INSTALLATION_ID},
+        json={"installation_id": INSTALLATION_ID},
     )
 
     assert wrong_installation.status_code == 422
@@ -217,7 +216,6 @@ def test_preview_delegates_reconcile_mode_to_existing_run_switch_owner() -> None
     response = client.post(
         f"/api/recipe/installations/{INSTALLATION_ID}/reconcile/preview",
         json={
-            "schema_version": 2,
             "installation_id": INSTALLATION_ID,
             "cleanup_mode": "reconcile",
         },
@@ -238,7 +236,6 @@ def test_apply_is_administrator_only_and_preserves_reviewed_request_identity() -
     client, audits = _client(operations, role="operator")
     path = f"/api/recipe/installations/{INSTALLATION_ID}/reconcile"
     body = {
-        "schema_version": 2,
         "installation_id": INSTALLATION_ID,
         "cleanup_mode": "reconcile",
         "plan_digest": PLAN_DIGEST,

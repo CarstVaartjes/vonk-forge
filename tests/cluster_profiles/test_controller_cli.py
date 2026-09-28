@@ -366,7 +366,6 @@ def _reconciliation_operation(
 ) -> dict[str, object]:
     node_id = "spk_" + "2" * 32
     return {
-        "schema_version": 2,
         "operation_id": "33333333-3333-4333-8333-333333333333",
         "kind": "recipe.cleanup.v2",
         "action": "cleanup",
@@ -476,7 +475,6 @@ def test_recipe_installation_reconcile_review_uses_typed_preview_route(
             "POST",
             path,
             {
-                "schema_version": 2,
                 "installation_id": installation_id,
                 "cleanup_mode": "reconcile",
             },
@@ -752,7 +750,6 @@ def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identit
     posts = [call[2] for call in client.calls if call[0] == "POST" and call[1] == apply]
     assert len(posts) == 2 and posts[0] == posts[1]
     assert posts[0] == {
-        "schema_version": 2,
         "installation_id": installation_id,
         "cleanup_mode": "reconcile",
         "plan_digest": _REVIEW_DIGEST,

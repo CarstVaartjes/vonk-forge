@@ -2783,8 +2783,7 @@ def _recipe_installation_reconcile(
         f"/api/recipe/installations/{_quoted(installation_id)}/reconcile/preview"
     )
     apply_path = f"/api/recipe/installations/{_quoted(installation_id)}/reconcile"
-    preview_body = {
-        "schema_version": 2,
+    preview_body: dict[str, object] = {
         "installation_id": installation_id,
         "cleanup_mode": "reconcile",
     }
