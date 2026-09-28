@@ -438,3 +438,80 @@ def test_exhausted_profile_retry_keeps_an_automatic_due_time(
     assert candidate == (first.id, "admin")
     # Scheduling recovery does not rewrite the parked row into a new state.
     assert service.application(first.id).state == "waiting-for-operator"
+
+
+def test_retry_of_a_failed_order_with_a_live_child_resumes_it(tmp_path: Path) -> None:
+    """A failed order whose child is still live resumes instead of refusing.
+
+    Live regression: a transient error while advancing a live Run/Switch child
+    marked the profile load failed after it had stopped the old run; every
+    automatic retry then refused with "Current child operation is still
+    active" and the new run was never started.
+    """
+
+    from vonk_control.models import FleetProfileApplication
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=run_switch
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Resume live child",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "resume-chat",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(820),
+        actor="admin",
+    )
+    assert service.tick()
+    with sessions() as session:
+        child = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
+        assert child is not None and child.state in {"queued", "running"}
+    # An advance error failed the order while its child stayed live.
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None and row.current_operation_id is not None
+        row.state = "failed"
+        row.status_reason = "transient advance failure"
+
+    resumed = service.retry(application.id, request_key=_uuid(821), actor="admin")
+
+    assert resumed.id == application.id
+    assert resumed.state == "running"
+    with sessions() as session:
+        rows = tuple(session.scalars(select(FleetProfileApplication)))
+        assert len(rows) == 1
