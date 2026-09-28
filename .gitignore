@@ -21,4 +21,4 @@ logs/
 __pycache__/
 .state/
 /.cli-dependencies/
-/.trivy/
+/trivy-results/
