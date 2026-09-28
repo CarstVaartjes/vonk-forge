@@ -34,18 +34,16 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
     agent_system,
     enrollment_wire_probe: Path,
 ) -> None:
-    from vonk_agent_protocol.claims import ClaimRequest
+    from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, ClaimRequest
 
     client, _services, _sessions, _clock = agent_system
     raw = _roundtrip(
         enrollment_wire_probe,
         json.dumps(PACKAGED_RUNTIME_IDENTITY).encode(),
         "--claim",
-        NODE_A,
     )
     parsed = ClaimRequest.model_validate_json(raw)
-    assert parsed.node_id == NODE_A
-    assert parsed.protocol_version == 3
+    assert parsed.protocol_version == AGENT_PROTOCOL_VERSION
     # Submit the production serializer's bytes unchanged, bypassing the
     # convenience client's automatic claim fixture completion.
     response = client.request(
@@ -62,7 +60,7 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
     invalid = dict(PACKAGED_RUNTIME_IDENTITY)
     del invalid["binary_digest"]
     rejected = subprocess.run(
-        [str(enrollment_wire_probe), "--claim", NODE_A],
+        [str(enrollment_wire_probe), "--claim"],
         input=json.dumps(invalid).encode() + b"\n",
         capture_output=True,
         check=False,

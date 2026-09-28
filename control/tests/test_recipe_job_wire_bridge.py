@@ -102,7 +102,6 @@ def test_controller_artifact_job_result_crosses_rust_and_python(
         "fence": claim.fence,
         "state": "succeeded",
         "result": {
-            "schema_version": 1,
             "job_id": job.id,
             "run_id": run_id,
             "exit_code": 0,
@@ -147,7 +146,6 @@ def test_recipe_job_result_accepts_omitted_or_explicit_null_reason() -> None:
         name="output.png", media_type="image/png", size_bytes=0, sha256="a" * 64
     )
     base = {
-        "schema_version": 1,
         "job_id": "00000000-0000-4000-8000-000000000011",
         "run_id": "00000000-0000-4000-8000-000000000012",
         "exit_code": 0,
