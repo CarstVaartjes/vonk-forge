@@ -41,8 +41,27 @@ impl RotationError {
         }
     }
 
+    /// Errors that end the agent: the Controller refused this identity
+    /// (401/403, including revocation), the local credential store is
+    /// unusable or tampered with, or the Controller issued a credential that
+    /// does not belong to this node.  An expired active certificate is not
+    /// fatal: it is never used, and renewal is retried idle.
+    pub fn fatal(&self) -> bool {
+        match self {
+            Self::ActiveIdentityExpired => false,
+            Self::Client(error) => error.fatal(),
+            Self::Identity(_) | Self::Issued(_) => true,
+        }
+    }
+
     pub fn decision(&self) -> &'static str {
-        if self.retryable() { "retry" } else { "exit" }
+        if self.retryable() {
+            "retry"
+        } else if self.fatal() {
+            "exit"
+        } else {
+            "defer"
+        }
     }
 }
 
@@ -138,15 +157,17 @@ mod tests {
         assert_eq!(error.code(), "controller.request_rejected");
         assert_eq!(error.decision(), "exit");
         assert!(!error.retryable());
+        assert!(error.fatal());
         assert!(error.to_string().contains("HTTP 403"));
     }
 
     #[test]
-    fn expired_active_identity_has_an_explicit_fail_closed_reason() {
+    fn expired_active_identity_defers_renewal_instead_of_exiting() {
         let error = RotationError::ActiveIdentityExpired;
         assert_eq!(error.code(), "local.identity_expired");
-        assert_eq!(error.decision(), "exit");
+        assert_eq!(error.decision(), "defer");
         assert!(!error.retryable());
+        assert!(!error.fatal());
         assert!(
             error
                 .to_string()
