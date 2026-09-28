@@ -10,7 +10,6 @@ const TARGET_ID = `spk_${"1".repeat(32)}`;
 const TECHNICAL_TARGET_ID = `spk_${"2".repeat(32)}`;
 
 const visualFleet = {
-  schema_version: 1 as const,
   generated_at: "2026-08-15T12:00:00Z",
   authority_revision: "a".repeat(64),
   event_cursor: 1,

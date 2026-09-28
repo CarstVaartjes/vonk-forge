@@ -469,7 +469,6 @@ class FleetEventRecorder:
                 entity_kind="node-profile",
                 entity_id=value.node_id,
                 payload={
-                    "schema_version": 1,
                     "node_id": value.node_id,
                     "profile_changed": True,
                 },
@@ -481,7 +480,6 @@ class FleetEventRecorder:
                 entity_kind="node-telemetry-latest",
                 entity_id=value.node_id,
                 payload={
-                    "schema_version": 1,
                     "node_id": value.node_id,
                     "sample_id": value.sample_id,
                 },
@@ -489,7 +487,6 @@ class FleetEventRecorder:
         if isinstance(value, RecipeInstallation):
             entity_kind = "recipe-installation"
             payload = {
-                "schema_version": 1,
                 "entity_kind": entity_kind,
                 "entity_id": value.id,
                 "recipe_revision_id": value.recipe_revision_id,
@@ -501,7 +498,6 @@ class FleetEventRecorder:
         if isinstance(value, InstallationNode):
             entity_kind = "installation-node"
             payload = {
-                "schema_version": 1,
                 "entity_kind": entity_kind,
                 "entity_id": value.id,
                 "installation_id": value.installation_id,
@@ -518,7 +514,6 @@ class FleetEventRecorder:
         if isinstance(value, RecipeRun):
             entity_kind = "recipe-run"
             payload = {
-                "schema_version": 1,
                 "entity_kind": entity_kind,
                 "entity_id": value.id,
                 "installation_id": value.installation_id,
@@ -532,7 +527,6 @@ class FleetEventRecorder:
         if isinstance(value, RunNode):
             entity_kind = "run-node"
             payload = {
-                "schema_version": 1,
                 "entity_kind": entity_kind,
                 "entity_id": value.id,
                 "run_id": value.run_id,
@@ -549,7 +543,6 @@ class FleetEventRecorder:
         if isinstance(value, Job):
             entity_kind = "job"
             payload = {
-                "schema_version": 1,
                 "entity_kind": entity_kind,
                 "entity_id": value.id,
                 "kind": value.kind,
@@ -562,7 +555,6 @@ class FleetEventRecorder:
         if isinstance(value, AgentOperation):
             entity_kind = "agent-operation"
             payload = {
-                "schema_version": 1,
                 "entity_kind": entity_kind,
                 "entity_id": value.id,
                 "parent_job_id": value.parent_job_id,

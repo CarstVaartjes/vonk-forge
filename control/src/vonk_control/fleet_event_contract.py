@@ -15,7 +15,6 @@ class _FleetEventModel(StrictJSONModel):
 
 
 class NodeProfilePayload(_FleetEventModel):
-    schema_version: Literal[1] = 1
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     profile_changed: bool | None = None
     display_name_changed: bool | None = None
@@ -28,13 +27,11 @@ class NodeProfilePayload(_FleetEventModel):
 
 
 class NodeTelemetryPayload(_FleetEventModel):
-    schema_version: Literal[1] = 1
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     sample_id: Annotated[str, Field(min_length=1, max_length=128)]
 
 
 class RecipeInstallationPayload(_FleetEventModel):
-    schema_version: Literal[1] = 1
     entity_kind: Literal["recipe-installation"]
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     recipe_revision_id: Annotated[str, Field(min_length=1)]
@@ -44,7 +41,6 @@ class RecipeInstallationPayload(_FleetEventModel):
 
 
 class InstallationNodePayload(_FleetEventModel):
-    schema_version: Literal[1] = 1
     entity_kind: Literal["installation-node"]
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     installation_id: Annotated[str, Field(min_length=1)]
@@ -57,7 +53,6 @@ class InstallationNodePayload(_FleetEventModel):
 
 
 class RecipeRunPayload(_FleetEventModel):
-    schema_version: Literal[1] = 1
     entity_kind: Literal["recipe-run"]
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     installation_id: Annotated[str, Field(min_length=1)]
@@ -69,7 +64,6 @@ class RecipeRunPayload(_FleetEventModel):
 
 
 class RunNodePayload(_FleetEventModel):
-    schema_version: Literal[1] = 1
     entity_kind: Literal["run-node"]
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     run_id: Annotated[str, Field(min_length=1)]
@@ -82,7 +76,6 @@ class RunNodePayload(_FleetEventModel):
 
 
 class JobPayload(_FleetEventModel):
-    schema_version: Literal[1] = 1
     entity_kind: Literal["job"]
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     kind: Annotated[str, Field(min_length=1)]
@@ -91,7 +84,6 @@ class JobPayload(_FleetEventModel):
 
 
 class AgentOperationPayload(_FleetEventModel):
-    schema_version: Literal[1] = 1
     entity_kind: Literal["agent-operation"]
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     parent_job_id: Annotated[str, Field(min_length=1)]

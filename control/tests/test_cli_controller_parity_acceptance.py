@@ -117,7 +117,6 @@ def _library(kind: str) -> dict[str, Any]:
 
 def _fleet() -> dict[str, Any]:
     return {
-        "schema_version": 1,
         "event_cursor": 0,
         "generated_at": NOW,
         "authority_revision": "a" * 64,

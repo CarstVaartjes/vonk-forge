@@ -22,7 +22,7 @@ type TestApi = ControlApi & BrowserAuthApi;
 
 function controlApi(overrides: Partial<TestApi> = {}): TestApi {
   return {
-    visualFleet: async () => ({schema_version: 1, event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
+    visualFleet: async () => ({event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
     session: async () => { throw new AuthenticationRequired(); },
     login: async () => session,
     logout: async () => undefined,

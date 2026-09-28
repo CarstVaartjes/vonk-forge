@@ -3069,8 +3069,6 @@ def _require_exclusive_run(target: DualRecoveryTarget, view: _FleetView) -> None
 
 def _fleet_view(value: object, expected_node_ids: Sequence[str]) -> _FleetView:
     snapshot = _mapping(value, "serialized FleetSnapshot")
-    if snapshot.get("schema_version") != 1:
-        raise QualificationError("FleetSnapshot schema version is invalid")
     cursor = _cursor(snapshot.get("event_cursor"), "FleetSnapshot event cursor")
     generated_at = _timestamp(
         snapshot.get("generated_at"), "FleetSnapshot generated_at"

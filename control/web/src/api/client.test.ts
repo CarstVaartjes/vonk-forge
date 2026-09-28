@@ -42,7 +42,7 @@ test("creates a Fleet enrollment grant through the current operator endpoint", a
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     requests.push(request);
-    return new Response(JSON.stringify({schema_version: 2, action: "enroll", state: "created", grant: {}}), {
+    return new Response(JSON.stringify({action: "enroll", state: "created", grant: {}}), {
       status: 201,
       headers: {"Content-Type": "application/json"},
     });

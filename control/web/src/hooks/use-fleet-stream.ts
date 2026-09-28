@@ -160,7 +160,7 @@ export function useFleetStream(api: ControlApi) {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
       const data = eventData(event) as FleetSnapshotEvent | null;
-      if (cursor === null || !data || data.schema_version !== 1
+      if (cursor === null || !data
           || typeof data.reset_reason !== "string"
           || typeof data.snapshot !== "object" || data.snapshot === null
           || data.snapshot.event_cursor !== cursor) return;
@@ -180,7 +180,7 @@ export function useFleetStream(api: ControlApi) {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
       const data = eventData(event) as FleetTelemetryEvent | null;
-      if (cursor === null || !data || data.schema_version !== 1
+      if (cursor === null || !data
           || typeof data.node_id !== "string"
           || typeof data.sample !== "object" || data.sample === null
           || data.sample.node_id !== data.node_id) return;
@@ -193,7 +193,7 @@ export function useFleetStream(api: ControlApi) {
       const event = rawEvent as MessageEvent<string>;
       const cursor = cursorFrom(event);
       const data = eventData(event) as FleetChangeEvent | null;
-      if (cursor === null || data?.schema_version !== 1 || data.projection_refresh_required !== true) return;
+      if (cursor === null || data?.projection_refresh_required !== true) return;
       if (cursor <= Math.max(appliedCursor, requiredRefreshCursor ?? -1)) return;
       requiredRefreshCursor = cursor;
       dispatch({type: "projection-refresh", cursor});

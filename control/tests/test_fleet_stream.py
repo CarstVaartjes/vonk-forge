@@ -195,7 +195,6 @@ def _operation_draft(identifier: int) -> FleetEventDraft:
         entity_kind="job",
         entity_id=entity_id,
         payload={
-            "schema_version": 1,
             "entity_kind": "job",
             "entity_id": entity_id,
             "kind": "deploy",
@@ -314,7 +313,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         node_id=NODE_ID,
         entity_kind="node-telemetry-latest",
         entity_id=NODE_ID,
-        payload={"schema_version": 1, "node_id": NODE_ID, "sample_id": SAMPLE_ID},
+        payload={"node_id": NODE_ID, "sample_id": SAMPLE_ID},
     )
     recipe_event = _event(
         7,
@@ -322,7 +321,6 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         node_id=NODE_ID,
         entity_kind="installation-node",
         payload={
-            "schema_version": 1,
             "entity_kind": "installation-node",
             "entity_id": "entity-7",
             "installation_id": "installation-1",
@@ -393,7 +391,6 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
                 "workloads": [],
             },
         },
-        "schema_version": 1,
     }
     assert recipe_fields == {"id": "7", "event": "recipe-state"}
     assert recipe_data == {
@@ -409,14 +406,12 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
                 "rank": 0,
                 "required_bytes": 0,
                 "role": "leader",
-                "schema_version": 1,
                 "state": "installed",
             },
             "node_id": NODE_ID,
             "occurred_at": "2026-08-15T12:00:07Z",
         },
         "projection_refresh_required": True,
-        "schema_version": 1,
     }
     assert events.replay_calls == [(5, NOW, 128)]
     assert telemetry.calls == [(SAMPLE_ID,)]
@@ -428,7 +423,6 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
         6,
         "operation-state",
         payload={
-            "schema_version": 1,
             "entity_kind": "job",
             "entity_id": "entity-6",
             "kind": "deploy",
@@ -471,13 +465,11 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     }
     assert snapshot_data == {
         "reset_reason": "initial",
-        "schema_version": 1,
         "snapshot": {
             "event_cursor": 5,
             "generated_at": "2026-08-15T12:00:00Z",
             "nodes": [],
             "authority_revision": COMMIT,
-            "schema_version": 1,
         },
     }
     assert replay_fields == {"id": "6", "event": "operation-state"}
@@ -500,7 +492,6 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
 
 def test_fleet_change_schema_rejects_unknown_typed_fields() -> None:
     data = {
-        "schema_version": 1,
         "projection_refresh_required": True,
         "change": {
             "entity_kind": "job",
@@ -508,7 +499,6 @@ def test_fleet_change_schema_rejects_unknown_typed_fields() -> None:
             "node_id": None,
             "occurred_at": "2026-08-15T12:00:00Z",
             "fields": {
-                "schema_version": 1,
                 "entity_kind": "job",
                 "entity_id": "job-typed",
                 "kind": "deploy",
@@ -533,7 +523,6 @@ def test_stream_rejects_event_type_and_source_kind_mismatch() -> None:
         "recipe-state",
         entity_kind="job",
         payload={
-            "schema_version": 1,
             "entity_kind": "job",
             "entity_id": "entity-8",
             "kind": "deploy",
@@ -615,7 +604,6 @@ def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
                     entity_kind="node-telemetry-latest",
                     entity_id=NODE_ID,
                     payload={
-                        "schema_version": 1,
                         "node_id": NODE_ID,
                         "sample_id": SAMPLE_ID,
                     },
@@ -659,7 +647,6 @@ def test_midstream_retention_loss_resets_before_delivering_later_event() -> None
         6,
         "operation-state",
         payload={
-            "schema_version": 1,
             "entity_kind": "job",
             "entity_id": "entity-6",
             "kind": "deploy",
@@ -827,7 +814,6 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
                     entity_kind="node-telemetry-latest",
                     entity_id=NODE_ID,
                     payload={
-                        "schema_version": 1,
                         "node_id": NODE_ID,
                         "sample_id": sample_id,
                     },
@@ -1041,7 +1027,6 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                         entity_kind="job",
                         entity_id="job-5",
                         payload={
-                            "schema_version": 1,
                             "entity_kind": "job",
                             "entity_id": "job-5",
                             "kind": "deploy",
@@ -1058,7 +1043,6 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                         entity_kind="job",
                         entity_id="job-6",
                         payload={
-                            "schema_version": 1,
                             "entity_kind": "job",
                             "entity_id": "job-6",
                             "kind": "deploy",

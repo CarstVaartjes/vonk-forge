@@ -764,7 +764,6 @@ def test_fleet_exposes_typed_visual_state() -> None:
 
     assert visual.status_code == 200
     assert visual.json() == {
-        "schema_version": 1,
         "event_cursor": 11,
         "generated_at": "2026-08-15T12:00:00Z",
         "authority_revision": COMMIT,

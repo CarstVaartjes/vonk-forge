@@ -113,7 +113,6 @@ class FleetUpgradeRequest(StrictJSONModel):
 
 
 class FleetActionResponse(StrictJSONModel):
-    schema_version: Literal[2] = 2
     action: Literal["enroll", "re-enroll", "remove", "upgrade"]
     state: str = Field(min_length=1, max_length=32)
     operation_id: str | None = Field(default=None, max_length=128)
@@ -145,7 +144,6 @@ class FleetLogEntry(StrictJSONModel):
 
 
 class FleetLogResponse(StrictJSONModel):
-    schema_version: Literal[2] = 2
     node_id: str = Field(pattern=_NODE_PATTERN)
     since: datetime | None
     lines: int = Field(ge=1, le=1_000)

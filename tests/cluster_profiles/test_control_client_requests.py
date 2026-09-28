@@ -600,7 +600,6 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
         "event_cursor": 0,
         "generated_at": "2026-09-07T00:00:00+00:00",
         "nodes": [],
-        "schema_version": 1,
     }
     client = ControlClient(
         "https://forge.example.test",
