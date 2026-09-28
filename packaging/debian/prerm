@@ -91,8 +91,22 @@ if [ "${1:-}" = remove ]; then
     if recovery_remove_binding "$1"; then
         recovery_remove=1
     elif [ -e "$upgrade_intent" ] || [ -L "$upgrade_intent" ]; then
-        echo 'vonk-forge-agent: cannot remove package during durable upgrade recovery' >&2
-        exit 1
+        # An explicit removal is the latest request: retire the durable
+        # upgrade intent so the recovery capsule does not reinstall the
+        # package behind it. The root-only state directory stays fail-closed.
+        upgrade_state_dir=$(/usr/bin/dirname "$upgrade_intent")
+        if [ -z "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ] \
+            && [ -d "$upgrade_state_dir" ] && [ ! -L "$upgrade_state_dir" ] \
+            && [ "$(/usr/bin/stat -c %u:%g:%a "$upgrade_state_dir")" = 0:0:700 ] \
+            && { [ -f "$upgrade_intent" ] || [ -L "$upgrade_intent" ]; }; then
+            echo 'vonk-forge-agent: removal supersedes durable upgrade recovery' >&2
+            /usr/bin/rm -f -- "$upgrade_intent" \
+                "$upgrade_state_dir/agent-blocked"
+            /usr/bin/sync -f "$upgrade_state_dir"
+        else
+            echo 'vonk-forge-agent: cannot remove package during durable upgrade recovery' >&2
+            exit 1
+        fi
     fi
     /usr/bin/systemctl --system stop \
         vonk-forge-package-helper-upgrade-finish.service >/dev/null 2>&1 || true
@@ -107,14 +121,14 @@ if [ "${1:-}" = remove ]; then
     deb-systemd-invoke stop vonk-forge-docker-firewall.service >/dev/null || true
     if [ -e "$pending" ] || [ -L "$pending" ]; then
         safe_pending || {
-            echo 'vonk-forge-agent: pending helper upgrade state is unsafe' >&2
-            exit 1
+            echo 'vonk-forge-agent: discarded malformed pending helper upgrade state' >&2
+            /usr/bin/rm -f -- "$pending"
         }
     fi
     if [ -e "$receipt" ] || [ -L "$receipt" ]; then
         safe_receipt || {
-            echo 'vonk-forge-agent: helper upgrade receipt is unsafe' >&2
-            exit 1
+            echo 'vonk-forge-agent: discarded malformed helper upgrade receipt' >&2
+            /usr/bin/rm -f -- "$receipt"
         }
     fi
     if [ "$recovery_remove" -eq 1 ]; then

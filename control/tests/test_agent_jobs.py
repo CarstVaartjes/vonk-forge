@@ -2305,6 +2305,86 @@ def test_parent_job_waits_when_all_operations_terminal_without_failures(
     assert job_state(sessions, parent_job.id).state == "waiting-for-operator"
 
 
+@pytest.mark.parametrize(
+    "failure_kind", ["temporary-dependency", "resource-prerequisite"]
+)
+def test_transient_start_failure_retries_automatically_without_operator(
+    service, failure_kind
+) -> None:
+    """Any transient failure of a restart-safe order is re-issued with backoff.
+
+    Catches the narrower classifier that retried a start only for one error
+    code and parked every other transient start failure for an operator.
+    """
+
+    from vonk_agent_protocol import AgentResult
+
+    jobs, sessions, clock = service
+    payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.start", COMMIT, payload
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+    body = {
+        key: claim.model_dump(mode="json")[key]
+        for key in (
+            "schema_version",
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "node_id",
+            "deadline",
+        )
+    }
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            json.dumps(
+                {
+                    **body,
+                    "state": "failed",
+                    "result": {
+                        "status": "failed",
+                        "error_code": "recipe_start_failed",
+                        "reason": "container runtime is busy",
+                        "failure_kind": failure_kind,
+                    },
+                }
+            )
+        )
+    )
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == "waiting-for-operator"
+        assert stored.retry_disposition == "retry"
+        assert stored.retry_due_at is not None
+        due = stored.retry_due_at.replace(tzinfo=UTC)
+    assert job_state(sessions, operation.parent_job_id).state == "queued"
+    clock.now = due + timedelta(seconds=1)
+    retry = claim_agent(
+        jobs, NODE_A, "serial-a", 30, capabilities=EXACT_LIFECYCLE_CAPABILITIES
+    )
+    assert retry is not None and retry.attempt == 2
+
+
+def test_uncertain_stop_is_reconciled_by_exact_resume_not_parked(service) -> None:
+    """An uncertain effect of an exact-resume order retries by inspection."""
+
+    jobs, sessions, clock = service
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a", 30)
+    assert claim is not None
+    jobs.uncertain(claim, "runtime did not confirm the stop")
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.retry_disposition == "retry"
+        assert stored.retry_due_at is not None
+    assert job_state(sessions, operation.parent_job_id).state == "queued"
+
+
 def test_progress_snapshots_and_phase_changes_have_bounded_write_frequency(
     service,
 ) -> None:

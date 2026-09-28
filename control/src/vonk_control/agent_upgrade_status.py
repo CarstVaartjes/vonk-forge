@@ -71,10 +71,10 @@ def agent_upgrade_next_action(*, retry_queued: bool) -> str:
             "the rollout again."
         )
     return (
-        "Keep the rollout paused and inspect the Spark package-helper and dpkg "
-        "recovery state before resuming. When ready, Resume queues the retry behind "
-        "a new safety delay; it does not dispatch immediately. Do not advance to "
-        "another Spark until this Spark reports the exact target identity."
+        "No action is required: the controller retries this Spark automatically "
+        "behind a new safety delay when it reconnects, and the rollout continues "
+        "with the other Sparks meanwhile. Inspect the Spark package-helper and "
+        "dpkg state if the retry keeps failing."
     )
 
 

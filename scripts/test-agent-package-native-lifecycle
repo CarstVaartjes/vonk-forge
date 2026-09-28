@@ -287,12 +287,10 @@ test -n "$candidate_build_digest" && test -n "$candidate_binary_digest"
 test "$candidate_build_digest" != "$baseline_build_digest"
 test "$candidate_binary_digest" != "$baseline_binary_digest"
 
-if env SYSTEMD_OFFLINE=1 "$dpkg" -i "$current_package" \
-  >"$downgrade_log" 2>&1; then
-  printf '%s\n' 'native lifecycle downgrade unexpectedly succeeded' >&2
-  exit 1
-fi
-grep -F 'refusing downgrade' "$downgrade_log" >/dev/null
+# A requested signed downgrade is an ordinary install: the latest request leads.
+env SYSTEMD_OFFLINE=1 "$dpkg" -i "$current_package" >"$downgrade_log" 2>&1
+grep -F 'installing requested downgrade' "$downgrade_log" >/dev/null
+test "$("$dpkg_query" -W -f="$dpkg_version_format" vonk-forge-agent)" = "$current_version"
 
 env SYSTEMD_OFFLINE=1 "$dpkg" --remove vonk-forge-agent
 test -f "$config"

@@ -190,6 +190,14 @@ impl ClientError {
             || matches!(self, Self::Controller(error) if error.retryable())
     }
 
+    /// The only errors that end the agent process: the Controller refused
+    /// this agent's authority (HTTP 401/403, which includes node revocation),
+    /// or the local TLS identity or Controller CA pin is unusable.  Every
+    /// other failure is logged, backed off, and retried by its caller.
+    pub fn fatal(&self) -> bool {
+        matches!(self, Self::Identity | Self::Pin) || matches!(self.status(), Some(401 | 403))
+    }
+
     pub fn retry_after_seconds(&self) -> Option<u32> {
         match self {
             Self::Controller(error) => error.retry_after_seconds,
@@ -252,8 +260,10 @@ impl ClientError {
             "retry"
         } else if matches!(self, Self::ResultRejected(_)) {
             "record"
-        } else {
+        } else if self.fatal() {
             "exit"
+        } else {
+            "defer"
         }
     }
 }
@@ -1738,7 +1748,7 @@ impl AgentHttpClient {
     }
 
     pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
-        let request = InventoryRequest {
+        let mut request = InventoryRequest {
             schema_version: 1,
             observed_at: chrono::Utc::now().into(),
             disk_total_bytes: inventory.disk_total_bytes,
@@ -1754,11 +1764,11 @@ impl AgentHttpClient {
             fabric_address: inventory.fabric_address.map(|value| value.to_string()),
             fabric_bandwidth_mbps: inventory
                 .fabric_bandwidth_mbps
-                .map(|value| u32::try_from(value).map_err(|_| ClientError::Protocol))
-                .transpose()?,
+                .and_then(|value| u32::try_from(value).ok()),
             nvidia_driver_version: inventory.nvidia_driver_version.clone(),
             container_runtime_version: inventory.container_runtime_version.clone(),
         };
+        clamp_inventory_request(&mut request);
         request.validate().map_err(|_| ClientError::Protocol)?;
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -2257,10 +2267,10 @@ fn controller_error(
         500..=599 => "controller.unavailable".to_owned(),
         _ => format!("controller.http_{status_code}"),
     });
-    let decision = if matches!(status_code, 408 | 429 | 500..=599) {
-        "retry"
-    } else {
-        "exit"
+    let decision = match status_code {
+        408 | 429 | 500..=599 => "retry",
+        401 | 403 => "exit",
+        _ => "defer",
     };
     ControllerError {
         operation: operation.to_owned(),
@@ -2271,6 +2281,60 @@ fn controller_error(
         decision,
         retry_after_seconds: None,
         summary: None,
+    }
+}
+
+/// Bring locally observed inventory inside the wire contract instead of
+/// refusing the whole report: out-of-range byte counts are clamped, a free
+/// value never exceeds its total, invalid or duplicate capabilities and an
+/// incomplete fabric pair are omitted.  Nothing is invented: a missing driver
+/// or runtime version still fails validation and the report is retried.
+fn clamp_inventory_request(request: &mut InventoryRequest) {
+    const MAX_BYTES: u64 = 16 * 1024_u64.pow(4);
+    for value in [
+        &mut request.disk_total_bytes,
+        &mut request.disk_free_bytes,
+        &mut request.host_memory_total_bytes,
+        &mut request.host_memory_free_bytes,
+        &mut request.gpu_memory_total_bytes,
+        &mut request.gpu_memory_free_bytes,
+    ] {
+        *value = (*value).min(MAX_BYTES);
+    }
+    request.disk_free_bytes = request.disk_free_bytes.min(request.disk_total_bytes);
+    request.host_memory_free_bytes = request
+        .host_memory_free_bytes
+        .min(request.host_memory_total_bytes);
+    request.gpu_memory_free_bytes = request
+        .gpu_memory_free_bytes
+        .min(request.gpu_memory_total_bytes);
+    request.gpu_count = request.gpu_count.min(64);
+    let mut seen = std::collections::BTreeSet::new();
+    request.capabilities.retain(|value| {
+        let valid = !value.is_empty()
+            && value.len() <= 128
+            && value.bytes().enumerate().all(|(index, byte)| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
+            });
+        valid && seen.insert(value.clone())
+    });
+    request.capabilities.truncate(64);
+    for version in [
+        &mut request.nvidia_driver_version,
+        &mut request.container_runtime_version,
+    ] {
+        version.retain(|character| character.is_ascii());
+        version.truncate(256);
+    }
+    if request.fabric_address.is_none()
+        || !request
+            .fabric_bandwidth_mbps
+            .is_some_and(|value| (1..=1_000_000).contains(&value))
+    {
+        request.fabric_address = None;
+        request.fabric_bandwidth_mbps = None;
     }
 }
 
@@ -2584,9 +2648,9 @@ fn valid_oci_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentHttpClient, AgentResult, ClientError, ExactRecipeRunObservation,
-        MAX_REJECTION_CONTEXT_CHARS, controller_rejection_digest, distribution_hash_read_bytes,
-        is_rotation_conflict, partial_path, valid_reported_hostname,
+        AgentHttpClient, AgentResult, ClientError, ControllerError, ExactRecipeRunObservation,
+        MAX_REJECTION_CONTEXT_CHARS, clamp_inventory_request, controller_rejection_digest,
+        distribution_hash_read_bytes, is_rotation_conflict, partial_path, valid_reported_hostname,
     };
     use crate::{
         oci::OciRuntime,
@@ -2623,6 +2687,64 @@ mod tests {
     };
 
     struct NoProcess;
+
+    #[test]
+    fn only_refused_identity_is_fatal_for_the_agent() {
+        for status in [401, 403] {
+            let error = ClientError::Controller(Box::new(ControllerError::from_status(status)));
+            assert!(error.fatal());
+            assert_eq!(error.decision(), "exit");
+        }
+        assert!(ClientError::Identity.fatal());
+        assert!(ClientError::Pin.fatal());
+        for status in [400, 404, 409, 422] {
+            let error = ClientError::Controller(Box::new(ControllerError::from_status(status)));
+            assert!(!error.fatal());
+            assert!(!error.retryable());
+            assert_eq!(error.decision(), "defer");
+        }
+        assert!(!ClientError::Protocol.fatal());
+        assert!(!ClientError::Retryable.fatal());
+    }
+
+    #[test]
+    fn out_of_contract_inventory_is_clamped_instead_of_refused() {
+        let mut request = vonk_agent_protocol::InventoryRequest {
+            schema_version: 1,
+            observed_at: Utc::now().into(),
+            disk_total_bytes: 100,
+            // Free raced above total between two statfs samples.
+            disk_free_bytes: 101,
+            host_memory_total_bytes: 64 * 1024_u64.pow(4),
+            host_memory_free_bytes: 1,
+            gpu_memory_total_bytes: 0,
+            gpu_memory_free_bytes: 0,
+            gpu_count: 1,
+            memory_pool: vonk_agent_protocol::generated::InventoryRequestMemoryPool::Shared,
+            artifact_store_read_only: false,
+            capabilities: vec![
+                "runtime.oci".to_owned(),
+                "runtime.oci".to_owned(),
+                "Bad Capability".to_owned(),
+            ],
+            fabric_address: None,
+            fabric_bandwidth_mbps: Some(100),
+            nvidia_driver_version: "580.1\u{e9}".to_owned(),
+            container_runtime_version: "podman 5".to_owned(),
+        };
+        assert!(request.validate().is_err());
+        clamp_inventory_request(&mut request);
+        request.validate().unwrap();
+        assert_eq!(request.disk_free_bytes, 100);
+        assert_eq!(request.capabilities, vec!["runtime.oci".to_owned()]);
+        assert_eq!(request.fabric_bandwidth_mbps, None);
+        assert_eq!(request.nvidia_driver_version, "580.1");
+
+        // A missing version is never invented: the report stays invalid.
+        request.container_runtime_version.clear();
+        clamp_inventory_request(&mut request);
+        assert!(request.validate().is_err());
+    }
 
     #[test]
     fn renewal_conflict_is_distinguished_from_revoked_identity() {
