@@ -6733,8 +6733,6 @@ export interface components {
             artifact_set_digest: string;
             /** Endpoint */
             endpoint: string;
-            /** Evidence Digest */
-            evidence_digest: string;
             /** Image Digest */
             image_digest: string;
             /** Local Address */
@@ -6784,8 +6782,6 @@ export interface components {
         RecipeStartRankLaunchEvidence: {
             /** Artifact Set Digest */
             artifact_set_digest: string;
-            /** Evidence Digest */
-            evidence_digest: string;
             /**
              * Fabric Projection Bound
              * @constant
@@ -6847,8 +6843,6 @@ export interface components {
             artifact_set_digest: string;
             /** Endpoint */
             endpoint: string;
-            /** Evidence Digest */
-            evidence_digest: string;
             /** Image Digest */
             image_digest: string;
             /** Local Address */
@@ -9281,8 +9275,6 @@ export interface components {
             artifact_set_digest: string;
             /** Endpoint */
             endpoint: string;
-            /** Evidence Digest */
-            evidence_digest: string;
             /** Image Digest */
             image_digest: string;
             /** Local Address */

@@ -153,9 +153,7 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
 
     # A delayed start success is historical evidence, never permission to
     # resurrect the retired run or give its unobserved memory to a replacement.
-    late = _result(
-        claim, {"evidence": evidence, "evidence_digest": evidence["evidence_digest"]}
-    )
+    late = _result(claim, {"evidence": evidence})
     with pytest.raises(StaleAgentAttempt):
         jobs.record_result(late)
     assert jobs.record_late_result(late)

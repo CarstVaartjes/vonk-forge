@@ -191,6 +191,19 @@ class AgentUpgradeResult(WireModel):
     activation_receipt: PackageActivationReceipt
 
 
+def _drop_retired_evidence_digest(value: Any) -> Any:
+    """Ignore the retired ``evidence_digest`` an older agent may still send.
+
+    During a fleet upgrade an agent that predates its removal can report to a
+    current Controller; the key carries no decision, so it is dropped rather
+    than failing the strict model.
+    """
+
+    if isinstance(value, Mapping) and "evidence_digest" in value:
+        return {key: item for key, item in value.items() if key != "evidence_digest"}
+    return value
+
+
 class _RecipeStartEvidenceCommon(WireModel):
     recipe_revision_id: CanonicalUUID
     recipe_content_sha256: DigestText
@@ -200,7 +213,11 @@ class _RecipeStartEvidenceCommon(WireModel):
     rank: int = Field(strict=True, ge=0)
     world_size: int = Field(strict=True, ge=1)
     memory_reservation_bytes: int = Field(strict=True, ge=1)
-    evidence_digest: DigestText
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_retired_digest(cls, value: Any) -> Any:
+        return _drop_retired_evidence_digest(value)
 
 
 class RecipeStartSingleEvidence(_RecipeStartEvidenceCommon):
@@ -265,7 +282,11 @@ RecipeStartEvidence = (
 class RecipeStartResult(WireModel):
     endpoint: str | None = None
     evidence: RecipeStartEvidence
-    evidence_digest: DigestText
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_retired_digest(cls, value: Any) -> Any:
+        return _drop_retired_evidence_digest(value)
 
 
 class ArtifactDistributionResult(WireModel):
@@ -278,7 +299,11 @@ class ArtifactDistributionResult(WireModel):
     verified_oci_layout_sha256: DigestText
     oci_image_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
     downloaded_bytes: int = Field(strict=True, ge=0, le=16 * 1024**4)
-    evidence_digest: DigestText
+
+    @model_validator(mode="before")
+    @classmethod
+    def _ignore_retired_digest(cls, value: Any) -> Any:
+        return _drop_retired_evidence_digest(value)
 
 
 class AgentFailureKind(StrEnum):

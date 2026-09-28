@@ -605,10 +605,7 @@ def test_connected_recipe_start_receipts_expose_rank_artifacts(tmp_path):
                     lease_deadline=NOW,
                     agent_certificate_serial="serial-0",
                     state="succeeded",
-                    result={
-                        "evidence": evidence,
-                        "evidence_digest": evidence["evidence_digest"],
-                    },
+                    result={"evidence": evidence},
                 )
             )
     service = DeploymentProvenanceService(sessions, clock=lambda: NOW)
@@ -691,10 +688,7 @@ def test_invalid_old_recipe_start_document_is_exposed_without_blocking_fleet_det
         )
         assert current is not None
         evidence = start_evidence(current.payload)
-        attempt_result = {
-            "evidence": evidence,
-            "evidence_digest": evidence["evidence_digest"],
-        }
+        attempt_result = {"evidence": evidence}
         session.add(
             AgentOperationAttempt(
                 operation_id=current.id,
@@ -814,10 +808,7 @@ def test_invalid_later_same_run_start_does_not_reuse_older_start_receipt(
         )
         assert current is not None
         evidence = start_evidence(current.payload)
-        attempt_result = {
-            "evidence": evidence,
-            "evidence_digest": evidence["evidence_digest"],
-        }
+        attempt_result = {"evidence": evidence}
         session.add(
             AgentOperationAttempt(
                 operation_id=current.id,

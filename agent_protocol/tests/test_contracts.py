@@ -119,7 +119,6 @@ def recipe_start_result(
         "rank": 0,
         "world_size": 1,
         "memory_reservation_bytes": 1024,
-        "evidence_digest": "d" * 64,
         "endpoint": endpoint,
         "ready": True,
         "run_generation": 1,
@@ -128,7 +127,7 @@ def recipe_start_result(
         "master_address": None,
         "master_port": None,
     }
-    return {"endpoint": endpoint, "evidence": evidence, "evidence_digest": "f" * 64}
+    return {"endpoint": endpoint, "evidence": evidence}
 
 
 def apply_vector_changes(
@@ -924,7 +923,6 @@ def test_distribution_result_cannot_fall_through_to_generic_evidence() -> None:
         "verified_oci_layout_sha256": "d" * 64,
         "oci_image_digest": "sha256:" + "c" * 64,
         "downloaded_bytes": 1024,
-        "evidence_digest": "e" * 64,
     }
     parsed = validate_result_for_operation(
         AgentOperation.ARTIFACT_DISTRIBUTION,
@@ -936,6 +934,29 @@ def test_distribution_result_cannot_fall_through_to_generic_evidence() -> None:
         validate_result_for_operation(
             AgentOperation.ARTIFACT_DISTRIBUTION,
             complete | {"downloaded_bytes": "1024"},
+            state="succeeded",
+        )
+
+
+def test_result_from_an_agent_that_still_sends_evidence_digest_is_accepted() -> None:
+    """A fleet upgrade can briefly pair an older agent with this Controller."""
+
+    legacy = recipe_start_result()
+    legacy["evidence_digest"] = "f" * 64
+    legacy["evidence"] = dict(legacy["evidence"]) | {"evidence_digest": "d" * 64}
+    parsed = validate_result_for_operation(
+        AgentOperation.RECIPE_START, legacy, state="succeeded"
+    )
+    assert canonical_message(parsed) == canonical_message(
+        validate_result_for_operation(
+            AgentOperation.RECIPE_START, recipe_start_result(), state="succeeded"
+        )
+    )
+    assert b"evidence_digest" not in canonical_message(parsed)
+    with pytest.raises(AgentProtocolError, match="typed model"):
+        validate_result_for_operation(
+            AgentOperation.RECIPE_START,
+            recipe_start_result() | {"unexpected": "f" * 64},
             state="succeeded",
         )
 

@@ -1575,7 +1575,6 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
                 reserved_memory_bytes=current_node.reserved_memory_bytes,
                 observed_memory_bytes=None,
                 endpoint=None,
-                evidence_digest=None,
                 observed_run_generation=None,
                 observation_receipt_sha256=None,
                 observation_process_running=None,

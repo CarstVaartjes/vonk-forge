@@ -400,10 +400,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
                     "runtime_arguments_sha256": "c" * 64,
                 }
             )
-        return {
-            **identity,
-            "evidence_digest": hashlib.sha256(canonical_message(identity)).hexdigest(),
-        }
+        return identity
     identity = {
         "recipe_revision_id": payload["recipe_revision_id"],
         "recipe_content_sha256": payload["recipe_content_sha256"],
@@ -434,10 +431,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
                 "master_port": payload["master_port"],
             }
         )
-    return {
-        **identity,
-        "evidence_digest": hashlib.sha256(canonical_message(identity)).hexdigest(),
-    }
+    return identity
 
 
 def setup_services(
@@ -1462,7 +1456,6 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
                     port=port,
                     reserved_memory_bytes=node.reserved_memory_bytes,
                     endpoint=endpoint,
-                    evidence_digest=node.evidence_digest,
                     updated_at=NOW,
                 )
             )
@@ -2041,7 +2034,7 @@ def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
 
     def success(payload: Mapping[str, object]) -> dict[str, object]:
         evidence = start_evidence(dict(payload))
-        return {"evidence": evidence, "evidence_digest": evidence["evidence_digest"]}
+        return {"evidence": evidence}
 
     def claim(node_id: str):
         with sessions() as session:
@@ -2159,12 +2152,6 @@ def test_distributed_start_rejects_changed_launch_evidence(tmp_path: Path) -> No
         )
     evidence = start_evidence(launch.payload)
     evidence["role"] = "entrypoint"
-    identity = {
-        key: value for key, value in evidence.items() if key != "evidence_digest"
-    }
-    evidence["evidence_digest"] = hashlib.sha256(
-        canonical_message(identity)
-    ).hexdigest()
 
     with pytest.raises(RecipeOperationConflict, match="fenced request"):
         service.record_node_result(
@@ -4708,10 +4695,8 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
             )
         )
         ranks[0].state = "running"
-        ranks[0].evidence_digest = "1" * 64
         ranks[0].updated_at = NOW
         ranks[1].state = "failed"
-        ranks[1].evidence_digest = "2" * 64
         ranks[1].updated_at = NOW
 
     status = service.run_status(start.owner_id)
