@@ -143,15 +143,17 @@ _CANCELLATION_UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 # Only an invalid recipe/runtime contract, a withdrawn revision, a revoked
-# authority, an untrusted source or redirect, a build whose identity changed or
-# is unproven, or a conflicting registry/build identity for the same bytes is
-# terminal. Every other failure, including
+# authority, an untrusted source or redirect, an invalid build source or
+# security envelope, or a conflicting registry/build identity for the same
+# bytes is terminal (as is any availability error explicitly marked
+# non-retryable, such as a build whose identity changed). Every other failure, including
 # integrity mismatches (whose bytes are then downloaded or built again) and
 # malformed records of our own, retries with capped backoff while the
 # operation remains the current intent.
 _TERMINAL_FAILURE_CODES = frozenset(
     {
-        "recipe_image.build_invalid",
+        "build.security_invalid",
+        "build.source_invalid",
         "recipe_image.recipe_invalid",
         "recipe_image.recipe_unavailable",
         "recipe_image.runtime_invalid",

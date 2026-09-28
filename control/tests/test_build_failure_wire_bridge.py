@@ -30,7 +30,6 @@ from vonk_control.models import (
     Job,
     User,
 )
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_agent_restart_recovery_wire_bridge import (
@@ -355,13 +354,14 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             assert service.get(parent.id).state in {"queued", "running", "partial"}
         else:
             assert observed.state == "failed"
-            with pytest.raises(RecipeImageAvailabilityError) as refused:
-                service.retry(
-                    parent.id,
-                    actor="operator",
-                    request_id=str(uuid.uuid4()),
-                )
-            assert refused.value.code == "recipe_image.not_retryable"
+            # The refusal never retries on its own. An explicit operator retry
+            # is a newer request and is accepted; it dispatches nothing until
+            # the parent runs again.
+            service.retry(
+                parent.id,
+                actor="operator",
+                request_id=str(uuid.uuid4()),
+            )
             with sessions() as session:
                 assert (
                     len(

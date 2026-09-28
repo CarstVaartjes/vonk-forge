@@ -380,6 +380,7 @@ def build_recipe_image_availability(
                         raise RecipeImageAvailabilityError(
                             "recipe_image.build_invalid",
                             "accepted shared build has no recorded builder identity",
+                            retryable=False,
                         )
                     if (
                         policy.artifact_format != BUILD_ARTIFACT_FORMAT
@@ -403,6 +404,7 @@ def build_recipe_image_availability(
                         raise RecipeImageAvailabilityError(
                             "recipe_image.build_invalid",
                             "accepted shared build request identity changed",
+                            retryable=False,
                         )
                     builder_id = candidate.builder_node_id
                     digest = candidate.build_input_sha256
@@ -464,6 +466,7 @@ def build_recipe_image_availability(
                 raise RecipeImageAvailabilityError(
                     "recipe_image.build_invalid",
                     "accepted build child identity changed",
+                    retryable=False,
                 )
             dependency = dependency or _new_build_dependency(parent)
             dependency = dependency.model_copy(
