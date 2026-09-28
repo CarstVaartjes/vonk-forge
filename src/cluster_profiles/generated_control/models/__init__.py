@@ -529,24 +529,9 @@ from .stop_impact import StopImpact
 from .string_parameter import StringParameter
 from .target_asset_state import TargetAssetState
 from .target_asset_state_state import TargetAssetStateState
-from .telemetry_capability import TelemetryCapability
-from .telemetry_capability_measurement_kind import TelemetryCapabilityMeasurementKind
-from .telemetry_capability_scope import TelemetryCapabilityScope
-from .telemetry_details import TelemetryDetails
-from .telemetry_metrics import TelemetryMetrics
 from .telemetry_point import TelemetryPoint
-from .telemetry_provenance import TelemetryProvenance
-from .telemetry_runtime import TelemetryRuntime
-from .telemetry_runtime_readiness import TelemetryRuntimeReadiness
-from .telemetry_series import TelemetrySeries
-from .telemetry_series_freshness import TelemetrySeriesFreshness
-from .telemetry_series_measurement_kind import TelemetrySeriesMeasurementKind
-from .telemetry_series_scope import TelemetrySeriesScope
-from .telemetry_series_support_status import TelemetrySeriesSupportStatus
 from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
-from .telemetry_workload import TelemetryWorkload
-from .telemetry_workload_state import TelemetryWorkloadState
 from .tensor_parallel_start_evidence import TensorParallelStartEvidence
 
 __all__ = (
@@ -1079,23 +1064,8 @@ __all__ = (
     "StringParameter",
     "TargetAssetState",
     "TargetAssetStateState",
-    "TelemetryCapability",
-    "TelemetryCapabilityMeasurementKind",
-    "TelemetryCapabilityScope",
-    "TelemetryDetails",
-    "TelemetryMetrics",
     "TelemetryPoint",
-    "TelemetryProvenance",
-    "TelemetryRuntime",
-    "TelemetryRuntimeReadiness",
-    "TelemetrySeries",
-    "TelemetrySeriesFreshness",
-    "TelemetrySeriesMeasurementKind",
-    "TelemetrySeriesScope",
-    "TelemetrySeriesSupportStatus",
     "TelemetryState",
     "TelemetryStateFreshness",
-    "TelemetryWorkload",
-    "TelemetryWorkloadState",
     "TensorParallelStartEvidence",
 )

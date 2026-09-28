@@ -7676,80 +7676,14 @@ export interface components {
             /** Verified Sha256 */
             verified_sha256?: string | null;
         };
-        /** TelemetryCapability */
-        TelemetryCapability: {
-            /** Device Id */
-            device_id?: string | null;
-            /** Freshness Threshold Seconds */
-            freshness_threshold_seconds: number;
-            /** Interface Name */
-            interface_name?: string | null;
-            /** Key */
-            key: string;
-            /**
-             * Measurement Kind
-             * @enum {string}
-             */
-            measurement_kind: "measured" | "derived" | "estimated" | "configured";
-            /** Node Id */
-            node_id?: string | null;
-            /** Process Id */
-            process_id?: number | null;
-            /** Process Name */
-            process_name?: string | null;
-            /** Reason */
-            reason?: string | null;
-            /** Run Id */
-            run_id?: string | null;
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "node" | "accelerator" | "memory" | "storage" | "network" | "runtime" | "workload" | "service" | "benchmark";
-            /** Source */
-            source: string;
-            /** Supported */
-            supported: boolean;
-            /** Unit */
-            unit: string;
-        };
-        /** TelemetryDetails */
-        "TelemetryDetails-Output": {
-            /** Accelerator Name */
-            accelerator_name?: string | null;
-            /** Accelerator Performance State */
-            accelerator_performance_state?: string | null;
-        };
-        /** TelemetryMetrics */
-        TelemetryMetrics: {
-            /** Capabilities */
-            capabilities: components["schemas"]["TelemetryCapability"][];
-            provenance: components["schemas"]["TelemetryProvenance"];
-            /** Runtimes */
-            runtimes: components["schemas"]["TelemetryRuntime"][];
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 2;
-            /** Series */
-            series: components["schemas"]["TelemetrySeries"][];
-            /** Workloads */
-            workloads: components["schemas"]["TelemetryWorkload"][];
-        };
         /** TelemetryPoint */
         TelemetryPoint: {
             /** Boot Id */
             boot_id: string;
-            /** Cpu Utilization Percent */
-            cpu_utilization_percent?: number | null;
-            details: components["schemas"]["TelemetryDetails-Output"];
             /** Disk Free Bytes */
             disk_free_bytes?: number | null;
             /** Disk Total Bytes */
             disk_total_bytes?: number | null;
-            /** Gap Samples */
-            gap_samples: number;
             /** Gpu Memory Free Bytes */
             gpu_memory_free_bytes?: number | null;
             /** Gpu Memory Total Bytes */
@@ -7758,17 +7692,10 @@ export interface components {
             gpu_utilization_percent?: number | null;
             /** Id */
             id: string;
-            /** Load Average 1M */
-            load_average_1m?: number | null;
             /** Memory Available Bytes */
             memory_available_bytes?: number | null;
             /** Memory Total Bytes */
             memory_total_bytes?: number | null;
-            metrics: components["schemas"]["TelemetryMetrics"];
-            /** Network Receive Bytes Per Second */
-            network_receive_bytes_per_second?: number | null;
-            /** Network Transmit Bytes Per Second */
-            network_transmit_bytes_per_second?: number | null;
             /** Node Id */
             node_id: string;
             /**
@@ -7776,123 +7703,11 @@ export interface components {
              * Format: date-time
              */
             observed_at: string;
-            /** Power Watts */
-            power_watts?: number | null;
             /**
              * Received At
              * Format: date-time
              */
             received_at: string;
-            /** Temperature C */
-            temperature_c?: number | null;
-        };
-        /** TelemetryProvenance */
-        TelemetryProvenance: {
-            /** Collector */
-            collector: string;
-            /** Collector Version */
-            collector_version: string;
-            /** Host Uptime Seconds */
-            host_uptime_seconds?: number | null;
-            /** Source Observed At */
-            source_observed_at?: string | null;
-        };
-        /** TelemetryRuntime */
-        TelemetryRuntime: {
-            /** Adapter */
-            adapter: string;
-            /** Adapter Reason */
-            adapter_reason?: string | null;
-            /** Adapter Supported */
-            adapter_supported: boolean;
-            /** Adapter Version */
-            adapter_version?: string | null;
-            /** Backend */
-            backend: string;
-            /** Context Limit Tokens */
-            context_limit_tokens?: number | null;
-            /** Endpoint */
-            endpoint?: string | null;
-            /** Engine Id */
-            engine_id: string;
-            /** Error */
-            error?: string | null;
-            /** Model */
-            model?: string | null;
-            /** Model Version */
-            model_version?: string | null;
-            /** Ranks */
-            ranks: number[];
-            /**
-             * Readiness
-             * @enum {string}
-             */
-            readiness: "starting" | "ready" | "running" | "queued" | "stopped" | "failed" | "unknown";
-            /** Recipe Revision */
-            recipe_revision?: string | null;
-            /** Run Id */
-            run_id: string;
-            /** Serving Node Ids */
-            serving_node_ids: string[];
-            /** Version */
-            version?: string | null;
-        };
-        /** TelemetrySeries */
-        TelemetrySeries: {
-            /** Aggregation */
-            aggregation: string;
-            /** Device Id */
-            device_id?: string | null;
-            /**
-             * Freshness
-             * @default fresh
-             * @enum {string}
-             */
-            freshness: "fresh" | "delayed" | "stale";
-            /** Freshness Threshold Seconds */
-            freshness_threshold_seconds: number;
-            /** Interface Name */
-            interface_name?: string | null;
-            /** Key */
-            key: string;
-            /**
-             * Measurement Kind
-             * @enum {string}
-             */
-            measurement_kind: "measured" | "derived" | "estimated" | "configured";
-            /** Node Id */
-            node_id?: string | null;
-            /**
-             * Observed At
-             * Format: date-time
-             */
-            observed_at: string;
-            /** Process Id */
-            process_id?: number | null;
-            /** Process Name */
-            process_name?: string | null;
-            /** Reason */
-            reason?: string | null;
-            /** Received At */
-            received_at?: string | null;
-            /** Run Id */
-            run_id?: string | null;
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "node" | "accelerator" | "memory" | "storage" | "network" | "runtime" | "workload" | "service" | "benchmark";
-            /** Source */
-            source: string;
-            /**
-             * Support Status
-             * @enum {string}
-             */
-            support_status: "available" | "unsupported" | "unavailable" | "stale";
-            /** Unit */
-            unit: string;
-            /** Value */
-            value: number | string | boolean | null;
         };
         /** TelemetryState */
         TelemetryState: {
@@ -7904,50 +7719,6 @@ export interface components {
              */
             freshness: "live" | "delayed" | "stale";
             sample: components["schemas"]["TelemetryPoint"];
-        };
-        /** TelemetryWorkload */
-        TelemetryWorkload: {
-            /** Created At */
-            created_at?: string | null;
-            /** Elapsed Seconds */
-            elapsed_seconds?: number | null;
-            /** Ended At */
-            ended_at?: string | null;
-            /** Engine Id */
-            engine_id: string;
-            /** Eta Seconds */
-            eta_seconds?: number | null;
-            /** Eta Source */
-            eta_source?: string | null;
-            /** Executor Node Ids */
-            executor_node_ids: string[];
-            /** Failure */
-            failure?: string | null;
-            /** Job Id */
-            job_id?: string | null;
-            /** Model */
-            model?: string | null;
-            /** Origin Node Id */
-            origin_node_id?: string | null;
-            /** Progress Max */
-            progress_max?: number | null;
-            /** Progress Value */
-            progress_value?: number | null;
-            /** Recipe Revision */
-            recipe_revision?: string | null;
-            /** Request Id */
-            request_id?: string | null;
-            /** Run Id */
-            run_id: string;
-            /** Started At */
-            started_at?: string | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "queued" | "running" | "completed" | "failed" | "cancelled" | "unknown";
-            /** Title */
-            title?: string | null;
         };
         /**
          * TensorParallelStartEvidence

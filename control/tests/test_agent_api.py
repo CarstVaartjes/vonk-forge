@@ -435,13 +435,10 @@ def telemetry_payload(
     boot_id: str = "00000000-0000-4000-8000-000000000001",
 ) -> dict[str, object]:
     return {
-        "schema_version": 1,
         "samples": [
             {
                 "boot_id": boot_id,
                 "observed_at": (observed_at or clock.now).isoformat(),
-                "cpu_utilization_percent": 12.5,
-                "load_average_1m": 1.25,
                 "memory_total_bytes": 128_000_000_000,
                 "memory_available_bytes": 64_000_000_000,
                 "disk_total_bytes": 1_000_000_000_000,
@@ -449,26 +446,6 @@ def telemetry_payload(
                 "gpu_utilization_percent": 25.0,
                 "gpu_memory_total_bytes": 128_000_000_000,
                 "gpu_memory_free_bytes": 63_000_000_000,
-                "temperature_c": 41.5,
-                "power_watts": 17.25,
-                "network_receive_bytes_per_second": 1024.5,
-                "network_transmit_bytes_per_second": 512.25,
-                "gap_samples": 0,
-                "details": {
-                    "accelerator_name": "NVIDIA GB10",
-                    "accelerator_performance_state": "P0",
-                },
-                "metrics": {
-                    "schema_version": 2,
-                    "series": [],
-                    "capabilities": [],
-                    "runtimes": [],
-                    "workloads": [],
-                    "provenance": {
-                        "collector": "test",
-                        "collector_version": "1",
-                    },
-                },
             }
         ],
     }
@@ -483,8 +460,7 @@ def chunked_asgi_telemetry(
 
     async def request() -> tuple[int, int]:
         chunks = [
-            b'{"schema_version":1,"samples":[],"padding":"'
-            + b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
+            b'{"samples":[],"padding":"' + b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
             b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
             b'"}',
         ]
@@ -537,73 +513,6 @@ def chunked_asgi_telemetry(
         return int(start["status"]), reads
 
     return asyncio.run(request())
-
-
-@pytest.mark.parametrize("series_count", [143, 512])
-def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
-    agent_system,
-    series_count: int,
-) -> None:
-    from vonk_agent_protocol import TelemetryRequest
-    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
-
-    client, services, _, clock = agent_system
-    payload = telemetry_payload(clock)
-    samples = payload["samples"]
-    assert isinstance(samples, list)
-    sampled = samples[0]
-    assert isinstance(sampled, dict)
-    series = [
-        {
-            "key": f"device.metric_{index}",
-            "scope": "node",
-            "process_name": "測" * 128,
-            "value": "測" * 256,
-            "unit": "state",
-            "source": "native-collector",
-            "measurement_kind": "measured",
-            "observed_at": sampled["observed_at"],
-            "freshness": "fresh",
-            "freshness_threshold_seconds": 6.0,
-            "support_status": "available",
-            "aggregation": "last",
-        }
-        for index in range(series_count)
-    ]
-    sampled["metrics"] = {
-        "schema_version": 2,
-        "series": series,
-        "capabilities": [],
-        "runtimes": [],
-        "workloads": [],
-        "provenance": {
-            "collector": "native-collector",
-            "collector_version": "2",
-            "host_uptime_seconds": 1,
-            "source_observed_at": sampled["observed_at"],
-        },
-    }
-    encoded = canonical_message(payload)
-    assert 64 * 1024 < len(encoded) < MAX_TELEMETRY_REPORT_BYTES
-    assert (
-        len(TelemetryRequest.parse(payload).samples[0].metrics.series) == series_count
-    )
-    response = client.post(
-        "/agent/telemetry",
-        headers={
-            **agent_headers(NODE_A, "serial-a"),
-            "content-type": "application/json",
-        },
-        content=encoded,
-    )
-    assert response.status_code == 204, response.text
-    with services.sessions() as session:
-        row = session.scalar(select(NodeTelemetrySample))
-        assert row is not None
-        assert [item["key"] for item in row.metrics["series"]] == [
-            item["key"] for item in series
-        ]
-        assert all(item["value"] == "測" * 256 for item in row.metrics["series"])
 
 
 def test_agent_posts_authenticated_telemetry_for_certificate_node(
@@ -692,22 +601,7 @@ def test_telemetry_rejects_more_than_sixteen_samples(agent_system) -> None:
     response = client.post(
         "/agent/telemetry",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"schema_version": 1, "samples": samples},
-    )
-    assert response.status_code == 422
-
-
-@pytest.mark.parametrize("schema_version", [True, 1.0])
-def test_telemetry_schema_version_is_exact_integer(
-    agent_system, schema_version: object
-) -> None:
-    client, _, _, clock = agent_system
-    payload = telemetry_payload(clock)
-    payload["schema_version"] = schema_version
-    response = client.post(
-        "/agent/telemetry",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=payload,
+        json={"samples": samples},
     )
     assert response.status_code == 422
 
@@ -739,13 +633,12 @@ def test_telemetry_requires_every_fixed_core_metric(agent_system) -> None:
 @pytest.mark.parametrize(
     "document",
     [
-        '{"schema_version":1,"schema_version":1,"samples":[]}',
+        '{"samples":[],"samples":[]}',
         (
-            '{"schema_version":1,"samples":[{'
+            '{"samples":[{'
             '"boot_id":"00000000-0000-4000-8000-000000000001",'
             '"observed_at":"2026-08-03T12:00:00+00:00",'
-            '"observed_at":"2026-08-03T12:00:01+00:00",'
-            '"gap_samples":0}]}'
+            '"observed_at":"2026-08-03T12:00:01+00:00"}]}'
         ),
     ],
 )

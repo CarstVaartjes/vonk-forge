@@ -1686,19 +1686,9 @@ class NodeTelemetrySample(Base):
         ),
         CheckConstraint(_uuid_shape("boot_id"), name="ck_telemetry_boot_id_shape"),
         CheckConstraint(
-            "gap_samples BETWEEN 0 AND 9223372036854775807",
-            name="ck_telemetry_gap_samples",
-        ),
-        CheckConstraint(
-            "(cpu_utilization_percent IS NULL OR "
-            "cpu_utilization_percent BETWEEN 0 AND 100) AND "
-            "(gpu_utilization_percent IS NULL OR "
-            "gpu_utilization_percent BETWEEN 0 AND 100)",
+            "gpu_utilization_percent IS NULL OR "
+            "gpu_utilization_percent BETWEEN 0 AND 100",
             name="ck_telemetry_utilization",
-        ),
-        CheckConstraint(
-            "load_average_1m IS NULL OR load_average_1m BETWEEN 0 AND 1000000",
-            name="ck_telemetry_load",
         ),
         CheckConstraint(
             "(memory_total_bytes IS NULL AND memory_available_bytes IS NULL) OR "
@@ -1727,19 +1717,6 @@ class NodeTelemetrySample(Base):
             "gpu_memory_free_bytes <= gpu_memory_total_bytes)",
             name="ck_telemetry_gpu_memory",
         ),
-        CheckConstraint(
-            "(temperature_c IS NULL OR temperature_c BETWEEN -100 AND 300) "
-            "AND (power_watts IS NULL OR power_watts BETWEEN 0 AND 100000) AND "
-            "(network_receive_bytes_per_second IS NULL OR "
-            "network_receive_bytes_per_second BETWEEN 0 AND 1000000000000000) AND "
-            "(network_transmit_bytes_per_second IS NULL OR "
-            "network_transmit_bytes_per_second BETWEEN 0 AND 1000000000000000)",
-            name="ck_telemetry_physical_metrics",
-        ),
-        CheckConstraint(
-            "length(CAST(details AS TEXT)) BETWEEN 2 AND 4096",
-            name="ck_telemetry_details",
-        ),
         Index("ix_telemetry_node_observed", "node_id", "observed_at"),
     )
     id: Mapped[str] = mapped_column(
@@ -1755,8 +1732,6 @@ class NodeTelemetrySample(Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    cpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
-    load_average_1m: Mapped[float | None] = mapped_column(Float)
     memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     memory_available_bytes: Mapped[int | None] = mapped_column(BigInteger)
     disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
@@ -1764,16 +1739,6 @@ class NodeTelemetrySample(Base):
     gpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
     gpu_memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_memory_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    temperature_c: Mapped[float | None] = mapped_column(Float)
-    power_watts: Mapped[float | None] = mapped_column(Float)
-    network_receive_bytes_per_second: Mapped[float | None] = mapped_column(Float)
-    network_transmit_bytes_per_second: Mapped[float | None] = mapped_column(Float)
-    gap_samples: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
-    details: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    # Rich schema-2 observations live separately from the scalar columns; this
-    # bounded JSON document carries per-device, per-interface and per-run
-    # series plus capability/provenance metadata.
-    metrics: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
 
 
 class NodeTelemetryLatest(Base):

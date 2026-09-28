@@ -16,8 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("telemetry sample violates the agent client contract".into());
     }
     let report = TelemetryRequest {
-        schema_version: 1,
-        samples: samples.iter().map(|sample| sample.wire().clone()).collect(),
+        samples: samples.to_vec(),
     };
     println!("{}", serde_json::to_string(&report)?);
     Ok(())

@@ -126,7 +126,7 @@ queries the Controller.
 ```bash
 vonkctl fleet
 vonkctl fleet --wide
-vonkctl fleet detail Atlas --metrics all --range 24h
+vonkctl fleet detail Atlas
 vonkctl fleet detail Atlas --watch --interval-seconds 2
 vonkctl fleet node-profile Atlas
 vonkctl fleet rename Atlas "Studio Spark"

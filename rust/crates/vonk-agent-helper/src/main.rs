@@ -287,7 +287,6 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         schema_version: 1,
         request_id,
         status: "rejected".parse().expect("declared helper response status"),
-        evidence_sha256: None,
         exit_code,
         error_code: Some(error.error_code.to_owned()),
         observation_receipt: None,
@@ -398,7 +397,6 @@ fn handle(
                 "invalid operation response status",
             )
         })?,
-        evidence_sha256: Some(outcome.evidence_sha256),
         exit_code: outcome
             .exit_code
             .map(u32::try_from)
@@ -719,7 +717,6 @@ mod tests {
         let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
         assert_eq!(response.status, "rejected");
         assert!(response.request_id.is_none());
-        assert!(response.evidence_sha256.is_none());
         assert_eq!(response.error_code.as_deref(), Some("request_invalid"));
         assert_eq!(
             vonk_agent_protocol::canonical_generated_json(&response).unwrap(),
@@ -786,7 +783,6 @@ mod tests {
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: "rejected".parse().expect("declared helper response status"),
-            evidence_sha256: None,
             exit_code: None,
             error_code: Some("operation_failed".to_owned()),
             observation_receipt: None,
@@ -807,7 +803,6 @@ mod tests {
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: "package-installed".parse().unwrap(),
-            evidence_sha256: Some("a".repeat(64)),
             exit_code: None,
             error_code: None,
             observation_receipt: None,

@@ -25,8 +25,6 @@ from vonk_control.telemetry import (
     TelemetryRepository,
 )
 
-from .telemetry_fixtures import telemetry_metrics_document
-
 NODE_A = "spk_" + "a" * 32
 BOOT_A = "00000000-0000-4000-8000-000000000001"
 NOW = datetime(2026, 8, 15, 12, 4, tzinfo=UTC)
@@ -48,8 +46,6 @@ def _raw(
     *,
     sequence: int,
     cpu: float | None = None,
-    temperature: float | None = None,
-    gap_samples: int = 0,
 ) -> NodeTelemetrySample:
     return NodeTelemetrySample(
         id=identifier,
@@ -57,22 +53,13 @@ def _raw(
         boot_id=BOOT_A,
         observed_at=observed_at,
         received_at=observed_at,
-        cpu_utilization_percent=cpu,
-        load_average_1m=None,
+        gpu_utilization_percent=cpu,
         memory_total_bytes=None,
         memory_available_bytes=None,
         disk_total_bytes=None,
         disk_free_bytes=None,
-        gpu_utilization_percent=None,
         gpu_memory_total_bytes=None,
         gpu_memory_free_bytes=None,
-        temperature_c=temperature,
-        power_watts=None,
-        network_receive_bytes_per_second=None,
-        network_transmit_bytes_per_second=None,
-        gap_samples=gap_samples,
-        details={},
-        metrics=telemetry_metrics_document(),
     )
 
 

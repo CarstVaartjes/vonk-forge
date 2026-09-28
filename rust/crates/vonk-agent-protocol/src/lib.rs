@@ -32,8 +32,7 @@ pub use generated::{
     HostRuntimeRequestAction as HostRuntimeAction, RecipeReconciliationIdentity,
     RecipeRunInspectionBinding, RecipeRunObservationReceiptClaims,
     RecipeRunObservationReceiptClaimsOutcome as RecipeRunObservationOutcome,
-    RecipeRunObservationWire, RecipeRunObservationsWire,
-    RestartVonkUnitOperationUnit as HostHelperRestartUnit, SignedHostHelperGrant,
+    RecipeRunObservationWire, RecipeRunObservationsWire, SignedHostHelperGrant,
     SignedRecipeRunObservationReceipt as RecipeRunObservationReceipt,
 };
 
@@ -129,9 +128,7 @@ impl HostHelperOperation {
                 operation.rollback.valid()
                     && operation.rollback.source.package_sha256 != operation.package_sha256
             }
-            Self::ConfirmPackageActivationOperation(_)
-            | Self::RestartVonkUnitOperation(_)
-            | Self::ScheduleRebootOperation(_) => true,
+            Self::ConfirmPackageActivationOperation(_) => true,
             Self::ExecuteContainerRuntimeRequestOperation(operation) => {
                 operation.job_id.get_version() == Some(uuid::Version::Random)
                     && operation.operation_id.get_version() == Some(uuid::Version::Random)
@@ -3186,10 +3183,13 @@ mod recipe_run_inspection_tests {
         observation.validate().unwrap();
         let mut wrong_operation = observation.clone();
         wrong_operation.grant.claims.operation =
-            HostHelperOperation::RestartVonkUnitOperation(generated::RestartVonkUnitOperation {
-                type_: "restart-vonk-unit".into(),
-                unit: HostHelperRestartUnit::Agent,
-            });
+            HostHelperOperation::ConfirmPackageActivationOperation(
+                generated::ConfirmPackageActivationOperation {
+                    type_: "confirm-package-activation".into(),
+                    package_sha256: "a".repeat(64),
+                    attempt_nonce: "b".repeat(64),
+                },
+            );
         assert!(wrong_operation.validate().is_err());
 
         let mut partial_rendezvous = RecipeRunInspectionBinding::from(&observation);

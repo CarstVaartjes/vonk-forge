@@ -12,9 +12,6 @@ from ..types import UNSET, Unset
 from typing import cast
 import datetime
 
-if TYPE_CHECKING:
-  from ..models.telemetry_details import TelemetryDetails
-  from ..models.telemetry_metrics import TelemetryMetrics
 
 
 
@@ -29,78 +26,46 @@ class TelemetryPoint:
     """
         Attributes:
             boot_id (str):
-            details (TelemetryDetails):
-            gap_samples (int):
             id (str):
-            metrics (TelemetryMetrics):
             node_id (str):
             observed_at (datetime.datetime):
             received_at (datetime.datetime):
-            cpu_utilization_percent (float | None | Unset):
             disk_free_bytes (int | None | Unset):
             disk_total_bytes (int | None | Unset):
             gpu_memory_free_bytes (int | None | Unset):
             gpu_memory_total_bytes (int | None | Unset):
             gpu_utilization_percent (float | None | Unset):
-            load_average_1m (float | None | Unset):
             memory_available_bytes (int | None | Unset):
             memory_total_bytes (int | None | Unset):
-            network_receive_bytes_per_second (float | None | Unset):
-            network_transmit_bytes_per_second (float | None | Unset):
-            power_watts (float | None | Unset):
-            temperature_c (float | None | Unset):
      """
 
     boot_id: str
-    details: TelemetryDetails
-    gap_samples: int
     id: str
-    metrics: TelemetryMetrics
     node_id: str
     observed_at: datetime.datetime
     received_at: datetime.datetime
-    cpu_utilization_percent: float | None | Unset = UNSET
     disk_free_bytes: int | None | Unset = UNSET
     disk_total_bytes: int | None | Unset = UNSET
     gpu_memory_free_bytes: int | None | Unset = UNSET
     gpu_memory_total_bytes: int | None | Unset = UNSET
     gpu_utilization_percent: float | None | Unset = UNSET
-    load_average_1m: float | None | Unset = UNSET
     memory_available_bytes: int | None | Unset = UNSET
     memory_total_bytes: int | None | Unset = UNSET
-    network_receive_bytes_per_second: float | None | Unset = UNSET
-    network_transmit_bytes_per_second: float | None | Unset = UNSET
-    power_watts: float | None | Unset = UNSET
-    temperature_c: float | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.telemetry_details import TelemetryDetails # noqa: PLC0415
-        from ..models.telemetry_metrics import TelemetryMetrics # noqa: PLC0415
         boot_id = self.boot_id
 
-        details = self.details.to_dict()
-
-        gap_samples = self.gap_samples
-
         id = self.id
-
-        metrics = self.metrics.to_dict()
 
         node_id = self.node_id
 
         observed_at = self.observed_at.isoformat()
 
         received_at = self.received_at.isoformat()
-
-        cpu_utilization_percent: float | None | Unset
-        if isinstance(self.cpu_utilization_percent, Unset):
-            cpu_utilization_percent = UNSET
-        else:
-            cpu_utilization_percent = self.cpu_utilization_percent
 
         disk_free_bytes: int | None | Unset
         if isinstance(self.disk_free_bytes, Unset):
@@ -132,12 +97,6 @@ class TelemetryPoint:
         else:
             gpu_utilization_percent = self.gpu_utilization_percent
 
-        load_average_1m: float | None | Unset
-        if isinstance(self.load_average_1m, Unset):
-            load_average_1m = UNSET
-        else:
-            load_average_1m = self.load_average_1m
-
         memory_available_bytes: int | None | Unset
         if isinstance(self.memory_available_bytes, Unset):
             memory_available_bytes = UNSET
@@ -150,45 +109,16 @@ class TelemetryPoint:
         else:
             memory_total_bytes = self.memory_total_bytes
 
-        network_receive_bytes_per_second: float | None | Unset
-        if isinstance(self.network_receive_bytes_per_second, Unset):
-            network_receive_bytes_per_second = UNSET
-        else:
-            network_receive_bytes_per_second = self.network_receive_bytes_per_second
-
-        network_transmit_bytes_per_second: float | None | Unset
-        if isinstance(self.network_transmit_bytes_per_second, Unset):
-            network_transmit_bytes_per_second = UNSET
-        else:
-            network_transmit_bytes_per_second = self.network_transmit_bytes_per_second
-
-        power_watts: float | None | Unset
-        if isinstance(self.power_watts, Unset):
-            power_watts = UNSET
-        else:
-            power_watts = self.power_watts
-
-        temperature_c: float | None | Unset
-        if isinstance(self.temperature_c, Unset):
-            temperature_c = UNSET
-        else:
-            temperature_c = self.temperature_c
-
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
             "boot_id": boot_id,
-            "details": details,
-            "gap_samples": gap_samples,
             "id": id,
-            "metrics": metrics,
             "node_id": node_id,
             "observed_at": observed_at,
             "received_at": received_at,
         })
-        if cpu_utilization_percent is not UNSET:
-            field_dict["cpu_utilization_percent"] = cpu_utilization_percent
         if disk_free_bytes is not UNSET:
             field_dict["disk_free_bytes"] = disk_free_bytes
         if disk_total_bytes is not UNSET:
@@ -199,20 +129,10 @@ class TelemetryPoint:
             field_dict["gpu_memory_total_bytes"] = gpu_memory_total_bytes
         if gpu_utilization_percent is not UNSET:
             field_dict["gpu_utilization_percent"] = gpu_utilization_percent
-        if load_average_1m is not UNSET:
-            field_dict["load_average_1m"] = load_average_1m
         if memory_available_bytes is not UNSET:
             field_dict["memory_available_bytes"] = memory_available_bytes
         if memory_total_bytes is not UNSET:
             field_dict["memory_total_bytes"] = memory_total_bytes
-        if network_receive_bytes_per_second is not UNSET:
-            field_dict["network_receive_bytes_per_second"] = network_receive_bytes_per_second
-        if network_transmit_bytes_per_second is not UNSET:
-            field_dict["network_transmit_bytes_per_second"] = network_transmit_bytes_per_second
-        if power_watts is not UNSET:
-            field_dict["power_watts"] = power_watts
-        if temperature_c is not UNSET:
-            field_dict["temperature_c"] = temperature_c
 
         return field_dict
 
@@ -220,24 +140,10 @@ class TelemetryPoint:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.telemetry_details import TelemetryDetails # noqa: PLC0415
-        from ..models.telemetry_metrics import TelemetryMetrics # noqa: PLC0415
         d = dict(src_dict)
         boot_id = d.pop("boot_id")
 
-        details = TelemetryDetails.from_dict(d.pop("details"))
-
-
-
-
-        gap_samples = d.pop("gap_samples")
-
         id = d.pop("id")
-
-        metrics = TelemetryMetrics.from_dict(d.pop("metrics"))
-
-
-
 
         node_id = d.pop("node_id")
 
@@ -249,16 +155,6 @@ class TelemetryPoint:
         received_at = datetime.datetime.fromisoformat(d.pop("received_at"))
 
 
-
-
-        def _parse_cpu_utilization_percent(data: object) -> float | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(float | None | Unset, data)
-
-        cpu_utilization_percent = _parse_cpu_utilization_percent(d.pop("cpu_utilization_percent", UNSET))
 
 
         def _parse_disk_free_bytes(data: object) -> int | None | Unset:
@@ -311,16 +207,6 @@ class TelemetryPoint:
         gpu_utilization_percent = _parse_gpu_utilization_percent(d.pop("gpu_utilization_percent", UNSET))
 
 
-        def _parse_load_average_1m(data: object) -> float | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(float | None | Unset, data)
-
-        load_average_1m = _parse_load_average_1m(d.pop("load_average_1m", UNSET))
-
-
         def _parse_memory_available_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -341,68 +227,19 @@ class TelemetryPoint:
         memory_total_bytes = _parse_memory_total_bytes(d.pop("memory_total_bytes", UNSET))
 
 
-        def _parse_network_receive_bytes_per_second(data: object) -> float | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(float | None | Unset, data)
-
-        network_receive_bytes_per_second = _parse_network_receive_bytes_per_second(d.pop("network_receive_bytes_per_second", UNSET))
-
-
-        def _parse_network_transmit_bytes_per_second(data: object) -> float | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(float | None | Unset, data)
-
-        network_transmit_bytes_per_second = _parse_network_transmit_bytes_per_second(d.pop("network_transmit_bytes_per_second", UNSET))
-
-
-        def _parse_power_watts(data: object) -> float | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(float | None | Unset, data)
-
-        power_watts = _parse_power_watts(d.pop("power_watts", UNSET))
-
-
-        def _parse_temperature_c(data: object) -> float | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(float | None | Unset, data)
-
-        temperature_c = _parse_temperature_c(d.pop("temperature_c", UNSET))
-
-
         telemetry_point = cls(
             boot_id=boot_id,
-            details=details,
-            gap_samples=gap_samples,
             id=id,
-            metrics=metrics,
             node_id=node_id,
             observed_at=observed_at,
             received_at=received_at,
-            cpu_utilization_percent=cpu_utilization_percent,
             disk_free_bytes=disk_free_bytes,
             disk_total_bytes=disk_total_bytes,
             gpu_memory_free_bytes=gpu_memory_free_bytes,
             gpu_memory_total_bytes=gpu_memory_total_bytes,
             gpu_utilization_percent=gpu_utilization_percent,
-            load_average_1m=load_average_1m,
             memory_available_bytes=memory_available_bytes,
             memory_total_bytes=memory_total_bytes,
-            network_receive_bytes_per_second=network_receive_bytes_per_second,
-            network_transmit_bytes_per_second=network_transmit_bytes_per_second,
-            power_watts=power_watts,
-            temperature_c=temperature_c,
         )
 
         return telemetry_point

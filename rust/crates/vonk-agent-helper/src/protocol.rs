@@ -12,8 +12,7 @@ use vonk_agent_protocol::{
 pub use vonk_agent_protocol::{
     HostHelperContainerRuntimeAction as ContainerRuntimeAction,
     HostHelperGrantClaims as GrantClaims, HostHelperGrantSignature as GrantSignature,
-    HostHelperOperation as HostOperation, HostHelperRestartUnit as RestartUnit,
-    SignedHostHelperGrant as SignedGrant,
+    HostHelperOperation as HostOperation, SignedHostHelperGrant as SignedGrant,
 };
 
 /// The same frame ceiling the agent frames against; declared once in the wire

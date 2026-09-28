@@ -57,7 +57,6 @@ if TYPE_CHECKING:
         FleetProfileEndpointsView,
     )
 
-TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
 MAX_PAGE_LIMIT = 512
 # An enrollment grant lives for the longest time the Controller allows.
 MAX_LOG_LINES = 1000
@@ -253,24 +252,6 @@ def _filters(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _detail_filters(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--metrics",
-        choices=("glance", "all"),
-        default="glance",
-        help="Show the key metrics or all of them",
-    )
-    parser.add_argument(
-        "--range", choices=TELEMETRY_RANGES, default="1h", help="Metrics history window"
-    )
-    parser.add_argument("--device", help="Only metrics of this device")
-    parser.add_argument("--interface", help="Only metrics of this network interface")
-    parser.add_argument("--run", help="Only metrics of this run")
-    parser.add_argument(
-        "--capabilities", action="store_true", help="Include the agent capabilities"
-    )
-
-
 def _watch_controls(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--timeout-seconds",
@@ -402,7 +383,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
 
     detail = fleet_actions.add_parser("detail", help="Show one Spark")
     _selector(detail, "spark", help="Exact Spark selector or friendly name")
-    _detail_filters(detail)
     detail.add_argument(
         "--watch", action="store_true", help="Keep refreshing until it settles"
     )
@@ -2358,18 +2338,7 @@ def _fleet(
         return result
     if action == "detail":
         selector = _fleet_selector(args)
-        query = (
-            _query(
-                metrics=args.metrics,
-                range=args.range,
-                device=args.device,
-                interface=args.interface,
-                run=args.run,
-                capabilities=args.capabilities,
-                technical=args.technical,
-            )
-            or None
-        )
+        query = _query(technical=args.technical) or None
         result = client.request(
             "GET",
             f"/api/fleet/{_quoted(selector)}",

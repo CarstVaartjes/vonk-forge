@@ -285,10 +285,10 @@ def _memory(node: Mapping[str, object]) -> str:
     return f"{round(100 * (total - free) / total)}% of {_size(total)}"
 
 
-def _cpu(node: Mapping[str, object]) -> str:
+def _gpu(node: Mapping[str, object]) -> str:
     telemetry = _optional(node.get("telemetry"), "telemetry")
     sample = _optional(telemetry.get("sample"), "telemetry sample")
-    value = sample.get("cpu_utilization_percent")
+    value = sample.get("gpu_utilization_percent")
     if telemetry.get("freshness") != "live" or not isinstance(value, (int, float)):
         return "unavailable"
     return f"{round(value)}%"
@@ -455,7 +455,7 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
     workloads = "1 workload" if len(run_ids) == 1 else f"{len(run_ids)} workloads"
     print(f"Fleet: {len(nodes)} Spark{plural}, {online} online, {workloads} running")
     print()
-    labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "CPU", "RUNNING"]
+    labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "RUNNING"]
     if wide:
         labels.append("ID")
     rows = []
@@ -467,7 +467,7 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
             _status(node),
             _memory(node),
             _size(inventory.get("disk_free_bytes")),
-            _cpu(node),
+            _gpu(node),
             "idle"
             if not loaded
             else f"{len(loaded)} workload" + ("s" if len(loaded) > 1 else ""),
