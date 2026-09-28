@@ -1329,18 +1329,6 @@
             ],
             "title": "Error"
           },
-          "imported_image_digest": {
-            "anyOf": [
-              {
-                "pattern": "^sha256:[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Imported Image Digest"
-          },
           "node_id": {
             "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
@@ -1362,56 +1350,40 @@
             "default": false,
             "title": "Uncertain",
             "type": "boolean"
-          },
-          "verified": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Verified"
-          },
-          "verified_digests": {
-            "items": {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            "maxItems": 256,
-            "title": "Verified Digests",
-            "type": "array"
-          },
-          "verified_image_digest": {
-            "anyOf": [
-              {
-                "pattern": "^sha256:[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Verified Image Digest"
-          },
-          "verified_oci_layout_sha256": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Verified Oci Layout Sha256"
           }
         },
         "required": [
           "node_id"
         ],
         "title": "ArtifactVerificationEvidence",
+        "type": "object"
+      },
+      "AuthSession": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "role": {
+            "const": "administrator",
+            "title": "Role",
+            "type": "string"
+          },
+          "subject": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "role",
+          "expires_at"
+        ],
+        "title": "AuthSession",
         "type": "object"
       },
       "AvailabilityOperationFailure": {
@@ -2477,80 +2449,6 @@
           "source"
         ],
         "title": "ControllerAssetState",
-        "type": "object"
-      },
-      "DistributionAssignment": {
-        "additionalProperties": false,
-        "description": "Controller authorization for one node, generation and object set.",
-        "properties": {
-          "assignment_id": {
-            "format": "uuid",
-            "title": "Assignment Id",
-            "type": "string"
-          },
-          "expires_at": {
-            "format": "date-time",
-            "title": "Expires At",
-            "type": "string"
-          },
-          "generation": {
-            "minimum": 1.0,
-            "title": "Generation",
-            "type": "integer"
-          },
-          "model_artifact_set_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Artifact Set Sha256",
-            "type": "string"
-          },
-          "node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Node Id",
-            "type": "string"
-          },
-          "objects": {
-            "items": {
-              "$ref": "#/components/schemas/DistributionObject"
-            },
-            "maxItems": 4096,
-            "minItems": 1,
-            "title": "Objects",
-            "type": "array"
-          },
-          "oci_archive_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Oci Archive Sha256",
-            "type": "string"
-          },
-          "oci_image_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Oci Image Digest",
-            "type": "string"
-          },
-          "plan_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Plan Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 2,
-            "title": "Schema Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "schema_version",
-          "assignment_id",
-          "plan_digest",
-          "generation",
-          "node_id",
-          "expires_at",
-          "model_artifact_set_sha256",
-          "objects",
-          "oci_image_digest",
-          "oci_archive_sha256"
-        ],
-        "title": "DistributionAssignment",
         "type": "object"
       },
       "DistributionObject": {
@@ -9216,6 +9114,43 @@
         "title": "LifecyclePreflightCheckpoint",
         "type": "object"
       },
+      "LoginRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "subject": {
+            "const": "admin",
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "LoginRequestInvalid": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "const": "login request is invalid",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LoginRequestInvalid",
+        "type": "object"
+      },
       "ManagedCatalogStaleRecipe": {
         "additionalProperties": false,
         "properties": {
@@ -10809,6 +10744,74 @@
           "last_seen_age_seconds"
         ],
         "title": "NodeConnection",
+        "type": "object"
+      },
+      "NodeDistributionAssignment": {
+        "additionalProperties": false,
+        "description": "A distribution grant scoped to one node, plan and model set.\n\nOnly the object set travels to the agent (``wire``); the scope fields stay\nwith the Controller, which authorizes every download against them.",
+        "properties": {
+          "assignment_id": {
+            "format": "uuid",
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "generation": {
+            "minimum": 1.0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "model_artifact_set_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Artifact Set Sha256",
+            "type": "string"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/DistributionObject"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "title": "Objects",
+            "type": "array"
+          },
+          "oci_archive_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Oci Archive Sha256",
+            "type": "string"
+          },
+          "oci_image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Oci Image Digest",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "objects",
+          "oci_image_digest",
+          "oci_archive_sha256",
+          "assignment_id",
+          "plan_digest",
+          "generation",
+          "node_id",
+          "expires_at",
+          "model_artifact_set_sha256"
+        ],
+        "title": "NodeDistributionAssignment",
         "type": "object"
       },
       "NodeProfileChange": {
@@ -13670,16 +13673,7 @@
                         "$ref": "#/components/schemas/RecipeImageImportEvidence"
                       },
                       {
-                        "$ref": "#/components/schemas/RecipeStartSingleEvidence"
-                      },
-                      {
-                        "$ref": "#/components/schemas/RecipeStartRankLaunchEvidence"
-                      },
-                      {
-                        "$ref": "#/components/schemas/RecipeStartCollectiveReadinessEvidence"
-                      },
-                      {
-                        "$ref": "#/components/schemas/TensorParallelStartEvidence"
+                        "$ref": "#/components/schemas/RecipeStartResult"
                       },
                       {
                         "$ref": "#/components/schemas/RecipeStopResult"
@@ -13729,16 +13723,7 @@
                         "$ref": "#/components/schemas/RecipeImageImportEvidence"
                       },
                       {
-                        "$ref": "#/components/schemas/RecipeStartSingleEvidence"
-                      },
-                      {
-                        "$ref": "#/components/schemas/RecipeStartRankLaunchEvidence"
-                      },
-                      {
-                        "$ref": "#/components/schemas/RecipeStartCollectiveReadinessEvidence"
-                      },
-                      {
-                        "$ref": "#/components/schemas/TensorParallelStartEvidence"
+                        "$ref": "#/components/schemas/RecipeStartResult"
                       },
                       {
                         "$ref": "#/components/schemas/RecipeStopResult"
@@ -14293,78 +14278,8 @@
       },
       "RecipeReconcileResult": {
         "additionalProperties": false,
-        "properties": {
-          "cleanup_receipt_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Cleanup Receipt Sha256",
-            "type": "string"
-          },
-          "compiled_spec_canonical_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Compiled Spec Canonical Sha256",
-            "type": "string"
-          },
-          "install_operation_id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Install Operation Id",
-            "type": "string"
-          },
-          "install_operation_payload_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Install Operation Payload Sha256",
-            "type": "string"
-          },
-          "installation_id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Installation Id",
-            "type": "string"
-          },
-          "node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Node Id",
-            "type": "string"
-          },
-          "plan_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Plan Digest",
-            "type": "string"
-          },
-          "recipe_content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Recipe Content Sha256",
-            "type": "string"
-          },
-          "recipe_revision_id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Recipe Revision Id",
-            "type": "string"
-          },
-          "reconciled": {
-            "const": true,
-            "title": "Reconciled",
-            "type": "boolean"
-          },
-          "removed_bytes": {
-            "description": "Measured bytes in the removed agent-owned installation tree, excluding the exact helper-managed runtime-cache subtree. The helper separately confirms removal of that private cache without reporting its byte count.",
-            "maximum": 17592186044416.0,
-            "minimum": 0.0,
-            "title": "Removed Bytes",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "reconciled",
-          "node_id",
-          "installation_id",
-          "install_operation_id",
-          "install_operation_payload_sha256",
-          "plan_digest",
-          "recipe_revision_id",
-          "recipe_content_sha256",
-          "compiled_spec_canonical_sha256",
-          "removed_bytes",
-          "cleanup_receipt_sha256"
-        ],
+        "description": "A reconciliation succeeds with an empty result.",
+        "properties": {},
         "title": "RecipeReconcileResult",
         "type": "object"
       },
@@ -14817,24 +14732,11 @@
         "title": "RecipeSetting",
         "type": "object"
       },
-      "RecipeStartCollectiveReadinessEvidence": {
+      "RecipeStartResult": {
         "additionalProperties": false,
+        "description": "The serving rank reports its endpoint; every other rank reports ``{}``.",
         "properties": {
-          "artifact_set_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Artifact Set Digest",
-            "type": "string"
-          },
           "endpoint": {
-            "title": "Endpoint",
-            "type": "string"
-          },
-          "image_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Image Digest",
-            "type": "string"
-          },
-          "local_address": {
             "anyOf": [
               {
                 "type": "string"
@@ -14843,399 +14745,16 @@
                 "type": "null"
               }
             ],
-            "title": "Local Address"
-          },
-          "master_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Master Address"
-          },
-          "master_port": {
-            "anyOf": [
-              {
-                "maximum": 65535.0,
-                "minimum": 1024.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Master Port"
-          },
-          "memory_reservation_bytes": {
-            "minimum": 1.0,
-            "title": "Memory Reservation Bytes",
-            "type": "integer"
-          },
-          "model_identity": {
-            "anyOf": [
-              {
-                "maxLength": 1024,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Identity"
-          },
-          "phase": {
-            "const": "collective-readiness",
-            "title": "Phase",
-            "type": "string"
-          },
-          "rank": {
-            "minimum": 0.0,
-            "title": "Rank",
-            "type": "integer"
-          },
-          "ready": {
-            "const": true,
-            "title": "Ready",
-            "type": "boolean"
-          },
-          "recipe_content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Recipe Content Sha256",
-            "type": "string"
-          },
-          "recipe_revision_id": {
-            "format": "uuid",
-            "maxLength": 36,
-            "minLength": 36,
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            "title": "Recipe Revision Id",
-            "type": "string"
-          },
-          "role": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Role",
-            "type": "string"
-          },
-          "run_generation": {
-            "minimum": 1.0,
-            "title": "Run Generation",
-            "type": "integer"
-          },
-          "run_id": {
-            "format": "uuid",
-            "maxLength": 36,
-            "minLength": 36,
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            "title": "Run Id",
-            "type": "string"
-          },
-          "runtime_arguments_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Runtime Arguments Sha256",
-            "type": "string"
-          },
-          "world_size": {
-            "minimum": 1.0,
-            "title": "World Size",
-            "type": "integer"
+            "title": "Endpoint"
           }
         },
-        "required": [
-          "recipe_revision_id",
-          "recipe_content_sha256",
-          "image_digest",
-          "artifact_set_digest",
-          "rank",
-          "world_size",
-          "memory_reservation_bytes",
-          "phase",
-          "run_id",
-          "run_generation",
-          "runtime_arguments_sha256",
-          "role",
-          "local_address",
-          "master_address",
-          "endpoint",
-          "ready"
-        ],
-        "title": "RecipeStartCollectiveReadinessEvidence",
-        "type": "object"
-      },
-      "RecipeStartRankLaunchEvidence": {
-        "additionalProperties": false,
-        "properties": {
-          "artifact_set_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Artifact Set Digest",
-            "type": "string"
-          },
-          "fabric_projection_bound": {
-            "const": true,
-            "title": "Fabric Projection Bound",
-            "type": "boolean"
-          },
-          "image_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Image Digest",
-            "type": "string"
-          },
-          "launched": {
-            "const": true,
-            "title": "Launched",
-            "type": "boolean"
-          },
-          "local_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Local Address"
-          },
-          "master_address": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Master Address"
-          },
-          "master_port": {
-            "anyOf": [
-              {
-                "maximum": 65535.0,
-                "minimum": 1024.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Master Port"
-          },
-          "memory_reservation_bytes": {
-            "minimum": 1.0,
-            "title": "Memory Reservation Bytes",
-            "type": "integer"
-          },
-          "model_identity": {
-            "anyOf": [
-              {
-                "maxLength": 1024,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Identity"
-          },
-          "phase": {
-            "const": "rank-launch",
-            "title": "Phase",
-            "type": "string"
-          },
-          "process_running": {
-            "const": true,
-            "title": "Process Running",
-            "type": "boolean"
-          },
-          "rank": {
-            "minimum": 0.0,
-            "title": "Rank",
-            "type": "integer"
-          },
-          "recipe_content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Recipe Content Sha256",
-            "type": "string"
-          },
-          "recipe_revision_id": {
-            "format": "uuid",
-            "maxLength": 36,
-            "minLength": 36,
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            "title": "Recipe Revision Id",
-            "type": "string"
-          },
-          "role": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Role",
-            "type": "string"
-          },
-          "run_generation": {
-            "minimum": 1.0,
-            "title": "Run Generation",
-            "type": "integer"
-          },
-          "run_id": {
-            "format": "uuid",
-            "maxLength": 36,
-            "minLength": 36,
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            "title": "Run Id",
-            "type": "string"
-          },
-          "runtime_arguments_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Runtime Arguments Sha256",
-            "type": "string"
-          },
-          "world_size": {
-            "minimum": 1.0,
-            "title": "World Size",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "recipe_revision_id",
-          "recipe_content_sha256",
-          "image_digest",
-          "artifact_set_digest",
-          "rank",
-          "world_size",
-          "memory_reservation_bytes",
-          "phase",
-          "run_id",
-          "run_generation",
-          "runtime_arguments_sha256",
-          "role",
-          "local_address",
-          "master_address",
-          "process_running",
-          "fabric_projection_bound",
-          "launched"
-        ],
-        "title": "RecipeStartRankLaunchEvidence",
-        "type": "object"
-      },
-      "RecipeStartSingleEvidence": {
-        "additionalProperties": false,
-        "properties": {
-          "artifact_set_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Artifact Set Digest",
-            "type": "string"
-          },
-          "endpoint": {
-            "title": "Endpoint",
-            "type": "string"
-          },
-          "image_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Image Digest",
-            "type": "string"
-          },
-          "local_address": {
-            "title": "Local Address",
-            "type": "null"
-          },
-          "master_address": {
-            "title": "Master Address",
-            "type": "null"
-          },
-          "master_port": {
-            "title": "Master Port",
-            "type": "null"
-          },
-          "memory_reservation_bytes": {
-            "minimum": 1.0,
-            "title": "Memory Reservation Bytes",
-            "type": "integer"
-          },
-          "model_identity": {
-            "anyOf": [
-              {
-                "maxLength": 1024,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Identity"
-          },
-          "rank": {
-            "const": 0,
-            "title": "Rank",
-            "type": "integer"
-          },
-          "ready": {
-            "const": true,
-            "title": "Ready",
-            "type": "boolean"
-          },
-          "recipe_content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Recipe Content Sha256",
-            "type": "string"
-          },
-          "recipe_revision_id": {
-            "format": "uuid",
-            "maxLength": 36,
-            "minLength": 36,
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            "title": "Recipe Revision Id",
-            "type": "string"
-          },
-          "run_generation": {
-            "minimum": 1.0,
-            "title": "Run Generation",
-            "type": "integer"
-          },
-          "runtime_arguments_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Runtime Arguments Sha256",
-            "type": "string"
-          },
-          "world_size": {
-            "const": 1,
-            "title": "World Size",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "recipe_revision_id",
-          "recipe_content_sha256",
-          "image_digest",
-          "artifact_set_digest",
-          "rank",
-          "world_size",
-          "memory_reservation_bytes",
-          "endpoint",
-          "ready",
-          "run_generation",
-          "runtime_arguments_sha256",
-          "local_address",
-          "master_address",
-          "master_port"
-        ],
-        "title": "RecipeStartSingleEvidence",
+        "title": "RecipeStartResult",
         "type": "object"
       },
       "RecipeStopResult": {
         "additionalProperties": false,
-        "properties": {
-          "stopped": {
-            "const": true,
-            "title": "Stopped",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "stopped"
-        ],
+        "description": "A stop succeeds with an empty result.",
+        "properties": {},
         "title": "RecipeStopResult",
         "type": "object"
       },
@@ -15319,23 +14838,8 @@
       },
       "RecipeUninstallResult": {
         "additionalProperties": false,
-        "properties": {
-          "removed_model_bytes": {
-            "maximum": 17592186044416.0,
-            "minimum": 0.0,
-            "title": "Removed Model Bytes",
-            "type": "integer"
-          },
-          "uninstalled": {
-            "const": true,
-            "title": "Uninstalled",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "uninstalled",
-          "removed_model_bytes"
-        ],
+        "description": "An uninstall succeeds with an empty result.",
+        "properties": {},
         "title": "RecipeUninstallResult",
         "type": "object"
       },
@@ -16887,17 +16391,6 @@
             "title": "Cleanup Mode",
             "type": "string"
           },
-          "exact_reconciliation_receipts": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exact Reconciliation Receipts"
-          },
           "final_verified": {
             "title": "Final Verified",
             "type": "boolean"
@@ -16924,14 +16417,6 @@
             "const": "final_verify",
             "title": "Phase",
             "type": "string"
-          },
-          "reconciliation_receipts": {
-            "items": {
-              "$ref": "#/components/schemas/RecipeReconcileResult"
-            },
-            "maxItems": 32,
-            "title": "Reconciliation Receipts",
-            "type": "array"
           },
           "reconciliation_request_id": {
             "anyOf": [
@@ -18923,7 +18408,7 @@
       },
       "RunSwitchReconciliationAuthority": {
         "additionalProperties": false,
-        "description": "Controller-owned identity and effect binding for installation repair.\n\nThe accepted installation plan remains opaque.  This authority records its\ncanonical fingerprint and binds each target to the successful original\n``recipe.install`` operation that supplied the persisted compiled spec.\nIt never claims that malformed launch metadata is executable.",
+        "description": "Controller-owned identity of the installation a repair removes.\n\nThe accepted installation plan remains opaque; it never claims that\nmalformed launch metadata is executable.",
         "properties": {
           "image_digest": {
             "pattern": "^sha256:[0-9a-f]{64}$",
@@ -18990,11 +18475,6 @@
             "title": "Schema Version",
             "type": "integer"
           },
-          "stored_plan_canonical_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Stored Plan Canonical Sha256",
-            "type": "string"
-          },
           "targets": {
             "items": {
               "$ref": "#/components/schemas/RunSwitchReconciliationTarget"
@@ -19015,7 +18495,6 @@
           "recipe_build_id",
           "image_digest",
           "model_content_sha256",
-          "stored_plan_canonical_sha256",
           "targets"
         ],
         "title": "RunSwitchReconciliationAuthority",
@@ -19023,35 +18502,8 @@
       },
       "RunSwitchReconciliationTarget": {
         "additionalProperties": false,
-        "description": "One exact rank and its current cleanup receipt state.",
+        "description": "One exact rank and whether its cleanup already succeeded.",
         "properties": {
-          "cleanup_receipt_sha256": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cleanup Receipt Sha256"
-          },
-          "compiled_spec_canonical_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Compiled Spec Canonical Sha256",
-            "type": "string"
-          },
-          "install_operation_id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Install Operation Id",
-            "type": "string"
-          },
-          "install_operation_payload_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Install Operation Payload Sha256",
-            "type": "string"
-          },
           "installed_bytes": {
             "minimum": 0.0,
             "title": "Installed Bytes",
@@ -19088,9 +18540,6 @@
           "rank",
           "role",
           "installed_bytes",
-          "install_operation_id",
-          "install_operation_payload_sha256",
-          "compiled_spec_canonical_sha256",
           "state"
         ],
         "title": "RunSwitchReconciliationTarget",
@@ -19500,11 +18949,6 @@
             ],
             "title": "Downloaded Bytes"
           },
-          "imported_image_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Imported Image Digest",
-            "type": "string"
-          },
           "node_id": {
             "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
@@ -19519,42 +18963,12 @@
             "const": "target-copy",
             "title": "Subphase",
             "type": "string"
-          },
-          "verified": {
-            "const": true,
-            "title": "Verified",
-            "type": "boolean"
-          },
-          "verified_digests": {
-            "items": {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            "maxItems": 256,
-            "minItems": 1,
-            "title": "Verified Digests",
-            "type": "array"
-          },
-          "verified_image_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Verified Image Digest",
-            "type": "string"
-          },
-          "verified_oci_layout_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Verified Oci Layout Sha256",
-            "type": "string"
           }
         },
         "required": [
           "phase",
           "subphase",
-          "node_id",
-          "verified",
-          "verified_digests",
-          "verified_image_digest",
-          "imported_image_digest",
-          "verified_oci_layout_sha256"
+          "node_id"
         ],
         "title": "RunSwitchTargetTransferEvidenceResult",
         "type": "object"
@@ -19566,7 +18980,7 @@
             "minProperties": 1,
             "patternProperties": {
               "^spk_[0-9a-f]{32}$": {
-                "$ref": "#/components/schemas/DistributionAssignment"
+                "$ref": "#/components/schemas/NodeDistributionAssignment"
               }
             },
             "title": "Assignments",
@@ -20939,113 +20353,6 @@
         ],
         "title": "TelemetryState",
         "type": "object"
-      },
-      "TensorParallelStartEvidence": {
-        "additionalProperties": false,
-        "description": "Exact endpoint evidence for a phase-free tensor-parallel start.",
-        "properties": {
-          "artifact_set_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Artifact Set Digest",
-            "type": "string"
-          },
-          "endpoint": {
-            "title": "Endpoint",
-            "type": "string"
-          },
-          "image_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Image Digest",
-            "type": "string"
-          },
-          "local_address": {
-            "title": "Local Address",
-            "type": "string"
-          },
-          "master_address": {
-            "title": "Master Address",
-            "type": "string"
-          },
-          "master_port": {
-            "maximum": 65535.0,
-            "minimum": 1024.0,
-            "title": "Master Port",
-            "type": "integer"
-          },
-          "memory_reservation_bytes": {
-            "minimum": 1.0,
-            "title": "Memory Reservation Bytes",
-            "type": "integer"
-          },
-          "model_identity": {
-            "anyOf": [
-              {
-                "maxLength": 1024,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Identity"
-          },
-          "rank": {
-            "minimum": 0.0,
-            "title": "Rank",
-            "type": "integer"
-          },
-          "ready": {
-            "const": true,
-            "title": "Ready",
-            "type": "boolean"
-          },
-          "recipe_content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Recipe Content Sha256",
-            "type": "string"
-          },
-          "recipe_revision_id": {
-            "format": "uuid",
-            "maxLength": 36,
-            "minLength": 36,
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            "title": "Recipe Revision Id",
-            "type": "string"
-          },
-          "run_generation": {
-            "minimum": 1.0,
-            "title": "Run Generation",
-            "type": "integer"
-          },
-          "runtime_arguments_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Runtime Arguments Sha256",
-            "type": "string"
-          },
-          "world_size": {
-            "minimum": 1.0,
-            "title": "World Size",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "recipe_revision_id",
-          "recipe_content_sha256",
-          "image_digest",
-          "artifact_set_digest",
-          "rank",
-          "world_size",
-          "memory_reservation_bytes",
-          "endpoint",
-          "ready",
-          "run_generation",
-          "runtime_arguments_sha256",
-          "local_address",
-          "master_address",
-          "master_port"
-        ],
-        "title": "TensorParallelStartEvidence",
-        "type": "object"
       }
     },
     "securitySchemes": {
@@ -21825,6 +21132,221 @@
         ],
         "summary": "Submit Job",
         "x-vonk-request-body": "none"
+      }
+    },
+    "/api/auth/cli-token": {
+      "post": {
+        "operationId": "downloadCliToken",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A short-lived administrator bearer token download"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Cli Token",
+        "x-vonk-request-body": "none",
+        "x-vonk-streaming-transport": true
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "loginBrowser",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginRequestInvalid"
+                }
+              }
+            },
+            "description": "Invalid login request"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        },
+        "security": [],
+        "summary": "Login"
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "logoutBrowser",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Logout",
+        "x-vonk-request-body": "none"
+      }
+    },
+    "/api/auth/session": {
+      "get": {
+        "operationId": "getBrowserSession",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Session"
       }
     },
     "/api/catalog/managed-recipes/sync": {

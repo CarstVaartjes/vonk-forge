@@ -1463,8 +1463,6 @@ export interface components {
             downloaded_bytes?: number | null;
             /** Error */
             error?: string | null;
-            /** Imported Image Digest */
-            imported_image_digest?: string | null;
             /** Node Id */
             node_id: string;
             /** Reason */
@@ -1474,14 +1472,6 @@ export interface components {
              * @default false
              */
             uncertain: boolean;
-            /** Verified */
-            verified?: boolean | null;
-            /** Verified Digests */
-            verified_digests?: string[];
-            /** Verified Image Digest */
-            verified_image_digest?: string | null;
-            /** Verified Oci Layout Sha256 */
-            verified_oci_layout_sha256?: string | null;
         };
         /** AuthSession */
         AuthSession: {
@@ -1838,7 +1828,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "published" | "controller-build" | "nas-cache" | "unknown";
+            source: "controller-build" | "nas-cache" | "unknown";
             /**
              * State
              * @enum {string}
@@ -1853,41 +1843,6 @@ export interface components {
             verified_bytes: number;
             /** Verified Sha256 */
             verified_sha256?: string | null;
-        };
-        /**
-         * DistributionAssignment
-         * @description Controller authorization for one node, generation and object set.
-         */
-        DistributionAssignment: {
-            /**
-             * Assignment Id
-             * Format: uuid
-             */
-            assignment_id: string;
-            /**
-             * Expires At
-             * Format: date-time
-             */
-            expires_at: string;
-            /** Generation */
-            generation: number;
-            /** Model Artifact Set Sha256 */
-            model_artifact_set_sha256: string;
-            /** Node Id */
-            node_id: string;
-            /** Objects */
-            objects: components["schemas"]["DistributionObject"][];
-            /** Oci Archive Sha256 */
-            oci_archive_sha256: string;
-            /** Oci Image Digest */
-            oci_image_digest: string;
-            /** Plan Digest */
-            plan_digest: string;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 2;
         };
         /**
          * DistributionObject
@@ -4515,6 +4470,39 @@ export interface components {
              */
             online_state: "online" | "offline" | "unregistered";
         };
+        /**
+         * NodeDistributionAssignment
+         * @description A distribution grant scoped to one node, plan and model set.
+         *
+         *     Only the object set travels to the agent (``wire``); the scope fields stay
+         *     with the Controller, which authorizes every download against them.
+         */
+        NodeDistributionAssignment: {
+            /**
+             * Assignment Id
+             * Format: uuid
+             */
+            assignment_id: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Generation */
+            generation: number;
+            /** Model Artifact Set Sha256 */
+            model_artifact_set_sha256: string;
+            /** Node Id */
+            node_id: string;
+            /** Objects */
+            objects: components["schemas"]["DistributionObject"][];
+            /** Oci Archive Sha256 */
+            oci_archive_sha256: string;
+            /** Oci Image Digest */
+            oci_image_digest: string;
+            /** Plan Digest */
+            plan_digest: string;
+        };
         /** NodeProfileChange */
         NodeProfileChange: {
             /** Entity Id */
@@ -4824,23 +4812,11 @@ export interface components {
              */
             severity: "info" | "warning" | "error";
         };
-        /** RecipeBuildCleanupEvidence */
-        RecipeBuildCleanupEvidence: {
-            /** Build Id */
-            build_id: string;
-            /** Operation Id */
-            operation_id: string;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            /**
-             * Stopped
-             * @constant
-             */
-            stopped: true;
-        };
+        /**
+         * RecipeBuildCleanupEvidence
+         * @description The build service is stopped; the fenced attempt is the whole answer.
+         */
+        RecipeBuildCleanupEvidence: Record<string, never>;
         /** RecipeBuildDefinition */
         RecipeBuildDefinition: {
             base_image: components["schemas"]["RecipeImage"];
@@ -4853,35 +4829,12 @@ export interface components {
         };
         /** RecipeBuildEvidence */
         RecipeBuildEvidence: {
-            /** Build Input Sha256 */
-            build_input_sha256: string;
             /** Image Bytes */
             image_bytes: number;
             /** Image Digest */
             image_digest: string;
             /** Oci Layout Sha256 */
             oci_layout_sha256: string;
-            policy: components["schemas"]["RecipeBuildPolicy"];
-        };
-        /** RecipeBuildPolicy */
-        RecipeBuildPolicy: {
-            /** Dockerfile */
-            dockerfile: string;
-            /** Findings */
-            findings: components["schemas"]["RecipeBuildPolicyFinding"][];
-            /** Passed */
-            passed: boolean;
-        };
-        /** RecipeBuildPolicyFinding */
-        RecipeBuildPolicyFinding: {
-            /** Code */
-            code: string;
-            /** Detail */
-            detail: string;
-            /** Line */
-            line?: number | null;
-            /** Path */
-            path: string;
         };
         /** RecipeCancellationRequest */
         RecipeCancellationRequest: {
@@ -5141,32 +5094,20 @@ export interface components {
             model_digest?: string | null;
             /** Oci Archive Sha256 */
             oci_archive_sha256: string;
-            /** Platform Manifest Digest */
-            platform_manifest_digest: string;
             /** Recipe Content Sha256 */
             recipe_content_sha256: string;
-            /** Registry Manifest Digest */
-            registry_manifest_digest?: string | null;
             /**
              * Schema Version
              * @default 2
              * @constant
              */
             schema_version: 2;
-            /** Source */
-            source: string;
         };
-        /** RecipeImageImportEvidence */
-        RecipeImageImportEvidence: {
-            /** Build Id */
-            build_id: string;
-            /** Image Bytes */
-            image_bytes: number;
-            /** Image Digest */
-            image_digest: string;
-            /** Oci Layout Sha256 */
-            oci_layout_sha256: string;
-        };
+        /**
+         * RecipeImageImportEvidence
+         * @description The image is imported; the Controller already holds its identity.
+         */
+        RecipeImageImportEvidence: Record<string, never>;
         /** RecipeInputSlot */
         RecipeInputSlot: {
             /** Description */
@@ -5393,11 +5334,11 @@ export interface components {
             cancelled?: true | null;
             /** Launch Evidence */
             launch_evidence?: {
-                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /** Node Evidence */
             node_evidence?: {
-                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /** Reason */
             reason: string;
@@ -5547,37 +5488,11 @@ export interface components {
              */
             state: "ready" | "blocked" | "unavailable";
         };
-        /** RecipeReconcileResult */
-        RecipeReconcileResult: {
-            /** Cleanup Receipt Sha256 */
-            cleanup_receipt_sha256: string;
-            /** Compiled Spec Canonical Sha256 */
-            compiled_spec_canonical_sha256: string;
-            /** Install Operation Id */
-            install_operation_id: string;
-            /** Install Operation Payload Sha256 */
-            install_operation_payload_sha256: string;
-            /** Installation Id */
-            installation_id: string;
-            /** Node Id */
-            node_id: string;
-            /** Plan Digest */
-            plan_digest: string;
-            /** Recipe Content Sha256 */
-            recipe_content_sha256: string;
-            /** Recipe Revision Id */
-            recipe_revision_id: string;
-            /**
-             * Reconciled
-             * @constant
-             */
-            reconciled: true;
-            /**
-             * Removed Bytes
-             * @description Measured bytes in the removed agent-owned installation tree, excluding the exact helper-managed runtime-cache subtree. The helper separately confirms removal of that private cache without reporting its byte count.
-             */
-            removed_bytes: number;
-        };
+        /**
+         * RecipeReconcileResult
+         * @description A reconciliation succeeds with an empty result.
+         */
+        RecipeReconcileResult: Record<string, never>;
         /**
          * RecipeRelease
          * @description The version this recipe runs.
@@ -5614,11 +5529,6 @@ export interface components {
              * @default false
              */
             force: boolean;
-            /**
-             * Force Download
-             * @default false
-             */
-            force_download: boolean;
             /**
              * Force Rebuild
              * @default false
@@ -5742,169 +5652,19 @@ export interface components {
             /** Value */
             value: string | number | boolean;
         };
-        /** RecipeStartCollectiveReadinessEvidence */
-        RecipeStartCollectiveReadinessEvidence: {
-            /** Artifact Set Digest */
-            artifact_set_digest: string;
+        /**
+         * RecipeStartResult
+         * @description The serving rank reports its endpoint; every other rank reports ``{}``.
+         */
+        RecipeStartResult: {
             /** Endpoint */
-            endpoint: string;
-            /** Image Digest */
-            image_digest: string;
-            /** Local Address */
-            local_address: string | null;
-            /** Master Address */
-            master_address: string | null;
-            /** Master Port */
-            master_port?: number | null;
-            /** Memory Reservation Bytes */
-            memory_reservation_bytes: number;
-            /** Model Identity */
-            model_identity?: string | null;
-            /**
-             * Phase
-             * @constant
-             */
-            phase: "collective-readiness";
-            /** Rank */
-            rank: number;
-            /**
-             * Ready
-             * @constant
-             */
-            ready: true;
-            /** Recipe Content Sha256 */
-            recipe_content_sha256: string;
-            /**
-             * Recipe Revision Id
-             * Format: uuid
-             */
-            recipe_revision_id: string;
-            /** Role */
-            role: string;
-            /** Run Generation */
-            run_generation: number;
-            /**
-             * Run Id
-             * Format: uuid
-             */
-            run_id: string;
-            /** Runtime Arguments Sha256 */
-            runtime_arguments_sha256: string;
-            /** World Size */
-            world_size: number;
+            endpoint?: string | null;
         };
-        /** RecipeStartRankLaunchEvidence */
-        RecipeStartRankLaunchEvidence: {
-            /** Artifact Set Digest */
-            artifact_set_digest: string;
-            /**
-             * Fabric Projection Bound
-             * @constant
-             */
-            fabric_projection_bound: true;
-            /** Image Digest */
-            image_digest: string;
-            /**
-             * Launched
-             * @constant
-             */
-            launched: true;
-            /** Local Address */
-            local_address: string | null;
-            /** Master Address */
-            master_address: string | null;
-            /** Master Port */
-            master_port?: number | null;
-            /** Memory Reservation Bytes */
-            memory_reservation_bytes: number;
-            /** Model Identity */
-            model_identity?: string | null;
-            /**
-             * Phase
-             * @constant
-             */
-            phase: "rank-launch";
-            /**
-             * Process Running
-             * @constant
-             */
-            process_running: true;
-            /** Rank */
-            rank: number;
-            /** Recipe Content Sha256 */
-            recipe_content_sha256: string;
-            /**
-             * Recipe Revision Id
-             * Format: uuid
-             */
-            recipe_revision_id: string;
-            /** Role */
-            role: string;
-            /** Run Generation */
-            run_generation: number;
-            /**
-             * Run Id
-             * Format: uuid
-             */
-            run_id: string;
-            /** Runtime Arguments Sha256 */
-            runtime_arguments_sha256: string;
-            /** World Size */
-            world_size: number;
-        };
-        /** RecipeStartSingleEvidence */
-        RecipeStartSingleEvidence: {
-            /** Artifact Set Digest */
-            artifact_set_digest: string;
-            /** Endpoint */
-            endpoint: string;
-            /** Image Digest */
-            image_digest: string;
-            /** Local Address */
-            local_address: null;
-            /** Master Address */
-            master_address: null;
-            /** Master Port */
-            master_port: null;
-            /** Memory Reservation Bytes */
-            memory_reservation_bytes: number;
-            /** Model Identity */
-            model_identity?: string | null;
-            /**
-             * Rank
-             * @constant
-             */
-            rank: 0;
-            /**
-             * Ready
-             * @constant
-             */
-            ready: true;
-            /** Recipe Content Sha256 */
-            recipe_content_sha256: string;
-            /**
-             * Recipe Revision Id
-             * Format: uuid
-             */
-            recipe_revision_id: string;
-            /** Run Generation */
-            run_generation: number;
-            /** Runtime Arguments Sha256 */
-            runtime_arguments_sha256: string;
-            /**
-             * World Size
-             * @constant
-             */
-            world_size: 1;
-        };
-        /** RecipeStopResult */
-        RecipeStopResult: {
-            /**
-             * Stopped
-             * @constant
-             */
-            stopped: true;
-        };
+        /**
+         * RecipeStopResult
+         * @description A stop succeeds with an empty result.
+         */
+        RecipeStopResult: Record<string, never>;
         /**
          * RecipeTopology
          * @description Roles and their start order; everything else follows from node_count.
@@ -5934,16 +5694,11 @@ export interface components {
             name: string;
             resources: components["schemas"]["RecipeRoleResources"];
         };
-        /** RecipeUninstallResult */
-        RecipeUninstallResult: {
-            /** Removed Model Bytes */
-            removed_model_bytes: number;
-            /**
-             * Uninstalled
-             * @constant
-             */
-            uninstalled: true;
-        };
+        /**
+         * RecipeUninstallResult
+         * @description An uninstall succeeds with an empty result.
+         */
+        RecipeUninstallResult: Record<string, never>;
         /**
          * RecipeUpdateChild
          * @description Frozen identity plus a rebuildable observation; child jobs own execution.
@@ -6452,8 +6207,6 @@ export interface components {
              * @enum {string}
              */
             cleanup_mode: "uninstall" | "reconcile";
-            /** Exact Reconciliation Receipts */
-            exact_reconciliation_receipts?: boolean | null;
             /** Final Verified */
             final_verified: boolean;
             /** Installation Id */
@@ -6465,8 +6218,6 @@ export interface components {
              * @constant
              */
             phase: "final_verify";
-            /** Reconciliation Receipts */
-            reconciliation_receipts?: components["schemas"]["RecipeReconcileResult"][];
             /** Reconciliation Request Id */
             reconciliation_request_id?: string | null;
             /** Removed */
@@ -7009,12 +6760,10 @@ export interface components {
         };
         /**
          * RunSwitchReconciliationAuthority
-         * @description Controller-owned identity and effect binding for installation repair.
+         * @description Controller-owned identity of the installation a repair removes.
          *
-         *     The accepted installation plan remains opaque.  This authority records its
-         *     canonical fingerprint and binds each target to the successful original
-         *     ``recipe.install`` operation that supplied the persisted compiled spec.
-         *     It never claims that malformed launch metadata is executable.
+         *     The accepted installation plan remains opaque; it never claims that
+         *     malformed launch metadata is executable.
          */
         RunSwitchReconciliationAuthority: {
             /** Image Digest */
@@ -7041,24 +6790,14 @@ export interface components {
              * @constant
              */
             schema_version: 2;
-            /** Stored Plan Canonical Sha256 */
-            stored_plan_canonical_sha256: string;
             /** Targets */
             targets: components["schemas"]["RunSwitchReconciliationTarget"][];
         };
         /**
          * RunSwitchReconciliationTarget
-         * @description One exact rank and its current cleanup receipt state.
+         * @description One exact rank and whether its cleanup already succeeded.
          */
         RunSwitchReconciliationTarget: {
-            /** Cleanup Receipt Sha256 */
-            cleanup_receipt_sha256?: string | null;
-            /** Compiled Spec Canonical Sha256 */
-            compiled_spec_canonical_sha256: string;
-            /** Install Operation Id */
-            install_operation_id: string;
-            /** Install Operation Payload Sha256 */
-            install_operation_payload_sha256: string;
             /** Installed Bytes */
             installed_bytes: number;
             /** Node Id */
@@ -7083,7 +6822,7 @@ export interface components {
             /** Archive Sha256 */
             archive_sha256: string;
             /** Build Id */
-            build_id?: string | null;
+            build_id: string;
             /** Build Input Sha256 */
             build_input_sha256?: string | null;
             /** Execution Keys */
@@ -7109,8 +6848,6 @@ export interface components {
             profile_application_id?: string | null;
             /** Recipe Revision Id */
             recipe_revision_id: string;
-            /** Registry Manifest Digest */
-            registry_manifest_digest?: string | null;
             /** Request Key */
             request_key: string;
             /**
@@ -7119,11 +6856,6 @@ export interface components {
              * @constant
              */
             schema_version: 2;
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "published" | "controller-build";
             /** Workload Intent Ordinal */
             workload_intent_ordinal: number;
         };
@@ -7224,8 +6956,6 @@ export interface components {
             copied_bytes?: number | null;
             /** Downloaded Bytes */
             downloaded_bytes?: number | null;
-            /** Imported Image Digest */
-            imported_image_digest: string;
             /** Node Id */
             node_id: string;
             /**
@@ -7238,23 +6968,12 @@ export interface components {
              * @constant
              */
             subphase: "target-copy";
-            /**
-             * Verified
-             * @constant
-             */
-            verified: true;
-            /** Verified Digests */
-            verified_digests: string[];
-            /** Verified Image Digest */
-            verified_image_digest: string;
-            /** Verified Oci Layout Sha256 */
-            verified_oci_layout_sha256: string;
         };
         /** RunSwitchTargetTransferResult */
         RunSwitchTargetTransferResult: {
             /** Assignments */
             assignments: {
-                [key: string]: components["schemas"]["DistributionAssignment"];
+                [key: string]: components["schemas"]["NodeDistributionAssignment"];
             };
             /** Cached Nodes */
             cached_nodes?: string[];
@@ -7330,8 +7049,6 @@ export interface components {
             verified_image_digest: string;
             /** Verified Oci Layout Sha256 */
             verified_oci_layout_sha256: string;
-            /** Verified Registry Manifest Digest */
-            verified_registry_manifest_digest?: string | null;
         };
         RuntimeArgumentValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
             [key: string]: components["schemas"]["JsonValue"];
@@ -7399,7 +7116,7 @@ export interface components {
             /** Archive Path */
             archive_path: string;
             /** Build Id */
-            build_id: string | null;
+            build_id: string;
             /** Build Input Sha256 */
             build_input_sha256?: string | null;
             /** Distribution Content Sha256 */
@@ -7413,21 +7130,15 @@ export interface components {
             /** Image Digest */
             image_digest: string;
             /** Local Image Config Id */
-            local_image_config_id: string | null;
-            /** Local Image Reference */
-            local_image_reference: string | null;
+            local_image_config_id: string;
             /** Oci Archive Sha256 */
             oci_archive_sha256: string;
-            /** Platform Manifest Digest */
-            platform_manifest_digest: string;
             /** Recorded At */
             recorded_at: string;
-            /** Registry Manifest Digest */
-            registry_manifest_digest: string | null;
             /** Runtime Adapter */
-            runtime_adapter?: string | null;
+            runtime_adapter: string;
             /** Runtime Adapter Sha256 */
-            runtime_adapter_sha256?: string | null;
+            runtime_adapter_sha256: string;
             /**
              * Runtime Interface
              * @constant
@@ -7443,11 +7154,6 @@ export interface components {
              * @constant
              */
             schema_version: 2;
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "published" | "controller-build";
         };
         /** RuntimeImageStorageImpact */
         RuntimeImageStorageImpact: {
@@ -7484,8 +7190,6 @@ export interface components {
             reclaimable_bytes: number;
             /** Reclaimable Digests */
             reclaimable_digests?: string[];
-            /** Registry Manifest Digest */
-            registry_manifest_digest?: string | null;
             /** Required Bytes */
             required_bytes?: number | null;
             /**
@@ -7519,23 +7223,12 @@ export interface components {
         };
         /** RuntimePreflightResult */
         RuntimePreflightResult: {
-            /** Cached */
-            cached: boolean;
-            /** Duration Ms */
-            duration_ms: number;
             /** Findings */
             findings: components["schemas"]["RuntimePreflightFinding"][];
             /** Fingerprint */
             fingerprint: string;
             /** Observed At */
             observed_at: number;
-            /** Request Sha256 */
-            request_sha256: string;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
         };
         /** SparkFit */
         SparkFit: {
@@ -7719,48 +7412,6 @@ export interface components {
              */
             freshness: "live" | "delayed" | "stale";
             sample: components["schemas"]["TelemetryPoint"];
-        };
-        /**
-         * TensorParallelStartEvidence
-         * @description Exact endpoint evidence for a phase-free tensor-parallel start.
-         */
-        TensorParallelStartEvidence: {
-            /** Artifact Set Digest */
-            artifact_set_digest: string;
-            /** Endpoint */
-            endpoint: string;
-            /** Image Digest */
-            image_digest: string;
-            /** Local Address */
-            local_address: string;
-            /** Master Address */
-            master_address: string;
-            /** Master Port */
-            master_port: number;
-            /** Memory Reservation Bytes */
-            memory_reservation_bytes: number;
-            /** Model Identity */
-            model_identity?: string | null;
-            /** Rank */
-            rank: number;
-            /**
-             * Ready
-             * @constant
-             */
-            ready: true;
-            /** Recipe Content Sha256 */
-            recipe_content_sha256: string;
-            /**
-             * Recipe Revision Id
-             * Format: uuid
-             */
-            recipe_revision_id: string;
-            /** Run Generation */
-            run_generation: number;
-            /** Runtime Arguments Sha256 */
-            runtime_arguments_sha256: string;
-            /** World Size */
-            world_size: number;
         };
     };
     responses: never;
