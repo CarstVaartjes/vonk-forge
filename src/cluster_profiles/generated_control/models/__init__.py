@@ -265,6 +265,7 @@ from .lifecycle_preflight_checkpoint_receipts import LifecyclePreflightCheckpoin
 from .list_model_library_sort import ListModelLibrarySort
 from .list_recipe_library_sort import ListRecipeLibrarySort
 from .managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
+from .managed_catalog_sync_failure import ManagedCatalogSyncFailure
 from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
 from .managed_catalog_sync_request import ManagedCatalogSyncRequest
 from .managed_catalog_sync_response import ManagedCatalogSyncResponse
@@ -891,6 +892,7 @@ __all__ = (
     "ListModelLibrarySort",
     "ListRecipeLibrarySort",
     "ManagedCatalogStaleRecipe",
+    "ManagedCatalogSyncFailure",
     "ManagedCatalogSyncProblem",
     "ManagedCatalogSyncRequest",
     "ManagedCatalogSyncResponse",

@@ -6,11 +6,11 @@ import io
 import json
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -61,6 +61,16 @@ class CatalogSyncView:
     problems: tuple[dict[str, object], ...]
     created_at: datetime
     completed_at: datetime | None
+    # The newest failure since the last completed sync, so a Controller that
+    # keeps failing to read the library is visible instead of silently stale.
+    last_error: CatalogSyncFailure | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogSyncFailure:
+    code: str
+    detail: str
+    occurred_at: datetime
 
 
 class ManagedRecipeCatalogSyncService:
@@ -171,7 +181,10 @@ class ManagedRecipeCatalogSyncService:
 
     def latest(self) -> CatalogSyncView | None:
         with self._sessions() as session:
-            row = session.scalar(
+            # Automatic read failures never observed a commit; they are
+            # reported as last_error on the run that still describes the
+            # applied catalog rather than replacing it.
+            newest = (
                 select(RecipeLibrarySyncRun)
                 .order_by(
                     RecipeLibrarySyncRun.created_at.desc(),
@@ -179,7 +192,47 @@ class ManagedRecipeCatalogSyncService:
                 )
                 .limit(1)
             )
-            return _view(row) if row is not None else None
+            row = session.scalar(
+                newest.where(
+                    ~and_(
+                        RecipeLibrarySyncRun.trigger == "automatic",
+                        RecipeLibrarySyncRun.state == "failed",
+                        RecipeLibrarySyncRun.observed_commit.is_(None),
+                    )
+                )
+            ) or session.scalar(newest)
+            if row is None:
+                return None
+            failure = session.scalar(
+                select(RecipeLibrarySyncRun)
+                .where(RecipeLibrarySyncRun.state == "failed")
+                .order_by(
+                    RecipeLibrarySyncRun.completed_at.desc(),
+                    RecipeLibrarySyncRun.id.desc(),
+                )
+                .limit(1)
+            )
+            succeeded = session.scalar(
+                select(RecipeLibrarySyncRun.completed_at)
+                .where(RecipeLibrarySyncRun.state == "succeeded")
+                .order_by(RecipeLibrarySyncRun.completed_at.desc())
+                .limit(1)
+            )
+            view = _view(row)
+            if (
+                failure is None
+                or failure.completed_at is None
+                or (succeeded is not None and succeeded >= failure.completed_at)
+            ):
+                return view
+            return replace(
+                view,
+                last_error=CatalogSyncFailure(
+                    code=failure.error_code or "catalog.sync_failed",
+                    detail=failure.error_detail or "managed catalog sync failed",
+                    occurred_at=failure.completed_at,
+                ),
+            )
 
     def get(self, sync_id: str) -> CatalogSyncView:
         with self._sessions() as session:
@@ -189,7 +242,16 @@ class ManagedRecipeCatalogSyncService:
             return _view(row)
 
     def automatic(self) -> CatalogSyncView:
-        snapshot = self._reader.list()
+        try:
+            snapshot = self._reader.list()
+        except (RecipeLibraryError, CatalogSyncError, OSError) as error:
+            # Reading the library failed before any sync could start; record
+            # it so sync-status shows why the catalog is not advancing.
+            self._record_read_failure(
+                str(getattr(error, "code", "catalog.sync_failed")),
+                str(getattr(error, "detail", str(error))) or type(error).__name__,
+            )
+            raise
         self._catalog.refresh_build_policy()
         with self._sessions() as session:
             current = session.scalar(
@@ -215,11 +277,73 @@ class ManagedRecipeCatalogSyncService:
             expected_commit=snapshot.commit,
         )
 
+    def _record_read_failure(self, code: str, detail: str) -> None:
+        """Persist one automatic read failure; a repeat only refreshes its time."""
+        code, detail = code[:128], detail[:256]
+        now = self._clock()
+        with self._sessions.begin() as session:
+            latest = session.scalar(
+                select(RecipeLibrarySyncRun)
+                .order_by(
+                    RecipeLibrarySyncRun.created_at.desc(),
+                    RecipeLibrarySyncRun.id.desc(),
+                )
+                .limit(1)
+            )
+            if (
+                latest is not None
+                and latest.state == "failed"
+                and latest.trigger == "automatic"
+                and latest.observed_commit is None
+                and (latest.error_code, latest.error_detail) == (code, detail)
+            ):
+                latest.completed_at = now
+                return
+            failed = json.loads(canonical_message(_result(_empty_result())))
+            failed["state"] = "failed"
+            failed["problems"] = [{"recipe_uri": None, "code": code, "detail": detail}]
+            session.add(
+                RecipeLibrarySyncRun(
+                    request_key=str(uuid.uuid4()),
+                    trigger="automatic",
+                    state="failed",
+                    active_slot=None,
+                    repository=self._repository,
+                    expected_commit=None,
+                    observed_commit=None,
+                    total_count=0,
+                    processed_count=0,
+                    imported_count=0,
+                    updated_count=0,
+                    current_count=0,
+                    conflict_count=0,
+                    missing_count=0,
+                    result=json.loads(canonical_message(_result(failed))),
+                    error_code=code,
+                    error_detail=detail,
+                    actor="system:recipe-library-sync",
+                    created_at=now,
+                    started_at=now,
+                    completed_at=now,
+                )
+            )
+
     def _apply(
         self, run_id: str, snapshot: RecipeLibrarySnapshot, *, actor: str
     ) -> dict[str, object]:
         result = _empty_result()
         self._catalog.refresh_build_policy()
+        # Index documents the reader could not validate were already skipped;
+        # report each one without holding up the rest of the snapshot.
+        for problem in snapshot.problems:
+            uri = problem.get("recipe_uri")
+            self._record_problem_values(
+                result,
+                uri=uri if isinstance(uri, str) else None,
+                code=str(problem.get("code", "catalog.sync_item_failed")),
+                detail=str(problem.get("detail", "catalog document was skipped")),
+            )
+            self._progress(run_id, result)
         # Catalog index entries are independent immutable documents. Import each
         # in its own transaction so one malformed model cannot hold up recipes
         # and models that are otherwise ready to apply.
@@ -354,7 +478,11 @@ class ManagedRecipeCatalogSyncService:
                     "catalog.sync_state_invalid", "managed catalog sync state changed"
                 )
             run.observed_commit = snapshot.commit
-            run.total_count = len(snapshot.items) + len(snapshot.catalog_entities)
+            run.total_count = (
+                len(snapshot.items)
+                + len(snapshot.catalog_entities)
+                + len(snapshot.problems)
+            )
 
     def _progress(self, run_id: str, result: Mapping[str, object]) -> None:
         with self._sessions.begin() as session:

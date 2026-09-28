@@ -20,6 +20,22 @@ That does not make every upstream model or dependency freely redistributable;
 the operator still reviews the recorded license and access terms before
 download or use.
 
+## Contract compatibility
+
+The `vonk_forge_contracts` package in the recipe repository is the single
+source of truth for Model and Recipe documents; the Controller consumes the
+exact commit pinned in `control/packaging/public-contracts.lock`. New or
+changed models and recipes never need a vonk-forge change: the Controller
+follows the newest signed release at runtime. A contract change is different.
+Within one `schema_version` it must be additive (add an optional field, or make
+a field optional); removing a field, making one required, or changing a
+field's meaning bumps `schema_version` and needs a coordinated vonk-forge
+release. Even an additive change needs the vonk-forge contracts pin bumped,
+because documents are strict (unknown fields are rejected) and
+`content_sha256` hashes the whole normalized document. Until vonk-forge picks
+up the new contract, the Controller skips each document it cannot validate,
+lists it under the sync-status `problems`, and keeps applying the rest.
+
 ## Development versus production
 
 The catalog index and recipe packages are not committed to the recipe

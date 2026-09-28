@@ -30,13 +30,11 @@ class ModelCapabilityFact:
     """
         Attributes:
             capability (ModelCapabilityFactCapability):
-            evidence_digest (None | str):
             evidence_status (ModelCapabilityFactEvidenceStatus):
             support (ModelCapabilityFactSupport):
      """
 
     capability: ModelCapabilityFactCapability
-    evidence_digest: None | str
     evidence_status: ModelCapabilityFactEvidenceStatus
     support: ModelCapabilityFactSupport
 
@@ -47,9 +45,6 @@ class ModelCapabilityFact:
     def to_dict(self) -> dict[str, Any]:
         capability: str = self.capability
 
-        evidence_digest: None | str
-        evidence_digest = self.evidence_digest
-
         evidence_status: str = self.evidence_status
 
         support: str = self.support
@@ -59,7 +54,6 @@ class ModelCapabilityFact:
 
         field_dict.update({
             "capability": capability,
-            "evidence_digest": evidence_digest,
             "evidence_status": evidence_status,
             "support": support,
         })
@@ -76,14 +70,6 @@ class ModelCapabilityFact:
 
 
 
-        def _parse_evidence_digest(data: object) -> None | str:
-            if data is None:
-                return data
-            return cast(None | str, data)
-
-        evidence_digest = _parse_evidence_digest(d.pop("evidence_digest"))
-
-
         evidence_status = check_model_capability_fact_evidence_status(d.pop("evidence_status"))
 
 
@@ -96,7 +82,6 @@ class ModelCapabilityFact:
 
         model_capability_fact = cls(
             capability=capability,
-            evidence_digest=evidence_digest,
             evidence_status=evidence_status,
             support=support,
         )

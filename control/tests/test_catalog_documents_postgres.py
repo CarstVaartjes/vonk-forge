@@ -276,7 +276,7 @@ def test_capability_and_provenance_only_model_revision_reuses_artifact_key(
     _document_section(changed, "metadata")["description"] = (
         "updated capability documentation"
     )
-    _document_section(changed, "provenance")["evidence_digest"] = "a" * 64
+    _document_section(changed, "provenance")["attribution"] = ["updated attribution"]
     successor = catalog.revise(
         first.document_id, changed, actor="operator", expected_revision=1
     )
@@ -299,7 +299,9 @@ def test_recipe_reuse_keys_follow_effective_execution_and_model_artifacts(
     _document_section(changed_model, "metadata")["description"] = (
         "updated capability documentation"
     )
-    _document_section(changed_model, "provenance")["evidence_digest"] = "a" * 64
+    _document_section(changed_model, "provenance")["attribution"] = [
+        "updated attribution"
+    ]
     changed_model_revision = catalog.revise(
         model_revision.document_id, changed_model, actor="operator", expected_revision=1
     )

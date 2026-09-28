@@ -38,7 +38,11 @@ package only when its digest is absent or changed in the persistent
 `state/recipe-library-packages` cache, verifies the package digest and member
 identities, and rejects unsafe tar members or oversized archives. A package
 reader's `prepare` hook validates all packages in a candidate index before the
-managed catalog sync writes its first revision or link. Package cache files are
+managed catalog sync writes its first revision or link. An integrity or
+transport failure rejects the whole candidate. A model or recipe document that
+is intact but does not validate against this Controller's contract is skipped
+on its own and reported as a `recipe_package.document_incompatible` problem;
+the rest of the release still applies. Package cache files are
 written with an fsync and atomic rename, so a restart can import the exact
 same package offline. Once every package has been applied, the package-backed
 sync publishes links and missing-recipe reconciliation in one database
@@ -48,4 +52,7 @@ sync runs and never become the active catalog. A single offline package import
 uses the normal exact-recipe import path and does not reconcile the rest of the
 managed library. The existing `/api/catalog/managed-recipes/sync` and
 `/api/catalog/managed-recipes/sync-status` routes remain the Controller's
-authenticated sync API.
+authenticated sync API. When the automatic sync cannot read the release at all,
+sync-status still reports the last applied run and adds `last_error` (code,
+detail, `occurred_at`) until a later sync succeeds; the sync retries after 30
+seconds, doubling up to the sync interval.

@@ -18,6 +18,7 @@ from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
+  from ..models.managed_catalog_sync_failure import ManagedCatalogSyncFailure
   from ..models.managed_catalog_sync_problem import ManagedCatalogSyncProblem
   from ..models.managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe
 
@@ -52,6 +53,7 @@ class ManagedCatalogSyncResponse:
             withdrawn_recipes (list[ManagedCatalogWithdrawnRecipe]):
             commit (None | str | Unset):
             expected_commit (None | str | Unset):
+            last_error (ManagedCatalogSyncFailure | None | Unset):
             schema_version (Literal[1] | Unset):  Default: 1.
      """
 
@@ -74,6 +76,7 @@ class ManagedCatalogSyncResponse:
     withdrawn_recipes: list[ManagedCatalogWithdrawnRecipe]
     commit: None | str | Unset = UNSET
     expected_commit: None | str | Unset = UNSET
+    last_error: ManagedCatalogSyncFailure | None | Unset = UNSET
     schema_version: Literal[1] | Unset = 1
 
 
@@ -82,6 +85,7 @@ class ManagedCatalogSyncResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe # noqa: PLC0415
+        from ..models.managed_catalog_sync_failure import ManagedCatalogSyncFailure # noqa: PLC0415
         from ..models.managed_catalog_sync_problem import ManagedCatalogSyncProblem # noqa: PLC0415
         from ..models.managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe # noqa: PLC0415
         completed_at: None | str
@@ -146,6 +150,14 @@ class ManagedCatalogSyncResponse:
         else:
             expected_commit = self.expected_commit
 
+        last_error: dict[str, Any] | None | Unset
+        if isinstance(self.last_error, Unset):
+            last_error = UNSET
+        elif isinstance(self.last_error, ManagedCatalogSyncFailure):
+            last_error = self.last_error.to_dict()
+        else:
+            last_error = self.last_error
+
         schema_version = self.schema_version
 
 
@@ -174,6 +186,8 @@ class ManagedCatalogSyncResponse:
             field_dict["commit"] = commit
         if expected_commit is not UNSET:
             field_dict["expected_commit"] = expected_commit
+        if last_error is not UNSET:
+            field_dict["last_error"] = last_error
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -184,6 +198,7 @@ class ManagedCatalogSyncResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.managed_catalog_stale_recipe import ManagedCatalogStaleRecipe # noqa: PLC0415
+        from ..models.managed_catalog_sync_failure import ManagedCatalogSyncFailure # noqa: PLC0415
         from ..models.managed_catalog_sync_problem import ManagedCatalogSyncProblem # noqa: PLC0415
         from ..models.managed_catalog_withdrawn_recipe import ManagedCatalogWithdrawnRecipe # noqa: PLC0415
         d = dict(src_dict)
@@ -277,6 +292,26 @@ class ManagedCatalogSyncResponse:
         expected_commit = _parse_expected_commit(d.pop("expected_commit", UNSET))
 
 
+        def _parse_last_error(data: object) -> ManagedCatalogSyncFailure | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                last_error_type_0 = ManagedCatalogSyncFailure.from_dict(data)
+
+
+
+                return last_error_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(ManagedCatalogSyncFailure | None | Unset, data)
+
+        last_error = _parse_last_error(d.pop("last_error", UNSET))
+
+
         schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
@@ -301,6 +336,7 @@ class ManagedCatalogSyncResponse:
             withdrawn_recipes=withdrawn_recipes,
             commit=commit,
             expected_commit=expected_commit,
+            last_error=last_error,
             schema_version=schema_version,
         )
 

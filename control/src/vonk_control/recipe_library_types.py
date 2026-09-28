@@ -75,6 +75,9 @@ class RecipeLibrarySnapshot:
     items: tuple[RecipeLibraryItem, ...]
     repository: str = "CarstVaartjes/vonk-forge-recipes"
     catalog_entities: tuple[dict[str, object], ...] = ()
+    # Index documents skipped because they could not be read, each a
+    # ``{"recipe_uri", "code", "detail"}`` sync problem.
+    problems: tuple[dict[str, object], ...] = ()
 
 
 __all__ = [
