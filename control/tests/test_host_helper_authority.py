@@ -16,12 +16,11 @@ from vonk_agent_protocol import (
     CompiledExecutionPlan,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
-    RestartVonkUnitOperation,
-    ScheduleRebootOperation,
     canonical_message,
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import (
+    ConfirmPackageActivationOperation,
     HostRuntimeRequest,
     RecipeReconciliationIdentity,
 )
@@ -215,7 +214,11 @@ def test_controller_issues_exact_short_lived_host_grant() -> None:
     authority = issuer()
     grant = authority.issue_grant(
         node_id="spk_" + "1" * 32,
-        operation=RestartVonkUnitOperation(type="restart-vonk-unit", unit="agent"),
+        operation=ConfirmPackageActivationOperation(
+            type="confirm-package-activation",
+            package_sha256="a" * 64,
+            attempt_nonce="b" * 64,
+        ),
         expires_in_seconds=90,
     )
 
@@ -270,8 +273,10 @@ def test_controller_refuses_unbounded_host_grants(seconds: object) -> None:
     with pytest.raises(HostHelperAuthorityError, match="expiry"):
         issuer().issue_grant(
             node_id="spk_" + "1" * 32,
-            operation=ScheduleRebootOperation(
-                type="schedule-reboot", delay_seconds=120
+            operation=ConfirmPackageActivationOperation(
+                type="confirm-package-activation",
+                package_sha256="a" * 64,
+                attempt_nonce="b" * 64,
             ),
             expires_in_seconds=seconds,
         )
@@ -281,7 +286,7 @@ def test_controller_refuses_mapping_shaped_or_untyped_operations() -> None:
     with pytest.raises(HostHelperAuthorityError, match="operation"):
         issuer().issue_grant(
             node_id="spk_" + "1" * 32,
-            operation={"type": "restart-vonk-unit", "unit": "agent"},
+            operation={"type": "confirm-package-activation"},
             expires_in_seconds=30,
         )
 

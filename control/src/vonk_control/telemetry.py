@@ -11,15 +11,11 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
 
 from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
-from .telemetry_contract import TelemetryDetails, TelemetryMetrics
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
-_MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 _MAX_BYTES = 16 * 1024**4
-_MAX_RATE = 1_000_000_000_000_000.0
 _MAX_BATCH_SAMPLES = 16
 
 
@@ -74,35 +70,9 @@ def _stored_utc(value: datetime) -> datetime:
 
 
 @dataclass(frozen=True, slots=True)
-class TelemetryDetailsInput:
-    accelerator_name: str | None = None
-    accelerator_performance_state: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.accelerator_name is not None and (
-            not isinstance(self.accelerator_name, str)
-            or not 1 <= len(self.accelerator_name) <= 256
-        ):
-            raise ValueError("telemetry accelerator name is invalid")
-        if self.accelerator_performance_state is not None and (
-            not isinstance(self.accelerator_performance_state, str)
-            or not 1 <= len(self.accelerator_performance_state) <= 32
-        ):
-            raise ValueError("telemetry accelerator performance state is invalid")
-
-    def as_dict(self) -> dict[str, str | None]:
-        return {
-            "accelerator_name": self.accelerator_name,
-            "accelerator_performance_state": self.accelerator_performance_state,
-        }
-
-
-@dataclass(frozen=True, slots=True)
 class TelemetrySampleInput:
     boot_id: uuid.UUID
     observed_at: datetime
-    cpu_utilization_percent: float | None
-    load_average_1m: float | None
     memory_total_bytes: int | None
     memory_available_bytes: int | None
     disk_total_bytes: int | None
@@ -110,31 +80,12 @@ class TelemetrySampleInput:
     gpu_utilization_percent: float | None
     gpu_memory_total_bytes: int | None
     gpu_memory_free_bytes: int | None
-    temperature_c: float | None
-    power_watts: float | None
-    network_receive_bytes_per_second: float | None
-    network_transmit_bytes_per_second: float | None
-    gap_samples: int
-    details: TelemetryDetailsInput
-    metrics: TelemetryMetrics
 
     def __post_init__(self) -> None:
         if not isinstance(self.boot_id, uuid.UUID) or self.boot_id.int == 0:
             raise ValueError("telemetry boot ID is invalid")
         if not isinstance(self.observed_at, datetime):
             raise ValueError("telemetry observation time is invalid")  # noqa: TRY004
-        _finite_number(
-            self.cpu_utilization_percent,
-            label="CPU utilization",
-            minimum=0,
-            maximum=100,
-        )
-        _finite_number(
-            self.load_average_1m,
-            label="load average",
-            minimum=0,
-            maximum=1_000_000,
-        )
         _capacity_pair(
             self.memory_total_bytes,
             self.memory_available_bytes,
@@ -159,39 +110,6 @@ class TelemetrySampleInput:
             label="GPU memory",
             free_label="GPU memory free",
         )
-        _finite_number(
-            self.temperature_c,
-            label="temperature",
-            minimum=-100,
-            maximum=300,
-        )
-        _finite_number(
-            self.power_watts,
-            label="power",
-            minimum=0,
-            maximum=100_000,
-        )
-        _finite_number(
-            self.network_receive_bytes_per_second,
-            label="network receive rate",
-            minimum=0,
-            maximum=_MAX_RATE,
-        )
-        _finite_number(
-            self.network_transmit_bytes_per_second,
-            label="network transmit rate",
-            minimum=0,
-            maximum=_MAX_RATE,
-        )
-        if (
-            type(self.gap_samples) is not int
-            or not 0 <= self.gap_samples <= _MAX_SIGNED_BIGINT
-        ):
-            raise ValueError("telemetry gap samples is invalid")
-        if not isinstance(self.details, TelemetryDetailsInput):
-            raise ValueError("telemetry details are invalid")  # noqa: TRY004
-        if not isinstance(self.metrics, TelemetryMetrics):
-            raise ValueError("telemetry metrics are invalid")  # noqa: TRY004
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,8 +119,6 @@ class TelemetrySampleView:
     boot_id: uuid.UUID
     observed_at: datetime
     received_at: datetime
-    cpu_utilization_percent: float | None
-    load_average_1m: float | None
     memory_total_bytes: int | None
     memory_available_bytes: int | None
     disk_total_bytes: int | None
@@ -210,13 +126,6 @@ class TelemetrySampleView:
     gpu_utilization_percent: float | None
     gpu_memory_total_bytes: int | None
     gpu_memory_free_bytes: int | None
-    temperature_c: float | None
-    power_watts: float | None
-    network_receive_bytes_per_second: float | None
-    network_transmit_bytes_per_second: float | None
-    gap_samples: int
-    details: TelemetryDetailsInput
-    metrics: TelemetryMetrics
 
 
 def _canonical_sample(
@@ -232,26 +141,22 @@ def _canonical_sample(
     return replace(value, observed_at=observed_at)
 
 
+_SAMPLE_FIELDS = (
+    "memory_total_bytes",
+    "memory_available_bytes",
+    "disk_total_bytes",
+    "disk_free_bytes",
+    "gpu_utilization_percent",
+    "gpu_memory_total_bytes",
+    "gpu_memory_free_bytes",
+)
+
+
 def _row_values(value: TelemetrySampleInput) -> dict[str, object]:
     return {
         "boot_id": str(value.boot_id),
         "observed_at": value.observed_at,
-        "cpu_utilization_percent": value.cpu_utilization_percent,
-        "load_average_1m": value.load_average_1m,
-        "memory_total_bytes": value.memory_total_bytes,
-        "memory_available_bytes": value.memory_available_bytes,
-        "disk_total_bytes": value.disk_total_bytes,
-        "disk_free_bytes": value.disk_free_bytes,
-        "gpu_utilization_percent": value.gpu_utilization_percent,
-        "gpu_memory_total_bytes": value.gpu_memory_total_bytes,
-        "gpu_memory_free_bytes": value.gpu_memory_free_bytes,
-        "temperature_c": value.temperature_c,
-        "power_watts": value.power_watts,
-        "network_receive_bytes_per_second": value.network_receive_bytes_per_second,
-        "network_transmit_bytes_per_second": value.network_transmit_bytes_per_second,
-        "gap_samples": value.gap_samples,
-        "details": value.details.as_dict(),
-        "metrics": value.metrics.model_dump(mode="json"),
+        **{name: getattr(value, name) for name in _SAMPLE_FIELDS},
     }
 
 
@@ -260,49 +165,19 @@ def _same_sample(row: NodeTelemetrySample, value: TelemetrySampleInput) -> bool:
         actual = getattr(row, field_name)
         if field_name == "observed_at":
             actual = _stored_utc(actual)
-        elif field_name in {"details", "metrics"}:
-            actual = dict(actual)
         if actual != expected:
             return False
     return True
 
 
 def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
-    try:
-        details_document = canonical_message(row.details)
-    except (TypeError, ValueError) as error:
-        raise ValueError("telemetry details are invalid") from error
-    details = TelemetryDetails.model_validate_json(details_document)
-    try:
-        metrics_document = canonical_message(row.metrics)
-    except (TypeError, ValueError) as error:
-        raise ValueError("telemetry metrics are invalid") from error
-    metrics = TelemetryMetrics.model_validate_json(metrics_document)
     return TelemetrySampleView(
         id=row.id,
         node_id=row.node_id,
         boot_id=uuid.UUID(row.boot_id),
         observed_at=_stored_utc(row.observed_at),
         received_at=_stored_utc(row.received_at),
-        cpu_utilization_percent=row.cpu_utilization_percent,
-        load_average_1m=row.load_average_1m,
-        memory_total_bytes=row.memory_total_bytes,
-        memory_available_bytes=row.memory_available_bytes,
-        disk_total_bytes=row.disk_total_bytes,
-        disk_free_bytes=row.disk_free_bytes,
-        gpu_utilization_percent=row.gpu_utilization_percent,
-        gpu_memory_total_bytes=row.gpu_memory_total_bytes,
-        gpu_memory_free_bytes=row.gpu_memory_free_bytes,
-        temperature_c=row.temperature_c,
-        power_watts=row.power_watts,
-        network_receive_bytes_per_second=row.network_receive_bytes_per_second,
-        network_transmit_bytes_per_second=row.network_transmit_bytes_per_second,
-        gap_samples=row.gap_samples,
-        details=TelemetryDetailsInput(
-            accelerator_name=details.accelerator_name,
-            accelerator_performance_state=details.accelerator_performance_state,
-        ),
-        metrics=metrics,
+        **{name: getattr(row, name) for name in _SAMPLE_FIELDS},
     )
 
 

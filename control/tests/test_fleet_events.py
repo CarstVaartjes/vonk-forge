@@ -25,12 +25,9 @@ from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.jobs import JobService
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.telemetry import (
-    TelemetryDetailsInput,
     TelemetryRepository,
     TelemetrySampleInput,
 )
-
-from .telemetry_fixtures import telemetry_metrics
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 
@@ -185,22 +182,13 @@ def _telemetry_sample(
     return TelemetrySampleInput(
         boot_id=uuid.UUID(boot_id),
         observed_at=observed_at,
-        cpu_utilization_percent=cpu,
-        load_average_1m=None,
+        gpu_utilization_percent=cpu,
         memory_total_bytes=None,
         memory_available_bytes=None,
         disk_total_bytes=None,
         disk_free_bytes=None,
-        gpu_utilization_percent=None,
         gpu_memory_total_bytes=None,
         gpu_memory_free_bytes=None,
-        temperature_c=None,
-        power_watts=None,
-        network_receive_bytes_per_second=None,
-        network_transmit_bytes_per_second=None,
-        gap_samples=0,
-        details=TelemetryDetailsInput(),
-        metrics=telemetry_metrics(),
     )
 
 

@@ -514,30 +514,10 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
     assert 'degraded_reason?: ("external-member" | "mapping-incomplete"' in typescript
 
 
-def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
+def test_generated_telemetry_contract_is_concrete() -> None:
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
-
-    for name in (
-        "TelemetryCapability",
-        "TelemetryDetails-Output",
-        "TelemetryMetrics",
-        "TelemetryPoint",
-        "TelemetryProvenance",
-        "TelemetryRuntime",
-        "TelemetrySeries",
-        "TelemetryWorkload",
-    ):
-        assert schema[name]["type"] == "object"
-        assert schema[name]["additionalProperties"] is False
-
-    point = schema["TelemetryPoint"]
-    assert point["properties"]["details"] == {
-        "$ref": "#/components/schemas/TelemetryDetails-Output"
-    }
-    assert point["properties"]["metrics"] == {
-        "$ref": "#/components/schemas/TelemetryMetrics"
-    }
-    assert "metrics" in point["required"]
+    assert schema["TelemetryPoint"]["type"] == "object"
+    assert schema["TelemetryPoint"]["additionalProperties"] is False
 
     typescript = TYPESCRIPT_CLIENT.read_text()
     assert "TelemetryPoint: {" in typescript

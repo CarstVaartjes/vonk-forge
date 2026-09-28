@@ -189,15 +189,7 @@ class FakeClient:
                     item["name"] for item in parameters if item["in"] == "query"
                 }
             elif path.startswith("/api/fleet/") and not path.endswith("/loginfo"):
-                assert query is None or set(query) <= {
-                    "metrics",
-                    "range",
-                    "device",
-                    "interface",
-                    "run",
-                    "capabilities",
-                    "technical",
-                }
+                assert query is None or set(query) <= {"technical"}
             elif path.endswith("/loginfo"):
                 assert query is None or set(query) <= {
                     "since",

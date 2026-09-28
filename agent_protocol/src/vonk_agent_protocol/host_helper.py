@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import re
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
@@ -27,7 +26,6 @@ from .wire_model import WireModel
 
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
 HOST_HELPER_GRANT_DOMAIN = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
-HOST_ARTIFACT_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00"
 RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY = "vonk.recipe-run-observation-helper"
 RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\x00"
 MAX_HOST_HELPER_GRANT_SECONDS = 300
@@ -269,8 +267,6 @@ class ContainerRuntimeAction(StrEnum):
 class HostOperationKind(StrEnum):
     INSTALL_VONK_DEB = "install-vonk-deb"
     CONFIRM_PACKAGE_ACTIVATION = "confirm-package-activation"
-    RESTART_VONK_UNIT = "restart-vonk-unit"
-    SCHEDULE_REBOOT = "schedule-reboot"
     EXECUTE_CONTAINER_RUNTIME_REQUEST = "execute-container-runtime-request"
 
 
@@ -290,16 +286,6 @@ class ConfirmPackageActivationOperation(_HostOperation):
     type: Literal["confirm-package-activation"]
     package_sha256: Digest
     attempt_nonce: Digest
-
-
-class RestartVonkUnitOperation(_HostOperation):
-    type: Literal["restart-vonk-unit"]
-    unit: Literal["agent", "helper"]
-
-
-class ScheduleRebootOperation(_HostOperation):
-    type: Literal["schedule-reboot"]
-    delay_seconds: int = Field(ge=60, le=3600, strict=True)
 
 
 class ExecuteContainerRuntimeRequestOperation(_HostOperation):
@@ -398,8 +384,6 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
 type HostOperation = Annotated[
     InstallVonkDebOperation
     | ConfirmPackageActivationOperation
-    | RestartVonkUnitOperation
-    | ScheduleRebootOperation
     | ExecuteContainerRuntimeRequestOperation,
     Field(discriminator="type"),
 ]
@@ -514,19 +498,6 @@ def recipe_run_observation_receipt_signing_bytes(
     return RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN + canonical_message(
         claims.to_mapping()
     )
-
-
-def host_artifact_signing_bytes(kind: str, digest: str) -> bytes:
-    if (
-        kind not in {"agent", "deb"}
-        or not isinstance(digest, str)
-        or _DIGEST.fullmatch(digest) is None
-    ):
-        raise AgentProtocolError("host artifact is invalid")
-    return HOST_ARTIFACT_DOMAIN + kind.encode("ascii") + b"\x00" + bytes.fromhex(digest)
-
-
-_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def _parse_model(cls: type[WireModel], value: Any, name: str) -> Any:

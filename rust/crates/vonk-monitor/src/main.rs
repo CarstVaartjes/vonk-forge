@@ -2,6 +2,7 @@
 
 use std::{
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 
@@ -52,69 +53,40 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     };
-    let collector_paths = telemetry_paths(&initial_config);
-    let mut collector = Some(TelemetryCollector::new(
+    let collector = Arc::new(TelemetryCollector::new(
         SystemProcessRunner,
         SystemFileSystemProvider,
-        collector_paths.clone(),
+        telemetry_paths(&initial_config),
         boot_id,
     )?);
-    let mut previous = None;
     let mut next_tick = tokio::time::Instant::now();
 
     loop {
         tokio::time::sleep_until(next_tick).await;
         let tick_started = tokio::time::Instant::now();
-        let prior = previous.take();
-        let current_collector = collector.take().expect("collector is returned each tick");
-        let collection = tokio::task::spawn_blocking(move || {
-            let mut collector = current_collector;
-            let result = collector.sample(prior.as_ref());
-            (collector, prior, result)
-        })
-        .await;
-        let Ok((returned_collector, prior, result)) = collection else {
-            eprintln!(
-                "vonk-monitor: operation=telemetry.collect endpoint=local error=collector-task-stopped; decision=discard-and-collect-next-interval"
-            );
-            collector = Some(TelemetryCollector::new(
-                SystemProcessRunner,
-                SystemFileSystemProvider,
-                collector_paths.clone(),
-                boot_id,
-            )?);
-            next_tick = next_tick_after(tick_started, tokio::time::Instant::now());
-            continue;
-        };
-        collector = Some(returned_collector);
-        match result {
-            Ok(sample) => {
-                previous = Some(sample.clone());
-                match AgentConfig::load(config_path)
-                    .ok()
-                    .and_then(|config| AgentHttpClient::from_config(&config).ok())
-                {
-                    Some(client) => {
-                        // This is intentionally one request for one fresh
-                        // sample. A failed upload is dropped at this point;
-                        // no retry queue or replay exists.
-                        if let Err(error) = client.report_telemetry(&[sample]).await {
-                            eprintln!(
-                                "vonk-monitor: operation=telemetry.upload endpoint=/agent/telemetry error={error}; decision=discard-and-collect-next-interval"
-                            );
-                        }
+        let current = Arc::clone(&collector);
+        match tokio::task::spawn_blocking(move || current.sample()).await {
+            Ok(sample) => match AgentConfig::load(config_path)
+                .ok()
+                .and_then(|config| AgentHttpClient::from_config(&config).ok())
+            {
+                Some(client) => {
+                    // This is intentionally one request for one fresh
+                    // sample. A failed upload is dropped at this point;
+                    // no retry queue or replay exists.
+                    if let Err(error) = client.report_telemetry(&[sample]).await {
+                        eprintln!(
+                            "vonk-monitor: operation=telemetry.upload endpoint=/agent/telemetry error={error}; decision=discard-and-collect-next-interval"
+                        );
                     }
-                    None => eprintln!(
-                        "vonk-monitor: operation=telemetry.upload endpoint=/agent/telemetry error=active-credentials-unavailable; decision=discard-and-collect-next-interval"
-                    ),
                 }
-            }
-            Err(error) => {
-                previous = prior;
-                eprintln!(
-                    "vonk-monitor: operation=telemetry.collect endpoint=local error={error}; decision=discard-and-collect-next-interval"
-                );
-            }
+                None => eprintln!(
+                    "vonk-monitor: operation=telemetry.upload endpoint=/agent/telemetry error=active-credentials-unavailable; decision=discard-and-collect-next-interval"
+                ),
+            },
+            Err(_) => eprintln!(
+                "vonk-monitor: operation=telemetry.collect endpoint=local error=collector-task-stopped; decision=discard-and-collect-next-interval"
+            ),
         }
         next_tick = next_tick_after(tick_started, tokio::time::Instant::now());
     }
@@ -133,16 +105,8 @@ fn next_tick_after(
 
 fn telemetry_paths(config: &AgentConfig) -> TelemetryPaths {
     TelemetryPaths {
-        stat: PathBuf::from("/proc/stat"),
-        loadavg: PathBuf::from("/proc/loadavg"),
-        uptime: PathBuf::from("/proc/uptime"),
         meminfo: PathBuf::from("/proc/meminfo"),
-        net_dev: PathBuf::from("/proc/net/dev"),
         store: config.data_dir.clone(),
-        sys_block: PathBuf::from("/sys/block"),
-        sys_class_net: PathBuf::from("/sys/class/net"),
-        thermal: PathBuf::from("/sys/class/thermal"),
-        powercap: PathBuf::from("/sys/class/powercap"),
     }
 }
 

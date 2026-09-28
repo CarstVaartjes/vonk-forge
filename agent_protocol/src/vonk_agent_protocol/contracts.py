@@ -1366,7 +1366,6 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         "agent-result.schema.json",
         "agent-directive.schema.json",
         "recipe-job-run.schema.json",
-        "telemetry-report.schema.json",
     }:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}")
     registry: dict[str, type[BaseModel]] = {
@@ -1380,12 +1379,6 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         from .recipe_jobs import RecipeJobRunRequest
 
         registry[schema_name] = RecipeJobRunRequest
-    if schema_name == "telemetry-report.schema.json":
-        # Telemetry is registered from the same Pydantic model used by the
-        # parser. The packaged JSON schema is an export artifact.
-        from .telemetry import TelemetryRequest
-
-        registry[schema_name] = TelemetryRequest
     document = registry[schema_name].model_json_schema()
     return Draft202012Validator(document, format_checker=PROTOCOL_FORMAT_CHECKER)
 
@@ -1479,10 +1472,6 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         "agent-result.schema.json": AgentResult.parse,
         "agent-directive.schema.json": AgentDirective.parse,
     }
-    if schema_name == "telemetry-report.schema.json":
-        from .telemetry import TelemetryRequest
-
-        parsers[schema_name] = TelemetryRequest.parse
     if schema_name == "recipe-job-run.schema.json":
         from .recipe_jobs import RecipeJobRunRequest
 
@@ -1491,13 +1480,4 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         parser = parsers[schema_name]
     except KeyError as error:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}") from error
-    if schema_name not in {
-        "agent-job.schema.json",
-        "agent-result.schema.json",
-        "agent-directive.schema.json",
-        "recipe-job-run.schema.json",
-    }:
-        errors = list(schema_validator(schema_name).iter_errors(raw))
-        if errors:
-            raise AgentProtocolError(f"schema validation failed: {errors[0].message}")
     return parser(raw)

@@ -41,13 +41,9 @@ from vonk_control.models import (
 )
 from vonk_control.passwords import hash_password
 from vonk_control.telemetry import (
-    TelemetryDetailsInput,
     TelemetryRepository,
     TelemetrySampleView,
 )
-from vonk_control.telemetry_contract import TelemetryDetails
-
-from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -231,25 +227,13 @@ def _sample() -> TelemetrySampleView:
         boot_id=uuid.UUID(NON_RFC_BOOT_ID),
         observed_at=NOW - timedelta(seconds=2),
         received_at=NOW - timedelta(seconds=1),
-        cpu_utilization_percent=12.5,
-        load_average_1m=None,
         memory_total_bytes=None,
         memory_available_bytes=None,
         disk_total_bytes=None,
         disk_free_bytes=None,
-        gpu_utilization_percent=None,
+        gpu_utilization_percent=12.5,
         gpu_memory_total_bytes=None,
         gpu_memory_free_bytes=None,
-        temperature_c=None,
-        power_watts=None,
-        network_receive_bytes_per_second=None,
-        network_transmit_bytes_per_second=None,
-        gap_samples=0,
-        details=TelemetryDetailsInput(
-            accelerator_name="NVIDIA GB10",
-            accelerator_performance_state="P0",
-        ),
-        metrics=telemetry_metrics(),
     )
 
 
@@ -368,27 +352,11 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         "node_id": NODE_ID,
         "sample": {
             "boot_id": NON_RFC_BOOT_ID,
-            "cpu_utilization_percent": 12.5,
-            "details": {
-                "accelerator_name": "NVIDIA GB10",
-                "accelerator_performance_state": "P0",
-            },
-            "gap_samples": 0,
+            "gpu_utilization_percent": 12.5,
             "id": SAMPLE_ID,
             "node_id": NODE_ID,
             "observed_at": "2026-08-15T11:59:58Z",
             "received_at": "2026-08-15T11:59:59Z",
-            "metrics": {
-                "capabilities": [],
-                "provenance": {
-                    "collector": "test",
-                    "collector_version": "1",
-                },
-                "runtimes": [],
-                "schema_version": 2,
-                "series": [],
-                "workloads": [],
-            },
         },
     }
     assert recipe_fields == {"id": "7", "event": "recipe-state"}
@@ -782,8 +750,6 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
                 boot_id=NON_RFC_BOOT_ID,
                 observed_at=NOW + timedelta(seconds=sequence),
                 received_at=NOW + timedelta(seconds=sequence),
-                cpu_utilization_percent=1.0,
-                load_average_1m=None,
                 memory_total_bytes=None,
                 memory_available_bytes=None,
                 disk_total_bytes=None,
@@ -791,16 +757,6 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
                 gpu_utilization_percent=None,
                 gpu_memory_total_bytes=None,
                 gpu_memory_free_bytes=None,
-                temperature_c=None,
-                power_watts=None,
-                network_receive_bytes_per_second=None,
-                network_transmit_bytes_per_second=None,
-                gap_samples=0,
-                details=TelemetryDetails(
-                    accelerator_name=None,
-                    accelerator_performance_state=None,
-                ).model_dump(mode="json"),
-                metrics=telemetry_metrics_document(),
             )
             for sequence, sample_id in enumerate(sample_ids)
         )

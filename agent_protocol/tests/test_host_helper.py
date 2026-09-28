@@ -12,7 +12,6 @@ from vonk_agent_protocol import (
     RecipeStopPayload,
     SignedRecipeRunObservationReceipt,
     canonical_message,
-    host_artifact_signing_bytes,
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import (
@@ -163,12 +162,6 @@ def test_rust_signed_receipt_fixture_round_trips_with_identical_signing_bytes() 
         b'"observed_at":1788000000,"outcome":"not-running",'
         b'"request_id":"10000000-0000-4000-8000-000000000001",'
         b'"request_sha256":"' + b"a" * 64 + b'","schema_version":1}'
-    )
-
-
-def test_host_artifact_signing_bytes_keep_the_domain_and_raw_digest_contract() -> None:
-    assert host_artifact_signing_bytes("agent", "a" * 64) == (
-        b"VONK-HOST-ARTIFACT-V1\x00agent\x00" + bytes.fromhex("a" * 64)
     )
 
 

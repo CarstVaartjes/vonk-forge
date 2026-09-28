@@ -2300,20 +2300,7 @@ def _typed_paired_fleet(
                     "freshness": "live",
                     "sample": {
                         "boot_id": boots.get(node_id, "boot-before"),
-                        "details": {},
-                        "gap_samples": 0,
                         "id": f"telemetry-{node_id}-{cursor}",
-                        "metrics": {
-                            "capabilities": [],
-                            "provenance": {
-                                "collector": "qualification-test",
-                                "collector_version": "1",
-                            },
-                            "runtimes": [],
-                            "schema_version": 2,
-                            "series": [],
-                            "workloads": [],
-                        },
                         "node_id": node_id,
                         "observed_at": timestamp,
                         "received_at": timestamp,
