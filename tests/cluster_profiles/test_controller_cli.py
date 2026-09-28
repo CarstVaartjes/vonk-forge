@@ -17,6 +17,7 @@ from vonk_forge_contracts import ModelDefinition, content_sha256
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_render import progress_line, render_payload
 from cluster_profiles.control_client import (
+    ControlConflict,
     ControlForbidden,
     ControlHTTPError,
     ControlNotFound,
@@ -68,6 +69,8 @@ class FakeClient:
         self._validate_request(method, path, payload, query)
         self.calls.append((method, path, payload, query))
         response = self.responses.get((method, path), {})
+        if method == "POST" and path.endswith("/preview") and not response:
+            response = {"allowed": True, "plan_digest": "c" * 64}
         if isinstance(response, list):
             # The final entry is sticky so a caller can describe a dependency
             # that keeps answering the same way, including one that stays
@@ -494,7 +497,7 @@ def test_recipe_installation_reconcile_review_uses_typed_preview_route(
     ]
 
 
-def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
+def test_recipe_installation_reconcile_rejects_security_or_changed_preview(
     monkeypatch,
 ) -> None:
     installation_id = "22222222-2222-4222-8222-222222222222"
@@ -518,8 +521,6 @@ def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -529,20 +530,20 @@ def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
     )
 
     assert status == 2
-    assert "plan changed" in str(result["error"]).lower()
+    assert "unavailable" in str(result["error"]).lower()
     assert all(call[1] != apply for call in client.calls)
 
-    client.responses[("POST", preview)] = _reconciliation_plan(
-        installation_id, allowed=False
-    )
+    refused = _reconciliation_plan(installation_id, allowed=False)
+    refused["blockers"] = [
+        {"code": "run-switch.node_revoked", "detail": "Spark was revoked"}
+    ]
+    client.responses[("POST", preview)] = refused
     status, result = run(
         (
             "recipe",
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -551,8 +552,48 @@ def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
         client,
     )
     assert status == 2
-    assert "blocked" in str(result["error"]).lower()
+    assert "run-switch.node_revoked" in str(result["error"])
     assert all(call[1] != apply for call in client.calls)
+
+
+def test_recipe_installation_reconcile_submits_despite_ordinary_blockers(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    apply = f"/api/recipe/installations/{installation_id}/reconcile"
+    blocked = _reconciliation_plan(installation_id, allowed=False)
+    blocked["blockers"] = [
+        {"code": "run-switch.capacity_busy", "detail": "capacity is busy"}
+    ]
+    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    client = FakeClient(
+        {
+            ("GET", "/api/operations"): empty,
+            ("POST", f"{apply}/preview"): blocked,
+            ("POST", apply): ControlConflict(409, "installation is busy"),
+        }
+    )
+    _allow_minimal_reconciliation_plan(monkeypatch)
+
+    run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--request-key",
+            key,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    submitted = [call for call in client.calls if call[:2] == ("POST", apply)]
+    assert len(submitted) == 1
+    assert submitted[0][2] is not None
+    assert submitted[0][2]["plan_digest"] == blocked["plan_digest"]
 
 
 def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity_rows(
@@ -576,8 +617,6 @@ def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -646,8 +685,6 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -674,8 +711,6 @@ def test_recipe_installation_reconcile_does_not_replay_after_uncertain_lookup() 
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -716,8 +751,6 @@ def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identit
             "installation",
             "reconcile",
             installation_id,
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             key,
             "--yes",
@@ -1239,8 +1272,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
             "model",
             "remove",
             "qwen",
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--yes",
             "--detach",
             "--json",
@@ -1265,8 +1296,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "remove",
                 "vision",
                 "--with-model",
-                "--review-digest",
-                _REVIEW_DIGEST,
                 "--yes",
                 "--json",
             ),
@@ -1321,8 +1350,6 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
             "remove",
             selector,
             "--yes",
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             request_key,
             "--detach",
@@ -1413,8 +1440,6 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
             selector,
             "--keep-model",
             "--yes",
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--request-key",
             request_key,
             "--detach",
@@ -1569,8 +1594,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
                 "--yes",
                 "--request-key",
                 request_key,
-                "--review-digest",
-                _REVIEW_DIGEST,
                 "--json",
             )
             if model_receipt_only_reconnect
@@ -1579,8 +1602,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
                 "remove",
                 selector,
                 "--yes",
-                "--review-digest",
-                _REVIEW_DIGEST,
                 "--json",
             )
         )
@@ -1591,8 +1612,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             selector,
             "--keep-model",
             "--yes",
-            "--review-digest",
-            _REVIEW_DIGEST,
             "--json",
         )
     client = FakeClient({("POST", path): receipt})
@@ -2294,8 +2313,6 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),
@@ -2304,10 +2321,11 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
 
     assert status == 0 and payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
+        "/api/profile/1/preview",
         "/api/profile/1/load",
         f"/api/profile/applications/{application_id}",
     ]
-    assert client.calls[0][2] == {
+    assert client.calls[1][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111",
         "plan_digest": "c" * 64,
     }
@@ -2328,8 +2346,6 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),
@@ -2337,7 +2353,7 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
     )
 
     assert status != 0
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
     assert not any(call[1].endswith("/progress") for call in client.calls)
 
 
@@ -2619,8 +2635,6 @@ def test_lost_mutation_response_still_names_the_request_key() -> None:
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),
@@ -2652,8 +2666,6 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),
@@ -2662,7 +2674,7 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
 
     assert status == 0
     assert payload["id"] == operation
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
 
 
 def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> None:
@@ -2686,8 +2698,6 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--request-key",
             key,
@@ -2713,6 +2723,7 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
         "request_key": key,
     }
     assert [call[:2] for call in client.calls] == [
+        ("POST", "/api/profile/1/preview"),
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/applications/{operation}"),
     ]
@@ -2739,8 +2750,6 @@ def test_lost_load_response_retries_only_with_original_request_key() -> None:
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            "c" * 64,
             "--yes",
             "--json",
         ),
@@ -3458,7 +3467,7 @@ def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() 
     status, payload = run(("model", "remove", "qwen", "--json"), model)
     removal_error = payload["error"]
     assert isinstance(removal_error, str)
-    assert status == 2 and "--review-digest SHA256 --yes" in removal_error
+    assert status == 2 and "--yes" in removal_error
     assert model.calls == []
 
     recipe = FakeClient({})
@@ -4091,9 +4100,11 @@ def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:
     assert args.timeout_seconds == 30
 
 
-@pytest.mark.parametrize("blocked", [True, False])
+@pytest.mark.parametrize(
+    "reason_code", [None, "profile.spark_offline", "profile.node_revoked"]
+)
 def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
-    blocked: bool, capsys
+    reason_code: str | None, capsys
 ) -> None:
     profile = {
         "name": "Default",
@@ -4104,7 +4115,6 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
         "assignments": [],
     }
     paths: list[str] = []
-    decision = {"blocked": blocked}
     application_id = "33333333-3333-4333-8333-333333333333"
 
     class RunClient:
@@ -4171,9 +4181,11 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
                 return {"number": 1, "revision": 1, "definition": profile}
             if path == "/api/profile/1/preview":
                 return {
-                    "allowed": not decision["blocked"],
+                    "allowed": reason_code is None,
                     "plan_digest": "b" * 64,
-                    "reasons": [{"detail": "Spark is offline"}],
+                    "reasons": []
+                    if reason_code is None
+                    else [{"code": reason_code, "detail": "Spark is not ready"}],
                 }
             if method == "POST" and path == "/api/profile/1/load":
                 assert payload is not None
@@ -4206,18 +4218,27 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
     args = cli._parser().parse_args(
         ["--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes", "--json"]
     )
+    if reason_code == "profile.node_revoked":
+        # A real security denial still stops before any load is submitted.
+        with pytest.raises(ControlConflict, match="profile.node_revoked"):
+            controller_cli.run_controller(
+                args,
+                cast(controller_cli.ControllerClient, RunClient()),
+                lambda: "11111111-1111-4111-8111-111111111111",
+            )
+        assert "/api/profile/1/load" not in paths
+        return
     result = controller_cli.run_controller(
         args,
         cast(controller_cli.ControllerClient, RunClient()),
         lambda: "11111111-1111-4111-8111-111111111111",
     )
     capsys.readouterr()
-    if blocked:
-        assert result["allowed"] is False
-    else:
-        assert result["state"] == "succeeded"
-        endpoints = result["endpoints"]
-        assert isinstance(endpoints, Mapping)
-        assert endpoints["application_id"] == application_id
+    # An ordinary blocker is not a client-side stop: the load is submitted and
+    # the Controller parks or refuses it.
+    assert result["state"] == "succeeded"
+    endpoints = result["endpoints"]
+    assert isinstance(endpoints, Mapping)
+    assert endpoints["application_id"] == application_id
     assert profile["assignments"][0]["recipe_selector"] == "vonk-forge/qwen-code"
-    assert ("/api/profile/1/load" not in paths) is blocked
+    assert "/api/profile/1/load" in paths

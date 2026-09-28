@@ -163,8 +163,6 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
             selector,
             "--keep-model",
             "--yes",
-            "--review-digest",
-            review["review_digest"],
             "--request-key",
             _REMOVE_KEY,
             "--detach",
