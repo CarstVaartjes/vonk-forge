@@ -47,9 +47,13 @@ class PrivateOutput:
         ) and stat.S_ISREG(current.st_mode)
 
     def write(self, document: object) -> None:
+        self.write_bytes(
+            (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode()
+        )
+
+    def write_bytes(self, content: bytes) -> None:
         if not self._owns_path() or os.fstat(self.stream.fileno()).st_mode & 0o077:
             raise OSError("private output changed; delivery refused")
-        content = (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode()
         self.stream.seek(0)
         self.stream.write(content)
         self.stream.truncate()
