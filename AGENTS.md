@@ -439,10 +439,13 @@ untyped JSON to avoid a justified schema change.
 
 Keep schema-changing PRs out of auto-merge; obtain an explicit operator decision
 for their merge, honoring authorization already given for that action. Describe
-the deployment impact in the PR. The fresh-schema contract has no in-place
-upgrade path for an incompatible existing database, and a deployed Controller
-refuses that mismatch. Merging source does not itself wipe a database.
-Resetting a deployed database, losing enrollment/profiles/audit, and re-enrolling
-nodes are separate consequential operations requiring explicit authorization.
-Do not infer that authorization from permission to implement or merge, or infer
-a live production environment from an old incident record.
+the deployment impact in the PR. Controller startup reconciles the live schema
+to current model metadata transactionally under the startup advisory lock.
+Missing tables, safe columns, indexes and constraints are applied. Unknown
+tables and columns are preserved, while obsolete constraints and indexes are
+replaced only after a safe replacement is installed. Data conflicts and unsafe
+casts are logged and deferred when the application can continue safely.
+Merging source does not itself wipe a database. A deliberate database reset
+and its data loss are separate consequential operations requiring explicit
+authorization; do not infer reset authorization from permission to implement
+or merge.

@@ -144,6 +144,36 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
 }
 
 #[test]
+fn malformed_gpu_row_does_not_hide_other_inventory_devices() {
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(
+        &meminfo,
+        "MemTotal:       123456 kB\nMemAvailable:    65432 kB\n",
+    )
+    .unwrap();
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        gpu_output: b"malformed device row\nNVIDIA H100, 119808, 110000, 590.44\n",
+        cdi_output: b"nvidia.com/gpu=all\n",
+    };
+    let inventory = InventoryCollector {
+        runner: &runner,
+        meminfo_path: &meminfo,
+        store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    }
+    .collect()
+    .unwrap();
+
+    assert_eq!(inventory.gpu_count, 1);
+    assert_eq!(inventory.gpu_memory_total_bytes, 119808 * 1024 * 1024);
+    assert_eq!(inventory.gpu_memory_free_bytes, 110000 * 1024 * 1024);
+}
+
+#[test]
 fn malformed_or_inconsistent_memory_evidence_fails_closed() {
     let directory = tempdir().unwrap();
     let meminfo = directory.path().join("meminfo");
