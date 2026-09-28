@@ -110,7 +110,9 @@ def test_canonical_recipe_preserves_unknown_engine_arguments(
         {"name": "future_toggle", "value": True},
         {"name": "future_payload", "value": "unicode Ω; $HOME"},
     ]
-    argv = _json_array(_json_object(_compile(raw, model, _built_image())["runtime"])["entrypoint"])
+    argv = _json_array(
+        _json_object(_compile(raw, model, _built_image())["runtime"])["entrypoint"]
+    )
 
     assert argv[3:6] == ["--future_option", '{"mode":"first"}', "--future_toggle"]
     assert "unicode Ω; $HOME" in argv

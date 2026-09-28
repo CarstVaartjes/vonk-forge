@@ -162,9 +162,7 @@ def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
         == f"localhost/vonk/recipe-build@sha256:{digest}"
     )
     assert artifact["path"] == "model.safetensors"
-    assert _json_object(artifact["model"])["content_sha256"] == document_sha256(
-        model
-    )
+    assert _json_object(artifact["model"])["content_sha256"] == document_sha256(model)
     assert artifact["mount"] == {
         "source": "/run/vonk/models/primary/weights",
         "target": "/models",

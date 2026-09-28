@@ -72,9 +72,7 @@ def test_skopeo_image_stage_has_no_host_socket_or_privileged_runtime_contract() 
     assert "/var/tmp" in runtime
 
 
-def test_skopeo_production_transport_inspects_the_stored_archive() -> (
-    None
-):
+def test_skopeo_production_transport_inspects_the_stored_archive() -> None:
     source = (ROOT / "control/src/vonk_control/runtime_image_preparation.py").read_text(
         encoding="utf-8"
     )

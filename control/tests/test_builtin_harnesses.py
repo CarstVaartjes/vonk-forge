@@ -20,7 +20,12 @@ from vonk_control.runtime_writable_paths import (
     telemetry_contract,
     writable_paths,
 )
-from vonk_forge_contracts import ModelDefinition, document_sha256, read_model, read_recipe
+from vonk_forge_contracts import (
+    ModelDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
 
 BUILTINS = (
     "vllm",
@@ -237,9 +242,7 @@ def test_builtin_harness_executes_a_valid_short_entrypoint_as_authored(
 ) -> None:
     raw = _recipe("vllm")
     raw["runtime"]["entrypoint"] = ["vllm", "serve", "/models"]
-    projection = _projection(
-        "vllm", recipe=raw, model=model
-    )
+    projection = _projection("vllm", recipe=raw, model=model)
 
     assert projection.command[0] == "vllm"
 
@@ -252,9 +255,7 @@ def test_vllm_preserves_opaque_engine_options(model: ModelDefinition) -> None:
             {"name": "structured-option", "value": '{"enabled":true}'},
         ]
     )
-    projection = _projection(
-        "vllm", recipe=raw, model=model
-    )
+    projection = _projection("vllm", recipe=raw, model=model)
 
     assert "--future-engine-option" in projection.command
     index = projection.command.index("--future-engine-option")
@@ -272,9 +273,7 @@ def test_canonical_harness_preserves_value_bearing_arguments(
         {"name": "mount", "value": ""},
         {"name": "option", "value": "-c"},
     ]
-    projection = _projection(
-        "vllm", recipe=raw, model=model
-    )
+    projection = _projection("vllm", recipe=raw, model=model)
 
     expected = (
         "--device",
@@ -298,9 +297,7 @@ def test_builtin_harness_preserves_unknown_environment(
     raw["runtime"]["environment"] = [
         {"name": "FUTURE_ENGINE_SETTING", "value": "preserve-me"}
     ]
-    projection = _projection(
-        slug, recipe=raw, model=model
-    )
+    projection = _projection(slug, recipe=raw, model=model)
 
     assert ("FUTURE_ENGINE_SETTING", "preserve-me") in projection.environment
     assert projection.environment == effective_environment(
