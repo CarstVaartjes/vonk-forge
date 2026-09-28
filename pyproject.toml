@@ -80,7 +80,3 @@ testpaths = ["tests"]
 # 60 s) lives in tools/pytest_budget.py and is checked after each test.
 timeout = 120
 # Markers: tools/pytest_prereqs.py (prerequisites) and tools/pytest_budget.py (slow).
-filterwarnings = [
-    # FastAPI 0.116 on Python 3.14; emitted once per route per app build.
-    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning",
-]
