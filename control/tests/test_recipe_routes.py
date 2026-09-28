@@ -1784,9 +1784,8 @@ def test_postgres_empty_route_renewal_recovers_exact_unprojected_activation(
     initial = verify_active_route_bundle(root, clock=clock).marker
     with routes.sessions() as session:
         publication = _publication(session, RECIPE_ROUTE_AUTHORITY_ID)
-        assert publication.evidence_digest is not None
         assert publication.lease_expires_at is not None
-        route_digest = publication.evidence_digest
+        route_digest = publication.plan_digest
         clock.now = publication.lease_expires_at.replace(tzinfo=UTC) + timedelta(
             seconds=1
         )

@@ -782,7 +782,7 @@ class RecipeRouteService:
                 else None
             )
             current_digest = (
-                publication.evidence_digest if publication is not None else None
+                publication.plan_digest if publication is not None else None
             )
             durable_current = (
                 owner is not None
@@ -790,13 +790,13 @@ class RecipeRouteService:
                 and publication.state == "completed"
                 and publication.generation == owner.owner_generation
             )
-            evidence_changed = current_digest != candidate.state.digest
+            candidate_changed = current_digest != candidate.state.digest
             renewal_due = (
                 current_expiry is not None
                 and current_expiry - now <= timedelta(seconds=renew_before_seconds)
                 and candidate.expires_at > current_expiry
             )
-            if not durable_current or evidence_changed or renewal_due:
+            if not durable_current or candidate_changed or renewal_due:
                 generation = self._publish(candidate)
                 self.projection_in_session(session, generation, state="completed")
                 for run_id in sorted(candidate.included):
@@ -873,8 +873,7 @@ class RecipeRouteService:
             or publication.state != "routes-withdrawn"
             or publication.generation is None
             or publication.generation != owner.owner_generation
-            or publication.plan_digest is None
-            or publication.evidence_digest != route_digest
+            or publication.plan_digest != route_digest
             or publication.activation_marker is None
             or publication.activation_marker_digest is None
             or publication.route_digest is None
@@ -899,7 +898,7 @@ class RecipeRouteService:
             or marker.generation != publication.generation
             or marker.state != "maintenance"
             or marker.plan_digest != publication.plan_digest
-            or marker.evidence_set_digest != publication.evidence_digest
+            or marker.evidence_set_digest != publication.plan_digest
             or marker.routes_sha256 != publication.route_digest
             or marker.litellm_sha256 != publication.litellm_digest
             or marker.manifest_sha256 != publication.bundle_digest
@@ -943,7 +942,6 @@ class RecipeRouteService:
             "state": state,
             "generation": marker.generation,
             "plan_digest": marker.plan_digest,
-            "evidence_digest": marker.evidence_set_digest,
             "route_digest": marker.routes_sha256,
             "litellm_digest": marker.litellm_sha256,
             "bundle_digest": marker.manifest_sha256,

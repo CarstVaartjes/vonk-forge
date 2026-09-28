@@ -158,7 +158,6 @@ class _ActiveRouteSnapshot:
     marker: Mapping[str, object]
     marker_digest: str
     route_digest: str
-    evidence_digest: str | None
     litellm_digest: str | None
     bundle_digest: str
     lease_issued_at: datetime
@@ -1670,7 +1669,6 @@ class _DurableOperationProjection:
             or publication.route_digest is None
             or publication.lease_issued_at is None
             or publication.lease_expires_at is None
-            or publication.evidence_digest is None
             or publication.litellm_digest is None
             or publication.bundle_digest is None
         ):
@@ -1680,7 +1678,6 @@ class _DurableOperationProjection:
             marker=marker,
             marker_digest=publication.activation_marker_digest,
             route_digest=publication.route_digest,
-            evidence_digest=publication.evidence_digest,
             litellm_digest=publication.litellm_digest,
             bundle_digest=publication.bundle_digest,
             lease_issued_at=_aware(publication.lease_issued_at),
@@ -1704,7 +1701,7 @@ class _DurableOperationProjection:
             or active_marker.plan_digest != snapshot.plan_digest
             or active_marker.generation != snapshot.publication_generation
             or active_marker.generation != snapshot.owner_generation
-            or active_marker.evidence_set_digest != snapshot.evidence_digest
+            or active_marker.evidence_set_digest != snapshot.plan_digest
             or active_marker.routes_sha256 != snapshot.route_digest
             or active_marker.litellm_sha256 != snapshot.litellm_digest
             or active_marker.manifest_sha256 != snapshot.bundle_digest

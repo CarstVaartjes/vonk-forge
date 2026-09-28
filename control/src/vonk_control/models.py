@@ -280,10 +280,6 @@ class RoutePublication(Base):
             name="ck_route_publications_plan_digest_length",
         ),
         CheckConstraint(
-            "evidence_digest IS NULL OR length(evidence_digest) = 64",
-            name="ck_route_publications_evidence_digest_length",
-        ),
-        CheckConstraint(
             "route_digest IS NULL OR length(route_digest) = 64",
             name="ck_route_publications_route_digest_length",
         ),
@@ -312,7 +308,6 @@ class RoutePublication(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     generation: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
     plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    evidence_digest: Mapped[str | None] = mapped_column(String(64))
     route_digest: Mapped[str | None] = mapped_column(String(64))
     litellm_digest: Mapped[str | None] = mapped_column(String(64))
     bundle_digest: Mapped[str | None] = mapped_column(String(64))
