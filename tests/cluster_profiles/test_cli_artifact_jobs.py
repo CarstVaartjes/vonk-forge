@@ -75,7 +75,6 @@ def _job(
 
 def _capabilities(*, maximum_input_file_bytes: int = 64) -> dict[str, object]:
     return {
-        "schema_version": 1,
         "storage": {
             "in_flight_uploads": 0,
             "max_stored_bytes": 4096,

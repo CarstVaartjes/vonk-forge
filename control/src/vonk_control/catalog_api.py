@@ -94,7 +94,6 @@ class ManagedCatalogSyncFailure(StrictModel):
 
 
 class ManagedCatalogSyncResponse(StrictModel):
-    schema_version: Literal[1] = 1
     sync_id: UuidId
     request_key: UuidId
     trigger: Literal["manual", "automatic"]
@@ -156,7 +155,6 @@ def _recipe_library_problem(
 
 def _managed_sync(value: CatalogSyncView) -> dict[str, object]:
     return {
-        "schema_version": 1,
         "sync_id": value.id,
         "request_key": value.request_key,
         "trigger": value.trigger,

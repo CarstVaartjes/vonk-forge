@@ -24,7 +24,6 @@ const run = {
 function detail(running = true): LibraryViewRecipeDetail {
   const definition = canonicalDefinition([canonicalImageInterface()]);
   return {
-    schema_version: 2,
     generated_at: "2026-08-28T12:00:00Z",
     recipe: {recipe_id: "recipe-chat", publisher: "local", slug: "qwen-chat", title: "Qwen Chat", description: "Fast distributed chat model.", content_sha256: "a".repeat(64)},
     definition,
@@ -110,7 +109,6 @@ function api(initialJobs: ArtifactJob[] = []) {
   let storedDraft: ArtifactJob | undefined;
   return {
     artifactJobCapabilities: vi.fn().mockResolvedValue({
-      schema_version: 1,
       transport: {max_input_files: 32, max_input_file_bytes: 536_870_912, max_input_total_bytes: 1_073_741_824, max_output_files: 32, max_output_file_bytes: 1_073_741_824, max_output_total_bytes: 2_147_483_648, max_timeout_seconds: 3600, reserved_input_names: ["manifest.json"]},
       storage: {max_stored_bytes: 10_737_418_240, used_bytes: 1_073_741_824, remaining_bytes: 9_663_676_416},
     }),

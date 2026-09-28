@@ -88,7 +88,6 @@ export async function loadLibraryView(api: ControlApi, signal: AbortSignal, sort
   const viewModels = models.map(model => viewModel(model, modelRecipes.get(modelKey(model.identity)) ?? []));
   const matched = new Set(viewModels.flatMap(model => model.recipes.map(recipe => recipe.recipe_revision_id)));
   return {
-    schema_version: 2,
     generated_at: modelPages[0]?.generated_at ?? recipePages[0]?.generated_at ?? new Date().toISOString(),
     freshness_policy: modelPages[0]?.freshness_policy ?? recipePages[0]?.freshness_policy!,
     models: viewModels,
@@ -109,7 +108,7 @@ function viewRecipeDetail(detail: RecipeDetail): LibraryViewRecipeDetail {
     title: detail.identity.title,
     topology_name: detail.document.topology.name,
   };
-  return {schema_version: 2, generated_at: detail.updated_at, definition: detail.document, recipe, model_documents: detail.model_documents, operational_state: {builds: [], installations: [], mappings: [], runs: []}, placement: [], reasons: [], topology: detail.document.topology};
+  return {generated_at: detail.updated_at, definition: detail.document, recipe, model_documents: detail.model_documents, operational_state: {builds: [], installations: [], mappings: [], runs: []}, placement: [], reasons: [], topology: detail.document.topology};
 }
 
 export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path}: {api: ControlApi; path: string; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void}) {

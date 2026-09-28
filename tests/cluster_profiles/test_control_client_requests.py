@@ -407,7 +407,6 @@ def test_request_validates_canonical_route_models(
     tmp_path: Path,
 ) -> None:
     capabilities = {
-        "schema_version": 1,
         "storage": {
             "in_flight_uploads": 0,
             "max_stored_bytes": 1024,
@@ -462,7 +461,7 @@ def test_request_rejects_response_outside_canonical_route_model(tmp_path: Path) 
         _token(tmp_path),
         opener=lambda *_args, **_kwargs: _Response(
             200,
-            {"schema_version": 1, "storage": {}, "transport": {}},
+            {"storage": {}, "transport": {}},
         ),
     )
 
@@ -484,7 +483,6 @@ def test_request_rejects_scalar_and_unknown_response_fields(
     tmp_path: Path, mutation
 ) -> None:
     payload = {
-        "schema_version": 1,
         "storage": {
             "in_flight_uploads": 0,
             "max_stored_bytes": 1024,
@@ -548,7 +546,6 @@ def test_request_rejects_undocumented_success_status(tmp_path: Path) -> None:
         opener=lambda *_args, **_kwargs: _Response(
             299,
             {
-                "schema_version": 1,
                 "storage": {
                     "in_flight_uploads": 0,
                     "max_stored_bytes": 1024,
@@ -696,7 +693,6 @@ def test_openapi_validation_is_safe_for_concurrent_requests(
     tmp_path: Path,
 ) -> None:
     capabilities = {
-        "schema_version": 1,
         "storage": {
             "in_flight_uploads": 0,
             "max_stored_bytes": 1024,

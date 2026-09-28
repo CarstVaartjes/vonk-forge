@@ -87,14 +87,12 @@ export type LibraryViewModel = {
   recipes: LibraryViewRecipe[];
 };
 export type LibraryViewSnapshot = {
-  schema_version: 2;
   generated_at: string;
   freshness_policy: components["schemas"]["FreshnessPolicy"];
   models: LibraryViewModel[];
   unlinked_recipes: LibraryViewRecipe[];
 };
 export type LibraryViewRecipeDetail = {
-  schema_version: 2;
   generated_at: string;
   definition: RecipeDefinition;
   recipe: LibraryViewRecipe;

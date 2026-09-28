@@ -504,7 +504,7 @@ class _ArtifactClient(_DownloadClient):
     ) -> dict[str, object]:
         self.calls.append((method, path))
         if path == "/api/artifact-jobs/capabilities":
-            return {"schema_version": 1, "transport": {}, "storage": {}}
+            return {"transport": {}, "storage": {}}
         if path.endswith("/artifact-jobs"):
             assert isinstance(extra_headers, Mapping)
             assert extra_headers == {"X-Request-ID": extra_headers["X-Request-ID"]}

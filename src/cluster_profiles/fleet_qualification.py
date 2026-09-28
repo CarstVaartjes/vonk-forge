@@ -1638,10 +1638,6 @@ class ArtifactJobSmokeAdapter:
         created_records = _payloads(records, f"{event_prefix}.created")
         request_key = _request_key(plan_digest, recipe_key, event_prefix)
         capabilities = client.request("GET", "/api/artifact-jobs/capabilities")
-        if capabilities.get("schema_version") != 1:
-            raise QualificationError(
-                "controller artifact-job capabilities are incompatible"
-            )
         if created_records:
             created = _object(created_records[-1].get("job"), "artifact job")
         else:
