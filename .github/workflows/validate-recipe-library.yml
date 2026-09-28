@@ -46,6 +46,11 @@ jobs:
         run: |
           test -f "$GITHUB_WORKSPACE/contracts/src/vonk_forge_contracts/__init__.py"
 
+      # The catalog index and packages are build outputs of the candidate's
+      # sources; validate what this checkout produces, not committed copies.
+      - name: Build recipe library index and packages
+        run: .vonk-forge/scripts/build-recipe-library "$GITHUB_WORKSPACE"
+
       - name: Validate recipe library
         run: |
           uv run --project .vonk-forge/control --frozen \

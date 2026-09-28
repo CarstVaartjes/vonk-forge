@@ -69,7 +69,11 @@ from .bounded_json import BoundedJSONError
 from .browser_auth import BrowserAuthenticationError, BrowserAuthService
 from .catalog_api import CatalogProblem, install_catalog_routes
 from .catalog_service import CatalogError, CatalogService
-from .catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
+from .catalog_sync import (
+    CatalogSyncError,
+    ManagedRecipeCatalogSyncService,
+    catalog_sync_retry_delay,
+)
 from .cluster_mappings import ClusterMappingService
 from .deployment_provenance import DeploymentProvenanceService
 from .distribution_executor import CompositeDistributionPhaseExecutor
@@ -1760,7 +1764,8 @@ def production_app() -> FastAPI:
         settings.recipe_library_package_url,
         cache_root=settings.state_path / "recipe-library-packages",
         api_url=settings.recipe_library_api_url,
-        raw_url=settings.recipe_library_raw_url,
+        asset_url=settings.recipe_library_asset_url,
+        release=settings.recipe_library_release,
     )
     catalog_service = CatalogService(
         sessions,
@@ -1798,23 +1803,35 @@ def production_app() -> FastAPI:
             return
         except TimeoutError:
             pass
+        failures = 0
         while not automatic_sync_stop.is_set():
             try:
                 await asyncio.to_thread(managed_catalog_sync.automatic)
+                failures = 0
             except (
                 CatalogError,
                 CatalogSyncError,
                 RecipeLibraryError,
                 OSError,
             ) as error:
+                # The previously imported catalog stays active; retry sooner
+                # than the steady-state interval, backing off per failure.
+                failures += 1
                 _LOGGER.warning(
-                    "automatic managed recipe catalog sync failed: %s",
+                    "automatic managed recipe catalog sync failed: %s (%s); "
+                    "retrying in %s seconds",
                     type(error).__name__,
+                    getattr(error, "code", "unclassified"),
+                    catalog_sync_retry_delay(
+                        failures, settings.recipe_library_sync_interval_seconds
+                    ),
                 )
             try:
                 await asyncio.wait_for(
                     automatic_sync_stop.wait(),
-                    timeout=settings.recipe_library_sync_interval_seconds,
+                    timeout=catalog_sync_retry_delay(
+                        failures, settings.recipe_library_sync_interval_seconds
+                    ),
                 )
             except TimeoutError:
                 continue

@@ -1,4 +1,8 @@
-"""Fetch every catalog and authority source commit the recipe library names."""
+"""Fetch every qualification-authority source commit the recipe library names.
+
+The catalog index is built in the checkout from its own HEAD, so only the
+commits pinned by qualification authorities can be missing from the clone.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +15,7 @@ from pathlib import Path
 
 library = Path(sys.argv[1]).resolve()
 retry = Path(os.environ["GITHUB_WORKSPACE"]) / "scripts/retry-dependency-fetch"
-catalog = json.loads((library / "catalog-index.json").read_text(encoding="utf-8"))
-sources = [catalog["source_commit"]]
+sources: list[object] = []
 for authority_path in sorted((library / "qualification/authorities").glob("*.json")):
     authority = json.loads(authority_path.read_text(encoding="utf-8"))
     sources.append(authority["catalog"]["source_commit"])
@@ -20,9 +23,7 @@ if any(
     not isinstance(source, str) or re.fullmatch(r"[0-9a-f]{40}", source) is None
     for source in sources
 ):
-    raise SystemExit(
-        "catalog or authority validation source is not an exact Git commit"
-    )
+    raise SystemExit("authority validation source is not an exact Git commit")
 for source in sorted(set(sources)):
     subprocess.run(
         [str(retry), "git", "fetch", "--no-tags", "--depth=1", "origin", source],

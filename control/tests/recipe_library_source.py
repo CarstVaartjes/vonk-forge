@@ -21,7 +21,7 @@ def recipe_library_root() -> Path:
     if not index.is_file():
         message = (
             "needs_recipe_library: VONK_RECIPE_LIBRARY_ROOT must point to a checkout "
-            f"containing catalog-index.json: {root}"
+            f"with a built catalog-index.json; run scripts/build-recipe-library {root}"
         )
         if os.environ.get("CI", "").lower() == "true":
             raise FileNotFoundError(message)

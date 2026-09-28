@@ -447,6 +447,23 @@ class ManagedRecipeCatalogSyncService:
             )
 
 
+CATALOG_SYNC_FIRST_RETRY_SECONDS = 30
+
+
+def catalog_sync_retry_delay(failures: int, interval_seconds: int) -> int:
+    """Seconds until the next automatic sync after ``failures`` in a row.
+
+    A success waits the steady-state interval. Consecutive failures retry
+    after 30, 60, 120, ... seconds, never later than that interval.
+    """
+    if failures <= 0:
+        return interval_seconds
+    return min(
+        interval_seconds,
+        CATALOG_SYNC_FIRST_RETRY_SECONDS * 2 ** min(failures - 1, 16),
+    )
+
+
 def _result(value: object) -> ManagedCatalogSyncResult:
     try:
         return ManagedCatalogSyncResult.model_validate_json(canonical_message(value))

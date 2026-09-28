@@ -197,7 +197,10 @@ every other suite.
 `VONK_RECIPE_LIBRARY_ROOT` is a path to the sibling recipe-library checkout, not
 a secret. Catalog, canonical-consumer, and acceptance-recipe tests read the real
 library through it and fail at collection when it is unset, so export it before
-running the root or control suites.
+running the root or control suites. The recipe repository does not commit its
+catalog index or packages: generate them once per checkout revision with
+`scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"`, as every CI job
+that checks out the library does.
 
 The native Rust agent and its wire contract build only for Linux. The
 `control/tests/*_wire_bridge.py` suites consume probes produced by

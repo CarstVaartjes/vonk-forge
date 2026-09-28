@@ -130,7 +130,10 @@ def _recipe_library() -> str | None:
     configured = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
     if configured and (Path(configured) / "catalog-index.json").is_file():
         return None
-    return "VONK_RECIPE_LIBRARY_ROOT naming a recipe checkout with catalog-index.json"
+    return (
+        "VONK_RECIPE_LIBRARY_ROOT naming a recipe checkout with a built "
+        "catalog-index.json (scripts/build-recipe-library)"
+    )
 
 
 def _repair_probe() -> str | None:

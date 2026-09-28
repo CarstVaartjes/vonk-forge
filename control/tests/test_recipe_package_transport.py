@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from vonk_control import recipe_packages
 from vonk_control.bounded_json import require_mapping
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
@@ -18,6 +19,7 @@ from vonk_control.recipe_packages import (
     RecipePackageClient,
     RecipePackageError,
 )
+from vonk_control.recipe_release import RecipeReleaseError
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
@@ -346,251 +348,310 @@ def _package_with_extra_member(package: bytes) -> bytes:
     return _repack(files)
 
 
-def test_production_reader_pins_raw_index_and_package_to_resolved_commit(
-    tmp_path: Path,
-) -> None:
-    index, row, package = _canonical_package_fixture()
-    publication = "2" * 40
-    requests: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(str(request.url))
-        if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(
-                200, json={"object": {"sha": publication, "type": "commit"}}
-            )
-        if request.url.path.endswith("/catalog-index.json"):
-            return httpx.Response(
-                200, headers={"content-type": "text/plain"}, content=index
-            )
-        if request.url.path.endswith("tiny-recipe.tar.gz"):
-            return httpx.Response(
-                200,
-                headers={"content-type": "application/octet-stream"},
-                content=package,
-            )
-        return httpx.Response(404)
-
-    client = RecipePackageClient(
-        None,
-        api_url="http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
-    )
-    snapshot = client.list()
-    item = client.fetch(
-        next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe")
-    )
-    assert requests[0].endswith(
-        "/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main"
-    )
-    assert requests[1] == (
-        "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge-recipes/"
-        f"{publication}/catalog-index.json"
-    )
-    package_metadata = require_mapping(
-        row["package"], "canonical fixture package metadata"
-    )
-    assert requests[2] == (
-        "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge-recipes/"
-        f"{publication}/{package_metadata['path']}"
-    )
-    assert item.package_handle is not None
-    assert item.package_handle.publication_commit == publication
-    assert item.package_handle.package_size == package_metadata["expected_bytes"]
-    assert item.package_handle.package_sha256 == package_metadata["sha256"]
-    assert item.package_handle.archive_path.is_file()
-    assert item.package_handle.closure_path.is_dir()
+SIGNED_COMMIT = "a" * 40
+SIGNED_BUNDLE = b'{"fixture": "signed"}'
+RELEASES = "/repos/CarstVaartjes/vonk-forge-recipes/releases"
 
 
-def test_production_reader_can_pin_through_the_internal_raw_relay(
-    tmp_path: Path,
-) -> None:
-    index, row, package = _canonical_package_fixture()
-    publication = "3" * 40
-    requests: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(str(request.url))
-        if request.url.port == 8083 and request.url.path.endswith(
-            "/git/ref/heads/main"
-        ):
-            return httpx.Response(
-                200, json={"object": {"sha": publication, "type": "commit"}}
-            )
-        if request.url.port == 8085 and request.url.path.endswith(
-            "/catalog-index.json"
-        ):
-            return httpx.Response(
-                200, headers={"content-type": "text/plain"}, content=index
-            )
-        if request.url.port == 8085 and request.url.path.endswith("tiny-recipe.tar.gz"):
-            return httpx.Response(
-                200,
-                headers={"content-type": "application/octet-stream"},
-                content=package,
-            )
-        return httpx.Response(404)
-
-    client = RecipePackageClient(
-        None,
-        api_url="http://127.0.0.1:8083",
-        raw_url="http://127.0.0.1:8085",
-        cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
-    )
-    snapshot = client.list()
-    item = client.fetch(
-        next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe")
-    )
-    package_metadata = require_mapping(
-        row["package"], "canonical fixture package metadata"
-    )
-
-    assert requests == [
-        "http://127.0.0.1:8083/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main",
-        (
-            "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/"
-            f"{publication}/catalog-index.json"
-        ),
-        (
-            "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/"
-            f"{publication}/{package_metadata['path']}"
-        ),
-    ]
-    assert item.package_handle is not None
-    client.close()
+def _checksums(assets: dict[str, bytes]) -> bytes:
+    return "".join(
+        f"{hashlib.sha256(payload).hexdigest()}  {name}\n"
+        for name, payload in sorted(assets.items())
+    ).encode()
 
 
-def test_publication_ref_uses_nested_commit_object_for_large_github_responses(
-    tmp_path: Path,
-) -> None:
-    index, row, package = _canonical_package_fixture()
-    publication = "4" * 40
-    calls: list[str] = []
+class _Release:
+    """A GitHub release API plus its redirecting asset origin."""
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(str(request.url))
-        if request.url.path.endswith("/git/ref/heads/main"):
+    def __init__(self, tag: str, assets: dict[str, bytes]) -> None:
+        self.tag = tag
+        self.assets = {"SHA256SUMS": _checksums(assets), **assets}
+        self.assets["SHA256SUMS.sigstore.json"] = SIGNED_BUNDLE
+        self.redirect_host = "release-assets.githubusercontent.com"
+        self.requests: list[str] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(str(request.url))
+        path = request.url.path
+        if path in {f"{RELEASES}/latest", f"{RELEASES}/tags/{self.tag}"}:
             return httpx.Response(
                 200,
                 json={
-                    "ref": "refs/heads/main",
-                    "object": {
-                        "sha": publication,
-                        "type": "commit",
-                        "url": "https://api.github.com/repos/example/git/commits/"
-                        + publication,
-                    },
-                    "node_id": "MDM6UmVm" + "x" * 130_000,
+                    "tag_name": self.tag,
+                    "draft": False,
+                    "assets": [
+                        {"id": 7, "name": name, "state": "uploaded"}
+                        for name in self.assets
+                    ],
                 },
             )
-        if request.url.path.endswith("/catalog-index.json"):
+        download = f"/CarstVaartjes/vonk-forge-recipes/releases/download/{self.tag}/"
+        if path.startswith(download) and path[len(download) :] in self.assets:
+            name = path[len(download) :]
             return httpx.Response(
-                200, headers={"content-type": "application/json"}, content=index
+                302,
+                headers={
+                    "location": f"https://{self.redirect_host}/github-production-"
+                    f"release-asset/1336002555/{name}?sig=opaque%3D"
+                },
             )
-        if request.url.path.endswith("tiny-recipe.tar.gz"):
+        if path.startswith("/github-production-release-asset/1336002555/"):
+            assert request.url.query == b"sig=opaque%3D"
             return httpx.Response(
                 200,
                 headers={"content-type": "application/octet-stream"},
-                content=package,
+                content=self.assets[path.rsplit("/", 1)[1]],
             )
         return httpx.Response(404)
 
+
+@pytest.fixture
+def signed_releases(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
+    """Replace Sigstore with a verifier accepting only SIGNED_BUNDLE.
+
+    The real verifier and the recorded production signature are covered by
+    test_recipe_release.py; these cases exercise everything the reader must
+    check after the signature: digests, commit binding, and transport.
+    """
+    verified: list[bytes] = []
+
+    def verify(checksums: bytes, bundle: bytes) -> str:
+        if bundle != SIGNED_BUNDLE:
+            raise RecipeReleaseError("recipe_release.signature_invalid", "unsigned")
+        verified.append(checksums)
+        return SIGNED_COMMIT
+
+    monkeypatch.setattr(recipe_packages, "verify_release_checksums", verify)
+    return verified
+
+
+def _release_for(index: bytes, package: bytes, *, tag: str = "v1.2.3") -> _Release:
+    return _Release(tag, {"catalog-index.json": index, "tiny-recipe.tar.gz": package})
+
+
+def test_production_reader_accepts_only_the_signed_release_assets(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, row, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    client = RecipePackageClient(
+        None,
+        api_url="http://127.0.0.1:8083",
+        asset_url="http://127.0.0.1:8085",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(release.handler),
+    )
+    snapshot = client.list()
+    item = client.fetch(snapshot.items[0].uri)
+
+    assert signed_releases == [release.assets["SHA256SUMS"]]
+    download = "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/releases/download/v1.2.3"
+    asset = "http://127.0.0.1:8085/github-production-release-asset/1336002555"
+    assert release.requests == [
+        f"http://127.0.0.1:8083{RELEASES}/latest",
+        *(
+            url
+            for name in (
+                "SHA256SUMS",
+                "SHA256SUMS.sigstore.json",
+                "catalog-index.json",
+                "tiny-recipe.tar.gz",
+            )
+            for url in (f"{download}/{name}", f"{asset}/{name}?sig=opaque%3D")
+        ),
+    ]
+    package_metadata = require_mapping(
+        row["package"], "canonical fixture package metadata"
+    )
+    assert snapshot.commit == SIGNED_COMMIT
+    assert item.package_handle is not None
+    assert item.package_handle.publication_commit == SIGNED_COMMIT
+    assert item.package_handle.package_sha256 == package_metadata["sha256"]
+    assert item.package_handle.closure_path.is_dir()
+    client.close()
+
+
+def test_production_reader_can_hold_an_exact_release_tag(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package, tag="v1.0.0")
+    client = RecipePackageClient(
+        None,
+        api_url="http://127.0.0.1",
+        release="v1.0.0",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(release.handler),
+    )
+    assert client.list().commit == SIGNED_COMMIT
+    # Without a relay the reader downloads from github.com and follows only
+    # the redirect to GitHub's release asset origin.
+    assert release.requests[:3] == [
+        f"http://127.0.0.1{RELEASES}/tags/v1.0.0",
+        (
+            "https://github.com/CarstVaartjes/vonk-forge-recipes/releases/download/"
+            "v1.0.0/SHA256SUMS"
+        ),
+        (
+            "https://release-assets.githubusercontent.com/github-production-release-"
+            "asset/1336002555/SHA256SUMS?sig=opaque%3D"
+        ),
+    ]
+    client.close()
+
+
+def test_unsigned_release_is_refused_even_with_a_previous_generation(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    cache = tmp_path / "packages"
+    client = RecipePackageClient(
+        None,
+        api_url="http://127.0.0.1",
+        cache_root=cache,
+        transport=httpx.MockTransport(release.handler),
+    )
+    client.prepare(client.list())
+    release.assets["SHA256SUMS.sigstore.json"] = b'{"forged": true}'
+    with pytest.raises(RecipeReleaseError, match="unsigned"):
+        client.list()
+    client.close()
+
+
+@pytest.mark.parametrize(
+    ("tamper", "error"),
+    [
+        ("index", "catalog-index.json does not match SHA256SUMS"),
+        ("package", "bytes do not match|does not match SHA256SUMS"),
+        ("source", "not built from the signed release commit"),
+        ("missing", "does not contain tiny-recipe.tar.gz|not in the signed release"),
+        ("redirect", "redirect leaves the GitHub asset origin"),
+    ],
+)
+def test_release_assets_must_match_the_signed_manifest(
+    tmp_path: Path, signed_releases: list[bytes], tamper: str, error: str
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    if tamper == "source":
+        document = json.loads(index)
+        document["source_commit"] = "b" * 40
+        index = _canonical(document) + b"\n"
+    release = _release_for(index, package)
+    if tamper == "index":
+        release.assets["catalog-index.json"] = index.replace(b"tiny", b"tinY", 1)
+    elif tamper == "package":
+        release.assets["tiny-recipe.tar.gz"] = _package_with_extra_member(package)
+    elif tamper == "missing":
+        del release.assets["tiny-recipe.tar.gz"]
+    elif tamper == "redirect":
+        release.redirect_host = "objects.example.invalid"
     client = RecipePackageClient(
         None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx.MockTransport(release.handler),
     )
-    snapshot = client.list()
-    item = client.fetch(
-        next(entry.uri for entry in snapshot.items if entry.slug == "tiny-recipe")
-    )
-
-    assert calls[0].endswith(
-        "/repos/CarstVaartjes/vonk-forge-recipes/git/ref/heads/main"
-    )
-    assert item.package_handle is not None
-    assert item.package_handle.publication_commit == publication
-    package_metadata = require_mapping(
-        row["package"], "canonical fixture package metadata"
-    )
-    assert item.package_handle.package_sha256 == package_metadata["sha256"]
+    with pytest.raises(RecipePackageError, match=error):
+        client.prepare(client.list())
     client.close()
 
 
-def test_publication_network_smoke_at_published_commit(tmp_path: Path) -> None:
-    """Opt-in smoke for the real GitHub API/raw publication boundary."""
+def test_restart_offline_reverifies_the_persisted_release(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    cache = tmp_path / "packages"
+    first = RecipePackageClient(
+        None,
+        api_url="http://127.0.0.1",
+        cache_root=cache,
+        transport=httpx.MockTransport(release.handler),
+    )
+    first.prepare(first.list())
+    first.close()
+    signed_releases.clear()
+
+    def offline(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    restarted = RecipePackageClient(
+        None,
+        api_url="http://127.0.0.1",
+        cache_root=cache,
+        transport=httpx.MockTransport(offline),
+    )
+    snapshot = restarted.list()
+    restarted.prepare(snapshot)
+    assert snapshot.commit == SIGNED_COMMIT
+    assert signed_releases == [release.assets["SHA256SUMS"]]
+    assert restarted.fetch(snapshot.items[0].uri).package_handle is not None
+    restarted.close()
+
+    # A generation cached without its signature material (for example by the
+    # retired raw-commit reader) is never served by the release reader.
+    persisted = json.loads((cache / "snapshot.json").read_text())
+    del persisted["release"]
+    (cache / "snapshot.json").write_text(json.dumps(persisted))
+    unsigned = RecipePackageClient(
+        None,
+        api_url="http://127.0.0.1",
+        cache_root=cache,
+        transport=httpx.MockTransport(offline),
+    )
+    with pytest.raises(RecipePackageError, match="unavailable"):
+        unsigned.list()
+    unsigned.close()
+
+
+# Opt-in only: downloads every package of a real release (~140 MB) over the
+# public network.
+@pytest.mark.slow(60)
+def test_release_network_smoke(tmp_path: Path) -> None:
+    """Opt-in smoke for the real signed GitHub release boundary."""
     if os.environ.get("VONK_RUN_RECIPE_NETWORK_SMOKE") != "1":
-        pytest.skip(
-            "set VONK_RUN_RECIPE_NETWORK_SMOKE=1 for the public publication smoke"
-        )
+        pytest.skip("set VONK_RUN_RECIPE_NETWORK_SMOKE=1 for the public release smoke")
     client = RecipePackageClient(
         None,
-        publication_commit="2001c6502bfdc66141dd7224bfde5d77734e9959",
+        release=os.environ.get("VONK_RECIPE_LIBRARY_RELEASE", "latest"),
         cache_root=tmp_path / "packages",
+        timeout_seconds=60,
     )
     try:
         snapshot = client.list()
         assert snapshot.repository == "CarstVaartjes/vonk-forge-recipes"
-        assert len(snapshot.items) == 84
-        item = client.fetch(
-            next(
-                entry.uri
-                for entry in snapshot.items
-                if entry.slug == "deepseek-v4-flash-0731-mia-dual"
-            )
-        )
-        assert item.package_handle is not None
-        assert item.package_handle.publication_commit == (
-            "2001c6502bfdc66141dd7224bfde5d77734e9959"
-        )
-        assert item.package_handle.package_sha256 == (
-            "eb408d2559ab16b7aa3697eb4cf66495eb22cd6da31cec496f540ac76898a581"
-        )
-        assert item.package_handle.package_size == 72879
-        assert item.package_handle.archive_path.is_file()
-        assert item.package_handle.closure_path.is_dir()
+        assert snapshot.items
+        client.prepare(snapshot)
+        for entry in snapshot.items:
+            item = client.fetch(entry.uri)
+            assert item.package_handle is not None
+            assert item.package_handle.publication_commit == snapshot.commit
+            assert item.package_handle.closure_path.is_dir()
     finally:
         client.close()
 
 
 def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(
-    tmp_path: Path,
+    tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, _, package = _canonical_package_fixture()
-    calls: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(str(request.url))
-        if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(
-                200, json={"object": {"sha": "2" * 40, "type": "commit"}}
-            )
-        if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(
-                200, headers={"content-type": "text/plain"}, content=index
-            )
-        return httpx.Response(
-            200, headers={"content-type": "application/octet-stream"}, content=package
-        )
-
+    release = _release_for(index, package)
     client = RecipePackageClient(
         None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx.MockTransport(release.handler),
     )
     client.list()
     candidate = client.list()
     client.prepare(candidate)
-    assert len([url for url in calls if url.endswith("tiny-recipe.tar.gz")]) == 1
+    assert len([url for url in release.requests if "/tiny-recipe.tar.gz?" in url]) == 1
     client.close()
 
 
 def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
-    tmp_path: Path,
+    tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, row, package = _canonical_package_fixture()
     changed = _package_with_extra_member(package)
@@ -603,26 +664,10 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
     changed_row["package"] = changed_package
     changed_index = json.loads(index)
     changed_index["recipes"] = [changed_row]
-    state = {"index": index, "package": package}
-    calls: list[str] = []
+    state = {"release": _release_for(index, package)}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(str(request.url))
-        if request.url.path.endswith("/git/ref/heads/main"):
-            return httpx.Response(
-                200, json={"object": {"sha": "2" * 40, "type": "commit"}}
-            )
-        if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=state["index"],
-            )
-        return httpx.Response(
-            200,
-            headers={"content-type": "application/octet-stream"},
-            content=state["package"],
-        )
+        return state["release"].handler(request)
 
     client = RecipePackageClient(
         None,
@@ -631,11 +676,12 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
         transport=httpx.MockTransport(handler),
     )
     client.prepare(client.list())
-    calls.clear()
-    state["index"] = _canonical(changed_index) + b"\n"
-    state["package"] = changed
+    state["release"] = _release_for(_canonical(changed_index) + b"\n", changed)
     client.prepare(client.list())
-    assert len([url for url in calls if url.endswith("tiny-recipe.tar.gz")]) == 1
+    assert (
+        len([url for url in state["release"].requests if "/tiny-recipe.tar.gz?" in url])
+        == 1
+    )
     client.close()
 
 
