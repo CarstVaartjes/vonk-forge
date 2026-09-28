@@ -221,7 +221,7 @@ def nas_responses(
     }
     responses = [
         (
-            "Install mode: lab (LAN only) or secure-remote (Tailscale) [lab / secure-remote]: ",
+            "Install mode: secure-remote (Tailscale) or lab (LAN only) [secure-remote / lab]: ",
             "secure-remote",
         ),
         ("Reserved NAS LAN IP: ", nas_ip),

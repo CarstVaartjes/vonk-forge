@@ -134,7 +134,9 @@ jobs:
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$TRIGGER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          test "$TRIGGER_CONCLUSION" = success
+          # A failed producer is reported by its own workflow; the next
+          # successful completion re-evaluates readiness for the source.
+          if [[ "$TRIGGER_CONCLUSION" != success ]]; then not_ready; fi
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           git fetch --force --tags origin
@@ -168,8 +170,13 @@ jobs:
               channel=stable
               mapfile -t release_tags < <(
                 git tag --points-at "$SOURCE_SHA" \
-                  | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+                  | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+                  || true
               )
+              # CI also runs for ordinary pushes to main. Only a release tag
+              # makes a CI completion a stable publication; development
+              # generations come from the dev producers above.
+              if [[ "${#release_tags[@]}" == 0 ]]; then not_ready; fi
               test "${#release_tags[@]}" = 1
               release_tag=${release_tags[0]}
               authority_ref="refs/tags/$release_tag"
