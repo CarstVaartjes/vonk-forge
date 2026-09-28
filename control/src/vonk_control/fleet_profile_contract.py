@@ -370,7 +370,6 @@ class FleetProfileInput(FleetProfileDefinition):
 
 
 class FleetProfileDefinitionView(_StrictModel):
-    schema_version: Literal[2] = 2
     id: UuidId | None
     number: int = Field(ge=1)
     revision: int = Field(ge=0)
@@ -386,7 +385,6 @@ class FleetProfileDefinitionView(_StrictModel):
 
 
 class FleetProfileView(_StrictModel):
-    schema_version: Literal[2] = 2
     id: UuidId
     number: int = Field(ge=1)
     revision: int = Field(ge=1)
@@ -410,7 +408,6 @@ class FleetProfileView(_StrictModel):
 
 
 class FleetProfileList(_StrictModel):
-    schema_version: Literal[2] = 2
     generated_at: datetime
     profiles: list[FleetProfileView] = Field(max_length=128)
 
@@ -1055,7 +1052,6 @@ class FleetProfileApplicationCancelRequest(_StrictModel):
 
 
 class FleetProfileApplicationView(_StrictModel):
-    schema_version: Literal[2] = 2
     id: UuidId
     request_key: UuidId
     profile_id: UuidId
