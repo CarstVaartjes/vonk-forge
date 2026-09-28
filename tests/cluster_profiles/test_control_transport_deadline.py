@@ -162,7 +162,7 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
         client.request(
             "POST",
             "/api/model/chosen/download",
-            {"schema_version": 2, "request_key": KEY},
+            {"request_key": KEY},
         )
     elapsed = time.monotonic() - started
     assert elapsed < 0.75, (
@@ -246,7 +246,7 @@ def test_cancelled_dns_cannot_delay_exit_or_send_a_late_request(
             client.request(
                 "POST",
                 "/api/model/chosen/download",
-                {"schema_version": 2, "request_key": KEY},
+                {"request_key": KEY},
             )
         elapsed = time.monotonic() - started
         assert elapsed < 0.75, f"resolver cleanup delayed exit to {elapsed:.3f}s"
@@ -307,7 +307,7 @@ def test_redirect_cannot_forward_authenticated_request(https_peer):
         client.request(
             "POST",
             "/api/model/chosen/download",
-            {"schema_version": 2, "request_key": KEY},
+            {"request_key": KEY},
         )
     assert len(state["calls"]) == 1 and state["calls"][0][1] != "/redirected"
 

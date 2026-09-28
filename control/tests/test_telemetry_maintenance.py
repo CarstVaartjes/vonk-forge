@@ -212,7 +212,6 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
             "node-telemetry-latest",
             NODE_A,
             {
-                "schema_version": 1,
                 "node_id": NODE_A,
                 "sample_id": sample_id,
             },

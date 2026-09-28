@@ -304,7 +304,7 @@ def test_interactive_review_is_rendered_before_prompt_and_post(
     result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert result["model_content_sha256"] == _MODEL_DIGEST
-    assert client.calls[-1][2] == {"schema_version": 2, "request_key": _REQUEST_KEY}
+    assert client.calls[-1][2] == {"request_key": _REQUEST_KEY}
     assert [(method, path) for method, path, _, _ in client.calls] == [
         ("GET", "/api/model/publisher%2Fmodel/remove-review"),
         ("POST", "/api/model/publisher%2Fmodel/remove"),
@@ -540,7 +540,6 @@ def test_scripted_recipe_remove_binds_explicit_model_choice(
             "POST",
             "/api/recipe/publisher%2Frecipe/remove",
             {
-                "schema_version": 2,
                 "request_key": _REQUEST_KEY,
                 "with_model": False,
             },

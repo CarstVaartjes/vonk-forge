@@ -189,7 +189,6 @@ class TelemetryMaintenance:
                     entity_kind="node-telemetry-latest",
                     entity_id=pointer.node_id,
                     payload={
-                        "schema_version": 1,
                         "node_id": pointer.node_id,
                         "sample_id": pointer.sample_id,
                     },

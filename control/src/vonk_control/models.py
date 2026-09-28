@@ -136,11 +136,6 @@ class JobAttempt(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-
-
 class ControlProcessHeartbeat(Base):
     """A completed scheduler loop bound to one running worker process."""
 

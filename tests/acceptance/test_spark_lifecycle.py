@@ -1917,7 +1917,6 @@ class SparkLifecycle:
                 FleetEnrollRequest(
                     name="Acceptance Spark",
                     request_key=str(uuid.uuid4()),
-                    ttl_seconds=600,
                 ).to_dict(),
             )
             envelope = require_object(response, "Fleet enrollment")
