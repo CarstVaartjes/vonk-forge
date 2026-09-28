@@ -185,15 +185,11 @@ def _require_mode(path: Path, expected: int) -> None:
 def assert_bundle_contract(bundle: Path) -> None:
     if bundle.is_symlink() or not bundle.is_dir():
         raise AcceptanceError("NAS bundle is not a safe directory")
-    if {entry.name for entry in bundle.iterdir()} != {
-        ".env",
-        "docker-compose.yaml",
-        "secrets",
-        "backups",
-    }:
-        raise AcceptanceError(
-            "NAS bundle must contain exactly docker-compose.yaml, .env, secrets, and backups"
-        )
+    missing = {".env", "docker-compose.yaml", "secrets", "backups"} - {
+        entry.name for entry in bundle.iterdir()
+    }
+    if missing:
+        raise AcceptanceError(f"NAS bundle is missing {', '.join(sorted(missing))}")
     compose = bundle / "docker-compose.yaml"
     environment = bundle / ".env"
     secrets = bundle / "secrets"

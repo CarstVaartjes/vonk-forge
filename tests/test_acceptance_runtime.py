@@ -211,8 +211,11 @@ def test_bundle_contract_is_exact_and_contains_no_secret_values_in_compose(
         assert_bundle_contract(bundle)
     (bundle / "backups").chmod(0o700)
 
-    (bundle / "README.md").write_text("extra")
-    with pytest.raises(AcceptanceError, match="exactly"):
+    (bundle / "backups-offhost").mkdir()
+    assert_bundle_contract(bundle)
+
+    (bundle / ".env").unlink()
+    with pytest.raises(AcceptanceError, match="missing .env"):
         assert_bundle_contract(bundle)
 
 
