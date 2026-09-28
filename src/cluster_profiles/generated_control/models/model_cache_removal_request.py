@@ -7,7 +7,9 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
+from typing import cast, Union
 from typing import Literal, Union, cast
+from typing import Union
 
 
 
@@ -20,18 +22,21 @@ T = TypeVar("T", bound="ModelCacheRemovalRequest")
 
 @_attrs_define
 class ModelCacheRemovalRequest:
-    """ Exact content identity and request key for a model cache removal.
+    """ Request key for removing the named model against current state.
+
+    ``model_content_sha256`` and ``review_digest`` are accepted for clients
+    that show a prior review; they are advisory and never refuse the request.
 
         Attributes:
-            model_content_sha256 (str):
             request_key (str):
-            review_digest (str):
+            model_content_sha256 (Union[None, Unset, str]):
+            review_digest (Union[None, Unset, str]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
-    model_content_sha256: str
     request_key: str
-    review_digest: str
+    model_content_sha256: Union[None, Unset, str] = UNSET
+    review_digest: Union[None, Unset, str] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
 
@@ -39,11 +44,19 @@ class ModelCacheRemovalRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
-        model_content_sha256 = self.model_content_sha256
-
         request_key = self.request_key
 
-        review_digest = self.review_digest
+        model_content_sha256: Union[None, Unset, str]
+        if isinstance(self.model_content_sha256, Unset):
+            model_content_sha256 = UNSET
+        else:
+            model_content_sha256 = self.model_content_sha256
+
+        review_digest: Union[None, Unset, str]
+        if isinstance(self.review_digest, Unset):
+            review_digest = UNSET
+        else:
+            review_digest = self.review_digest
 
         schema_version = self.schema_version
 
@@ -51,10 +64,12 @@ class ModelCacheRemovalRequest:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "model_content_sha256": model_content_sha256,
             "request_key": request_key,
-            "review_digest": review_digest,
         })
+        if model_content_sha256 is not UNSET:
+            field_dict["model_content_sha256"] = model_content_sha256
+        if review_digest is not UNSET:
+            field_dict["review_digest"] = review_digest
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -65,19 +80,35 @@ class ModelCacheRemovalRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        model_content_sha256 = d.pop("model_content_sha256")
-
         request_key = d.pop("request_key")
 
-        review_digest = d.pop("review_digest")
+        def _parse_model_content_sha256(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256", UNSET))
+
+
+        def _parse_review_digest(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        review_digest = _parse_review_digest(d.pop("review_digest", UNSET))
+
 
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
         model_cache_removal_request = cls(
-            model_content_sha256=model_content_sha256,
             request_key=request_key,
+            model_content_sha256=model_content_sha256,
             review_digest=review_digest,
             schema_version=schema_version,
         )

@@ -213,3 +213,20 @@ __all__ = [
     "cache_removal_review_digest",
     "seal_cache_removal_review",
 ]
+
+
+# Removal waits for active work (runs, downloads, applications) to release
+# an asset. A saved profile never releases on its own, so an accepted removal
+# would wait for it indefinitely while fencing the profile's own launches;
+# that reference still refuses the request.
+IN_USE_REMOVAL_CODES = frozenset(
+    {"recipe_image.removal_referenced", "model_cache.removal_referenced"}
+)
+
+
+def refusing_removal_blockers(review: CacheRemovalReview) -> list[CacheRemovalBlocker]:
+    """Blockers that refuse a removal; in-use assets alone make it wait."""
+
+    if any(item.owner_kind == "fleet-profile" for item in review.references):
+        return list(review.blockers)
+    return [item for item in review.blockers if item.code not in IN_USE_REMOVAL_CODES]

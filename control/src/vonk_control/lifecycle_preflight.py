@@ -17,6 +17,7 @@ from pydantic import (
 from sqlalchemy import select
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
+from .failure_classification import is_security_failure
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
 from .recovery_policy import RecoveryPolicy
 from .runtime_preflight import (
@@ -66,59 +67,15 @@ class LifecyclePreflightCheckpoint(StrictJSONModel):
         return self
 
 
-# Security refusals that park the preflight instead of retrying it. Each code is
-# one a producer actually emits: the agent's `HostRuntimeError::preflight_code()`
-# (`helper_<code>` for codes on `stable_runtime_error_code`), the helper's own
-# un-prefixed wire rejection codes (`vonk-agent-helper` `HelperRejection`,
-# carried verbatim by image-import failures), the agent's `runtime_helper_<cause>`
-# receipt causes, and the controller/agent identity, enrollment and certificate
-# codes. Everything else is transient and retried with backoff.
-_SECURITY_FAILURE_CODES = frozenset(
-    {
-        # Helper grant, peer identity, replay and integrity refusals.
-        "helper_grant_invalid",
-        "helper_grant_unauthorized",
-        "helper_grant_node_mismatch",
-        "helper_peer_identity_invalid",
-        "helper_request_replayed",
-        "helper_request_installation_identity_invalid",
-        "helper_request_plan_binding_invalid",
-        "helper_inspection_receipt_invalid",
-        "helper_observation_receipt_invalid",
-        "helper_operation_invalid_artifact",
-        "helper_runtime_image_identity_invalid",
-        "grant_invalid",
-        "grant_unauthorized",
-        "grant_node_mismatch",
-        "peer_identity_invalid",
-        "request_replayed",
-        "operation_invalid_artifact",
-        "runtime_image_identity_invalid",
-        "runtime_helper_inspection_receipt_invalid",
-        "runtime_helper_observation_receipt_invalid",
-        # Controller authentication, enrollment, identity and certificate codes.
-        "controller.authentication_required",
-        "controller.request_rejected",
-        "controller.fleet.enrollment_denied",
-        "agent.enrollment.submit.rejected",
-        "agent.certificate.rotation.conflict",
-        "local.identity_expired",
-    }
-)
-
-
-def _is_security_failure(code: str | None) -> bool:
-    """Return whether a child's typed error code is a real security refusal."""
-    return code in _SECURITY_FAILURE_CODES
-
-
+# Security refusals (failure_classification.is_security_failure) park the
+# preflight; everything else is transient and retried with backoff.
 def _child_error_code(result: object) -> str | None:
     """Read the typed failure code from a child attempt result, never free text."""
     if not isinstance(result, Mapping):
         return None
     for key in ("error_code", "helper_error_code"):
         value = result.get(key)
-        if isinstance(value, str) and _is_security_failure(value):
+        if isinstance(value, str) and is_security_failure(value):
             return value
     value = result.get("error_code")
     return value if isinstance(value, str) else None
@@ -167,7 +124,7 @@ class LifecyclePreflight:
             checkpoint.pending_node_id = None
             checkpoint.receipts.pop(node_id, None)
             checkpoint.next_check_at = None
-            if _is_security_failure(error_code):
+            if is_security_failure(error_code):
                 return checkpoint, reason
             checkpoint.next_check_at = self._recovery.next_attempt(
                 f"{request_key}:{phase_index}:{node_id}",

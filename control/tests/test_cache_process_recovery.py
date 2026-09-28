@@ -305,7 +305,6 @@ def test_image_contention_resumes_after_release_without_exhausting_transfer_budg
         authority=lambda *args, **kwargs: (recipe, _runtime()),
         transport=LockedTransport(),
         clock=lambda: now[0],
-        automatic_attempt_limit=2,
     )
     accepted = service.start(revision_id, actor="test", request_id=str(uuid.uuid4()))
     holder = _hold(lock_path)

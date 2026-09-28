@@ -6,9 +6,11 @@ from vonk_agent_protocol import canonical_message
 from vonk_control import cache_removal_review as review_contract
 from vonk_control.cache_removal_review import (
     CacheRemovalAsset,
+    CacheRemovalBlocker,
     CacheRemovalFinding,
     CacheRemovalReview,
     CacheRemovalReviewContent,
+    refusing_removal_blockers,
     seal_cache_removal_review,
 )
 
@@ -134,3 +136,38 @@ def test_complete_review_wire_budget_reports_limit_and_observed_size(
         match=rf"{limit}-byte limit \({wire_size} bytes observed\)",
     ):
         seal_cache_removal_review(content)
+
+
+def test_in_use_removal_waits_for_active_work_but_saved_profiles_refuse() -> None:
+    in_use = CacheRemovalBlocker(
+        code="model_cache.removal_referenced",
+        detail="model cache set is still referenced",
+        retryable=True,
+    )
+    other = CacheRemovalBlocker(
+        code="runtime_image.removal_path_unsafe", detail="unsafe", retryable=False
+    )
+    profile_review = seal_cache_removal_review(
+        _content().model_copy(update={"blockers": [in_use, other]})
+    )
+    assert refusing_removal_blockers(profile_review) == [in_use, other]
+
+    active_review = seal_cache_removal_review(
+        _content().model_copy(
+            update={
+                "references": [],
+                "active_work": [
+                    _content()
+                    .references[0]
+                    .model_copy(
+                        update={
+                            "classification": "active-work",
+                            "owner_kind": "run-switch-operation",
+                        }
+                    )
+                ],
+                "blockers": [in_use, other],
+            }
+        )
+    )
+    assert refusing_removal_blockers(active_review) == [other]

@@ -512,7 +512,7 @@ def test_pending_profile_edit_is_rejected_before_selection_after_restart(
         request_key=_uuid(883),
         actor="admin",
     )
-    assert accepted.state == "waiting-for-operator"
+    assert accepted.state == "queued"
     assert accepted.progress.admission_pending is True
 
     # The request is still pending admission, so the saved draft can make its

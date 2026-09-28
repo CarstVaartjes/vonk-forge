@@ -24,7 +24,6 @@ from .recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
     RecipeImageAvailabilityView,
-    _retryable,
 )
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
@@ -157,7 +156,8 @@ class RecipeDownloadRequest(StrictJSONModel):
 
 class RecipeOperatorRequest(RecipeDownloadRequest):
     with_model: bool
-    review_digest: Digest
+    # Advisory: removal always applies to the recipe's current state.
+    review_digest: Digest | None = None
 
 
 class RecipeCancellationRequest(RecipeDownloadRequest):
@@ -379,7 +379,7 @@ def _recipe_error(error: BaseException) -> HTTPException:
     # already decided which one it is, so keep 503 Service Unavailable for the
     # former and 409 Conflict for the latter: a client may retry the first and
     # must not loop on the second.
-    if isinstance(error, RecipeImageAvailabilityError) and not _retryable(error):
+    if isinstance(error, RecipeImageAvailabilityError) and error.retryable is not True:
         return HTTPException(status_code=409, detail=_refusal_detail(error))
     return HTTPException(status_code=503, detail=_refusal_detail(error))
 

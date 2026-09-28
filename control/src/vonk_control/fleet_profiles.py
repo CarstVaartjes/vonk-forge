@@ -34,6 +34,7 @@ from .artifact_lifecycle import (
 from .artifact_reference_scan import require_model_sets_open
 from .auth import MUTATION_ROLES, Actor
 from .bounded_json import integer, require_mapping, sequence
+from .failure_classification import error_code, is_security_failure
 from .fleet_profile_contract import (
     FleetProfileAction,
     FleetProfileAdmissionDecision,
@@ -129,6 +130,7 @@ from .recipe_runtime_specs import (
     recipe_topology,
     resolve_recipe_entities,
 )
+from .recovery_policy import RecoveryPolicy
 from .run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchAssessment,
@@ -177,6 +179,20 @@ _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
 _MAX_CACHE_RECOVERY_DELAY_SECONDS = 60
 _MAX_ADMISSION_RETRY_DELAY_SECONDS = 60
+# Integrity and storage-access refusals of a child are not replayed blindly by
+# profile recovery; receipts that do not validate would repeat child effects.
+#: Backoff for re-issuing Stop to older workload effects that have not yet
+#: produced their cancellation receipt.
+_STOP_REISSUE_POLICY = RecoveryPolicy(max_delay_seconds=300)
+_PROFILE_RECOVERY_REFUSED_CODES = frozenset(
+    {
+        "run-switch.receipt_invalid",
+        "runtime_image.archive_unavailable",
+        "runtime_image.receipt_identity_conflict",
+        "runtime_image.receipt_identity_invalid",
+        "runtime_image.receipt_invalid",
+    }
+)
 # A profile request may race a short heartbeat, telemetry write, or worker
 # transaction while taking the reviewed admission snapshot.  Retry the whole
 # SQL transaction after releasing it; the request key keeps a later successful
@@ -598,6 +614,21 @@ def _cache_recovery_delay(attempt: int) -> timedelta:
     return timedelta(seconds=min(_MAX_CACHE_RECOVERY_DELAY_SECONDS, 2**exponent))
 
 
+def _preview_blocker_codes(preview: FleetProfilePreview) -> list[str]:
+    return [reason.code for reason in preview.reasons] + [
+        blocker.code
+        for item in preview.assessments
+        for blocker in item.assessment.blockers
+    ]
+
+
+def _profile_preview_is_waitable(preview: FleetProfilePreview) -> bool:
+    """Any blocker except a security boundary parks the intent for re-planning."""
+    return not any(
+        is_security_failure(code) for code in _preview_blocker_codes(preview)
+    )
+
+
 def _admission_retry_delay(attempt: int) -> timedelta:
     """Bound parked admission retries while preserving the latest intent."""
 
@@ -734,30 +765,73 @@ class RunSwitchFleetProfileAdapter:
             # its dependency visible and reconciles the child's durable result.
             return
 
+    def _failed_children(
+        self, application_id: str, *, session: Session
+    ) -> tuple[dict[str, object], list[RunSwitchOperation]] | None:
+        """Return the adapter state and every child recorded as failed."""
+
+        application = session.get(FleetProfileApplication, application_id)
+        state = None if application is None else self._state(application)
+        if state is None:
+            return None
+        failures = sequence(state.get("assignment_failures")) or ()
+        operation_ids = {
+            value
+            for value in (
+                state.get("active_operation_id"),
+                *(
+                    failure.get("operation_id")
+                    for failure in failures
+                    if isinstance(failure, Mapping)
+                ),
+            )
+            if isinstance(value, str)
+        }
+        children: list[RunSwitchOperation] = []
+        for operation_id in sorted(operation_ids):
+            try:
+                children.append(self._run_switch.get(operation_id))
+            except (KeyError, RuntimeError, TypeError, ValueError):
+                continue
+        return state, children
+
+    def recovery_refused(self, application_id: str, *, session: Session) -> bool:
+        """A security or receipt-validation refusal is not replayed.
+
+        A receipt that fails validation must not repeat the child's effects.
+        Downloaded bytes that fail their digest are recovered: the replay
+        discards them and downloads again.
+        """
+
+        found = self._failed_children(application_id, session=session)
+        if found is None:
+            return False
+        state, children = found
+        if any(
+            isinstance(failure, Mapping) and failure.get("terminal") is True
+            for failure in sequence(state.get("assignment_failures")) or ()
+        ):
+            return True
+        for child in children:
+            code = child.result.failure_code if child.result is not None else None
+            if is_security_failure(code) or code in _PROFILE_RECOVERY_REFUSED_CODES:
+                return True
+        return False
+
     def recoverable_cache_loss(self, application_id: str, *, session: Session) -> bool:
         """Recognize only a typed, pre-effect Controller cache loss."""
 
-        application = session.get(FleetProfileApplication, application_id)
-        if application is None:
+        found = self._failed_children(application_id, session=session)
+        if found is None or found[0].get("state") != "failed":
             return False
-        state = self._state(application)
-        if state is None or state.get("state") != "failed":
-            return False
-        active = state.get("active_operation_id")
-        if not isinstance(active, str):
-            return False
-        try:
-            child = self._run_switch.get(active)
-        except (KeyError, RuntimeError, TypeError, ValueError):
-            return False
-        result = child.result
-        return bool(
+        return any(
             child.state == "failed"
-            and result is not None
-            and result.phase == "prepare"
-            and result.subphase == "runtime-image"
-            and result.child_operation_id is None
-            and result.failure_code == "runtime_image.cache_missing"
+            and child.result is not None
+            and child.result.phase == "prepare"
+            and child.result.subphase == "runtime-image"
+            and child.result.child_operation_id is None
+            and child.result.failure_code == "runtime_image.cache_missing"
+            for child in found[1]
         )
 
     def start(
@@ -1068,18 +1142,18 @@ class RunSwitchFleetProfileAdapter:
                 TypeError,
                 ValueError,
             ) as error:
-                raise FleetProfileConflict(
-                    "Profile resource admission is unavailable; review again"
+                raise FleetProfileAdmissionEffectBusy(
+                    "Profile resource admission is temporarily unavailable; retrying automatically"
                 ) from error
             current = FleetProfileAdmissionDecision.from_assessment(
                 FleetProfileAssignmentAssessment(
                     assignment_id=assignment.id, assessment=fresh
                 )
             )
-            if not current.allowed or current != decision:
+            if not current.allowed:
                 reasons = ", ".join(reason.code for reason in current.blockers[:4])
-                raise FleetProfileStalePlanConflict(
-                    "Profile resource admission changed; review again"
+                raise FleetProfileAdmissionEffectBusy(
+                    "Profile resource admission is waiting for capacity"
                     + (f": {reasons}" if reasons else "")
                 )
 
@@ -1118,13 +1192,25 @@ class RunSwitchFleetProfileAdapter:
         cancelling = _persisted_profile_progress(application).cancellation is not None
         active = state.get("active_operation_id")
         position = state.get("position")
+        queue_state = sequence(state.get("queue")) or ()
+        current_item = (
+            queue_state[integer(position) or 0]
+            if (integer(position) or 0) < len(queue_state)
+            else None
+        )
+        active_kind = state.get("active_kind") or (
+            current_item.get("kind") if isinstance(current_item, Mapping) else None
+        )
         expected_partial_failure = False
         if isinstance(active, str):
             try:
                 child = self._run_switch.get(active)
             except KeyError as error:
                 raise RuntimeError("Run/Switch child is unavailable") from error
-            if child.state in {"queued", "running"}:
+            # ``waiting`` is an automatically observed Run/Switch state (for
+            # example background runtime-image preparation or an overdue start
+            # observation); the child resumes on its own, so it is in progress.
+            if child.state in {"queued", "running", "waiting"}:
                 view = self._view_from_child(application_id, state, child)
                 new_progress = (
                     view.progress.model_dump(mode="json")
@@ -1159,7 +1245,7 @@ class RunSwitchFleetProfileAdapter:
                     children.append(
                         {
                             "operation_id": child.operation_id,
-                            "kind": state.get("active_kind"),
+                            "kind": active_kind,
                             "state": child.state,
                             "result": (
                                 receipt.model_dump(mode="json")
@@ -1201,13 +1287,33 @@ class RunSwitchFleetProfileAdapter:
                     reason = child.status_reason or (
                         f"Run/Switch child ended in {child.state}"
                     )
-                    return self._failed_in_session(session, application, state, reason)
+                    failures = list(sequence(state.get("assignment_failures")) or ())
+                    failures.append(
+                        {
+                            "assignment_id": (
+                                current_item.get("assignment_id")
+                                if isinstance(current_item, Mapping)
+                                else None
+                            ),
+                            "operation_id": child.operation_id,
+                            "reason": reason[:512],
+                            "terminal": is_security_failure(
+                                child.result.failure_code
+                                if child.result is not None
+                                else None
+                            ),
+                        }
+                    )
+                    state["assignment_failures"] = failures
+                    # The failure is recorded per assignment; the shared code
+                    # below records the child and continues with the next one.
+                    expected_partial_failure = True
                 children = list(sequence(state.get("children")) or ())
                 receipt = self._child_receipt(child)
                 children.append(
                     {
                         "operation_id": child.operation_id,
-                        "kind": state.get("active_kind"),
+                        "kind": active_kind,
                         "state": child.state,
                         "result": (
                             receipt.model_dump(mode="json")
@@ -1249,7 +1355,7 @@ class RunSwitchFleetProfileAdapter:
                 children.append(
                     {
                         "operation_id": child.operation_id,
-                        "kind": state.get("active_kind"),
+                        "kind": active_kind,
                         "state": child.state,
                         "result": (
                             receipt.model_dump(mode="json")
@@ -1295,9 +1401,27 @@ class RunSwitchFleetProfileAdapter:
                 ),
                 None,
             )
-            state["state"] = "failed" if incomplete_model is not None else "succeeded"
+            failures = sequence(state.get("assignment_failures")) or ()
+            state["state"] = (
+                "failed" if incomplete_model is not None or failures else "succeeded"
+            )
+            first_failure = next(
+                (
+                    str(failure.get("reason"))
+                    for failure in failures
+                    if isinstance(failure, Mapping)
+                ),
+                None,
+            )
             state["status_reason"] = (
-                incomplete_model.detail if incomplete_model is not None else None
+                incomplete_model.detail
+                if incomplete_model is not None
+                else (
+                    f"{len(failures)} assignment(s) need reconciliation: "
+                    f"{first_failure}"[:512]
+                    if failures
+                    else None
+                )
             )
             state["result"] = {
                 "children": list(sequence(state.get("children")) or ()),
@@ -1308,12 +1432,19 @@ class RunSwitchFleetProfileAdapter:
             return self._view_from_state(application, state)
         item = queue[integer(position) or 0]
         if not isinstance(item, Mapping):
-            return self._failed_in_session(
-                session,
-                application,
-                state,
-                "Persisted profile switch queue is invalid",
+            failures = list(sequence(state.get("assignment_failures")) or ())
+            failures.append(
+                {
+                    "assignment_id": None,
+                    "reason": "Persisted assignment queue item is malformed",
+                    "terminal": False,
+                }
             )
+            state["assignment_failures"] = failures
+            state["position"] = (integer(position) or 0) + 1
+            self._write_state(session, application, state)
+            session.flush()
+            return self._view_from_state(application, state)
         operation = self._start_child(
             application_id,
             item,
@@ -1367,22 +1498,34 @@ class RunSwitchFleetProfileAdapter:
             state["observation_deadline_at"] = None
             state["pending_operation_ids"] = []
             state["status_reason"] = None
+            state["stop_reissue_attempt"] = 0
             return None
+        AgentJobService.request_superseded_workload_cancellation_in_session(
+            session, scope_node_ids, ordinal, now
+        )
         deadline = min(effect.observation_deadline for effect in effects)
         due = min(effect.observe_due_at for effect in effects)
+        # Each re-issue backs off exponentially (persisted attempt counter), so
+        # an effect past its observation deadline is not re-stopped every tick.
+        raw_attempt = state.get("stop_reissue_attempt")
+        attempt = (raw_attempt if type(raw_attempt) is int else 0) + 1
+        backoff = _STOP_REISSUE_POLICY.next_attempt(
+            application.id, attempt, now, ongoing_intent=True
+        )
+        assert backoff is not None
+        due = max(due, backoff)
         operation_ids = sorted(effect.operation_id for effect in effects)
-        next_state = "waiting-for-operator" if now >= deadline else "running"
         reason = (
-            "An older issued workload has no definitive cancellation receipt: "
-            if now >= deadline
-            else "Waiting for older issued workload cancellation receipts: "
-        ) + ", ".join(operation_ids)
+            "Reissuing Stop and observing older issued workload cancellation: "
+            + ", ".join(operation_ids)
+        )
         updated = {
-            "state": next_state,
+            "state": "running",
             "status_reason": reason[:512],
-            "observation_due_at": None if now >= deadline else due.isoformat(),
+            "observation_due_at": due.isoformat(),
             "observation_deadline_at": deadline.isoformat(),
             "pending_operation_ids": operation_ids,
+            "stop_reissue_attempt": min(attempt, 32),
         }
         if any(state.get(key) != value for key, value in updated.items()):
             state.update(updated)
@@ -1907,7 +2050,10 @@ class RunSwitchFleetProfileAdapter:
             bytes=child.progress.completed_bytes,
             total_bytes=child.progress.total_bytes,
         )
-        child_state = _operation_state(child.state, default="running")
+        child_state = _operation_state(
+            "running" if child.state == "waiting" else child.state,
+            default="running",
+        )
         result = self._child_receipt(child)
         return FleetProfileChildOperation(
             id=application_id,
@@ -2386,6 +2532,9 @@ class FleetProfileService:
         self._switch_adapter = switch_adapter
         self._cache_resolver = cache_resolver
         self._assessment_provider = assessment_provider
+        # Round-robin position of the bounded automatic-recovery scan, so rows
+        # that stay ineligible cannot starve later due rows.
+        self._recovery_cursor: str | None = None
 
     def _selected_profile_snapshot(
         self, session: Session
@@ -4046,7 +4195,7 @@ class FleetProfileService:
                     existing,
                     session=session,
                     profile_id=profile_id,
-                    reviewed_digest=plan_digest,
+                    reviewed_digest=None,
                     actor=actor,
                 )
                 if existing is not None
@@ -4152,7 +4301,7 @@ class FleetProfileService:
                 plan_digest=pending_plan_digest,
                 # Keep the short synchronous admission attempt visible as a
                 # normal queued application.  If it cannot bind, the defer
-                # path changes this to waiting-for-operator before returning.
+                # path records the next automatic attempt before returning.
                 state="queued",
                 plan=pending_preview.model_dump(mode="json"),
                 selection_generation=(
@@ -4216,7 +4365,9 @@ class FleetProfileService:
             row.progress = FleetProfileApplicationProgress.model_validate_json(
                 canonical_message(progress_data), strict=True
             ).model_dump(mode="json")
-            row.state = "waiting-for-operator"
+            # Admission retries itself at ``admission_retry_at``; no operator
+            # action is required, so the row stays queued with its next due time.
+            row.state = "queued"
             row.status_reason = f"{reason} Next attempt: {next_retry.isoformat()}."[
                 :512
             ]
@@ -4418,13 +4569,23 @@ class FleetProfileService:
         pending: FleetProfileApplicationView | None = None
         try:
             preview = self.preview(profile_id)
-            if preview.plan_digest != plan_digest:
-                raise FleetProfileStalePlanConflict(
-                    "Fleet profile preview is stale; review the profile again before loading"
-                )
             if not preview.allowed:
-                raise FleetProfileConflict(
-                    "Fleet profile preview is blocked; review the current blockers before loading"
+                if not _profile_preview_is_waitable(preview):
+                    raise FleetProfileConflict(
+                        "Fleet profile intent contains a security or contract blocker"
+                    )
+                pending = self._create_pending_application(
+                    preview,
+                    request_key=request_key,
+                    actor=actor,
+                    operation_kind="fleet-profile.apply",
+                    select_profile=True,
+                )
+                return self._defer_pending_application(
+                    pending.id,
+                    "Waiting for current Fleet conditions: "
+                    + "; ".join(_preview_blocker_codes(preview)[:8])
+                    + ".",
                 )
             pending = self._create_pending_application(
                 preview,
@@ -4829,14 +4990,6 @@ class FleetProfileService:
                     ).preparation_decisions
                 }
                 if automatic_cache_recovery:
-                    if self._switch_adapter is None or not (
-                        self._switch_adapter.recoverable_cache_loss(
-                            parent.id, session=session
-                        )
-                    ):
-                        raise FleetProfileConflict(
-                            "Automatic recovery requires a pre-effect cache loss"
-                        )
                     recovery_ordinal = prior.workload_intent_ordinal
                     if recovery_ordinal is None:
                         raise FleetProfileConflict(
@@ -5076,6 +5229,12 @@ class FleetProfileService:
                 row.updated_at = now
             session.flush()
             if retry_of_application_id is not None and existing is None:
+                if retry_parent is not None and automatic_cache_recovery:
+                    retry_parent.state = "failed"
+                    retry_parent.status_reason = (
+                        f"Automatically reconciled by profile retry {row.id}"
+                    )[:512]
+                    retry_parent.updated_at = now
                 if (
                     selected_generation is None
                     or selected_application_id is None
@@ -5344,6 +5503,30 @@ class FleetProfileService:
                 "Application intent differs from its accepted profile snapshot"
             )
         if not preview.allowed:
+            if automatic_cache_recovery and _profile_preview_is_waitable(preview):
+                with self._sessions.begin() as session:
+                    row = session.get(
+                        FleetProfileApplication, application_id, with_for_update=True
+                    )
+                    if row is not None and self._retry_eligible(session, row):
+                        progress = _persisted_profile_progress(row)
+                        progress_data = progress.model_dump(mode="json")
+                        progress_data["attempt"] = progress.attempt + 1
+                        due = _aware(self._clock()) + _cache_recovery_delay(
+                            progress.attempt
+                        )
+                        progress_data["retry_due_at"] = due.isoformat()
+                        row.progress = (
+                            FleetProfileApplicationProgress.model_validate_json(
+                                canonical_message(progress_data), strict=True
+                            ).model_dump(mode="json")
+                        )
+                        row.status_reason = (
+                            "Retrying after current Fleet conditions change; "
+                            f"next attempt at {due.isoformat()}"
+                        )
+                        row.updated_at = _aware(self._clock())
+                        return self._application_view(row)
             raise FleetProfileConflict(
                 "Current Fleet state blocks application recovery"
             )
@@ -6015,7 +6198,7 @@ class FleetProfileService:
         parked_observed = self._observe_parked_applications(now)
         recovery_deferred = False
         cancellation_observed = self._observe_pending_cancellation(now)
-        recovery = self._automatic_cache_recovery(now)
+        recovery = self._automatic_profile_recovery(now)
         if recovery is not None:
             application_id, actor = recovery
             request_key = str(
@@ -6042,14 +6225,35 @@ class FleetProfileService:
                         row.status_reason = (
                             f"{error} Next cache check: {next_check.isoformat()}."
                         )[:512]
-                        row.updated_at = now
                         recovery_deferred = True
                 # No replacement intent or unknown-output build was admitted.
                 # The existing backoff revisits this receipt after cache repair.
-            except (FleetProfileConflict, FleetProfilePermissionDenied):
-                # Retry performs the authoritative profile, scope, ordinal and
-                # lineage checks again after this read-only candidate scan.
-                pass
+            except (FleetProfileConflict, FleetProfilePermissionDenied) as error:
+                with self._sessions.begin() as session:
+                    row = session.get(
+                        FleetProfileApplication, application_id, with_for_update=True
+                    )
+                    if (
+                        row is not None
+                        and not isinstance(error, FleetProfilePermissionDenied)
+                        and not is_security_failure(error_code(error))
+                        and self._retry_eligible(session, row)
+                    ):
+                        progress = _persisted_profile_progress(row)
+                        progress_data = progress.model_dump(mode="json")
+                        progress_data["attempt"] = progress.attempt + 1
+                        due = now + _cache_recovery_delay(progress.attempt)
+                        progress_data["retry_due_at"] = due.isoformat()
+                        row.progress = (
+                            FleetProfileApplicationProgress.model_validate_json(
+                                canonical_message(progress_data), strict=True
+                            ).model_dump(mode="json")
+                        )
+                        row.status_reason = (
+                            f"{error}; next attempt at {due.isoformat()}"
+                        )[:512]
+                        row.updated_at = now
+                        recovery_deferred = True
             else:
                 return True
         with self._sessions.begin() as session:
@@ -6735,31 +6939,65 @@ class FleetProfileService:
         row.updated_at = now
         return True
 
-    def _automatic_cache_recovery(self, now: datetime) -> tuple[str, str] | None:
-        """Find one current failed profile whose only blocker is vanished cache bytes."""
+    def _automatic_profile_recovery(self, now: datetime) -> tuple[str, str] | None:
+        """Find one current profile intent that can safely be reconciled again."""
 
         with self._sessions() as session:
             adapter = self._switch_adapter
             if adapter is None:
                 return None
-            rows = session.scalars(
-                select(FleetProfileApplication)
-                .where(FleetProfileApplication.state == "failed")
-                .order_by(
-                    FleetProfileApplication.updated_at.desc(),
-                    FleetProfileApplication.id.desc(),
-                )
-                .limit(64)
+            # Only due rows are scanned (the typed timestamp below remains the
+            # authority), and the bounded batch walks all due rows round-robin
+            # so a refused or ineligible row cannot starve an eligible one.
+            retry_at = func.replace(
+                FleetProfileApplication.progress["retry_due_at"].as_string(),
+                "Z",
+                "+00:00",
             )
+            retry_cutoff = TypeAdapter(datetime).dump_python(_aware(now), mode="json")
+            statement = (
+                select(FleetProfileApplication)
+                .where(
+                    FleetProfileApplication.state.in_(
+                        ("failed", "waiting-for-operator")
+                    ),
+                    or_(
+                        retry_at.is_(None),
+                        retry_at <= str(retry_cutoff).replace("Z", "+00:00"),
+                    ),
+                )
+                .order_by(FleetProfileApplication.id)
+                .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
+            )
+            cursor = self._recovery_cursor
+            rows = list(
+                session.scalars(
+                    statement
+                    if cursor is None
+                    else statement.where(FleetProfileApplication.id > cursor)
+                )
+            )
+            if cursor is not None and len(rows) < _MAX_PARKED_APPLICATION_OBSERVATIONS:
+                rows.extend(
+                    session.scalars(
+                        statement.where(FleetProfileApplication.id <= cursor).limit(
+                            _MAX_PARKED_APPLICATION_OBSERVATIONS - len(rows)
+                        )
+                    )
+                )
+            self._recovery_cursor = rows[-1].id if rows else None
             for row in rows:
                 try:
                     progress = _persisted_profile_progress(row)
                 except FleetProfileConflict:
                     continue
-                if (
-                    progress.intended_profile is None
-                    or not adapter.recoverable_cache_loss(row.id, session=session)
+                if progress.intended_profile is None or adapter.recovery_refused(
+                    row.id, session=session
                 ):
+                    continue
+                if progress.retry_due_at is not None and _aware(
+                    progress.retry_due_at
+                ) > _aware(now):
                     continue
                 current_scope = tuple(
                     session.scalars(
@@ -6776,6 +7014,7 @@ class FleetProfileService:
                     progress.attempt
                 ):
                     continue
+                self._recovery_cursor = row.id
                 return row.id, row.actor
         return None
 

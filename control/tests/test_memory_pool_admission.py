@@ -260,7 +260,9 @@ def test_separate_pools_recheck_the_other_constraint_after_a_planned_stop():
     assert plan.nodes[0].after_stop_free_after_bytes == 10
 
 
-def test_changed_physical_pool_requires_a_new_profile_review(tmp_path, postgres_engine):
+def test_changed_physical_pool_loads_against_the_current_plan(
+    tmp_path, postgres_engine
+):
     sessions, _, _, profile, api, headers, reviewed, _ = _capacity_profile(
         tmp_path, postgres_engine
     )
@@ -271,7 +273,7 @@ def test_changed_physical_pool_requires_a_new_profile_review(tmp_path, postgres_
     current = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
     assert current.status_code == 200 and current.json()["allowed"], current.text
     assert current.json()["plan_digest"] != reviewed["plan_digest"]
-    refused = api.post(
+    loaded = api.post(
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
@@ -279,4 +281,7 @@ def test_changed_physical_pool_requires_a_new_profile_review(tmp_path, postgres_
             "request_key": str(uuid4()),
         },
     )
-    assert refused.status_code == 409, refused.text
+    # The stale review digest is advisory; the load binds the current plan.
+    assert loaded.status_code == 202, loaded.text
+    intended = loaded.json()["progress"]["intended_profile"]
+    assert intended["reviewed_plan_digest"] == current.json()["plan_digest"]

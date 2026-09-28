@@ -12,7 +12,6 @@ from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
     FleetProfileService,
-    FleetProfileStalePlanConflict,
     build_production_fleet_profile_service,
 )
 from vonk_control.models import (
@@ -137,22 +136,19 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
         RunSwitchAssessment.model_validate_json(json.dumps(dropped_reasons))
     render_payload(blocked.model_dump(mode="json"), "profile", action="preview")
     assert "short by" in capsys.readouterr().out
-    with pytest.raises(FleetProfileStalePlanConflict):
-        service.apply(
-            profile.id,
-            plan_digest=reviewed.plan_digest,
-            request_key=str(uuid4()),
-            actor="admin",
-        )
-    with pytest.raises(FleetProfileConflict, match="blocked"):
-        service.apply(
-            profile.id,
-            plan_digest=blocked.plan_digest,
-            request_key=str(uuid4()),
-            actor="admin",
-        )
+    # The latest load request leads: an older review digest is advisory, and a
+    # capacity shortage parks the accepted intent with a visible next attempt.
+    parked = service.apply(
+        profile.id,
+        plan_digest=reviewed.plan_digest,
+        request_key=str(uuid4()),
+        actor="admin",
+    )
+    assert parked.state == "queued"
+    assert parked.progress.admission_pending is True
+    assert "Next attempt" in (parked.status_reason or "")
     with sessions() as session:
-        assert session.scalar(select(FleetProfileApplication)) is None
+        assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
 
 
 def _replace_run(sessions, run_id: str) -> str:
@@ -212,15 +208,17 @@ def test_replacing_a_run_on_the_same_nodes_requires_another_review(tmp_path, cap
     assert reviewed.summary.stops == refreshed.summary.stops == 1
     assert reviewed.steps == refreshed.steps
     assert reviewed.plan_digest != refreshed.plan_digest
-    with pytest.raises(FleetProfileConflict, match="stale"):
-        service.apply(
-            profile.id,
-            plan_digest=reviewed.plan_digest,
-            request_key=str(uuid4()),
-            actor="admin",
-        )
-    with sessions() as session:
-        assert session.scalar(select(FleetProfileApplication)) is None
+    # The load applies the current plan (stopping the replacement run), not
+    # the stale review of the run it replaced.
+    applied = service.apply(
+        profile.id,
+        plan_digest=reviewed.plan_digest,
+        request_key=str(uuid4()),
+        actor="admin",
+    )
+    intended = applied.progress.intended_profile
+    assert intended is not None
+    assert intended.reviewed_plan_digest == refreshed.plan_digest
 
 
 def test_review_ignores_transfer_counters_but_binds_reuse_and_blockers():
@@ -260,13 +258,6 @@ def test_review_ignores_transfer_counters_but_binds_reuse_and_blockers():
     evidence.update(targets_ready=True, ready=True)
     reusable = service.preview(profile.id)
     assert reusable.plan_digest != review.plan_digest
-    with pytest.raises(FleetProfileConflict, match="stale"):
-        service.apply(
-            profile.id,
-            plan_digest=review.plan_digest,
-            actor="admin",
-            request_key=str(uuid4()),
-        )
     evidence["reasons"] = [
         {
             "code": "preparation.revoked",
@@ -379,13 +370,6 @@ def test_review_binds_idle_roster_and_definition_but_not_observation_time():
     expanded = service.preview(profile.id)
     assert expanded.scope.idle_node_ids == [_node_id(1), _node_id(2)]
     assert expanded.plan_digest != review.plan_digest
-    with pytest.raises(FleetProfileConflict, match="stale"):
-        service.apply(
-            profile.id,
-            plan_digest=review.plan_digest,
-            actor="admin",
-            request_key=str(uuid4()),
-        )
     service.update(
         profile.id,
         FleetProfileInput(
@@ -426,9 +410,19 @@ def test_admitted_review_replay_ignores_later_edits_but_binds_issuer_and_digest(
         )
         == accepted
     )
-    for actor, digest in (("another-admin", review.plan_digest), ("admin", "f" * 64)):
-        with pytest.raises(FleetProfileConflict, match="request key"):
-            service.apply(profile.id, plan_digest=digest, actor=actor, request_key=key)
+    # The issuer is bound to the request key; the review digest is advisory,
+    # so a replay under the same key returns the accepted application.
+    with pytest.raises(FleetProfileConflict, match="request key"):
+        service.apply(
+            profile.id,
+            plan_digest=review.plan_digest,
+            actor="another-admin",
+            request_key=key,
+        )
+    assert (
+        service.apply(profile.id, plan_digest="f" * 64, actor="admin", request_key=key)
+        == accepted
+    )
     with sessions() as session:
         assert list(session.scalars(select(FleetProfileApplication.id))) == [
             accepted.id

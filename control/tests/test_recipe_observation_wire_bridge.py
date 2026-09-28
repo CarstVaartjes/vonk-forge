@@ -1839,6 +1839,78 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
         )
 
 
+def test_singleton_recovery_refuses_per_node_start_for_another_plan(
+    tmp_path: Path,
+    recipe_observation_wire_probe: Path,
+    host_helper_wire_probe: Path,
+    postgres_engine,
+) -> None:
+    """The Job binds the run plan; the replayed per-node payload must too."""
+
+    from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+
+    (
+        now,
+        _app,
+        sessions,
+        run_id,
+        original_start_id,
+        _node_id,
+        _grant_public_key,
+        _binding,
+        _service,
+        queue,
+        _mapping_id,
+        _node_ids,
+        bound_service,
+        routes,
+    ) = _signed_absent_singleton(
+        tmp_path,
+        recipe_observation_wire_probe=recipe_observation_wire_probe,
+        host_helper_wire_probe=host_helper_wire_probe,
+        engine=postgres_engine,
+    )
+    with sessions.begin() as session:
+        start = session.get(Job, original_start_id)
+        assert start is not None
+        payload = json.loads(canonical_message(start.payload))
+        item = payload["phases"][0][0]
+        start_payload = item["payload"]
+        # Job-level binding stays exact; only the per-node payload differs.
+        start_payload["plan_digest"] = "0" * 64
+        child = session.get(AgentOperation, item["operation_id"])
+        assert child is not None
+        start.payload = payload
+        start.payload_digest = hashlib.sha256(canonical_message(payload)).hexdigest()
+        child.payload = start_payload
+        child.payload_digest = hashlib.sha256(
+            canonical_message(start_payload)
+        ).hexdigest()
+    now[0] = NOW + timedelta(seconds=4)
+    recovery = DistributedRecoveryCoordinator(
+        sessions,
+        routes=routes,
+        agent_jobs=queue,
+        clock=lambda: now[0],
+        recovery_run_stops=bound_service,
+        singleton_start_timeout_seconds=60,
+    )
+
+    assert recovery.tick() is True
+
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        assert "accepted Start image authority is stale" in (run.route_error or "")
+        assert not session.scalar(
+            select(Job.id).where(
+                Job.kind.in_({"recipe.stop", "recipe.start"}),
+                Job.payload["owner_id"].as_string() == run_id,
+                Job.payload["recovery"].is_not(None),
+            )
+        )
+
+
 @pytest.mark.parametrize("schedule", [(120,), (121,), (0, 60, 121)])
 def test_signed_observation_deadline_applies_to_first_receipt_not_renewal(
     tmp_path: Path,

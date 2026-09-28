@@ -499,6 +499,10 @@ class _SwitchAdapter:
         del application_id, session
         return False
 
+    def recovery_refused(self, application_id: str, *, session: Session) -> bool:
+        del application_id, session
+        return False
+
     def start(
         self,
         *,
@@ -1108,7 +1112,9 @@ def test_parked_profile_load_fences_workload_before_admission_retry(
         request_key=_uuid(973),
         actor="admin",
     )
-    assert parked.state == "waiting-for-operator"
+    # Admission retries itself; the accepted intent stays queued with a due time.
+    assert parked.state == "queued"
+    assert parked.progress.admission_retry_at is not None
     assert parked.progress.workload_intent_ordinal is None
 
     monkeypatch.setattr(FleetProfileService, "_queue_application", original_queue)
@@ -1143,7 +1149,9 @@ def test_parked_profile_load_rechecks_fencing_after_ordinal_is_bound(
         request_key=_uuid(974),
         actor="admin",
     )
-    assert parked.state == "waiting-for-operator"
+    # Admission retries itself; the accepted intent stays queued with a due time.
+    assert parked.state == "queued"
+    assert parked.progress.admission_retry_at is not None
     assert parked.progress.workload_intent_ordinal is None
 
     assert service.tick() is True
@@ -1180,7 +1188,7 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
         request_key=_uuid(976),
         actor="admin",
     )
-    assert first.state == "waiting-for-operator"
+    assert first.state == "queued"
     assert service.tick() is True
     first = service.application(first.id)
     assert first.progress.workload_intent_ordinal == 1
@@ -1198,7 +1206,7 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
         request_key=_uuid(977),
         actor="admin",
     )
-    assert second.state == "waiting-for-operator"
+    assert second.state == "queued"
     assert service.tick() is True
     first = service.application(first.id)
     second = service.application(second.id)
@@ -2312,6 +2320,107 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     )
 
 
+def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
+    """A Run/Switch child that is waiting on its own observation is in progress.
+
+    Background runtime-image preparation and overdue start observations park
+    the child in ``waiting`` and resume it automatically. The profile used to
+    fail the whole load with "Run/Switch child returned waiting".
+    """
+
+    from vonk_control.run_switch_operations import (
+        RunSwitchOperationService,
+        _persisted_result,
+    )
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Waiting switch child",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "waiting-switch-child",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(648),
+        actor="admin",
+    )
+    assert service.tick() is True
+    started = service.application(application.id)
+    assert started.progress.switch_adapter is not None
+    child_id = started.progress.switch_adapter.active_operation_id
+    assert isinstance(child_id, str)
+
+    with sessions.begin() as session:
+        job = session.get(Job, child_id)
+        assert job is not None
+        job.state = "waiting"
+        job.status_reason = "Runtime image preparation is running in the background"
+        job.updated_at = lifecycle._clock()
+
+    service.tick()
+    waiting = service.application(application.id)
+    assert waiting.state in {"queued", "running"}, waiting.status_reason
+    assert waiting.progress.switch_adapter is not None
+    assert waiting.progress.switch_adapter.active_operation_id == child_id
+
+    with sessions.begin() as session:
+        job = session.get(Job, child_id)
+        assert job is not None
+        job.state = "succeeded"
+        job.status_reason = None
+        job.result = _persisted_result(_transfer_result(nodes))
+        job.updated_at = lifecycle._clock()
+
+    assert service.tick() is True
+    completed = service.application(application.id)
+    assert completed.state == "succeeded", completed.status_reason
+
+
 def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> None:
     """Advancing a child must reuse the tick's transaction, not race its row lock.
 
@@ -2871,18 +2980,13 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
         }
 
 
-def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
+def test_profile_apply_uses_latest_saved_profile_when_digest_is_stale() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-
-    with pytest.raises(FleetProfileConflict, match="stale"):
-        service.apply(
-            profile.id, plan_digest="f" * 64, request_key=_uuid(5), actor="admin"
-        )
 
     updated = service.update(
         profile.id,
@@ -2892,6 +2996,11 @@ def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
         actor="admin",
     )
     assert updated.profile_digest != profile.profile_digest
+    application = service.apply(
+        profile.id, plan_digest="f" * 64, request_key=_uuid(5), actor="admin"
+    )
+    assert application.profile_digest == updated.profile_digest
+    assert application.state == "queued"
 
 
 def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation() -> (
@@ -3268,13 +3377,14 @@ def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -
     )
     assert reason.severity == "error"
     assert "cannot attest" in reason.detail
-    with pytest.raises(FleetProfileConflict, match="preview is blocked"):
-        service.apply(
-            profile.id,
-            plan_digest=preview.plan_digest,
-            request_key=_uuid(41),
-            actor="admin",
-        )
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(41),
+        actor="admin",
+    )
+    assert application.state == "queued"
+    assert "Next attempt" in (application.status_reason or "")
 
 
 def test_profile_preview_projects_exact_preparation_from_run_switch_authority(

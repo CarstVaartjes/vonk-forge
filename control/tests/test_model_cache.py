@@ -12,6 +12,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import vonk_control.model_cache as model_cache_module
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -28,6 +29,7 @@ from vonk_control.distribution import (
 from vonk_control.jobs import JobService
 from vonk_control.model_cache import (
     _CHUNK_BYTES,
+    _RETRY_MAX_SECONDS,
     ArtifactSetManifest,
     ArtifactSpec,
     ModelCacheConflict,
@@ -395,7 +397,7 @@ def test_model_removal_review_preserves_unknown_storage_observation(
     assert object_asset.available_bytes is None
 
 
-def test_model_removal_review_rejects_changed_storage_before_owner_write(
+def test_model_removal_applies_to_current_storage_after_an_old_review(
     cache, tmp_path: Path
 ):
     service, sessions = cache
@@ -416,25 +418,21 @@ def test_model_removal_review_rejects_changed_storage_before_owner_write(
     service._object_path(digest).unlink()
     receipt = service.root / "objects" / digest[:2] / f"{digest}.receipt.json"
     receipt.unlink()
-    with pytest.raises(ModelCacheConflict) as stale:
-        service.remove_model_selector(
-            "a" * 64,
-            actor="operator",
-            request_key="00000000-0000-4000-8000-000000001064",
-            model_content_sha256="a" * 64,
-            review_digest=reviewed.review_digest,
-        )
-    assert stale.value.code == "model_cache.removal_review_stale"
+    # The earlier review is advisory: removal applies to the current state.
+    accepted = service.remove_model_selector(
+        "a" * 64,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000001064",
+        model_content_sha256="a" * 64,
+        review_digest=reviewed.review_digest,
+    )
+    for _ in range(10):
+        if service.get_operation(accepted.id).state == "succeeded":
+            break
+        service.advance_removals(limit=10)
+    assert service.get_operation(accepted.id).state == "succeeded"
     with sessions() as session:
-        assert (
-            session.scalar(
-                select(ModelCacheOperation).where(
-                    ModelCacheOperation.request_key
-                    == "00000000-0000-4000-8000-000000001064"
-                )
-            )
-            is None
-        )
+        assert session.get(ModelCacheSet, downloaded.artifact_set_sha256) is None
         assert all(
             row.removal_owner_id is None
             for row in session.scalars(select(ArtifactLifecycleGate))
@@ -1946,21 +1944,22 @@ def test_transient_download_failure_requeues_with_exact_identity_and_bound(
     assert completed.artifact_set_sha256 == queued.artifact_set_sha256
 
 
-def test_exhausted_transient_download_allows_bounded_operator_retry_after_restart(
+def test_transient_download_failures_retry_with_capped_backoff_until_success(
     cache, tmp_path: Path
 ) -> None:
     service, sessions = cache
     model = "a" * 64
-    data = b"operator retry payload"
+    data = b"persistent retry payload"
     artifact = _artifact(tmp_path, data, model_content_sha256=model)
     preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     original = service._open_source
     calls = 0
+    failures = 12
 
     def flaky_source(spec, offset):
         nonlocal calls
         calls += 1
-        if calls <= 3:
+        if calls <= failures:
             raise OSError(errno.ETIMEDOUT, "timed out")
         return original(spec, offset)
 
@@ -1972,48 +1971,95 @@ def test_exhausted_transient_download_allows_bounded_operator_retry_after_restar
         model_content_sha256=model,
         artifacts=[artifact],
     )
-    for _ in range(3):
+    delays = []
+    for _ in range(failures):
         assert service.run_pending() == 1
-    exhausted = service.get_operation(operation.id)
-    assert exhausted.state == "failed"
-    assert exhausted.attempt == 3
-    retry = service.retry(
-        exhausted.id,
-        actor="operator",
-        request_key="00000000-0000-4000-8000-000000000021",
-    )
-    assert retry.state == "queued"
-    assert retry.attempt == 1
-    assert retry.plan_digest == exhausted.plan_digest
-    assert retry.artifact_set_sha256 == exhausted.artifact_set_sha256
+        waiting = service.get_operation(operation.id)
+        assert waiting.state == "queued"
+        assert waiting.failure is not None and waiting.failure["retryable"] is True
+        delays.append(waiting.failure["retry_after_seconds"])
+    assert delays == sorted(delays)
+    assert max(delays) == _RETRY_MAX_SECONDS
 
     restarted = ModelCacheService(
         sessions, service.root, reserve_bytes=0, fixture_sources=True
     )
+    restarted._open_source = flaky_source
     assert restarted.resume_operations() == 1
     restarted.run_pending()
-    assert restarted.get_operation(retry.id).state == "succeeded"
+    assert restarted.get_operation(operation.id).state == "succeeded"
 
 
-def test_model_cache_retry_classification_rejects_terminal_http_and_storage_errors() -> (
-    None
-):
-    request = httpx.Request("GET", "https://example.invalid/model")
-    for status in (401, 403, 404):
-        response = httpx.Response(status, request=request)
-        error = httpx.HTTPStatusError(
-            "request failed", request=request, response=response
+def test_operator_retry_of_a_failed_download_is_always_accepted(
+    cache, tmp_path: Path
+) -> None:
+    service, _sessions = cache
+    model = "c" * 64
+    artifact = _artifact(tmp_path, b"retry after terminal", model_content_sha256=model)
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
+    original = service._open_source
+    denied = [True]
+
+    def source(spec, offset):
+        if denied[0]:
+            raise ModelCacheStorageError(
+                "model_cache.source_untrusted", "source is not trusted"
+            )
+        return original(spec, offset)
+
+    service._open_source = source
+    operation = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000022",
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256=model,
+        artifacts=[artifact],
+    )
+    previous = operation
+    for number in range(23, 28):
+        service.run_pending()
+        failed = service.get_operation(previous.id)
+        assert failed.state == "failed"
+        previous = service.retry(
+            failed.id,
+            actor="operator",
+            request_key=f"00000000-0000-4000-8000-{number:012d}",
         )
-        assert _retryable_failure(error) is False
-    for status in (429, 500, 503):
+        assert previous.state == "queued"
+    denied[0] = False
+    service.run_pending()
+    assert service.get_operation(previous.id).state == "succeeded"
+
+
+def test_model_cache_retry_classification_uses_typed_codes() -> None:
+    def coded(code: str) -> ModelCacheStorageError:
+        return ModelCacheStorageError(code, "detail")
+
+    for code in (
+        "model_cache.credentials_missing",
+        "model_cache.credentials_denied",
+        "model_cache.credentials_invalid",
+        "model_cache.source_untrusted",
+        "model_cache.redirect_forbidden",
+    ):
+        assert _retryable_failure(coded(code)) is False
+    for code in (
+        "model_cache.digest_mismatch",
+        "model_cache.source_size_mismatch",
+        "model_cache.source_unavailable",
+        "model_cache.rate_limited",
+    ):
+        assert _retryable_failure(coded(code)) is True
+    request = httpx.Request("GET", "https://example.invalid/model")
+    for status in (404, 429, 500):
         response = httpx.Response(status, request=request)
         error = httpx.HTTPStatusError(
-            "request failed", request=request, response=response
+            "permission denied", request=request, response=response
         )
         assert _retryable_failure(error) is True
-    assert _retryable_failure(OSError(errno.EACCES, "permission denied")) is False
-    assert _retryable_failure(OSError(errno.ENOSPC, "no space left")) is False
-    assert _retryable_failure(OSError(errno.ETIMEDOUT, "timed out")) is True
+    assert _retryable_failure(OSError(errno.EACCES, "permission denied")) is True
+    assert _retryable_failure(OSError(errno.ENOSPC, "no space left")) is True
+    assert _retryable_failure(RuntimeError("digest auth denied")) is True
 
 
 def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
@@ -2102,7 +2148,11 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     )
     service.run_pending()
     failed = service.get_operation(failed.id)
-    assert failed.state == "failed"
+    # Bad bytes never replace the verified object; they are discarded and the
+    # repair keeps retrying until the source serves the pinned content.
+    assert failed.state == "queued"
+    assert failed.failure is not None
+    assert failed.failure["code"] == "integrity_mismatch"
     assert target.read_bytes() == good
 
     source.write_bytes(good)
@@ -2118,27 +2168,15 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
         return replace(source_path, target_path)
 
     monkeypatch.setattr("vonk_control.model_cache.os.replace", fail_final_replace)
-    swap_failed = service.start_repair(
-        actor="test",
-        request_key="00000000-0000-4000-8000-000000000006",
-        artifact_set_sha256=set_digest,
-        plan_digest=str(bad_preview["plan_digest"]),
-    )
     service.run_pending()
-    swap_failed = service.get_operation(swap_failed.id)
-    assert swap_failed.state == "failed"
+    swap_failed = service.get_operation(failed.id)
+    assert swap_failed.state == "queued"
     assert target.read_bytes() == good
     assert not any(service.root.joinpath("quarantine").iterdir())
 
     monkeypatch.undo()
-    repaired = service.start_repair(
-        actor="test",
-        request_key="00000000-0000-4000-8000-000000000007",
-        artifact_set_sha256=set_digest,
-        plan_digest=str(bad_preview["plan_digest"]),
-    )
     service.run_pending()
-    repaired = service.get_operation(repaired.id)
+    repaired = service.get_operation(failed.id)
     assert repaired.state == "succeeded"
     assert target.read_bytes() == good
 
@@ -2972,6 +3010,11 @@ def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
     def checkpoint(spec, **kwargs):
         part = service._partial_path(kwargs["set_digest"], spec.sha256)
         count = kwargs["actual_bytes"]
+        if not part.exists():
+            # Bytes that disagree with the pin were discarded.
+            assert count == 0
+            checkpoints.append(count)
+            return real_checkpoint(spec, **kwargs)
         assert count <= synced_sizes.get(part.stat().st_ino, 0)
         checkpoints.append(count)
         return real_checkpoint(spec, **kwargs)
@@ -2984,7 +3027,11 @@ def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
             model_content_sha256="b" * 64,
             request_key="00000000-0000-4000-8000-000000000996",
         )
-        expected = 0 if ending == "fsync_error" else min(len(body), len(payload))
+        expected = (
+            0
+            if ending in {"fsync_error", "oversized"}
+            else min(len(body), len(payload))
+        )
         assert checkpoints[-1] == expected
         assert operation.progress["downloaded_bytes"] == expected
         assert (operation.state == "succeeded") == (ending == "complete")
@@ -3109,17 +3156,18 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
             )
 
         failed = download(998)
-        assert failed.state == "failed"
+        assert failed.state == "queued"
         assert failed.last_error is not None
         assert "test durability failure" in failed.last_error
         assert failed.progress["downloaded_bytes"] == 0
-        # A fresh attempt must not publish or request a range while retained
-        # bytes still cannot be synced, even if their hash already matches.
-        failed_again = download(999)
-        assert failed_again.state == "failed"
+        # The automatic retry must not publish or request a range while
+        # retained bytes still cannot be synced, even if their hash matches.
+        service.run_pending()
+        assert service.get_operation(failed.id).state == "queued"
         assert len(requests) == 1
         fail_sync[0] = False
-        recovered = download(1000)
+        service.run_pending()
+        recovered = service.get_operation(failed.id)
         assert recovered.state == "succeeded"
         if complete_tail:
             assert len(requests) == 1
@@ -3228,7 +3276,7 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
         client.close()
 
 
-def test_remove_model_refuses_active_preparation_without_cancelling_it(
+def test_remove_model_supersedes_an_older_download_of_the_same_set(
     cache, tmp_path: Path
 ):
     service, sessions = cache
@@ -3313,16 +3361,20 @@ def test_remove_model_refuses_active_preparation_without_cancelling_it(
         force=True,
         selector="vonk-forge/remove-model-a",
     )
-    with pytest.raises(ModelCacheConflict) as refused:
-        _remove_model(
-            service,
-            "vonk-forge/remove-model-a",
-            actor="operator",
-            request_key="00000000-0000-4000-8000-000000001033",
-            model_content_sha256=digest_a,
-        )
-    assert refused.value.code == "model_cache.removal_referenced"
-    assert service.get_operation(pending.id).state == "queued"
+    removal = _remove_model(
+        service,
+        "vonk-forge/remove-model-a",
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000001033",
+        model_content_sha256=digest_a,
+    )
+    # The newer removal supersedes the older in-flight download of the set.
+    assert service.get_operation(pending.id).state == "cancelled"
+    for _ in range(10):
+        if service.get_operation(removal.id).state == "succeeded":
+            break
+        service.run_pending()
+    assert service.get_operation(removal.id).state == "succeeded"
 
     with sessions() as session:
         assert (
@@ -3331,7 +3383,7 @@ def test_remove_model_refuses_active_preparation_without_cancelling_it(
                     ModelCacheSet.model_content_sha256 == digest_a,
                 )
             )
-            is not None
+            is None
         )
         assert (
             session.scalar(
@@ -3342,17 +3394,60 @@ def test_remove_model_refuses_active_preparation_without_cancelling_it(
             is not None
         )
         assert session.get(AgentNode, "spark-live") is not None
+    # The object shared with model B is retained.
     assert service._object_path(artifact["sha256"]).is_file()
+
+
+def test_model_removal_waits_for_in_use_sets_then_completes(
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    service, sessions = cache
+    model = "e" * 64
+    downloaded = _download(
+        service,
+        [_artifact(tmp_path, b"in use weights", model_content_sha256=model)],
+        model_content_sha256=model,
+        request_key="00000000-0000-4000-8000-000000001040",
+    )
+    assert downloaded.state == "succeeded"
+    set_digest = str(downloaded.artifact_set_sha256)
+    owners = {set_digest: ("installation 1",)}
+    real_reasons = model_cache_module.model_set_reference_reasons
+
+    def reasons(session, digests):
+        found = real_reasons(session, digests)
+        return {
+            digest: tuple(found.get(digest, ())) + owners.get(digest, ())
+            for digest in digests
+        }
+
+    monkeypatch.setattr(model_cache_module, "model_set_reference_reasons", reasons)
+    removal = service.remove_model_selector(
+        model, actor="operator", request_key="00000000-0000-4000-8000-000000001041"
+    )
+    for _ in range(3):
+        service.advance_removals(limit=10)
+        with sessions.begin() as session:
+            row = session.get(ModelCacheOperation, removal.id)
+            assert row is not None
+            row.payload = dict(row.payload) | {
+                "retry": dict(row.payload["retry"]) | {"next_retry_at": None}
+            }
+    waiting = service.get_operation(removal.id)
+    assert waiting.state in {"queued", "partial"}
+    assert waiting.failure is not None and waiting.failure["retryable"] is True
     with sessions() as session:
-        assert (
-            session.scalar(
-                select(ModelCacheOperation).where(
-                    ModelCacheOperation.request_key
-                    == "00000000-0000-4000-8000-000000001033"
-                )
-            )
-            is None
-        )
+        assert session.get(ModelCacheSet, set_digest) is not None
+
+    owners.clear()
+    service.advance_removals(limit=10)
+    for _ in range(10):
+        if service.get_operation(removal.id).state == "succeeded":
+            break
+        service.advance_removals(limit=10)
+    assert service.get_operation(removal.id).state == "succeeded"
+    with sessions() as session:
+        assert session.get(ModelCacheSet, set_digest) is None
 
 
 def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Path):
@@ -3445,7 +3540,7 @@ def test_model_removal_rejects_persisted_intent_drift_before_effects(
     assert service._object_path(str(artifact["sha256"])).read_bytes() == b"bound bytes"
 
 
-def test_model_removal_binds_digest_before_mutable_selector_resolution(
+def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
     cache,
 ):
     service, sessions = cache
@@ -3496,26 +3591,13 @@ def test_model_removal_binds_digest_before_mutable_selector_resolution(
         )
 
     request_key = "00000000-0000-4000-8000-000000001052"
-    with pytest.raises(ModelCacheConflict) as mismatch:
-        _remove_model(
-            service,
-            "vonk-forge/exact-removal",
-            actor="operator",
-            request_key=request_key,
-            model_content_sha256=digest_b,
-        )
-    assert mismatch.value.code == "model_cache.removal_identity_mismatch"
-    with sessions() as session:
-        assert (
-            session.scalar(select(func.count()).select_from(ModelCacheOperation)) == 0
-        )
-
     reviewed = service.review_model_removal("vonk-forge/exact-removal")
+    # A stale client-side identity is advisory: the selector resolves now.
     accepted = service.remove_model_selector(
         "vonk-forge/exact-removal",
         actor="operator",
         request_key=request_key,
-        model_content_sha256=digest_a,
+        model_content_sha256=digest_b,
         review_digest=reviewed.review_digest,
     )
     assert accepted.model_content_sha256 == digest_a
@@ -3549,13 +3631,12 @@ def test_model_removal_binds_digest_before_mutable_selector_resolution(
         review_digest=reviewed.review_digest,
     )
     assert replay.id == accepted.id
+    assert replay.model_content_sha256 == digest_a
     with pytest.raises(ModelCacheConflict) as reused:
         service.remove_model_selector(
-            "vonk-forge/exact-removal",
+            "vonk-forge/other-model",
             actor="operator",
             request_key=request_key,
-            model_content_sha256=digest_b,
-            review_digest="f" * 64,
         )
     assert reused.value.code == "model_cache.request_key_reused"
 

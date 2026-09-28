@@ -5047,6 +5047,18 @@
             ],
             "title": "Operation Kind"
           },
+          "retry_due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Due At"
+          },
           "retry_of_application_id": {
             "anyOf": [
               {
@@ -5378,6 +5390,51 @@
           "assessment"
         ],
         "title": "FleetProfileAssignmentAssessment",
+        "type": "object"
+      },
+      "FleetProfileAssignmentFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "assignment_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment Id"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "terminal": {
+            "default": false,
+            "title": "Terminal",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "FleetProfileAssignmentFailure",
         "type": "object"
       },
       "FleetProfileAssignmentInput": {
@@ -7095,6 +7152,14 @@
             "title": "Actor",
             "type": "string"
           },
+          "assignment_failures": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAssignmentFailure"
+            },
+            "maxItems": 128,
+            "title": "Assignment Failures",
+            "type": "array"
+          },
           "assignment_ids": {
             "items": {
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -7237,6 +7302,13 @@
               }
             ],
             "title": "Status Reason"
+          },
+          "stop_reissue_attempt": {
+            "default": 0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Stop Reissue Attempt",
+            "type": "integer"
           }
         },
         "required": [
@@ -10764,12 +10836,19 @@
       },
       "ModelCacheRemovalRequest": {
         "additionalProperties": false,
-        "description": "Exact content identity and request key for a model cache removal.",
+        "description": "Request key for removing the named model against current state.\n\n``model_content_sha256`` and ``review_digest`` are accepted for clients\nthat show a prior review; they are advisory and never refuse the request.",
         "properties": {
           "model_content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Content Sha256",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Content Sha256"
           },
           "request_key": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -10777,9 +10856,16 @@
             "type": "string"
           },
           "review_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Review Digest",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Digest"
           },
           "schema_version": {
             "const": 2,
@@ -10789,9 +10875,7 @@
           }
         },
         "required": [
-          "request_key",
-          "model_content_sha256",
-          "review_digest"
+          "request_key"
         ],
         "title": "ModelCacheRemovalRequest",
         "type": "object"
@@ -15711,9 +15795,16 @@
             "type": "string"
           },
           "review_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Review Digest",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Digest"
           },
           "schema_version": {
             "const": 2,
@@ -15728,8 +15819,7 @@
         },
         "required": [
           "request_key",
-          "with_model",
-          "review_digest"
+          "with_model"
         ],
         "title": "RecipeOperatorRequest",
         "type": "object"
@@ -20108,6 +20198,11 @@
             ],
             "title": "Final Verify Started At"
           },
+          "force_replan": {
+            "default": false,
+            "title": "Force Replan",
+            "type": "boolean"
+          },
           "item_index": {
             "default": 0,
             "maximum": 31.0,
@@ -20259,6 +20354,12 @@
             },
             "title": "Phase Results",
             "type": "array"
+          },
+          "phase_retry_generation": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Phase Retry Generation",
+            "type": "integer"
           },
           "preflight": {
             "anyOf": [
