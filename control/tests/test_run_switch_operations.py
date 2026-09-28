@@ -891,6 +891,63 @@ def test_run_switch_missing_target_is_terminal_with_clear_reason(
     assert "target node no longer exists" in (failed.status_reason or "")
 
 
+def test_inactive_target_waits_then_resumes_when_the_spark_returns(
+    tmp_path: Path,
+) -> None:
+    """A Spark that goes inactive parks the switch; its return resumes it."""
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    now = [NOW]
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        artifacts=CompleteArtifactInspector(),
+    )
+    service._clock = lambda: now[0]
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.state = "failed"
+
+    assert service._advance(operation.operation_id) is True
+    waiting = service.get(operation.operation_id)
+    assert waiting.state == "waiting"
+    assert "return to active state" in (waiting.status_reason or "")
+    assert waiting.result is not None and waiting.result.observation_due_at
+    due = waiting.result.observation_due_at
+    # Nothing happens before the backoff is due.
+    assert service._advance(operation.operation_id) is False
+
+    with sessions.begin() as session:
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.state = "active"
+    now[0] = due + timedelta(seconds=1)
+    assert service._advance(operation.operation_id) is True
+    resumed = service.get(operation.operation_id)
+    assert resumed.state != "waiting"
+    assert "return to active state" not in (resumed.status_reason or "")
+    for _ in range(40):
+        if not service._advance(operation.operation_id):
+            break
+    final = service.get(operation.operation_id)
+    assert final.state not in {"waiting", "failed"}, final.status_reason
+
+
 def test_child_activity_change_persists_without_clock_only_writes(
     tmp_path: Path,
 ) -> None:

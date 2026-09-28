@@ -59,6 +59,7 @@ class FleetProfileSwitchAdapterState:
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             state (Union[Unset, FleetProfileSwitchAdapterStateState]):  Default: 'queued'.
             status_reason (Union[None, Unset, str]):
+            stop_reissue_attempt (Union[Unset, int]):  Default: 0.
      """
 
     actor: str
@@ -81,6 +82,7 @@ class FleetProfileSwitchAdapterState:
     schema_version: Union[Literal[2], Unset] = 2
     state: Union[Unset, FleetProfileSwitchAdapterStateState] = 'queued'
     status_reason: Union[None, Unset, str] = UNSET
+    stop_reissue_attempt: Union[Unset, int] = 0
 
 
 
@@ -206,6 +208,8 @@ class FleetProfileSwitchAdapterState:
         else:
             status_reason = self.status_reason
 
+        stop_reissue_attempt = self.stop_reissue_attempt
+
 
         field_dict: dict[str, Any] = {}
 
@@ -244,6 +248,8 @@ class FleetProfileSwitchAdapterState:
             field_dict["state"] = state
         if status_reason is not UNSET:
             field_dict["status_reason"] = status_reason
+        if stop_reissue_attempt is not UNSET:
+            field_dict["stop_reissue_attempt"] = stop_reissue_attempt
 
         return field_dict
 
@@ -449,6 +455,8 @@ class FleetProfileSwitchAdapterState:
         status_reason = _parse_status_reason(d.pop("status_reason", UNSET))
 
 
+        stop_reissue_attempt = d.pop("stop_reissue_attempt", UNSET)
+
         fleet_profile_switch_adapter_state = cls(
             actor=actor,
             assignment_ids=assignment_ids,
@@ -470,6 +478,7 @@ class FleetProfileSwitchAdapterState:
             schema_version=schema_version,
             state=state,
             status_reason=status_reason,
+            stop_reissue_attempt=stop_reissue_attempt,
         )
 
         return fleet_profile_switch_adapter_state

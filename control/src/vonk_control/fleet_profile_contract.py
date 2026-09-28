@@ -774,6 +774,7 @@ class FleetProfileSwitchAdapterState(_StrictModel):
     observation_due_at: datetime | None = None
     observation_deadline_at: datetime | None = None
     pending_operation_ids: list[UuidId] = Field(default_factory=list, max_length=128)
+    stop_reissue_attempt: int = Field(default=0, ge=0, le=32)
     result: FleetProfileSwitchAdapterResult | None = None
 
     @model_validator(mode="after")

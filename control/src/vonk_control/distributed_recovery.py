@@ -720,6 +720,9 @@ def _singleton_recovery_authority(
         or accepted_start.mapping_generation != run.mapping_generation
         or accepted_start.run_generation != run.run_generation
         or accepted_start.image_digest != installation.image_digest
+        # The Job-level binding selects the Start; the exact per-node payload
+        # that recovery replays must name the same run plan.
+        or accepted_start.plan_digest != run.plan_digest
         or accepted_start.alias != run.alias
         or accepted_start.rank != run_node.rank
         or accepted_start.role != run_node.role

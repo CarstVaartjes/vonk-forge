@@ -3560,6 +3560,11 @@ export interface components {
             state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled";
             /** Status Reason */
             status_reason?: string | null;
+            /**
+             * Stop Reissue Attempt
+             * @default 0
+             */
+            stop_reissue_attempt: number;
         };
         /**
          * FleetProfileSwitchChildResult

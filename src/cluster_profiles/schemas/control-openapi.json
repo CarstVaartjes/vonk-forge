@@ -7274,6 +7274,13 @@
               }
             ],
             "title": "Status Reason"
+          },
+          "stop_reissue_attempt": {
+            "default": 0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Stop Reissue Attempt",
+            "type": "integer"
           }
         },
         "required": [

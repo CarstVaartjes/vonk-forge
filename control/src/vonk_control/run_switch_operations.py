@@ -6765,12 +6765,18 @@ class RunSwitchOperationService:
             try:
                 persisted_progress = _read_progress(row.result)
             except RunSwitchOperationConflict:
-                persisted_progress = _read_progress(row.payload.get("progress", {}))
-                persisted_progress["force_replan"] = True
+                # Unreadable evidence of what was issued is never re-planned
+                # from the accepted payload: a Start may already exist.
+                return False
             if (
                 plan is not None
                 and plan.allowed
                 and not persisted_progress.get("force_replan")
+            ):
+                return False
+            # Cancellation and newer intent are settled before any re-plan.
+            if persisted_progress.get("cancellation") or (
+                self._scope_intent_status(session, row) != "current"
             ):
                 return False
             due = persisted_progress.get("observation_due_at")
@@ -6839,15 +6845,25 @@ class RunSwitchOperationService:
             try:
                 progress = _read_progress(current.result)
             except RunSwitchOperationConflict:
-                progress = _read_progress(current.payload.get("progress", {}))
-                progress["force_replan"] = True
+                return False
             if (
                 current_plan is not None
                 and current_plan.allowed
                 and not progress.get("force_replan")
             ):
                 return False
-            if refreshed is not None and refreshed.allowed:
+            if progress.get("cancellation") or (
+                self._scope_intent_status(session, current) != "current"
+            ):
+                return False
+            # Target membership is fenced by the accepted workload ordinal on
+            # exactly these Sparks. A refreshed plan naming other Sparks is not
+            # this intent; wait (with backoff) until the plan matches again or a
+            # newer request supersedes it.
+            targets_changed = (refreshed is not None and refreshed.allowed) and sorted(
+                _plan_target_node_ids(refreshed)
+            ) != sorted(current.targets)
+            if refreshed is not None and refreshed.allowed and not targets_changed:
                 current.payload = {
                     **current.payload,
                     "plan": refreshed.model_dump(mode="json"),
@@ -6896,7 +6912,9 @@ class RunSwitchOperationService:
                 due = _next_replan(current.id, progress, now)
                 current.state = "waiting"
                 reasons = (
-                    "; ".join(reason.code for reason in refreshed.blockers[:8])
+                    "run-switch.plan-targets-changed"
+                    if targets_changed
+                    else "; ".join(reason.code for reason in refreshed.blockers[:8])
                     if refreshed is not None
                     else "run-switch.plan-refresh-unavailable"
                 )
@@ -6971,6 +6989,13 @@ class RunSwitchOperationService:
                 session.commit()
                 return True
             if intent_status == "waiting":
+                pending_due = progress.get("observation_due_at")
+                if (
+                    job.state == "waiting"
+                    and isinstance(pending_due, str)
+                    and now < _aware(datetime.fromisoformat(pending_due))
+                ):
+                    return False
                 due = _next_replan(job.id, progress, now)
                 job.state = "waiting"
                 job.status_reason = (
@@ -7010,11 +7035,19 @@ class RunSwitchOperationService:
                 if not child_id:
                     # Final verification observes an existing run and route;
                     # reopening this checkpoint cannot issue a new workload.
+                    # A due automatic wait (an inactive target Spark that has
+                    # returned, a background preparation, a backoff) resumes
+                    # the exact checkpoint: no child is outstanding, and the
+                    # phase key is unchanged, so re-entry is idempotent.
                     # Newer intent was checked above, and the persisted start
                     # deadline remains immutable.
-                    if progress.get("phase") != "final_verify":
+                    if progress.get("phase") != "final_verify" and not (
+                        job.state == "waiting" and isinstance(observation_due, str)
+                    ):
                         return False
                     job.state = "running"
+                    if progress.get("phase") != "final_verify":
+                        job.status_reason = None
                     job.updated_at = now
                     session.commit()
                 else:
@@ -7273,8 +7306,8 @@ class RunSwitchOperationService:
                     self._fail(
                         operation_id,
                         reason,
-                        retryable=classify(kind) is RecoveryDecision.RETRY,
                         checkpoint=(phase_index, item_index, child_id),
+                        failure_code=_child_failure_code(evidence),
                         child_evidence=evidence,
                         checkpoint_guard=checkpoint_job,
                     )
@@ -8868,6 +8901,29 @@ def _child_progress_payload(child: object) -> Mapping[str, object]:
     if isinstance(child_reason, str) and child_reason:
         payload["status_reason"] = child_reason[:512]
     return payload
+
+
+def _child_failure_code(evidence: Mapping[str, object]) -> str | None:
+    """Carry the child's typed error code; a security code anywhere wins."""
+
+    codes: list[str] = []
+    code = evidence.get("error_code")
+    if isinstance(code, str) and code:
+        codes.append(code)
+    for field in ("node_evidence", "launch_evidence"):
+        members = evidence.get(field)
+        if isinstance(members, Mapping):
+            codes.extend(
+                item["error_code"]
+                for item in members.values()
+                if isinstance(item, Mapping)
+                and isinstance(item.get("error_code"), str)
+                and item["error_code"]
+            )
+    return next(
+        (value for value in codes if is_security_failure(value)),
+        codes[0] if codes else None,
+    )
 
 
 def _child_failure_kind(child: object) -> FailureKind:
