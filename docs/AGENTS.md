@@ -13,8 +13,7 @@ releases, and how it resumes. Preserve bounded nonblocking coordination, child
 lease inheritance, stale-attempt fencing, and failure isolation. Do not claim
 that documentation or a timeout alone proves current code cannot deadlock.
 
-The [storage and coordination plan](plans/resilient-artifact-storage.md) tracks
-pending implementation. Distinguish target contracts from implemented behavior
+Distinguish target contracts from implemented behavior
 and tested/deployed evidence. Keep operator commands accurate until the matching
 implementation ships. Remove superseded architecture instructions and update
 their references; retain useful product rationale with an explicit historical

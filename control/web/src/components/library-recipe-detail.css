@@ -341,36 +341,6 @@
   margin: 0.35rem 0 0;
 }
 
-.library-reasons {
-  display: grid;
-  gap: 0.5rem;
-  list-style: none;
-  margin: 0.75rem 0;
-  padding: 0;
-}
-
-.library-reasons li {
-  background: #ffffff05;
-  border: 1px solid color-mix(in srgb, var(--info) 45%, var(--border));
-  border-radius: 0.55rem;
-  display: grid;
-  gap: 0.2rem;
-  min-width: 0;
-  padding: 0.55rem 0.65rem;
-}
-
-.library-reasons li span {
-  color: var(--text-muted);
-}
-
-.library-reasons .reason-warning {
-  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
-}
-
-.library-reasons .reason-error {
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
-}
-
 .placement-groups {
   display: grid;
   gap: 0.8rem;

@@ -387,7 +387,6 @@
 
 .library-compact,
 .library-compare-picker,
-.library-comparison,
 .library-compare-empty {
   background: var(--surface-panel, #101d1a);
   border: 1px solid var(--border);
@@ -397,12 +396,7 @@
   overflow: hidden;
 }
 
-.library-comparison {
-  contain: inline-size paint;
-}
-
-.library-compact-heading,
-.library-comparison-heading {
+.library-compact-heading {
   align-items: center;
   display: flex;
   gap: 1rem;
@@ -410,13 +404,11 @@
   padding: 1rem;
 }
 
-.library-compact-heading :where(h3, p),
-.library-comparison-heading :where(h3, p) {
+.library-compact-heading :where(h3, p) {
   margin: 0;
 }
 
-.library-compact-heading > span,
-.library-comparison-heading > p {
+.library-compact-heading > span {
   color: var(--text-muted);
   font-size: 0.78rem;
 }
@@ -498,64 +490,6 @@
 
 .library-compare-option small {
   color: var(--text-muted);
-}
-
-.library-comparison-scroll {
-  border-top: 1px solid var(--border);
-  contain: inline-size;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  width: 100%;
-}
-
-.library-comparison-scroll:focus-visible {
-  outline-offset: -3px;
-}
-
-.library-comparison table {
-  border-collapse: collapse;
-  min-width: 52rem;
-  width: 100%;
-}
-
-.library-comparison :where(th, td) {
-  border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  min-width: 13rem;
-  padding: 0.8rem;
-  text-align: left;
-  vertical-align: top;
-}
-
-.library-comparison :where(th, td):first-child {
-  background: #0b1713;
-  left: 0;
-  min-width: 8.5rem;
-  position: sticky;
-  width: 8.5rem;
-  z-index: 1;
-}
-
-.library-comparison thead th:first-child {
-  z-index: 2;
-}
-
-.library-comparison thead th:not(:first-child) {
-  background: linear-gradient(145deg, #14231f, #0c1714);
-}
-
-.library-comparison thead th strong,
-.library-comparison thead th small,
-.library-comparison td {
-  display: grid;
-  gap: 0.45rem;
-}
-
-.library-comparison thead .button {
-  justify-self: start;
-  min-height: 36px;
-  padding: 0.4rem 0.6rem;
 }
 
 .comparison-status {
@@ -1006,11 +940,6 @@
 
   .library-compare-picker-list {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .library-comparison :where(th, td):first-child {
-    left: auto;
-    position: static;
   }
 }
 

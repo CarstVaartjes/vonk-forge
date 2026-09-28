@@ -9,14 +9,11 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+from vonk_control.models import FleetProfileApplication, Job, RecipeRun
 
-from .test_cli_operator_walkthrough import (
-    _effect_counts,
-    _session_environment,
-    _walkthrough_app,
-)
-from .test_profile_load_installed_cli import _https_api_peer
+from .test_profile_load_installed_cli import _https_api_peer, _process_environment
+from .test_profile_load_submission import _profile_api
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 pytestmark = pytest.mark.lane
@@ -45,25 +42,24 @@ print(json.dumps({"node_count": len(nodes)}, separators=(",", ":")))
 """
 
 
+def _effect_counts(sessions) -> tuple[int, int, int]:
+    with sessions() as session:
+        return (
+            session.scalar(select(func.count()).select_from(Job)) or 0,
+            session.scalar(select(func.count()).select_from(FleetProfileApplication))
+            or 0,
+            session.scalar(select(func.count()).select_from(RecipeRun)) or 0,
+        )
+
+
 def test_installed_no_input_fleet_json_pipeline_is_read_only(
     installed_vonkctl: Path, postgres_engine, tmp_path: Path
 ) -> None:
-    sessions, app, headers, *_identities = _walkthrough_app(
-        postgres_engine, tmp_path / "owner-services"
-    )
+    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
     before_effects = _effect_counts(sessions)
 
-    with (
-        TestClient(app) as api,
-        _https_api_peer(tmp_path, api, headers) as (url, certificate, peer),
-    ):
-        environment = _session_environment(
-            installed_vonkctl=installed_vonkctl,
-            workspace=tmp_path,
-            url=url,
-            certificate=certificate,
-            headers=headers,
-        )
+    with _https_api_peer(tmp_path, api, headers) as (url, certificate, peer):
+        environment = _process_environment(tmp_path, url, certificate, headers)
         from tests.subprocess_environment import isolated_environment
 
         consumer_environment = isolated_environment(
@@ -115,7 +111,7 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
     assert consumer_stdout.count("\n") == 1
     summary = json.loads(consumer_stdout)
     assert isinstance(summary, dict)
-    assert summary["node_count"] == 1
+    assert summary["node_count"] == 2
     assert len(peer.calls) == 1
     method, path, _body = peer.calls[0]
     assert method == "GET"

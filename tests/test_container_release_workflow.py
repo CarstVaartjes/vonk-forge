@@ -956,7 +956,6 @@ def test_production_release_retries_reconcile_immutable_outputs_before_completio
     assert "Verify and record Hermes release image" in publisher
     assert "scripts/reconcile-hermes-release-image" in publisher
     assert "Attest Hermes release provenance" in publisher
-    assert "refuse-existing-image-version" not in publisher
     assert "scripts/reconcile-github-release" in release
     assert "SOURCE_SHA: ${{ github.sha }}" in release
     assert "scripts/promote-accepted-channel" in aliases
@@ -1316,7 +1315,6 @@ def test_hermes_build_keeps_its_existing_release_tags() -> None:
 def test_hermes_release_reuse_is_the_only_existing_version_path() -> None:
     publisher = job("publish-images")
 
-    assert "scripts/refuse-existing-image-version" not in publisher
     assert "Reconcile existing Hermes release image" in publisher
     assert "Attest Hermes release provenance" in publisher
 

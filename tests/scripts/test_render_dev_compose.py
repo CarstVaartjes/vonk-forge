@@ -102,12 +102,18 @@ def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
     assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
     assert document["services"]["caddy"]["configs"]
     assert "configs:" in text
+    images = [service["image"] for service in document["services"].values()]
+    # Every image is a literal: Vonk images carry their digest and third-party
+    # images an explicit version tag.
+    assert all("${" not in image for image in images)
     assert all(
-        isinstance(service, dict)
-        and isinstance(service.get("image"), str)
-        and "@sha256:" in service["image"]
-        and "${" not in service["image"]
-        for service in document["services"].values()
+        "@sha256:" in image
+        for image in images
+        if image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+    )
+    assert all(
+        ":" in image.rsplit("/", 1)[-1] and not image.endswith(":latest")
+        for image in images
     )
 
     for profile in ([], ["--profile", "hermes"]):

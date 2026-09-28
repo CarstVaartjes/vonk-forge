@@ -1,10 +1,8 @@
-"""Stable execution-harness compiler contracts for schema-v1 recipes."""
+"""Stable execution-harness projection contracts for schema-v1 recipes."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
 
 from ..runtime_writable_paths import EngineTelemetryContract, RuntimeWritablePath
 
@@ -51,19 +49,3 @@ class HarnessProjection:
     binding: HarnessBinding | None = None
     devices: tuple[str, ...] = ()
     host_network: bool = False
-
-
-class HarnessCompiler(Protocol):
-    slug: str
-    contract_version: int
-
-    def compile(
-        self,
-        recipe: Mapping[str, object],
-        distribution: Mapping[str, object],
-        patch: Mapping[str, object] | None,
-        parameters: Mapping[str, object],
-        topology: Mapping[str, object],
-        role: str,
-        rank: int,
-    ) -> HarnessProjection: ...
