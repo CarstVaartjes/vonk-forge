@@ -30,6 +30,8 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
 from vonk_control.models import AgentCertificate, AgentNode, AgentOperation, Base
 
+from tests.wire_probes import prebuilt_probe
+
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_agent_jobs_postgres import NODE_A, NODE_B, Clock, parent
 
@@ -291,29 +293,7 @@ def distribution_https(tmp_path: Path, controller):
 
 @pytest.fixture(scope="session")
 def restart_probe() -> Path:
-    path = os.environ.get("VONK_RESTART_RECOVERY_PROBE")
-    if path is None:
-        root = Path(__file__).resolve().parents[2]
-        subprocess.run(
-            [
-                "cargo",
-                "build",
-                "--locked",
-                "-p",
-                "vonk-agent",
-                "--example",
-                "restart_recovery_probe",
-            ],
-            cwd=root,
-            check=True,
-        )
-        path = str(
-            Path(os.environ.get("CARGO_TARGET_DIR", root / "target"))
-            / "debug/examples/restart_recovery_probe"
-        )
-    probe = Path(path)
-    assert probe.is_file() and os.access(probe, os.X_OK)
-    return probe
+    return prebuilt_probe("VONK_RESTART_RECOVERY_PROBE")
 
 
 def _probe_request(

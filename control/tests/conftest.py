@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -15,11 +16,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from .api_response_witness import (  # noqa: F401 - pytest discovers imported hooks.
-    pytest_runtest_teardown,
-    pytest_sessionfinish,
-    pytest_terminal_summary,
-)
 from .api_response_witness import (
     pytest_addoption as _api_response_addoption,
 )
@@ -29,9 +25,17 @@ from .api_response_witness import (
 from .api_response_witness import (
     pytest_runtest_setup as _api_response_runtest_setup,
 )
+from .api_response_witness import (  # noqa: F401 - pytest discovers imported hooks.
+    pytest_runtest_teardown,
+    pytest_terminal_summary,
+)
+from .api_response_witness import (
+    pytest_sessionfinish as _api_response_sessionfinish,
+)
 
 POSTGRES_IMAGE = "postgres:18.3"
 _POSTGRES_PASSWORD = "postgres"
+_POSTGRES_OWNER_LABEL = "dev.vonk-forge.control-tests.owner"
 _POSTGRES_PORT_TEMPLATE = (
     '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}'
 )
@@ -42,7 +46,7 @@ _REGISTERED_MARKERS = (
     "needs_buildx: requires the Docker Buildx plugin for image builds",
     "needs_systemd: requires systemd tools or a systemd host",
     "needs_recipe_library: requires VONK_RECIPE_LIBRARY_ROOT to name the canonical recipe checkout",
-    "needs_rust_probe: requires cargo to build a Python/Rust wire probe",
+    "needs_rust_probe: requires Rust wire probes built by scripts/tests/run_agent_wire_contracts.py",
     "needs_uv_cache: requires cached wheels for offline installed-CLI tests",
     "postgres: provisions a disposable PostgreSQL server through Docker",
 )
@@ -131,71 +135,158 @@ def _run(
     )
 
 
-@pytest.fixture(scope="session")
-def postgres_server_engine() -> Iterator[Engine]:
-    if shutil.which("docker") is None:
-        _docker_unavailable("Docker is required for PostgreSQL integration tests")
+class _PostgresServer:
+    """One disposable PostgreSQL server per test process.
 
-    try:
-        docker_info = _run(["docker", "info"], timeout=15, check=False)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        _docker_unavailable(f"Docker is unavailable: {error}")
-    if docker_info.returncode != 0:
-        detail = docker_info.stderr.strip() or docker_info.stdout.strip()
-        _docker_unavailable(f"Docker is unavailable: {detail}")
+    It starts when collection finishes, and only if a selected test needs it,
+    so container start-up and ``initdb`` are not charged to whichever test
+    happens to request the fixture first. The data directory is a tmpfs and
+    durability is off: the server is discarded after the session, and tests
+    that kill client processes rely on committed rows, not on crash safety of
+    the server itself.
+    """
 
-    container_name = f"vonk-control-tests-{uuid.uuid4().hex[:12]}"
-    try:
-        started = _run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-d",
-                "--name",
-                container_name,
-                "-e",
-                f"POSTGRES_PASSWORD={_POSTGRES_PASSWORD}",
-                "-p",
-                "127.0.0.1::5432",
-                POSTGRES_IMAGE,
-            ],
-            timeout=180,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-        pytest.fail(f"disposable PostgreSQL failed to start: {error}", pytrace=False)
+    container: str | None = None
+    engine: Engine | None = None
+    unavailable: str | None = None
 
-    container = started.stdout.strip()
-    admin_engine: Engine | None = None
-    try:
+    @classmethod
+    def start(cls) -> None:
+        if shutil.which("docker") is None:
+            cls.unavailable = "Docker is required for PostgreSQL integration tests"
+            return
+        try:
+            docker_info = _run(["docker", "info"], timeout=15, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            cls.unavailable = f"Docker is unavailable: {error}"
+            return
+        if docker_info.returncode != 0:
+            detail = docker_info.stderr.strip() or docker_info.stdout.strip()
+            cls.unavailable = f"Docker is unavailable: {detail}"
+            return
+        cls._stop_orphans()
+        try:
+            started = _run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "-d",
+                    "--name",
+                    f"vonk-control-tests-{uuid.uuid4().hex[:12]}",
+                    "--label",
+                    f"{_POSTGRES_OWNER_LABEL}={socket.gethostname()}:{os.getpid()}",
+                    "-e",
+                    f"POSTGRES_PASSWORD={_POSTGRES_PASSWORD}",
+                    "--tmpfs",
+                    "/var/lib/postgresql",
+                    "-p",
+                    "127.0.0.1::5432",
+                    POSTGRES_IMAGE,
+                    "-c",
+                    "fsync=off",
+                    "-c",
+                    "synchronous_commit=off",
+                    "-c",
+                    "full_page_writes=off",
+                ],
+                timeout=180,
+            )
+        except (
+            OSError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as error:
+            cls.unavailable = f"disposable PostgreSQL failed to start: {error}"
+            return
+        cls.container = started.stdout.strip()
         inspected = _run(
-            ["docker", "inspect", "-f", _POSTGRES_PORT_TEMPLATE, container],
+            ["docker", "inspect", "-f", _POSTGRES_PORT_TEMPLATE, cls.container],
             timeout=15,
         )
         port = inspected.stdout.strip()
-        admin_engine = create_engine(
+        engine = create_engine(
             "postgresql+psycopg://"
             f"postgres:{_POSTGRES_PASSWORD}@127.0.0.1:{port}/postgres",
             isolation_level="AUTOCOMMIT",
             pool_pre_ping=True,
         )
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 60
         while True:
             try:
-                with admin_engine.connect():
+                with engine.connect():
                     break
             except (OSError, SQLAlchemyError) as error:
                 if time.monotonic() >= deadline:
-                    pytest.fail(
-                        f"disposable PostgreSQL did not become ready: {error}",
-                        pytrace=False,
+                    engine.dispose()
+                    cls.unavailable = (
+                        f"disposable PostgreSQL did not become ready: {error}"
                     )
+                    return
                 time.sleep(0.1)
-        yield admin_engine
-    finally:
-        if admin_engine is not None:
-            admin_engine.dispose()
-        _run(["docker", "stop", container], timeout=30, check=False)
+        cls.engine = engine
+
+    @classmethod
+    def _stop_orphans(cls) -> None:
+        """Stop servers whose test process died without its session teardown."""
+
+        listed = _run(
+            [
+                "docker",
+                "ps",
+                "--filter",
+                f"label={_POSTGRES_OWNER_LABEL}",
+                "--format",
+                f'{{{{.ID}}}} {{{{.Label "{_POSTGRES_OWNER_LABEL}"}}}}',
+            ],
+            timeout=15,
+            check=False,
+        )
+        orphans = []
+        for line in listed.stdout.splitlines():
+            container, _, owner = line.partition(" ")
+            host, _, pid = owner.rpartition(":")
+            if host != socket.gethostname() or not pid.isdigit():
+                continue
+            try:
+                os.kill(int(pid), 0)
+            except ProcessLookupError:
+                orphans.append(container)
+            except PermissionError:
+                continue
+        if orphans:
+            _run(["docker", "stop", *orphans], timeout=60, check=False)
+
+    @classmethod
+    def stop(cls) -> None:
+        if cls.engine is not None:
+            cls.engine.dispose()
+            cls.engine = None
+        if cls.container is not None:
+            _run(["docker", "stop", cls.container], timeout=30, check=False)
+            cls.container = None
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    if any(item.get_closest_marker("postgres") for item in session.items) and (
+        sys.platform.startswith("linux")
+    ):
+        _PostgresServer.start()
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    _PostgresServer.stop()
+    _api_response_sessionfinish(session, exitstatus)
+
+
+@pytest.fixture(scope="session")
+def postgres_server_engine() -> Engine:
+    if _PostgresServer.engine is None:
+        _docker_unavailable(
+            _PostgresServer.unavailable or "PostgreSQL was not started for this session"
+        )
+    assert _PostgresServer.engine is not None
+    return _PostgresServer.engine
 
 
 @pytest.fixture
@@ -259,27 +350,8 @@ def _missing_prerequisite(marker: str, item: pytest.Item) -> str | None:
         configured = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
         if not configured or not (Path(configured) / "catalog-index.json").is_file():
             return "needs_recipe_library tests require VONK_RECIPE_LIBRARY_ROOT with catalog-index.json"
-    if marker == "needs_rust_probe" and shutil.which("cargo") is None:
-        return "needs_rust_probe tests require cargo to build the wire probe"
     if marker == "needs_rust_probe" and not sys.platform.startswith("linux"):
-        return "needs_rust_probe tests build Linux-only agent wire probes"
-    if marker == "needs_rust_probe" and Path(str(item.fspath)).name == (
-        "test_enrollment_wire_bridge.py"
-    ):
-        required_probes = {
-            "bootstrap_wire_probe": "VONK_BOOTSTRAP_WIRE_PROBE",
-            "enrollment_wire_probe": "VONK_ENROLLMENT_WIRE_PROBE",
-        }
-        if isinstance(item, pytest.Function):
-            for fixture, environment_name in required_probes.items():
-                if fixture not in item.fixturenames:
-                    continue
-                configured = os.environ.get(environment_name)
-                if not configured or not Path(configured).is_file():
-                    return (
-                        "needs_rust_probe tests require built enrollment probes; run "
-                        "scripts/tests/run_agent_wire_contracts.py"
-                    )
+        return "needs_rust_probe tests drive Linux-only agent wire probes"
     if marker == "postgres":
         if not sys.platform.startswith("linux"):
             return (
