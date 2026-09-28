@@ -852,18 +852,25 @@ is the Spark-local serving address LiteLLM forwards to; it is usually
 unreachable from a client and is never the endpoint. The web Profiles view
 shows the same base URL and model for a loaded profile.
 
-Clients authenticate to the gateway with a LiteLLM virtual key, never the
-Controller token. Create one scoped to the alias in the LiteLLM admin UI at
-`https://<controller host>/litellm/ui`, or on the NAS with the LiteLLM master
-key, keeping both out of shell history and output:
+Clients authenticate to the gateway with a gateway client key (a LiteLLM
+virtual key), never the Controller token. `vonkctl profile endpoint` prints a
+ready-to-paste client configuration but never a key. Manage keys with vonkctl;
+creating and revoking need the administrator role:
 
 ```sh
-docker exec vonk-forge-litellm-1 python3 -c 'import json,urllib.request as u; \
-k=open("/run/vonk-normalized-secrets/litellm-master-key").read().strip(); \
-b=json.dumps({"models":["ALIAS"],"key_alias":"CLIENT-NAME"}).encode(); \
-r=u.Request("http://127.0.0.1:4000/key/generate",data=b,headers={"Authorization":"Bearer "+k,"Content-Type":"application/json"}); \
-print(json.load(u.urlopen(r))["key"])' > client-key && chmod 600 client-key
+vonkctl key create laptop --output client-key   # private file, mode 600
+vonkctl key create ci --model ALIAS --expires 30d
+vonkctl key list
+vonkctl key revoke ci
 ```
+
+`key create` shows the key once: on stdout, or only in the new `--output` file.
+Without `--model` a key may use every gateway model, so it keeps working as
+profiles change; `--expires` takes a duration such as `30d` or `12h` and the
+default is never. `key list` shows names, models, creation, expiry, and last
+use, never a secret. The Controller keeps a key named `default` and writes it to
+`secrets/gateway/client-key` (mode 600) in the Compose bundle directory; a
+Controller restart recreates it if it was revoked or lost.
 
 Then `GET https://<controller host>/v1/models` with `Authorization: Bearer
 <key>` lists the alias, and `POST /v1/chat/completions` serves it.

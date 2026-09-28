@@ -163,6 +163,13 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
                 "target": "/offhost",
             }:
                 continue
+            if name == "control-api" and volume == {
+                "type": "bind",
+                "source": "./secrets/gateway",
+                "target": "/gateway-secrets",
+                "bind": {"create_host_path": True},
+            }:
+                continue
             source = _volume_source(volume)
             if source is not None and (
                 source.startswith((".", "/", "~")) or "/" in source

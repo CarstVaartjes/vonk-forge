@@ -87,6 +87,7 @@ from .fleet_projection import (
 )
 from .fleet_stream import parse_last_event_id
 from .fleet_stream_contract import FleetStreamEvent
+from .gateway_keys import GatewayKeyError, GatewayKeyService, install_gateway_key_routes
 from .installation_reconciliation_api import (
     install_installation_reconciliation_routes,
 )
@@ -551,6 +552,7 @@ def create_app(
     browser_auth: BrowserAuthService | None = None,
     model_cache: Any | None = None,
     recipe_image_availability: Any | None = None,
+    gateway_keys: GatewayKeyService | None = None,
     lifespan: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(
@@ -871,6 +873,9 @@ def create_app(
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
         audits=audits,
+    )
+    install_gateway_key_routes(
+        app, actor_dependency=authenticated_actor, service=gateway_keys
     )
     install_failure_evidence_routes(
         app,
@@ -1838,14 +1843,38 @@ def production_app() -> FastAPI:
             except TimeoutError:
                 continue
 
+    gateway_keys = GatewayKeyService()
+
+    async def ensure_default_gateway_key() -> None:
+        # LiteLLM starts after the API; retry until the default client key
+        # exists and matches its secrets file, then stop.
+        delay = 5.0
+        while not automatic_sync_stop.is_set():
+            try:
+                if await asyncio.to_thread(gateway_keys.ensure_default):
+                    _LOGGER.info("default gateway client key is ready")
+                return
+            except (GatewayKeyError, OSError) as error:
+                _LOGGER.warning(
+                    "default gateway client key not ready: %s; retrying in %s seconds",
+                    error,
+                    delay,
+                )
+            try:
+                await asyncio.wait_for(automatic_sync_stop.wait(), timeout=delay)
+            except TimeoutError:
+                delay = min(delay * 2, 300.0)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         nonlocal automatic_sync_task
         automatic_sync_task = asyncio.create_task(run_automatic_catalog_sync())
+        default_key_task = asyncio.create_task(ensure_default_gateway_key())
         try:
             yield
         finally:
             automatic_sync_stop.set()
+            await default_key_task
             if automatic_sync_task is not None:
                 await automatic_sync_task
             model_cache.close()
@@ -1907,6 +1936,7 @@ def production_app() -> FastAPI:
         agent_upgrades=agent_upgrades,
         model_cache=model_cache,
         recipe_image_availability=recipe_image_production.service,
+        gateway_keys=gateway_keys,
         lifespan=lifespan,
     )
     web_root = Path(__file__).resolve().parent / "web"

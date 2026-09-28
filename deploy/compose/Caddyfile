@@ -180,6 +180,16 @@ http://:8084 {
 	respond 404
 }
 
+# The Controller manages inference gateway client keys through this relay.
+# Only LiteLLM's key routes pass; LiteLLM still requires its master key.
+http://:8086 {
+	@litellm_key_admin path /key/generate /key/list /key/info /key/delete
+	handle @litellm_key_admin {
+		reverse_proxy litellm:4000
+	}
+	respond 404
+}
+
 # Secure remote browser traffic arrives from Tailscale over the private
 # tailnet-web-edge network. Tailscale terminates HTTPS before this HTTP
 # listener; Lab mode also serves the control hostname on the local-CA HTTPS
