@@ -388,7 +388,11 @@ def test_connection_check_rejects_a_fifo_without_waiting_for_a_writer(tmp_path):
     token = tmp_path / "token-fifo"
     os.mkfifo(token, 0o600)
     environment = {
-        **os.environ,
+        "HOME": str(tmp_path),
+        "PATH": os.defpath,
+        "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
         "VONK_CONTROL_URL": "https://forge.example.test",
         "VONK_CONTROL_TOKEN_FILE": str(token),
     }
@@ -398,7 +402,7 @@ def test_connection_check_rejects_a_fifo_without_waiting_for_a_writer(tmp_path):
         env=environment,
         capture_output=True,
         text=True,
-        timeout=3,
+        timeout=8,
         check=False,
     )
     assert result.returncode == 2

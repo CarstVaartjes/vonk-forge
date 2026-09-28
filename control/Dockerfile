@@ -86,6 +86,8 @@ COPY control/src ./src
 COPY control/alembic.ini ./alembic.ini
 COPY control/migrations ./migrations
 COPY --from=web /web/dist ./src/vonk_control/web
+# The repository image build runs scripts/build-control-wheel before invoking
+# Docker so this local dependency exists and has the digest pinned in uv.lock.
 COPY inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl /wheels/
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends git \

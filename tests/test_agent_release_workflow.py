@@ -216,6 +216,7 @@ def test_slot_manifest_signer_is_absent() -> None:
     assert not (ROOT / "scripts/sign-agent-release").exists()
 
 
+@pytest.mark.needs_dpkg_deb
 def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> None:
     build_digest = "sha256:" + "b" * 64
     binaries = tmp_path / "binaries"
@@ -385,6 +386,7 @@ def test_prebuild_authority_rejects_non_ed25519_with_matching_spki_hash(
     assert {path.name for path in runner_temp.iterdir()} == {"vonk-agent-release.pem"}
 
 
+@pytest.mark.needs_dpkg_deb
 def test_prebuild_authority_matches_signing_ed25519_key_id(tmp_path: Path) -> None:
     private_key = tmp_path / "ed25519.pem"
     generate_private_key(private_key, "ED25519")

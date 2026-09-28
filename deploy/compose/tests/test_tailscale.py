@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -12,6 +13,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose"
 TAILSCALE_IMAGE = "tailscale/tailscale:v1.102.3"
+
+
+@pytest.fixture
+def short_socket_directory():
+    with tempfile.TemporaryDirectory(prefix="vk-", dir="/tmp") as directory:
+        yield Path(directory)
 
 
 def test_default_tailscale_image_matches_the_audited_lock() -> None:
@@ -196,8 +203,10 @@ def _wait_for_service_state(
     pytest.fail(f"Tailscale service state did not converge: {actual}")
 
 
-def test_default_gateway_reconciles_only_the_vonk_service(tmp_path: Path) -> None:
-    socket_path = tmp_path / "tailscaled.sock"
+def test_default_gateway_reconciles_only_the_vonk_service(
+    tmp_path: Path, short_socket_directory: Path
+) -> None:
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     calls = tmp_path / "calls.log"
@@ -250,10 +259,10 @@ def test_default_gateway_reconciles_only_the_vonk_service(tmp_path: Path) -> Non
 
 
 def test_unavailable_hermes_with_stale_advertisements_is_withdrawn_before_exact_return(
-    tmp_path: Path,
+    tmp_path: Path, short_socket_directory: Path
 ) -> None:
     """Catches an exact Serve map hiding stale Hermes AdvertiseServices."""
-    socket_path = tmp_path / "tailscaled.sock"
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     state, calls = _write_stateful_tailscale(tmp_path)
@@ -532,8 +541,10 @@ def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
     }
 
 
-def test_configurator_uses_distinct_overridden_service_names(tmp_path: Path) -> None:
-    socket_path = tmp_path / "tailscaled.sock"
+def test_configurator_uses_distinct_overridden_service_names(
+    tmp_path: Path, short_socket_directory: Path
+) -> None:
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     state, calls = _write_stateful_tailscale(tmp_path)
@@ -607,9 +618,9 @@ def test_configurator_rejects_invalid_or_duplicate_service_names(
 
 
 def test_unapproved_advertisement_does_not_claim_service_host_readiness(
-    tmp_path: Path,
+    tmp_path: Path, short_socket_directory: Path
 ) -> None:
-    socket_path = tmp_path / "tailscaled.sock"
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     fake = tmp_path / "tailscale"
@@ -643,9 +654,9 @@ def test_unapproved_advertisement_does_not_claim_service_host_readiness(
 
 
 def test_service_host_mapping_without_primary_routes_is_healthy(
-    tmp_path: Path,
+    tmp_path: Path, short_socket_directory: Path
 ) -> None:
-    socket_path = tmp_path / "tailscaled.sock"
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     fake = tmp_path / "tailscale"
@@ -689,12 +700,13 @@ def test_service_host_mapping_without_primary_routes_is_healthy(
 )
 def test_pending_advertisement_is_acceptance_only(
     tmp_path: Path,
+    short_socket_directory: Path,
     require_service_host: str,
     ephemeral: str,
     expected_returncode: int,
 ) -> None:
     """Only ephemeral no-client acceptance may ignore advertised=false."""
-    socket_path = tmp_path / "tailscaled.sock"
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     fake = tmp_path / "tailscale"
@@ -739,11 +751,12 @@ def test_pending_advertisement_is_acceptance_only(
 )
 def test_empty_pending_service_map_is_ephemeral_acceptance_only(
     tmp_path: Path,
+    short_socket_directory: Path,
     require_service_host: str,
     ephemeral: str,
     expected_returncode: int,
 ) -> None:
-    socket_path = tmp_path / "tailscaled.sock"
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     fake = tmp_path / "tailscale"
@@ -800,9 +813,9 @@ def test_service_host_bypass_requires_ephemeral_gateway() -> None:
 
 
 def test_configurator_re_advertises_pending_service_host(
-    tmp_path: Path,
+    tmp_path: Path, short_socket_directory: Path
 ) -> None:
-    socket_path = tmp_path / "tailscaled.sock"
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     repaired = tmp_path / "repaired"
@@ -849,9 +862,9 @@ def test_configurator_re_advertises_pending_service_host(
 
 
 def test_configurator_replaces_exact_map_for_stale_primary_route(
-    tmp_path: Path,
+    tmp_path: Path, short_socket_directory: Path
 ) -> None:
-    socket_path = tmp_path / "tailscaled.sock"
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     repaired = tmp_path / "repaired"
@@ -898,8 +911,10 @@ def test_configurator_replaces_exact_map_for_stale_primary_route(
     assert repaired.is_file()
 
 
-def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> None:
-    socket_path = tmp_path / "tailscaled.sock"
+def test_configurator_repairs_plaintext_or_extra_service_map(
+    tmp_path: Path, short_socket_directory: Path
+) -> None:
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     log = tmp_path / "calls.log"
@@ -970,9 +985,9 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
 
 
 def test_configurator_advertises_hermes_when_both_profile_endpoints_are_available(
-    tmp_path: Path,
+    tmp_path: Path, short_socket_directory: Path
 ) -> None:
-    socket_path = tmp_path / "tailscaled.sock"
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     calls = tmp_path / "calls.log"
@@ -1080,10 +1095,10 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
 
 
 def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_safe(
-    tmp_path: Path,
+    tmp_path: Path, short_socket_directory: Path
 ) -> None:
     """Catches TCP-only readiness, stale advertisements, and shared scratch files."""
-    socket_path = tmp_path / "tailscaled.sock"
+    socket_path = short_socket_directory / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
     daemon_socket.bind(str(socket_path))
     state, calls = _write_stateful_tailscale(tmp_path)

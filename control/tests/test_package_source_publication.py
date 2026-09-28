@@ -7,6 +7,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [
     str(ROOT / path)
@@ -18,9 +22,6 @@ from agent_package_source_publication import package_source
 from vonk_control.agent_package_source import load_package_source
 
 
-@unittest.skipUnless(
-    Path("/usr/bin/dpkg-deb").exists(), "Debian package producer runs in OrbStack"
-)
 class PackageSourcePublicationTests(unittest.TestCase):
     def test_signed_deb_producer_bytes_are_consumed_at_exact_binary_lookup(self):
         from test_agent_deb import (

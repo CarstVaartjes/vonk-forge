@@ -114,6 +114,7 @@ def test_installed_stale_review_is_shown_and_never_admitted_or_replayed(
             environment,
             tmp_path,
             answer="yes",
+            review_content=old_digest,
         )
         assert edit_status == 200
         assert stale_status == 2

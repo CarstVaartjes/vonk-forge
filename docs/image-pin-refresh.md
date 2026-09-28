@@ -10,8 +10,9 @@ the manual procedure for a human refreshing a pin deliberately.
 `deploy/compose/images.lock.json` is the single inventory. Its `images` mapping
 holds the Compose runtime images and its `build_bases` mapping holds the images
 the release Dockerfiles build `FROM`. `scripts/verify-supply-chain` binds the
-lock into `inventory/sbom/manifest.json` and rejects any entry that pins no
-explicit version.
+lock to the Compose and Dockerfile defaults and rejects unpinned or floating
+references. Generated SBOM manifests are CI/release artifacts, not committed
+source files.
 
 ## The pins and where they live
 
@@ -153,8 +154,9 @@ Dockerfile and `scripts/verify-controller-skopeo` check them.
 5. Update the tests listed in the table, then the annotations in
    `scripts/verify-controller-skopeo` (pinned source reference, both expected
    child digests, and the index label check).
-6. Regenerate the bound evidence:
-   `uv run --frozen python scripts/verify-supply-chain --write-manifest`.
+6. Run the supply-chain verifier. CI generates the SBOM and lock digest
+   manifest from the reviewed lockfiles and attaches them to a release; no
+   generated file needs to be staged locally.
 7. Run the verification below and review `git diff`.
 
 ## Verify

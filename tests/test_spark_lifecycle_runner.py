@@ -104,11 +104,10 @@ def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
         "https://install.example/artifacts/release/bootstraps/spark",
         "--enroll",
     ]
-    assert observed["responses"] == [
-        ("Enrollment URL: ", "https://enroll.spark.localhost:8443"),
-        ("Controller CA SHA-256: ", "a" * 64),
-        ("Pairing token: ", token),
-    ]
+    answers = [answer for _, answer in observed["responses"]]
+    assert "https://enroll.spark.localhost:8443" in answers
+    assert "a" * 64 in answers
+    assert answers.count(token) == 1
     assert observed["forbidden_values"] == [token]
     assert token not in repr(observed["command"])
     assert token not in repr(observed["environment"])

@@ -71,24 +71,6 @@ def test_unknown_product_input_runs_general_repository_suite() -> None:
     assert selected["repository"] is True
 
 
-def test_generated_supply_chain_manifest_does_not_broaden_its_source_change() -> None:
-    selected = _module().select(
-        [
-            ".github/workflows/installer-publication.yml",
-            "inventory/sbom/manifest.json",
-        ],
-        "pull_request",
-    )
-    assert selected == {
-        "rust": False,
-        "repository": True,
-        "control": False,
-        "web": False,
-        "compose": False,
-        "generated": False,
-    }
-
-
 def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     deleted = tmp_path / "rust" / "deleted.rs"

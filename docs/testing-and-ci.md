@@ -34,6 +34,28 @@ Run `git diff --check` before committing. Use the active task worktree for all
 commands and a writable task-specific cache. Keep `tests` and `control/tests`
 in separate invocations.
 
+For the complete local repository and Controller pytest suites, run:
+
+```bash
+scripts/test-local
+```
+
+The local `control` project refers to the ignored protocol wheel under
+`inventory/wheels`. `scripts/test-local` builds and verifies it automatically.
+For direct `uv sync --project control` or `uv run --project control` commands,
+run `scripts/build-control-wheel` once first; it also checks the wheel against
+the hash locked in `control/uv.lock`.
+
+On Linux, this runs both suites in full. On macOS, it runs portable tests on
+the host and sends tests marked `linux_only`, `needs_systemd`,
+`needs_rust_probe`, or `postgres` to the `vonk-ci` OrbStack VM when available.
+It prints an explicit prerequisite skip if the VM is unavailable; CI must
+provide its equivalent Linux lane and required recipe checkout, and fail when
+either is missing. The VM uses task-specific uv and Cargo directories under
+`$HOME` to isolate Python and Rust artifacts. Set
+`VONK_RECIPE_LIBRARY_ROOT` when the sibling
+checkout is outside `/opt/vonk-forge-recipes`.
+
 ### Local Linux and container testing
 
 On macOS, use OrbStack for container-backed tests before treating a Linux-only
@@ -160,6 +182,7 @@ UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --frozen ruff chec
 
 # Python types. Pyright reads [tool.pyright] and resolves imports from the
 # control virtualenv, so sync that project once first.
+scripts/build-control-wheel
 UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
   uv sync --project control --frozen
 UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache scripts/check-python-types
@@ -172,6 +195,7 @@ npm run build --prefix control/web
 # Rust wire structures: fail if they no longer match the Pydantic schemas.
 # This runs the typify code generator with cargo, then compares its output.
 # The generator runs on macOS too; it does not build the Linux-only agent.
+scripts/build-control-wheel
 UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
   uv run --project control --frozen --with-editable . \
   python scripts/generate-agent-wire --check
@@ -235,9 +259,11 @@ success for missing environment inputs.
 
 ### Supply-chain verification
 
-Run `scripts/verify-supply-chain --json` for generated release inputs; CI runs
-the same verifier. Regenerate curated inventory when its inputs change and
-expect a no-op for changes outside that set. See the
+Run `scripts/verify-supply-chain --json` to validate authored lockfiles, the
+third-party contract wheel digest, and image pins. CI builds the protocol
+wheel, generates SPDX documents and a digest manifest, and uploads them as
+verified release evidence. These generated files are not committed or staged
+by the pre-commit hook. See the
 [development workflow](runbooks/development-workflow.md#generated-artifacts-and-release-evidence).
 
 ## What earns a test

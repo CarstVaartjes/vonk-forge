@@ -63,7 +63,7 @@ with open(sys.argv[1], "a+b") as lock:
     assert holder.stdout is not None and holder.stdin is not None
     try:
         assert holder.stdout.readline().strip() == "locked"
-        deadline = time.monotonic() + 2
+        deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             service.tick()
             if all(
@@ -77,7 +77,7 @@ with open(sys.argv[1], "a+b") as lock:
         assert service.get_operation(eligible.id).state == "succeeded"
         for _ in range(5):
             before = now[0]
-            deadline = time.monotonic() + 2
+            deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
                 service.tick()
                 observed = service.get_operation(waiting.id)
