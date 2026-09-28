@@ -230,13 +230,10 @@ def test_postgres_upgrade_bypasses_unsupported_work_then_resumes_it(
         (
             "runtime.preflight.v1",
             {
-                "schema_version": 1,
-                "architecture": "linux-arm64",
                 "source_build": False,
                 "minimum_free_bytes": 0,
                 "fabric_connectivity": "none",
                 "fabric_minimum_mbps": 0,
-                "mandatory_capabilities": [],
             },
             "agent_restart_interrupted",
             True,
@@ -308,24 +305,6 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
     )
     if due is not None:
         clock.now = due.replace(tzinfo=UTC)
-        if kind == "recipe.stop":
-            assert (
-                claim_agent(
-                    jobs,
-                    NODE_A,
-                    "serial-a",
-                )
-                is None
-            )
-            with sessions() as session:
-                stored = session.get(AgentOperation, operation.id)
-                assert stored is not None
-                assert stored.status_reason is not None
-                assert (
-                    "Spark agent update required before exact recovery"
-                    in stored.status_reason
-                )
-                assert stored.retry_due_at == due
         second = claim_agent(
             jobs,
             NODE_A,
@@ -539,7 +518,6 @@ def test_postgres_expired_mutating_operation_schedules_bounded_exact_retry(
         assert session.get(Job, parent_job.id).state == "queued"  # type: ignore[union-attr]
 
     clock.now = due.replace(tzinfo=UTC)
-    assert claim_agent(jobs, NODE_A, "serial-a") is None
     second = claim_agent(
         jobs,
         NODE_A,

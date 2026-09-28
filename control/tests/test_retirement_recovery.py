@@ -137,7 +137,7 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
 
     # A delayed start success is historical evidence, never permission to
     # resurrect the retired run or give its unobserved memory to a replacement.
-    late = _result(claim, {"evidence": evidence})
+    late = _result(claim, evidence)
     with pytest.raises(StaleAgentAttempt):
         jobs.record_result(late)
     assert jobs.record_late_result(late)
@@ -392,7 +392,7 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
             _required(session.get(RecipeInstallation, install.owner_id)).state
             != "uninstalled"
         )
-        child = _required(session.get(AgentOperation, cleanup.operation_id))
+        child = _required(session.get(AgentOperation, fenced_operation(sessions, cleanup).id))
         assert child.state == "failed" and child.retry_due_at is None
         assert (
             session.scalar(
