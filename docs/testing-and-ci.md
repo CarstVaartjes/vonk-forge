@@ -73,7 +73,9 @@ installed `vonkctl` as separate processes against an HTTPS Controller peer get
 remove repeated work (build or start once per session, inject clocks instead
 of sleeping, shrink fixtures to the boundary under test). On a machine that is
 knowingly overloaded, `--test-budget-scale=2` (or `0` to disable) relaxes the
-check locally; CI always runs at the default scale.
+check locally. CI runs at the default scale but, because shared runners vary in
+speed, fails a test only above twice its budget and reports one between the
+budget and twice it as a warning (summary line and `::warning::` annotation).
 
 No test builds a container image. Checks that need the real Controller or
 worker image carry `@pytest.mark.built_image` and take the image from

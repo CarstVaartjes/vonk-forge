@@ -12,11 +12,14 @@ fail unrelated tests later in the same worker. Hung tests are still stopped by
 pytest-timeout's much longer ``timeout`` from the pytest configuration.
 
 ``--test-budget-scale`` multiplies every budget (``0`` disables the check) for
-a machine that is knowingly overloaded; CI runs at the default scale.
+a machine that is knowingly overloaded. Shared CI runners vary in speed, so in
+CI (``CI`` set) a test fails only above twice its budget; between the budget and
+twice it, the run reports a warning instead.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from collections.abc import Generator
@@ -27,6 +30,7 @@ DEFAULT_BUDGET_SECONDS = 10.0
 MAX_BUDGET_SECONDS = 60.0
 
 _SETUP_DURATION = pytest.StashKey[float]()
+_WARNING_PROPERTY = "vonk-test-budget-warning"
 _PLUGIN_NAME = "vonk-test-budget"
 
 
@@ -129,12 +133,41 @@ def pytest_runtest_makereport(
         return report
     budget = budget_seconds(item) * scale
     elapsed = item.stash.get(_SETUP_DURATION, 0.0) + own_duration
-    if elapsed > budget:
-        report.outcome = "failed"
-        report.longrepr = (
-            f"test took {elapsed:.1f}s (setup and call, excluding shared "
-            f"session fixtures), over its {budget:g}s budget; make it faster, "
-            "or mark it @pytest.mark.slow(<seconds>) with a comment saying why "
-            "(see docs/testing-and-ci.md)"
-        )
+    if elapsed <= budget:
+        return report
+    message = (
+        f"test took {elapsed:.1f}s (setup and call, excluding shared "
+        f"session fixtures), over its {budget:g}s budget; make it faster, "
+        "or mark it @pytest.mark.slow(<seconds>) with a comment saying why "
+        "(see docs/testing-and-ci.md)"
+    )
+    if _in_ci() and elapsed <= 2 * budget:
+        report.user_properties.append((_WARNING_PROPERTY, f"{item.nodeid}: {message}"))
+        return report
+    report.outcome = "failed"
+    report.longrepr = message
     return report
+
+
+def _in_ci() -> bool:
+    return os.environ.get("CI", "").lower() not in ("", "0", "false")
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    # Also runs in the xdist controller, which receives the worker's properties.
+    for name, value in report.user_properties:
+        if name == _WARNING_PROPERTY:
+            _CONFIG_WARNINGS.append(str(value))
+
+
+_CONFIG_WARNINGS: list[str] = []
+
+
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    if not _CONFIG_WARNINGS:
+        return
+    terminalreporter.section("tests over their time budget (warning in CI)")
+    for warning in _CONFIG_WARNINGS:
+        terminalreporter.line(warning)
+        # GitHub Actions annotation.
+        terminalreporter.line(f"::warning::{warning}")
