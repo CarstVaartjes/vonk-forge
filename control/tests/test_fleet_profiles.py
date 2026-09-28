@@ -258,10 +258,8 @@ def test_profile_application_read_rejects_malformed_persisted_plan_and_result() 
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-    preview = service.preview(profile.id)
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(701),
         actor="admin",
     )
@@ -296,10 +294,8 @@ def test_profile_worker_marks_malformed_persisted_plan_failed() -> None:
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-    preview = service.preview(profile.id)
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(702),
         actor="admin",
     )
@@ -325,10 +321,8 @@ def test_profile_worker_marks_malformed_persisted_progress_failed() -> None:
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-    preview = service.preview(profile.id)
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(705),
         actor="admin",
     )
@@ -360,10 +354,8 @@ def test_profile_application_read_requires_result_for_succeeded_state() -> None:
         sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
     )
     profile = service.create(_input(revision_id), actor="admin")
-    preview = service.preview(profile.id)
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(703),
         actor="admin",
     )
@@ -819,7 +811,6 @@ def test_profile_admission_refuses_a_missing_exact_build() -> None:
     with pytest.raises(FleetProfileConflict, match="build.consumer_invalid"):
         service.apply(
             profile.id,
-            plan_digest=preview.plan_digest,
             request_key=_uuid(40),
             actor="admin",
         )
@@ -839,10 +830,8 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
         ),
     )
     profile = service.create(_input(revision_id), actor="admin")
-    preview = service.preview(profile.id)
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(40),
         actor="admin",
     )
@@ -876,10 +865,8 @@ def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
     profile = service.create(_input(revision_id), actor="admin")
     assert service.get(profile.id).assignments[0].observed_state == "Not loaded"
 
-    preview = service.preview(profile.id)
     service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(441),
         actor="admin",
     )
@@ -921,10 +908,8 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
         saved_only = service.endpoint_intent(session, profile.number)
     assert saved_only.assignments == ()
 
-    preview = service.preview(profile.id)
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(440),
         actor="admin",
     )
@@ -1053,7 +1038,6 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
 
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(42),
         actor="admin",
     )
@@ -1111,17 +1095,13 @@ def test_new_profile_load_supersedes_older_queued_scope_by_acceptance_order() ->
         _input(revision_id).model_copy(update={"name": "Newer choice"}),
         actor="admin",
     )
-    first_preview = service.preview(first_profile.id)
     first = service.apply(
         first_profile.id,
-        plan_digest=first_preview.plan_digest,
         request_key=_uuid(971),
         actor="admin",
     )
-    second_preview = service.preview(second_profile.id)
     second = service.apply(
         second_profile.id,
-        plan_digest=second_preview.plan_digest,
         request_key=_uuid(972),
         actor="admin",
     )
@@ -1145,7 +1125,6 @@ def test_parked_profile_load_fences_workload_before_admission_retry(
     adapter = _SwitchAdapter()
     service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
     profile = service.create(_input(revision_id), actor="admin")
-    preview = service.preview(profile.id)
     original_queue = FleetProfileService._queue_application
 
     def stay_busy(self, reviewed, **kwargs):
@@ -1154,7 +1133,6 @@ def test_parked_profile_load_fences_workload_before_admission_retry(
     monkeypatch.setattr(FleetProfileService, "_queue_application", stay_busy)
     parked = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(973),
         actor="admin",
     )
@@ -1183,7 +1161,6 @@ def test_parked_profile_load_rechecks_fencing_after_ordinal_is_bound(
         sessions, clock=lambda: now[0], switch_adapter=adapter
     )
     profile = service.create(_input(revision_id), actor="admin")
-    preview = service.preview(profile.id)
 
     def stay_busy(self, reviewed, **kwargs):
         raise FleetProfileAdmissionBusy("test admission owner")
@@ -1191,7 +1168,6 @@ def test_parked_profile_load_rechecks_fencing_after_ordinal_is_bound(
     monkeypatch.setattr(FleetProfileService, "_queue_application", stay_busy)
     parked = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(974),
         actor="admin",
     )
@@ -1230,7 +1206,6 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
     monkeypatch.setattr(FleetProfileService, "_queue_application", stay_busy)
     first = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(976),
         actor="admin",
     )
@@ -1248,7 +1223,6 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
     )
     second = service.apply(
         profile.id,
-        plan_digest=refreshed.plan_digest,
         request_key=_uuid(977),
         actor="admin",
     )
@@ -1276,7 +1250,6 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
         profile.number,
         request_key=_uuid(975),
         actor="admin",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
     now += timedelta(seconds=1)
     with sessions.begin() as session:
@@ -1291,7 +1264,6 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
         profile.number,
         request_key=_uuid(976),
         actor="admin",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
     assert second.state == "queued"
     assert second.progress.workload_intent_ordinal == 2
@@ -1302,7 +1274,6 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
             profile.number,
             request_key=_uuid(976),
             actor="admin",
-            expected_plan_digest=second.progress.intended_profile.reviewed_plan_digest,
         )
         == second
     )
@@ -1318,7 +1289,6 @@ def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) 
             profile.number,
             request_key=_uuid(975),
             actor="admin",
-            expected_plan_digest=service.preview(profile.id).plan_digest,
         )
 
 
@@ -1335,7 +1305,6 @@ def test_preview_isolates_an_unreadable_pending_plan() -> None:
         assigned.number,
         request_key=_uuid(981),
         actor="admin",
-        expected_plan_digest=service.preview(assigned.id).plan_digest,
     )
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, pending.id)
@@ -1399,7 +1368,6 @@ def test_preview_reports_an_unreadable_pending_plan_without_a_scope() -> None:
         assigned.number,
         request_key=_uuid(982),
         actor="admin",
-        expected_plan_digest=service.preview(assigned.id).plan_digest,
     )
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, pending.id)
@@ -1542,7 +1510,6 @@ def test_activity_projection_keeps_valid_records_when_one_is_unreadable() -> Non
         profile.number,
         request_key=_uuid(983),
         actor="admin",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
     with sessions() as session:
         valid_row = session.get(FleetProfileApplication, valid.id)
@@ -1600,7 +1567,6 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
         profile.number,
         request_key=_uuid(986),
         actor="admin",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, first.id)
@@ -1636,7 +1602,6 @@ def test_retry_eligibility_survives_a_damaged_sibling_receipt() -> None:
         profile.number,
         request_key=_uuid(989),
         actor="admin",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
     assert service.retry_eligible(first.id) is False
 
@@ -1653,13 +1618,11 @@ def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
         profile.number,
         request_key=_uuid(977),
         actor="admin",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
     second = service.load(
         profile.number,
         request_key=_uuid(978),
         actor="admin",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
     assert second.id != first.id
     assert second.progress.workload_intent_ordinal == 2
@@ -1670,7 +1633,6 @@ def test_new_load_replaces_same_profile_while_same_key_replays() -> None:
             profile.number,
             request_key=_uuid(978),
             actor="admin",
-            expected_plan_digest=second.progress.intended_profile.reviewed_plan_digest,
         )
         == second
     )
@@ -1721,7 +1683,6 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
     assert [step.kind for step in preview.steps] == ["switch"]
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(43),
         actor="admin",
     )
@@ -1958,7 +1919,6 @@ def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
     assert set(preview.steps[0].node_ids) == {_node_id(1), _node_id(2)}
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(610),
         actor="admin",
     )
@@ -2004,7 +1964,6 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
 
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(801),
         actor="admin",
     )
@@ -2060,7 +2019,6 @@ def test_all_idle_profile_supersedes_a_queued_load_without_a_run() -> None:
     assert [step.node_ids for step in preview.steps] == [[_node_id(1)]]
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(822),
         actor="admin",
     )
@@ -2132,7 +2090,6 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert [step.kind for step in preview.steps] == ["switch"]
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(640),
         actor="admin",
     )
@@ -2307,7 +2264,6 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     assert preview.allowed is True
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(647),
         actor="admin",
     )
@@ -2431,7 +2387,6 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     assert preview.allowed is True
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(648),
         actor="admin",
     )
@@ -2536,7 +2491,6 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
     assert preview.allowed is True
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(645),
         actor="admin",
     )
@@ -2649,7 +2603,6 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
         assert preview.allowed is True
         application = service.apply(
             profile.id,
-            plan_digest=preview.plan_digest,
             request_key=_uuid(646),
             actor="admin",
         )
@@ -2730,7 +2683,6 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
 
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(644),
         actor="admin",
     )
@@ -3002,13 +2954,11 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
 
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(4),
         actor="admin",
     )
     replay = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(4),
         actor="admin",
     )
@@ -3042,9 +2992,7 @@ def test_profile_apply_uses_latest_saved_profile_when_digest_is_stale() -> None:
         actor="admin",
     )
     assert updated.profile_digest != profile.profile_digest
-    application = service.apply(
-        profile.id, plan_digest="f" * 64, request_key=_uuid(5), actor="admin"
-    )
+    application = service.apply(profile.id, request_key=_uuid(5), actor="admin")
     assert application.profile_digest == updated.profile_digest
     assert application.state == "queued"
 
@@ -3329,7 +3277,6 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
     assert no_op.steps == []
     retained = service.apply(
         profile_a.id,
-        plan_digest=no_op.plan_digest,
         request_key=_uuid(802),
         actor="admin",
     )
@@ -3425,7 +3372,6 @@ def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -
     assert "cannot attest" in reason.detail
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(41),
         actor="admin",
     )
@@ -3691,7 +3637,6 @@ def test_exact_profile_switch_abandons_a_never_installed_leftover(
 
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(910),
         actor="admin",
     )
@@ -3791,7 +3736,6 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
     preview = service.preview(profile.id)
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(902),
         actor="admin",
     )

@@ -140,7 +140,6 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     # capacity shortage parks the accepted intent with a visible next attempt.
     parked = service.apply(
         profile.id,
-        plan_digest=reviewed.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )
@@ -212,7 +211,6 @@ def test_replacing_a_run_on_the_same_nodes_requires_another_review(tmp_path, cap
     # the stale review of the run it replaced.
     applied = service.apply(
         profile.id,
-        plan_digest=reviewed.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )
@@ -288,10 +286,8 @@ def test_retry_cannot_expand_destructive_effects_outside_original_consent(
         request_id=str(uuid4()),
         alias="reviewed-endpoint",
     )
-    reviewed = service.preview(profile.id)
     application = service.apply(
         profile.id,
-        plan_digest=reviewed.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )
@@ -392,9 +388,7 @@ def test_admitted_review_replay_ignores_later_edits_but_binds_issuer_and_digest(
     profile = service.create(_input(revision), actor="admin")
     review = service.preview(profile.id)
     key = str(uuid4())
-    accepted = service.apply(
-        profile.id, plan_digest=review.plan_digest, actor="admin", request_key=key
-    )
+    accepted = service.apply(profile.id, actor="admin", request_key=key)
     intended = accepted.progress.intended_profile
     assert intended is not None
     assert intended.reviewed_plan_digest == review.plan_digest
@@ -404,25 +398,16 @@ def test_admitted_review_replay_ignores_later_edits_but_binds_issuer_and_digest(
         FleetProfileInput(name="Changed to idle", expected_revision=profile.revision),
         actor="admin",
     )
-    assert (
-        service.apply(
-            profile.id, plan_digest=review.plan_digest, actor="admin", request_key=key
-        )
-        == accepted
-    )
+    assert service.apply(profile.id, actor="admin", request_key=key) == accepted
     # The issuer is bound to the request key; the review digest is advisory,
     # so a replay under the same key returns the accepted application.
     with pytest.raises(FleetProfileConflict, match="request key"):
         service.apply(
             profile.id,
-            plan_digest=review.plan_digest,
             actor="another-admin",
             request_key=key,
         )
-    assert (
-        service.apply(profile.id, plan_digest="f" * 64, actor="admin", request_key=key)
-        == accepted
-    )
+    assert service.apply(profile.id, actor="admin", request_key=key) == accepted
     with sessions() as session:
         assert list(session.scalars(select(FleetProfileApplication.id))) == [
             accepted.id
@@ -458,7 +443,6 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
     original_review = service.preview(profile.id)
     original = service.apply(
         profile.id,
-        plan_digest=original_review.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )

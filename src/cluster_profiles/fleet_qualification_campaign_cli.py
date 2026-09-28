@@ -2493,7 +2493,7 @@ def _submit_load(
         )
 
     path = f"/api/profile/{number}/load"
-    payload = {"plan_digest": plan_digest, "request_key": request_key}
+    payload = {"request_key": request_key}
     found = _lookup_load_request(
         client,
         number,

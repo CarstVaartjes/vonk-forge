@@ -7,11 +7,7 @@ import select
 import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import (
-    ControlConflict,
-    ControlForbidden,
-    ControlNotFound,
-)
+from cluster_profiles.control_client import ControlNotFound
 
 KEY = "11111111-1111-4111-8111-111111111111"
 DIGEST = "c" * 64
@@ -73,7 +69,7 @@ class Client:
         assert path.endswith("/load")
         assert isinstance(payload, dict)
         assert isinstance(payload.get("request_key"), str)
-        assert payload.get("plan_digest") == self.plan_digest
+        assert "plan_digest" not in payload
         intended = {}
         if self.include_receipt_digest:
             intended["reviewed_plan_digest"] = self.plan_digest
@@ -85,18 +81,7 @@ class Client:
         }
 
 
-class ChangesAfterPreviewClient(Client):
-    def request(self, method, path, payload=None, **kwargs):
-        if path.endswith("/load") and not any(
-            called_path.endswith("/load") for _, called_path, _ in self.calls
-        ):
-            self.calls.append((method, path, payload))
-            self.plan_digest = "d" * 64
-            raise ControlConflict(409, "The current plan changed")
-        return super().request(method, path, payload, **kwargs)
-
-
-def test_yes_applies_latest_preview_without_caller_supplied_digest(capsys):
+def test_yes_loads_without_a_preview_round_trip(capsys):
     client = Client(include_receipt_digest=False)
     assert (
         cli.main(
@@ -116,37 +101,7 @@ def test_yes_applies_latest_preview_without_caller_supplied_digest(capsys):
         == 0
     )
     capsys.readouterr()
-    assert sum(path.endswith("/preview") for _, path, _ in client.calls) == 1
-    assert sum(path.endswith("/load") for _, path, _ in client.calls) == 1
-
-
-def test_latest_plan_is_submitted_after_preview_conflict(capsys):
-    client = ChangesAfterPreviewClient()
-    assert (
-        cli.main(
-            (
-                "--profile",
-                "2",
-                "profile",
-                "load",
-                "--yes",
-                "--request-key",
-                KEY,
-                "--detach",
-                "--json",
-            ),
-            control_client=client,
-        )
-        == 0
-    )
-    capsys.readouterr()
-    assert sum(path.endswith("/preview") for _, path, _ in client.calls) == 2
-    assert sum(path.endswith("/load") for _, path, _ in client.calls) == 2
-    load_bodies = [
-        payload for _, path, payload in client.calls if path.endswith("/load")
-    ]
-    assert load_bodies[0]["plan_digest"] == DIGEST
-    assert load_bodies[1]["plan_digest"] == "d" * 64
+    assert [path for _, path, _ in client.calls] == ["/api/profile/2/load"]
 
 
 @pytest.mark.parametrize(
@@ -180,63 +135,6 @@ def test_json_dry_run_returns_one_blocked_review_without_load(capsys):
     assert json.loads(output.out)["allowed"] is False
     assert output.err == ""
     assert client.calls == [("POST", "/api/profile/2/preview", None)]
-
-
-def test_yes_submits_latest_plan_even_when_preview_has_waitable_blockers(capsys):
-    client = Client(blocked=True)
-    assert (
-        cli.main(
-            (
-                "--profile",
-                "2",
-                "profile",
-                "load",
-                "--yes",
-                "--request-key",
-                KEY,
-                "--detach",
-                "--json",
-            ),
-            control_client=client,
-        )
-        == 0
-    )
-    capsys.readouterr()
-    assert [path for _, path, _ in client.calls] == [
-        "/api/profile/2/preview",
-        "/api/profile/2/load",
-    ]
-
-
-def test_preview_authorization_denial_still_stops_before_load(capsys):
-    class DeniedPreviewClient(Client):
-        def request(self, method, path, payload=None, **kwargs):
-            if path.endswith("/preview"):
-                self.calls.append((method, path, payload))
-                raise ControlForbidden(403, "profile preview denied")
-            return super().request(method, path, payload, **kwargs)
-
-    client = DeniedPreviewClient()
-    assert (
-        cli.main(
-            (
-                "--profile",
-                "2",
-                "profile",
-                "load",
-                "--yes",
-                "--request-key",
-                KEY,
-                "--detach",
-                "--json",
-            ),
-            control_client=client,
-        )
-        == 2
-    )
-    output = capsys.readouterr()
-    assert json.loads(output.out)["code"] == "http.403"
-    assert [path for _, path, _ in client.calls] == ["/api/profile/2/preview"]
 
 
 def test_interactive_blocked_preview_can_be_confirmed_and_submitted(
@@ -514,6 +412,6 @@ def test_unbound_load_receipt_is_only_looked_up_and_never_replayed(binding, caps
     assert document["request_key"] == KEY
     assert document["submission"]["acceptance"] == "unknown"
     paths = [path for _method, path, _payload in client.calls]
-    assert paths.count("/api/profile/2/preview") == 1
+    assert "/api/profile/2/preview" not in paths
     assert paths.count("/api/profile/2/load") >= 1
     assert paths.count(f"/api/profile/2/requests/{KEY}") >= 1

@@ -375,7 +375,6 @@ def test_numbered_autosave_uses_revision_and_load_freezes_whole_roster() -> None
         2,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000099",
-        expected_plan_digest=service.preview(changed.id).plan_digest,
     )
     assert application.state == "succeeded"
     assert application.progress.intended_profile is not None
@@ -457,7 +456,6 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
         profile.number,
         actor="test",
         request_key="00000000-0000-4000-8000-000000000097",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
     assert application.progress.intended_profile is not None
     assert (

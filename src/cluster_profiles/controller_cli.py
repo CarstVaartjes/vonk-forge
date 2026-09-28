@@ -1086,17 +1086,13 @@ def _poll_path(
 def _submit_profile_load(
     client: ControllerClient,
     number: int,
-    expected_digest: str,
     args: argparse.Namespace,
     factory: Callable[[], str],
 ) -> dict[str, object]:
     key = _request_key(args, factory)
     path = f"/api/profile/{number}/load"
     lookup = f"/api/profile/{number}/requests/{key}"
-    body: dict[str, object] = {
-        "request_key": key,
-        "plan_digest": expected_digest,
-    }
+    body: dict[str, object] = {"request_key": key}
 
     def validate(result: Mapping[str, object]) -> str:
         operation_id = result.get("id")
@@ -1106,7 +1102,7 @@ def _submit_profile_load(
             or not operation_id
         ):
             raise ControlMalformedResponse(
-                "profile load receipt identifies another request or review"
+                "profile load receipt identifies another request"
             )
         return operation_id
 
@@ -3588,38 +3584,12 @@ def _profile(
         )
         if not args.yes and not interactive:
             raise ValueError("profile load requires --yes in noninteractive mode")
-        preview = client.request("POST", f"/api/profile/{number}/preview")
-        expected_digest = preview.get("plan_digest")
-        if (
-            not isinstance(expected_digest, str)
-            or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
-        ):
-            raise ControlMalformedResponse(
-                "profile preview has no valid current plan digest"
-            )
         if not args.yes:
+            preview = client.request("POST", f"/api/profile/{number}/preview")
             with redirect_stdout(sys.stderr):
                 render_payload(preview, "profile", action="preview")
             _confirm_action(args, f"Load profile {number} with these effects?")
-        try:
-            result = _submit_profile_load(
-                client, number, expected_digest, args, factory
-            )
-        except ControlConflict as error:
-            # A stale review is bookkeeping. Refresh the same user's intent and
-            # reconnect with its original request identity.
-            if error.code not in {None, "http.409", "profile.stale_plan"}:
-                raise
-            current = client.request("POST", f"/api/profile/{number}/preview")
-            current_digest = current.get("plan_digest")
-            if (
-                not isinstance(current_digest, str)
-                or re.fullmatch(r"[0-9a-f]{64}", current_digest) is None
-            ):
-                raise ControlMalformedResponse(
-                    "profile preview has no valid current plan digest"
-                )
-            result = _submit_profile_load(client, number, current_digest, args, factory)
+        result = _submit_profile_load(client, number, args, factory)
         if args.detach:
             return result
         application_id = result.get("id")

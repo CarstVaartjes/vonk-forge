@@ -225,7 +225,6 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
     assert effect.profile_stop_scope is not None
     application = profiles.apply(
         profile.id,
-        plan_digest=review.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )

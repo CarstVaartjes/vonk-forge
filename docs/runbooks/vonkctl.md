@@ -673,7 +673,7 @@ the Controller error code and original detail in JSON output for debugging.
 In an interactive terminal, load shows the current review and asks for one
 default-no confirmation. `--detach` returns the accepted application instead
 of following it. For scripts, JSON, redirected input, or `--no-input`, use
-`--yes`; the CLI fetches the latest plan before submitting:
+`--yes`; the CLI submits the load directly and the Controller plans it:
 
 ```bash
 vonkctl --profile 2 --json profile load --dry-run > reviewed-plan.json
@@ -681,9 +681,9 @@ vonkctl --profile 2 --json profile load --dry-run > reviewed-plan.json
 vonkctl --profile 2 --json profile load --yes --detach
 ```
 
-A dry-run reports the current plan without submitting. With `--yes`, the CLI
-submits the latest plan even when waitable blockers are present; the Controller
-parks the request until they clear. Authentication and authorization failures
+A dry-run reports the current plan without submitting. A load always applies
+the Controller's current plan, even when waitable blockers are present; the
+Controller parks the request until they clear. Authentication and authorization failures
 such as 401 or 403 remain refusals. Do not combine `--dry-run` with `--yes` or
 `--detach`.
 
@@ -694,9 +694,9 @@ before saving; the web editor likewise sends the selected library row's
 canonical selector. It does not pin a recipe revision or declare a subset scope.
 The Controller returns warnings for incomplete groups and resource pressure at
 save time. A load preview reports blockers, resolved immutable identities, the
-whole-fleet snapshot, resource fit, and a `plan_digest`. The CLI binds its
-current preview to submission; the Controller revalidates the plan and parks
-requests with waitable blockers until their dependencies clear.
+whole-fleet snapshot, resource fit, and a `plan_digest`. A load request carries
+only its request key; the Controller plans the current profile at admission and
+parks requests with waitable blockers until their dependencies clear.
 
 ### Batched recipe qualification
 

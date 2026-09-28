@@ -4371,7 +4371,6 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
         profile.number,
         request_key=str(uuid.uuid4()),
         actor="admin",
-        expected_plan_digest=profiles.preview(profile.id).plan_digest,
     )
     assert profiles.tick()
     first_application = profiles.application(first.id)
@@ -4408,12 +4407,10 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
         sessions, clock=lambda: NOW + timedelta(seconds=1), run_switch_operations=switch
     )
     request_key = str(uuid.uuid4())
-    reviewed_digest = profiles.preview(profile.id).plan_digest
     retry = profiles.load(
         profile.number,
         request_key=request_key,
         actor="admin",
-        expected_plan_digest=reviewed_digest,
     )
     assert retry.retry_of_application_id is None
     assert retry.progress.workload_intent_ordinal is not None
@@ -4460,7 +4457,6 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
             profile.number,
             request_key=request_key,
             actor="admin",
-            expected_plan_digest=reviewed_digest,
         )
         == final
     )

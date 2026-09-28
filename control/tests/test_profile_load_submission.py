@@ -70,10 +70,9 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
     sessions, api, codec, headers, preview = _profile_api(postgres_engine)
     path = "/api/profile/1/load"
     key = str(uuid4())
-    body = {"request_key": key, "plan_digest": preview["plan_digest"]}
+    body = {"request_key": key}
     for missing in (
         {},
-        {"request_key": key},
         {"plan_digest": preview["plan_digest"]},
         {**body, "dry_run": True},
     ):
@@ -92,14 +91,12 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
     )
     assert changed.status_code == 200
     assert api.post(path, headers=headers, json=body).json() == accepted.json()
-    # The latest request leads: a fresh load with the previous revision's
-    # review digest applies the current saved profile instead of refusing.
+    # The latest request leads: a fresh load applies the current saved profile.
     latest = api.post(path, headers=headers, json={**body, "request_key": str(uuid4())})
     assert latest.status_code == 202, latest.text
     assert latest.json()["id"] != accepted.json()["id"]
-    # The review digest is advisory; a replay under the same key is the
-    # original accepted application.
-    replay = api.post(path, headers=headers, json={**body, "plan_digest": "f" * 64})
+    # A replay under the same key is the original accepted application.
+    replay = api.post(path, headers=headers, json=body)
     assert replay.json()["id"] == accepted.json()["id"]
     assert (
         api.post(path, headers=_headers(codec, "operator"), json=body).status_code
@@ -138,7 +135,7 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
 def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
     postgres_engine, tmp_path, capsys
 ):
-    sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
     token = tmp_path / "token"
     token.touch(mode=0o600)
     token.write_text(headers["Authorization"].removeprefix("Bearer "))
@@ -209,7 +206,6 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
     assert [method for method, _, _ in calls] == ["POST", "POST", "GET"]
     assert calls[1][2] == {
         "request_key": key,
-        "plan_digest": preview["plan_digest"],
     }
     assert calls[2][1].endswith(f"/api/profile/1/requests/{key}")
     with sessions() as session:
@@ -217,7 +213,7 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
 
 
 def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) -> None:
-    sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
     original = FleetProfileService._queue_application
     attempts = 0
 
@@ -232,7 +228,7 @@ def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) 
     response = api.post(
         "/api/profile/1/load",
         headers=headers,
-        json={"request_key": str(uuid4()), "plan_digest": preview["plan_digest"]},
+        json={"request_key": str(uuid4())},
     )
 
     assert response.status_code == 202, response.text
@@ -247,7 +243,7 @@ def test_change_between_fresh_review_and_admission_refuses_load(
     monkeypatch,
     change,
 ):
-    sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
     original = FleetProfileService._queue_application
 
     def after_preview(service, reviewed, **kwargs):
@@ -282,7 +278,6 @@ def test_change_between_fresh_review_and_admission_refuses_load(
         headers=headers,
         json={
             "request_key": str(uuid4()),
-            "plan_digest": preview["plan_digest"],
         },
     )
     assert response.status_code == (403 if change == "authority" else 409), (
@@ -296,12 +291,12 @@ def test_change_between_fresh_review_and_admission_refuses_load(
 def test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_review(
     postgres_engine, monkeypatch
 ):
-    sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
     rendezvous = threading.Barrier(2)
     first_committed = threading.Event()
     second_request = ContextVar("second_request", default=False)
     original = FleetProfileService.preview
-    body = {"request_key": str(uuid4()), "plan_digest": preview["plan_digest"]}
+    body = {"request_key": str(uuid4())}
 
     def preview_after_lookup(service, *args, **kwargs):
         rendezvous.wait(timeout=5)
@@ -341,7 +336,7 @@ def test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_revie
 
 
 def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_engine):
-    sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
     snapshot_locked = threading.Event()
     release = threading.Event()
 
@@ -378,7 +373,6 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                 headers=headers,
                 json={
                     "request_key": str(uuid4()),
-                    "plan_digest": preview["plan_digest"],
                 },
             )
             try:
@@ -470,7 +464,6 @@ def test_recipe_head_changed_after_review_is_not_substituted_into_admitted_inten
         headers=headers,
         json={
             "request_key": str(uuid4()),
-            "plan_digest": preview["plan_digest"],
         },
     )
     assert response.status_code == 409, response.text
@@ -501,7 +494,7 @@ def _running_profile_api(tmp_path, engine):
 def test_workload_change_between_review_and_acceptance_is_refused(
     tmp_path, postgres_engine, monkeypatch, change
 ):
-    sessions, api, headers, profile, installed, run, preview = _running_profile_api(
+    sessions, api, headers, profile, installed, run, _preview = _running_profile_api(
         tmp_path, postgres_engine
     )
     original_queue = FleetProfileService._queue_application
@@ -566,7 +559,6 @@ def test_workload_change_between_review_and_acceptance_is_refused(
         headers=headers,
         json={
             "request_key": str(uuid4()),
-            "plan_digest": preview["plan_digest"],
         },
     )
     assert response.status_code == 409, response.text
@@ -586,7 +578,7 @@ def test_workload_change_between_review_and_acceptance_is_refused(
 def test_admission_serializes_run_replacement_until_acceptance_commits(
     tmp_path, postgres_engine
 ):
-    sessions, api, headers, profile, _installed, run, preview = _running_profile_api(
+    sessions, api, headers, profile, _installed, run, _preview = _running_profile_api(
         tmp_path, postgres_engine
     )
     snapshot_locked = threading.Event()
@@ -618,7 +610,6 @@ def test_admission_serializes_run_replacement_until_acceptance_commits(
                 headers=headers,
                 json={
                     "request_key": str(uuid4()),
-                    "plan_digest": preview["plan_digest"],
                 },
             )
             try:
@@ -651,10 +642,8 @@ def test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance(
         request_id=str(uuid4()),
         alias="reviewed-endpoint",
     )
-    preview = service.preview(profile.id)
     accepted = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )
@@ -715,7 +704,6 @@ def test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation(
     assert preview.allowed and preview.summary.stops == preview.summary.starts == 1
     accepted = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )
@@ -779,7 +767,6 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
     attempted = threading.Event()
     request_body = {
         "request_key": str(uuid4()),
-        "plan_digest": preview["plan_digest"],
     }
     prefix = f"SELECT {locked_model.__tablename__}."
 

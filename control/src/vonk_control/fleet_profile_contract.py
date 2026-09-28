@@ -1047,7 +1047,6 @@ class FleetProfilePreview(FleetProfileReviewedDecision):
 
 
 class FleetProfileLoadRequest(_StrictModel):
-    plan_digest: Digest
     request_key: UuidId
 
 

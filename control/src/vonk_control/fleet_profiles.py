@@ -3178,21 +3178,15 @@ class FleetProfileService:
         *,
         actor: str,
         request_key: str,
-        expected_plan_digest: str,
     ) -> FleetProfileApplicationView:
-        """Admit only reviewed intent; replay before consulting mutable choices."""
+        """Admit the current plan; replay before consulting mutable choices."""
         with self._sessions() as session:
             profile_id = session.scalar(
                 select(FleetProfile.id).where(FleetProfile.number == number)
             )
         if profile_id is None:
             raise KeyError(number)
-        return self.apply(
-            profile_id,
-            plan_digest=expected_plan_digest,
-            request_key=request_key,
-            actor=actor,
-        )
+        return self.apply(profile_id, request_key=request_key, actor=actor)
 
     def progress_number(self, number: int) -> FleetProfileApplicationView:
         profile = self.get_number(number)
@@ -4190,7 +4184,6 @@ class FleetProfileService:
         self,
         profile_id: str,
         *,
-        plan_digest: str,
         request_key: str,
         actor: str,
     ) -> FleetProfileApplicationView | None:
@@ -4570,11 +4563,9 @@ class FleetProfileService:
             raise
 
     def apply(
-        self, profile_id: str, *, plan_digest: str, request_key: str, actor: str
+        self, profile_id: str, *, request_key: str, actor: str
     ) -> FleetProfileApplicationView:
-        replay = self._load_replay(
-            profile_id, plan_digest=plan_digest, request_key=request_key, actor=actor
-        )
+        replay = self._load_replay(profile_id, request_key=request_key, actor=actor)
         if replay is not None:
             return replay
         pending: FleetProfileApplicationView | None = None
@@ -4658,12 +4649,7 @@ class FleetProfileService:
             # Another identical submission can commit after our first lookup.
             # Its accepted receipt wins over a newly stale preview or a busy
             # admission boundary; this read never refreshes the approved intent.
-            replay = self._load_replay(
-                profile_id,
-                plan_digest=plan_digest,
-                request_key=request_key,
-                actor=actor,
-            )
+            replay = self._load_replay(profile_id, request_key=request_key, actor=actor)
             if replay is not None:
                 if replay.state == "waiting-for-operator":
                     self._discard_pending_application(replay.id)

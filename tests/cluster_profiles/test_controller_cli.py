@@ -2326,13 +2326,11 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
 
     assert status == 0 and payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
-        "/api/profile/1/preview",
         "/api/profile/1/load",
         f"/api/profile/applications/{application_id}",
     ]
-    assert client.calls[1][2] == {
+    assert client.calls[0][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111",
-        "plan_digest": "c" * 64,
     }
 
 
@@ -2358,7 +2356,7 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
     )
 
     assert status != 0
-    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
     assert not any(call[1].endswith("/progress") for call in client.calls)
 
 
@@ -2679,7 +2677,7 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
 
     assert status == 0
     assert payload["id"] == operation
-    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
 
 
 def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> None:
@@ -2728,7 +2726,6 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
         "request_key": key,
     }
     assert [call[:2] for call in client.calls] == [
-        ("POST", "/api/profile/1/preview"),
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/applications/{operation}"),
     ]
@@ -4203,9 +4200,7 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
                     "request_key": payload["request_key"],
                     "state": "running",
                     "progress": {
-                        "intended_profile": {
-                            "reviewed_plan_digest": payload["plan_digest"]
-                        }
+                        "intended_profile": {"reviewed_plan_digest": "b" * 64}
                     },
                 }
             if path == f"/api/profile/applications/{application_id}":
