@@ -235,21 +235,26 @@ def test_profile_scoped_key_provisioner_has_only_key_management_authority() -> N
         "/run/secrets/litellm-master-key",
     }
     assert service["depends_on"] == {
+        "control-api": {
+            "condition": "service_started",
+            "required": False,
+            "restart": True,
+        },
         "litellm": {
             "condition": "service_healthy",
             "required": True,
             "restart": True,
-        }
+        },
     }
-    assert service["entrypoint"] == [
-        "python",
-        "/usr/local/bin/provision-hermes-litellm-key",
-        "--reconcile-forever",
-    ]
+    assert service["entrypoint"][:2] == ["/bin/sh", "-c"]
+    assert service["entrypoint"][2].endswith(
+        "exec python /run/vonk-runtime-assets/hermes-agent/provision-litellm-key.py"
+        " --reconcile-forever"
+    )
     assert service["healthcheck"]["test"] == [
         "CMD",
         "python",
-        "/usr/local/bin/provision-hermes-litellm-key",
+        "/run/vonk-runtime-assets/hermes-agent/provision-litellm-key.py",
         "--check",
     ]
     assert not service.get("ports")

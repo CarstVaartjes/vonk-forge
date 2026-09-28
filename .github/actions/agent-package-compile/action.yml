@@ -90,7 +90,7 @@ runs:
           "compiled_artifact_name=${ARTIFACT_NAME}-compiled-${debian_architecture}-${BINARY_SET}" \
           >> "$GITHUB_OUTPUT"
 
-    - name: Revalidate exact current main compilation source
+    - name: Revalidate main compilation source
       shell: bash
       env:
         SOURCE_SHA: ${{ inputs.source_sha }}
@@ -98,8 +98,7 @@ runs:
         set -euo pipefail
         git fetch --force --no-tags origin \
           +refs/heads/main:refs/remotes/origin/main
-        test "$SOURCE_SHA" = \
-          "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+        git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
 
     - name: Install pinned native Rust toolchain
       shell: bash
@@ -181,8 +180,7 @@ runs:
         set -euo pipefail
         git fetch --force --no-tags origin \
           +refs/heads/main:refs/remotes/origin/main
-        test "$SOURCE_SHA" = \
-          "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+        git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
 
     - name: Upload exact compiled binary set
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

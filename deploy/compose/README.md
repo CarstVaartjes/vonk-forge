@@ -110,6 +110,14 @@ and adding any newly required inputs. Settings a release no longer uses are
 dropped from `.env` and listed in the installer output. Place the resulting directory over the controller project, pull, and
 redeploy. Keep named volumes during normal upgrades.
 
+Non-secret runtime configuration (the Caddyfile, service entrypoints,
+Prometheus, Grafana, registry and LiteLLM supervisor files) ships inside the
+Controller API image. On every start the API stages it into the
+`runtime-assets` volume that the other services read, and those services
+restart with it. A pull and redeploy therefore rolls out configuration too; the
+installer only needs to run again when `.env`, secrets or the Compose graph
+itself change.
+
 Development and production use this exact topology and configuration contract.
 They use development `:dev` or production `:latest` application images and channel-specific Spark package versions
 selected by the installer publication channel. Hermes is the sole optional

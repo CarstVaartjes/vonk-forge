@@ -54,10 +54,13 @@ def migrated_engine(postgres_engine):
     )
     command.upgrade(config, "head")
 
+    # Production waits 30 s for a row lock. Keep a stuck lock bounded well
+    # inside each test's 10 s budget, but long enough that a loaded CI shard
+    # does not turn an ordinary serialized wait into LockNotAvailable.
     @event.listens_for(postgres_engine, "checkout")
     def bounded_locks(connection, _record, _proxy):
         with connection.cursor() as cursor:
-            cursor.execute("SET lock_timeout = '1s'")
+            cursor.execute("SET lock_timeout = '5s'")
 
     return postgres_engine
 

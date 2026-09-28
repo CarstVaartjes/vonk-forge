@@ -226,20 +226,11 @@ def assert_bundle_contract(bundle: Path) -> None:
         if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
             raise AcceptanceError("secret file is unsafe")
         relative = path.relative_to(secrets)
-        runtime_config = relative.parts[0] == "runtime-configs"
-        if runtime_config:
-            if stat.S_IMODE(metadata.st_mode) not in {0o644, 0o755}:
-                raise AcceptanceError(f"{relative} has unsafe permissions")
-        else:
-            _require_mode(path, 0o600)
+        _require_mode(path, 0o600)
         content = path.read_bytes().strip()
         if not content and relative.as_posix() not in OPTIONAL_SECRET_FILES:
             raise AcceptanceError(f"bundle file {relative} is empty")
-        if (
-            content
-            and not runtime_config
-            and (content in compose_raw or content in environment_raw)
-        ):
+        if content and (content in compose_raw or content in environment_raw):
             raise AcceptanceError(
                 f"secret value {relative} leaked into bundle metadata"
             )

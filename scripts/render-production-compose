@@ -105,7 +105,6 @@ def render(
     canonical_renderer._resolve_runtime_images(document, channel)
     if channel != "pinned":
         canonical_renderer._resolve_extension_images(document, channel)
-    canonical_renderer._embed_runtime_assets(document, template.parent)
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_CONTROL_HOSTNAME" not in rendered:
         raise ValueError("template is not the production graph")

@@ -125,11 +125,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/main
-          test "$GITHUB_SHA" = "$SOURCE_SHA"
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
-          test "$SOURCE_SHA" = \
-            "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
           metadata=$(scripts/agent-package-metadata \
             development branch main "$SOURCE_SHA" "$RUN_NUMBER")
           while IFS='=' read -r name value; do

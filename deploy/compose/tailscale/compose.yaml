@@ -65,7 +65,10 @@ services:
     logging: *tailscale-logging
     read_only: true
     network_mode: service:tailscale-gateway
-    entrypoint: [/bin/sh, /usr/local/bin/configure-tailscale]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /run/vonk-runtime-assets/tailscale/configure.sh ]; do sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/tailscale/configure.sh'
     environment:
       # Compose profiles are a client-side selection and are not inherited by
       # containers. Pass the selection explicitly so the healthcheck cannot
@@ -74,7 +77,7 @@ services:
       VONK_SELECTED_PROFILES: ${COMPOSE_PROFILES:-}
     volumes:
       - tailscale-socket:/var/run/tailscale
-      - ./configure.sh:/usr/local/bin/configure-tailscale:ro
+      - runtime-assets:/run/vonk-runtime-assets:ro
     secrets:
       - hermes-api-key
     tmpfs:
@@ -83,11 +86,15 @@ services:
       tailscale-gateway:
         condition: service_healthy
         restart: true
+      control-api:
+        condition: service_started
+        required: false
+        restart: true
       caddy:
         condition: service_healthy
         restart: true
     healthcheck:
-      test: [CMD-SHELL, "TS_HEALTHCHECK_ONLY=1 /bin/sh /usr/local/bin/configure-tailscale"]
+      test: [CMD-SHELL, "TS_HEALTHCHECK_ONLY=1 /bin/sh /run/vonk-runtime-assets/tailscale/configure.sh"]
       interval: 15s
       # Two sequential Hermes probes are each bounded to 3s.
       timeout: 8s

@@ -23,7 +23,15 @@ x-control-environment: &control-environment
 services:
   postgres:
     image: postgres:18.6
-    entrypoint: [/usr/local/bin/vonk-postgres-entrypoint]
+    # The Controller image ships this entrypoint and stages it on start (see
+    # control-api), so a pulled release updates it. PostgreSQL must start
+    # before the Controller, so wait for the staged copy instead of depending
+    # on the Controller.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /run/vonk-runtime-assets/postgres/init-databases.sh ]; do sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/postgres/entrypoint.sh "$$@"'
+      - vonk-postgres-entrypoint
     command: [postgres]
     restart: unless-stopped
     logging: *bounded-logging
@@ -45,8 +53,7 @@ services:
       - type: bind
         source: ${VONK_BACKUP_OFFHOST_PATH:-./backups-offhost}
         target: /offhost
-      - ./postgres/entrypoint.sh:/usr/local/bin/vonk-postgres-entrypoint:ro
-      - ./postgres/init-databases.sh:/run/vonk-source-assets/postgres/init-databases.sh:ro
+      - runtime-assets:/run/vonk-runtime-assets:ro
     networks: [data, litellm-data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U control -d control && psql -U control -d control -tAc 'SELECT 1' | grep -qx 1"]
@@ -75,13 +82,9 @@ services:
       - litellm-supervisor-state:/supervisor
       - normalized-private-keys:/normalized
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
-      - ./litellm/bootstrap-config.json:/run/vonk-source-assets/litellm/bootstrap-config.json:ro
-      - ./litellm/entrypoint.sh:/run/vonk-source-assets/litellm/entrypoint.sh:ro
-      - ./litellm/config_supervisor.py:/run/vonk-source-assets/litellm/config_supervisor.py:ro
-      - ./prometheus/prometheus.yml:/run/vonk-source-assets/prometheus/prometheus.yml:ro
-      - ./prometheus/alerts.yaml:/run/vonk-source-assets/prometheus/alerts.yaml:ro
-      - ./grafana/provisioning:/run/vonk-source-assets/grafana/provisioning:ro
-      - ./grafana/dashboards:/run/vonk-source-assets/grafana/dashboards:ro
+      # Non-secret runtime configuration ships in this image; the pre-exec
+      # stages it here for every consumer on each start.
+      - runtime-assets:/runtime-assets
       # The Controller keeps the default gateway client key here (mode 600).
       - type: bind
         source: ./secrets/gateway
@@ -93,8 +96,8 @@ services:
     # builds. PostgreSQL remains the authority for their lifecycle.
     tmpfs: [/tmp]
     networks: [application, data, agent-proxy, ca]
-    depends_on:
-      postgres: {condition: service_healthy}
+    # No dependency on PostgreSQL: it waits for the entrypoint this service
+    # stages, and startup retries the database connection until it is ready.
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
       interval: 10s
@@ -158,7 +161,10 @@ services:
     image: ${LITELLM_IMAGE:?set a version-pinned Vonk LiteLLM image}
     restart: unless-stopped
     logging: *bounded-logging
-    entrypoint: [/bin/sh, /run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /run/vonk-runtime-assets/litellm/entrypoint.sh ]; do sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh'
     read_only: true
     user: "10002:10001"
     cap_drop: [ALL]
@@ -177,6 +183,7 @@ services:
     secrets: []
     volumes:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
+      - runtime-assets:/run/vonk-runtime-assets:ro
       - route-publications:/routes:ro
       - litellm-supervisor-state:/supervisor:rw
     tmpfs:
@@ -185,7 +192,7 @@ services:
     networks: [litellm-data, cluster-egress, litellm-edge]
     depends_on:
       postgres: {condition: service_healthy}
-      control-api: {condition: service_healthy}
+      control-api: {condition: service_started, required: false, restart: true}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=3)"]
       interval: 15s
@@ -196,8 +203,13 @@ services:
     image: prom/prometheus:v3.15.0
     restart: unless-stopped
     logging: *bounded-logging
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /run/vonk-runtime-assets/prometheus/prometheus.yml ]; do sleep 1; done; exec /bin/prometheus "$$@"'
+      - prometheus
     command:
-      - --config.file=/run/vonk-normalized-secrets/runtime-assets/prometheus/prometheus.yml
+      - --config.file=/run/vonk-runtime-assets/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
       - --storage.tsdb.retention.size=10GB
@@ -207,10 +219,11 @@ services:
     volumes:
       - prometheus-data:/prometheus
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
+      - runtime-assets:/run/vonk-runtime-assets:ro
     tmpfs: [/tmp]
     networks: [application]
     depends_on:
-      control-api: {condition: service_healthy}
+      control-api: {condition: service_started, required: false, restart: true}
     healthcheck:
       test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:9090/-/ready"]
       interval: 10s
@@ -223,11 +236,16 @@ services:
     logging: *bounded-logging
     read_only: true
     user: "472:472"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /run/vonk-runtime-assets/grafana/provisioning/datasources/prometheus.yaml ]; do sleep 1; done; exec /run.sh "$$@"'
+      - grafana
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/vonk-normalized-secrets/grafana-admin-password
-      GF_PATHS_PROVISIONING: /run/vonk-normalized-secrets/runtime-assets/grafana/provisioning
+      GF_PATHS_PROVISIONING: /run/vonk-runtime-assets/grafana/provisioning
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -235,9 +253,11 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
+      - runtime-assets:/run/vonk-runtime-assets:ro
     tmpfs: [/tmp]
     networks: [application, ingress]
     depends_on:
+      control-api: {condition: service_started, required: false, restart: true}
       prometheus: {condition: service_healthy}
     healthcheck:
       test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:3000/api/health"]
@@ -245,6 +265,10 @@ services:
       timeout: 5s
       retries: 12
 
+  # Services that read the Controller-staged runtime assets depend on the
+  # Controller only to restart with a new release. They wait for their staged
+  # files, never for a healthy Controller: the volume keeps the last release,
+  # so the gateway keeps serving while the Controller is down.
   caddy:
     image: caddy:2.11.4
     restart: unless-stopped
@@ -256,18 +280,20 @@ services:
         host_ip: ${NAS_LAN_IP:?set reserved NAS LAN IP}
         protocol: tcp
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy/entrypoint.sh:/usr/local/bin/vonk-caddy-entrypoint:ro
+      - runtime-assets:/run/vonk-runtime-assets:ro
       - caddy-data:/data
       - caddy-config:/config
     tmpfs: [/tmp]
-    entrypoint: [/bin/sh, /usr/local/bin/vonk-caddy-entrypoint]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /run/vonk-runtime-assets/caddy/entrypoint.sh ]; do sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh'
     environment:
       VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set the control hostname}
     secrets: [agent-client-ca, agent-proxy-auth, controller-server-certificate, controller-server-key]
     networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge, hermes-inference, litellm-edge]
     depends_on:
-      control-api: {condition: service_healthy}
+      control-api: {condition: service_started, required: false, restart: true}
       registry: {condition: service_healthy}
     healthcheck:
       test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8082/healthz"]
@@ -282,11 +308,17 @@ services:
     read_only: true
     environment:
       OTEL_TRACES_EXPORTER: none
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /run/vonk-runtime-assets/registry/config.yml ]; do sleep 1; done; exec /entrypoint.sh /run/vonk-runtime-assets/registry/config.yml'
     volumes:
-      - ./registry/config.yml:/etc/distribution/config.yml:ro
+      - runtime-assets:/run/vonk-runtime-assets:ro
       - registry-data:/var/lib/registry
     tmpfs: [/tmp]
     networks: [registry-edge, registry-publisher]
+    depends_on:
+      control-api: {condition: service_started, required: false, restart: true}
     healthcheck:
       test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:5000/v2/ || exit 1"]
       interval: 10s
@@ -377,4 +409,5 @@ volumes:
   workload-tuf-publication: {}
   deployment-observations: {}
   normalized-private-keys: {}
+  runtime-assets: {}
   step-ca-data: {}

@@ -183,8 +183,7 @@ runs:
             test "$GITHUB_REF" = refs/heads/main
             git fetch --force --no-tags origin \
               +refs/heads/main:refs/remotes/origin/main
-            test "$SOURCE_SHA" = \
-              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
             scripts/verify-release-tag-authority \
@@ -529,8 +528,7 @@ runs:
             test "$GITHUB_REF" = refs/heads/main
             git fetch --force --no-tags origin \
               +refs/heads/main:refs/remotes/origin/main
-            test "$SOURCE_SHA" = \
-              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
             scripts/verify-release-tag-authority \
@@ -584,8 +582,7 @@ runs:
             test "$GITHUB_REF" = refs/heads/main
             git fetch --force --no-tags origin \
               +refs/heads/main:refs/remotes/origin/main
-            test "$SOURCE_SHA" = \
-              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
             scripts/verify-release-tag-authority \
@@ -618,8 +615,7 @@ runs:
             test "$GITHUB_REF" = refs/heads/main
             git fetch --force --no-tags origin \
               +refs/heads/main:refs/remotes/origin/main
-            test "$SOURCE_SHA" = \
-              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
             scripts/verify-release-tag-authority \
@@ -653,8 +649,7 @@ runs:
             test "$GITHUB_REF" = refs/heads/main
             git fetch --force --no-tags origin \
               +refs/heads/main:refs/remotes/origin/main
-            test "$SOURCE_SHA" = \
-              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
             ;;
           stable)
             scripts/verify-release-tag-authority \

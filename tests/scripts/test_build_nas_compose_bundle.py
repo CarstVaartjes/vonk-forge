@@ -122,8 +122,9 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "enabled_value",
         "disabled_value",
     }
-    runtime_files = {item["file"]: item for item in payload["runtime_files"]}
-    assert len(runtime_files) == len(original_compose["configs"])
+    # Runtime configuration ships in the Controller image, not the bundle.
+    assert "runtime_files" not in payload
+    assert "configs" not in original_compose
 
     installer_secret_files = {item["file"] for item in payload["secrets"]}
     for group in ("random_text", "ed25519_pkcs8_pem", "postgres_urls"):
@@ -173,36 +174,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         for secret in compose["secrets"].values()
     }
     assert compose_secret_files == installer_secret_files
-    assert all(set(config) == {"file"} for config in compose["configs"].values())
-    compose_runtime_files = {
-        config["file"].removeprefix("./secrets/")
-        for config in compose["configs"].values()
-    }
-    assert compose_runtime_files == set(runtime_files)
-    for name, original in original_compose["configs"].items():
-        relative = compose["configs"][name]["file"].removeprefix("./secrets/")
-        assert runtime_files[relative]["content"] == original["content"].replace(
-            "$$", "$"
-        )
-        referenced_modes = {
-            reference.get("mode", "0444")
-            for service in original_compose["services"].values()
-            for reference in service.get("configs", [])
-            if reference["source"] == name
-        }
-        assert runtime_files[relative]["mode"] == (
-            0o755 if referenced_modes == {"0555"} else 0o644
-        )
-    assert all(
-        set(reference) <= {"source", "target"}
-        for service in compose["services"].values()
-        for reference in service.get("configs", [])
-    )
-    assert all(
-        service.get("read_only") is True
-        for service in compose["services"].values()
-        if service.get("configs") and service.get("read_only") is not None
-    )
+    assert "configs" not in compose
     assert compose["secrets"]["step-ca-config"]["file"] == ("./secrets/step-ca/ca.json")
     assert all(
         "STEP_CA_CONFIG_FILE" not in str(volume)
@@ -233,9 +205,7 @@ def test_payload_build_is_deterministic_and_refuses_to_overwrite(
     assert preserved.read_text(encoding="utf-8") == "operator data\n"
 
 
-@pytest.mark.parametrize(
-    "mutation", ("service", "image", "include", "bind", "config-dollar")
-)
+@pytest.mark.parametrize("mutation", ("service", "image", "include", "bind", "config"))
 def test_payload_build_rejects_noncanonical_compose(
     tmp_path: Path, mutation: str
 ) -> None:
@@ -254,8 +224,7 @@ def test_payload_build_rejects_noncanonical_compose(
             "./repository:/repository:ro"
         )
     else:
-        first_config = next(iter(document["configs"].values()))
-        first_config["content"] += "\n$UNSAFE_INTERPOLATION\n"
+        document["configs"] = {"caddyfile": {"file": "./Caddyfile"}}
     compose.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
 
     output = tmp_path / f"{mutation}.json"

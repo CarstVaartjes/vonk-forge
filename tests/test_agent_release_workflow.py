@@ -637,8 +637,13 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     assert metadata.count("fetch-depth: 0") == 1
     assert metadata.count("git fetch --no-tags --prune origin") == 1
     assert metadata.count('test "$GITHUB_REF" = "refs/heads/main"') == 1
-    assert metadata.count('test "$GITHUB_SHA" = "$main_sha"') == 1
-    assert text.index("Verify exact current main tip") < text.index(
+    assert (
+        metadata.count(
+            'git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main'
+        )
+        == 1
+    )
+    assert text.index("Verify the commit is on main") < text.index(
         "Derive immutable development package metadata"
     )
     assert "verify-main-for-apt:" not in text
@@ -682,7 +687,7 @@ def test_development_security_gate_is_parallel_keyless_and_exact_main_bound() ->
     package = text.split("\n  build-test-sign:\n", 1)[1].split(
         "\n  security-gates:\n", 1
     )[0]
-    authority = workflow_step(security, "Revalidate exact current main security source")
+    authority = workflow_step(security, "Revalidate main security source")
 
     assert "needs: [package-metadata]" in security
     for compiler in (
@@ -696,7 +701,7 @@ def test_development_security_gate_is_parallel_keyless_and_exact_main_bound() ->
     assert 'save-if: "false"' in security
     assert 'test "$GITHUB_REF" = refs/heads/main' in authority
     assert "+refs/heads/main:refs/remotes/origin/main" in authority
-    assert 'test "$GITHUB_SHA" =' in authority
+    assert 'git merge-base --is-ancestor "$GITHUB_SHA"' in authority
     for forbidden in (
         "environment:",
         "id-token: write",
@@ -775,7 +780,7 @@ def test_development_compiler_fanout_is_role_complete_and_collision_free() -> No
 def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() -> None:
     text = COMPILE_WORKFLOW.read_text()
     validation = workflow_step(text, "Validate architecture compilation authority")
-    authority = workflow_step(text, "Revalidate exact current main compilation source")
+    authority = workflow_step(text, "Revalidate main compilation source")
     compile_step = workflow_step(text, "Compile exact package binary set")
     upload_authority = workflow_step(
         text, "Revalidate source before compiled artifact upload"
@@ -819,7 +824,7 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert "compiled/${{ inputs.binary_set }}/vonk-agent-helper" in upload
     assert "path: compiled\n" not in upload
     assert (
-        text.index("Revalidate exact current main compilation source")
+        text.index("Revalidate main compilation source")
         < text.index("Compile exact package binary set")
         < text.index("Revalidate source before compiled artifact upload")
         < text.index("Upload exact compiled binary set")
@@ -984,7 +989,7 @@ def test_development_apt_publication_is_exact_run_bound() -> None:
     assert 'test "$EVENT_HEAD_SHA" = "$source_sha"' in resolve
     assert "scripts/agent-package-metadata" in accepted
     assert "+refs/heads/main:refs/remotes/origin/main" in accepted
-    assert 'test "$SOURCE_SHA" =' in accepted
+    assert 'git merge-base --is-ancestor "$SOURCE_SHA"' in accepted
     assert "jobs?filter=latest&per_page=100" in accepted
     assert "artifacts?per_page=100" in accepted
     assert 'test "$(jq \'length\' "$jobs")" = 6' in accepted
@@ -1016,7 +1021,7 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
 
     assert "needs: [package-metadata, build-test-sign]" in lifecycle
     assert "runs-on: ubuntu-24.04-arm" in lifecycle
-    assert "Revalidate exact current main ARM64 acceptance source" in lifecycle
+    assert "Revalidate main ARM64 acceptance source" in lifecycle
     assert "+refs/heads/main:refs/remotes/origin/main" in lifecycle
     assert (
         "Install pinned Rust toolchain for the historical helper fixture" in lifecycle
@@ -1207,7 +1212,10 @@ def test_reusable_apt_publisher_rechecks_dev_authority_inside_protected_job() ->
     assert 'test "$GITHUB_REF" = "refs/heads/main"' in authority
     assert "git fetch --no-tags --prune origin" in authority
     assert "+refs/heads/main:refs/remotes/origin/main" in authority
-    assert 'test "$SOURCE_SHA" = "$main_sha"' in authority
+    assert (
+        'git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main'
+        in authority
+    )
     assert "dev)" in authority
     stable_case = authority.split("stable)", 1)[1].split("*)", 1)[0]
     assert "origin/main" not in stable_case
