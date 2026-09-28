@@ -82,6 +82,11 @@ services:
       - ./prometheus/alerts.yaml:/run/vonk-source-assets/prometheus/alerts.yaml:ro
       - ./grafana/provisioning:/run/vonk-source-assets/grafana/provisioning:ro
       - ./grafana/dashboards:/run/vonk-source-assets/grafana/dashboards:ro
+      # The Controller keeps the default gateway client key here (mode 600).
+      - type: bind
+        source: ./secrets/gateway
+        target: /gateway-secrets
+        bind: {create_host_path: true}
     # Built OCI archives can be tens of GiB and must remain available while
     # they are distributed to every mapped Spark. Keep them off tmpfs and in a
     # dedicated volume so Controller restarts do not invalidate accepted

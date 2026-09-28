@@ -629,15 +629,12 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
         )
         assert human.returncode == 0, human.stdout + human.stderr
         expected_expiry = datetime.fromisoformat(endpoint.expires_at).isoformat(sep=" ")
-        expected_example = (
-            "  API_BASE="
-            + shlex.quote(endpoint.api_base)
-            + " MODEL="
-            + shlex.quote(loaded_assignment.alias)
-        )
         assert f"Route expires at: {expected_expiry}" in human.stdout
-        assert "Credential-free configuration example:" in human.stdout
-        assert expected_example in human.stdout
+        assert (
+            "  export OPENAI_BASE_URL=" + shlex.quote(endpoint.api_base) in human.stdout
+        )
+        assert f"  model: {loaded_assignment.alias}" in human.stdout
+        assert "vonkctl key create" in human.stdout
         assert "Authorization" not in human.stdout
         assert token not in human.stdout + human.stderr
 
