@@ -267,16 +267,6 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
     assert not (PYTHON_CLIENT / "api/default/upload_artifact_job_input.py").exists()
     assert not (PYTHON_CLIENT / "api/default/download_artifact_job_result.py").exists()
 
-    source_bundle = operations["downloadRecipeSourceBundle"]
-    assert source_bundle["x-vonk-streaming-transport"] is True
-    assert source_bundle["responses"]["200"]["content"] == {
-        "application/vnd.vonk-forge.source-bundle.v1+tar": {
-            "schema": {"format": "binary", "type": "string"}
-        }
-    }
-    assert "downloadRecipeSourceBundle" not in typescript
-    assert not (PYTHON_CLIENT / "api/default/download_recipe_source_bundle.py").exists()
-
 
 def test_admin_schema_is_secret_free() -> None:
     schema = json.loads(OPENAPI.read_text())

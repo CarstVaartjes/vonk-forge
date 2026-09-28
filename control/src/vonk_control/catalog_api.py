@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import tempfile
 import uuid
 from typing import Any, Literal, Protocol
 
-from fastapi import FastAPI, HTTPException, Path, Request
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import ConfigDict, Field
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from .audit import AuditRecord
 from .auth import Actor
@@ -23,8 +22,7 @@ from .catalog_sync_contract import (
     ManagedCatalogSyncProblem,
     ManagedCatalogWithdrawnRecipe,
 )
-from .download_contract import upload_request_body
-from .library_contract import Digest, UuidId
+from .library_contract import UuidId
 from .recipe_library_types import RecipeLibraryError
 from .strict_json import StrictJSONModel
 
@@ -43,14 +41,6 @@ _RECIPE_LIBRARY_UNAVAILABLE_CODES = frozenset(
 )
 
 CATALOG_OPERATION_IDS = {
-    (
-        "get",
-        "/api/catalog/source-bundles/{sha256}",
-    ): "downloadRecipeSourceBundle",
-    (
-        "put",
-        "/api/catalog/source-bundles/{sha256}",
-    ): "uploadRecipeSourceBundle",
     (
         "post",
         "/api/catalog/managed-recipes/sync",
@@ -125,14 +115,6 @@ class ManagedCatalogSyncResponse(StrictModel):
     created_at: str
     completed_at: str | None
     last_error: ManagedCatalogSyncFailure | None = None
-
-
-class SourceBundleResponse(StrictModel):
-    sha256: Digest
-    archive_bytes: int = Field(ge=1)
-    total_bytes: int = Field(ge=0)
-    file_count: int = Field(ge=1, le=4096)
-    files: list[str] = Field(min_length=1, max_length=4096)
 
 
 def _catalog_problem(
@@ -236,102 +218,6 @@ def install_catalog_routes(
                 status_code=503, detail="managed recipe catalog sync is unavailable"
             )
         return managed_sync
-
-    @app.get(
-        "/api/catalog/source-bundles/{sha256}",
-        response_class=Response,
-        responses={
-            200: {
-                "content": {
-                    "application/vnd.vonk-forge.source-bundle.v1+tar": {
-                        "schema": {"type": "string", "format": "binary"}
-                    }
-                }
-            },
-            401: {"model": CatalogProblem},
-            404: {"model": CatalogProblem},
-            422: {"model": CatalogProblem},
-        },
-        openapi_extra={"x-vonk-streaming-transport": True},
-        operation_id="downloadRecipeSourceBundle",
-    )
-    def download_source_bundle(
-        request: Request,
-        sha256: str = Path(pattern=r"^[0-9a-f]{64}$"),
-        _actor: Actor = authenticated,
-    ):
-        try:
-            archive = catalog().read_source_bundle(sha256)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="source bundle not found"
-            ) from None
-        except CatalogError as error:
-            return _problem(request, error)
-        return Response(
-            archive,
-            media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
-            headers={
-                "Cache-Control": "private, max-age=31536000, immutable",
-                "Content-Disposition": f'attachment; filename="vonk-source-{sha256}.tar"',
-                "ETag": f'"sha256:{sha256}"',
-                "X-Content-Type-Options": "nosniff",
-            },
-        )
-
-    @app.put(
-        "/api/catalog/source-bundles/{sha256}",
-        response_model=SourceBundleResponse,
-        responses={
-            401: {"model": CatalogProblem},
-            403: {"model": CatalogProblem},
-            409: {"model": CatalogProblem},
-            422: {"model": CatalogProblem},
-        },
-        operation_id="uploadRecipeSourceBundle",
-        openapi_extra=upload_request_body("application/octet-stream"),
-    )
-    async def upload_source_bundle(
-        request: Request,
-        sha256: str = Path(pattern=r"^[0-9a-f]{64}$"),
-        actor: Actor = authenticated,
-    ):
-        administrator(actor)
-        maximum = 64 * 1024 * 1024
-        received = 0
-        with tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b") as payload:
-            async for chunk in request.stream():
-                received += len(chunk)
-                if received > maximum:
-                    return _problem(
-                        request,
-                        CatalogError(
-                            "bundle.archive_too_large",
-                            "source bundle is too large",
-                        ),
-                    )
-                payload.write(chunk)
-            payload.seek(0)
-            try:
-                result = catalog().store_source_bundle(sha256, payload, actor.subject)
-            except CatalogError as error:
-                return _problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.source_bundle.upload",
-                None,
-                (sha256, str(result.archive_bytes)),
-            )
-        )
-        return {
-            "sha256": result.sha256,
-            "archive_bytes": result.archive_bytes,
-            "total_bytes": result.total_bytes,
-            "file_count": result.file_count,
-            "files": list(result.files),
-        }
 
     @app.post(
         "/api/catalog/managed-recipes/sync",

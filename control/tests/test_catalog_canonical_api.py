@@ -20,7 +20,7 @@ def test_catalog_api_exposes_canonical_import_and_sync_only() -> None:
     )
 
     paths = app.openapi()["paths"]
-    assert "/api/catalog/source-bundles/{sha256}" in paths
+    assert "/api/catalog/source-bundles/{sha256}" not in paths
     assert "/api/catalog/managed-recipes/sync" in paths
     assert "/api/catalog/public-recipes" not in paths
     assert "/api/catalog/imports/public" not in paths
