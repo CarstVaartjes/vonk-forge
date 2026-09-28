@@ -2062,7 +2062,7 @@ Web methods in `control/web/src/api/client.ts` map to the CLI as follows:
 | Model/recipe library, status, detail, prepare, remove, update and progress | Matching singular Model/Recipe commands; same owning contracts |
 | Activity and resumable job detail | `fleet activity`, `fleet progress`, `fleet resume`; CLI has no separate raw audit-export or generic operation-detail command |
 | Artifact draft, inputs, submit, cancel and results | Seven `recipe job` leaves above; existing web callers now pass stable request-key headers and reconcile receipts. Exact receipt identity, explicit denial and abort-recovery checks pass, including the full 163-test web suite. |
-| Published profile endpoints | `profile endpoint`; current web API wrapper has no equivalent profile-scoped method, so no completed web parity is claimed |
+| Published profile endpoints | `profile endpoint`; the web Profiles view shows the loaded profile's gateway base URL and model alias from the same `GET /api/profile/{number}/endpoints` projection |
 | Browser sign-in/out and CLI token download | Explicit bootstrap dependency, not CLI session/password administration |
 
 The CLI implementation does not claim the later web redesign is delivered.

@@ -400,7 +400,8 @@ def _smoke(
     assignment = assignments[0]
     assert assignment["state"] == "published"
     assert assignment["alias"] == "qwen"
-    assert assignment["endpoint"]["api_base"] == "http://10.0.0.2:8000/v1"
+    assert assignment["endpoint"]["api_base"].startswith("https://")
+    assert assignment["endpoint"]["backend_api_base"] == "http://10.0.0.2:8000/v1"
     assert "Authorization" not in endpoint.stdout
 
     detail_unavailable = _run_cli(

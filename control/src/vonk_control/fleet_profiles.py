@@ -175,6 +175,16 @@ _PROFILE_ACTIVITY_ACTIVE_STATES = ("queued", "running", "waiting-for-operator")
 # contract's own alias, so a malformed state fails instead of reaching a typed
 # model as an unvalidated string.
 _OPERATION_STATE_ADAPTER = TypeAdapter(FleetProfileOperationState)
+# Human labels for the loaded application's live assignment state.  "Running"
+# is reported only once the run is up on every member and its route published.
+_OBSERVED_ASSIGNMENT_LABELS: Mapping[FleetProfileAssignmentState, str] = {
+    "not-placed": "Not placed",
+    "placed": "Placed",
+    "installing": "Installing",
+    "installed": "Installed",
+    "running": "Running",
+    "degraded": "Degraded",
+}
 _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
 _MAX_CACHE_RECOVERY_DELAY_SECONDS = 60
@@ -7246,13 +7256,18 @@ class FleetProfileService:
             # The application worker owns failing that receipt explicitly.
             selection = None
             warnings.append("The selected profile application is unreadable")
+        loaded_assignments = (
+            selection.intended.assignments
+            if selection is not None and selection.profile_id == row.id
+            else None
+        )
         assigned_nodes = (
             {
                 node.node_id
-                for assignment in selection.intended.assignments
+                for assignment in loaded_assignments
                 for node in assignment.nodes
             }
-            if selection is not None and selection.profile_id == row.id
+            if loaded_assignments is not None
             else {node_id for choice in choices for node_id in choice.spark_ids}
         )
         for choice in choices:
@@ -7358,7 +7373,12 @@ class FleetProfileService:
                         "revision_id": revision.id,
                     },
                     resources=resources,
-                    observed_state="Not loaded",
+                    observed_state=self._observed_assignment_state(
+                        session,
+                        loaded_assignments,
+                        recipe_id=recipe.id,
+                        spark_ids=choice.spark_ids,
+                    ),
                 )
             )
         roster = tuple(
@@ -7450,6 +7470,41 @@ class FleetProfileService:
             created_at=_aware(row.created_at),
             updated_at=_aware(row.updated_at),
         )
+
+    @classmethod
+    def _observed_assignment_state(
+        cls,
+        session: Session,
+        loaded_assignments: Sequence[FleetProfileAssignment] | None,
+        *,
+        recipe_id: str,
+        spark_ids: Sequence[str],
+    ) -> str:
+        """Project one saved assignment onto the live loaded application.
+
+        Only the currently selected application's exact assignment says what
+        is loaded; a saved edit that application does not contain is honestly
+        "Not loaded".  The label comes from the same assignment-state predicate
+        that planning and endpoint publication use, never a second opinion.
+        """
+
+        if loaded_assignments is None:
+            return "Not loaded"
+        nodes = set(spark_ids)
+        loaded = next(
+            (
+                assignment
+                for assignment in loaded_assignments
+                if assignment.recipe_id == recipe_id
+                and {node.node_id for node in assignment.nodes} == nodes
+            ),
+            None,
+        )
+        if loaded is None:
+            return "Not loaded"
+        return _OBSERVED_ASSIGNMENT_LABELS[
+            cls._assignment_state(session, loaded).current_state
+        ]
 
     @staticmethod
     def _model_title(session: Session, document: Mapping[str, object]) -> str | None:

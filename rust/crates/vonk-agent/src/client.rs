@@ -365,6 +365,15 @@ pub struct RecipeRunInspectionGrant {
     pub unowned: bool,
 }
 
+/// The Controller's answer for one locally retained run, by id alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecipeRunDisposition {
+    /// The Controller has a record of the run; its integrity checks apply.
+    Known,
+    /// The Controller has no record of the run and never will accept it.
+    Unowned,
+}
+
 /// Response header naming a run the Controller has no record of.
 pub const RECIPE_RUN_DISPOSITION_HEADER: &str = "x-vonk-recipe-run-disposition";
 /// The only disposition value: the Controller never owned this run.
@@ -744,6 +753,32 @@ impl AgentHttpClient {
         let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         Ok(response.grant)
+    }
+
+    /// Whether the Controller has any record of one locally retained run.
+    ///
+    /// Needs only the run id, so it also answers for a run directory whose
+    /// managed metadata this agent can no longer parse.  The Controller names
+    /// only a run it never owned; any other header value is outside the
+    /// contract and never guessed at.
+    pub async fn recipe_run_disposition(
+        &self,
+        run_id: uuid::Uuid,
+    ) -> Result<RecipeRunDisposition, ClientError> {
+        let response = self
+            .current_client()
+            .await
+            .get(self.endpoint(&format!("/agent/recipe-runs/{run_id}/disposition"))?)
+            .send()
+            .await?;
+        classify_response(&response)?;
+        match response.headers().get(RECIPE_RUN_DISPOSITION_HEADER) {
+            None => Ok(RecipeRunDisposition::Known),
+            Some(value) if value.as_bytes() == RECIPE_RUN_UNOWNED.as_bytes() => {
+                Ok(RecipeRunDisposition::Unowned)
+            }
+            Some(_) => Err(ClientError::Protocol),
+        }
     }
 
     pub async fn recipe_run_inspection_grant(

@@ -8,6 +8,7 @@ import type {
   ControlApi,
   FleetProfileInput,
   FleetProfileList,
+  FleetProfileEndpoints,
   FleetProfilePreview,
   FleetProfile,
   FleetProfileApplicationView,
@@ -255,6 +256,13 @@ export class ApiClient implements ControlApi {
 
   async profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.GET("/api/profile/{number}/progress", {
+      params: {path: {number}},
+      signal,
+    }));
+  }
+
+  async profileEndpoints(number: number, signal?: AbortSignal): Promise<FleetProfileEndpoints> {
+    return resultData(await this.generated.GET("/api/profile/{number}/endpoints", {
       params: {path: {number}},
       signal,
     }));

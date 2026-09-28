@@ -122,6 +122,7 @@ export type FleetProfile = components["schemas"]["FleetProfileView"];
 export type FleetProfileInput = components["schemas"]["FleetProfileInput"];
 export type FleetProfileList = components["schemas"]["FleetProfileList"];
 export type FleetProfilePreview = components["schemas"]["FleetProfilePreview"];
+export type FleetProfileEndpoints = components["schemas"]["FleetProfileEndpointsView"];
 export type FleetProfileApplicationView = components["schemas"]["FleetProfileApplicationView"];
 export type FleetProfileLoadInput = components["schemas"]["FleetProfileLoadRequest"];
 export type TelemetryScope = components["schemas"]["TelemetrySeries"]["scope"];
@@ -181,6 +182,7 @@ export interface ControlApi extends LibraryApi {
   loadProfile(number: number, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   profileApplicationByRequest(number: number, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profileEndpoints(number: number, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   enrollFleetNode(input: {name: string; request_key: string; ttl_seconds: number}, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
   jobs(cursor?: string): Promise<JobsResponse>;

@@ -162,15 +162,15 @@ class Settings:
     package_helper_receipt_private_key_path: Path | None = None
     host_runtime_grant_private_key_path: Path | None = None
     recipe_library_api_url: str = "https://api.github.com"
-    # None downloads release assets directly from GitHub; the Compose
-    # deployment routes them through Caddy's repository-scoped relay.
-    recipe_library_asset_url: str | None = None
+    # Release asset downloads always use the in-project Caddy relay, which is
+    # scoped to the recipe repository; the API has no direct path to GitHub's
+    # asset origin.  This is fixed, not configuration.
+    recipe_library_asset_url: str = "http://caddy:8085"
     # "latest" follows the newest signed release; an exact vMAJOR.MINOR.PATCH
     # tag holds the Controller on that release.
     recipe_library_release: str = "latest"
-    # Optional immutable package channel.  An empty value keeps development
-    # and existing installations on the GitHub reader until publication is
-    # configured.
+    # Acceptance-only unsigned fixture channel (the Spark lifecycle canary).
+    # Unset in every deployment, which reads signed GitHub releases.
     recipe_library_package_url: str | None = None
     recipe_library_sync_interval_seconds: int = 900
     distributed_start_timeout_seconds: int = 3600
@@ -498,13 +498,6 @@ class Settings:
             raise SettingsError(
                 "recipe library API URL must be GitHub or the fixed internal relay"
             )
-        recipe_library_asset_url = (
-            os.environ.get("VONK_RECIPE_LIBRARY_ASSET_URL", "").rstrip("/") or None
-        )
-        if recipe_library_asset_url not in {None, "http://caddy:8085"}:
-            raise SettingsError(
-                "recipe library asset URL must be empty or the fixed internal relay"
-            )
         recipe_library_release = (
             os.environ.get("VONK_RECIPE_LIBRARY_RELEASE", "latest").strip() or "latest"
         )
@@ -582,7 +575,6 @@ class Settings:
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
             recipe_library_api_url=recipe_library_api_url,
-            recipe_library_asset_url=recipe_library_asset_url,
             recipe_library_release=recipe_library_release,
             recipe_library_package_url=recipe_library_package_url,
             recipe_library_sync_interval_seconds=recipe_library_sync_interval_seconds,

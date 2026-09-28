@@ -2,9 +2,12 @@
 
 Production Controllers read signed GitHub releases of the recipe repository
 (see [the recipe library](../operators/recipe-library.md#development-versus-production)).
-`VONK_RECIPE_LIBRARY_PACKAGE_URL` instead selects an operator-configured
-package channel for reviewed internal fixtures; the operator who configures it
-owns its integrity, because it carries no release signature.
+Release assets are always downloaded through the Controller's in-project
+Caddy relay (`http://caddy:8085`, built in); `VONK_RECIPE_LIBRARY_RELEASE` is
+the only operator setting and optionally holds an exact release. The unsigned
+package channel below exists only for the acceptance lifecycle canary, which
+sets `VONK_RECIPE_LIBRARY_PACKAGE_URL` directly on its disposable Controller;
+it is not part of the Compose configuration and carries no release signature.
 
 The platform publisher emits `index.json` and one immutable package for each
 recipe. The package channel is served at the configured origin with these

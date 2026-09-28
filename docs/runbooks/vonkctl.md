@@ -843,6 +843,31 @@ alias narrows the result. An absent, stale, revoked, or unpublished route is not
 replaced with a guessed address. Endpoint discovery does not issue credentials
 or prove physical model quality.
 
+The client endpoint is the Controller's inference gateway, not a Spark:
+`API base` is `https://<controller host>/v1` (the same origin as
+`VONK_CONTROL_URL`; over Tailscale, the `svc:vonk-forge` service), where Caddy
+routes `/v1/*` to LiteLLM behind the route-lease check. Use it with the
+`Client model identifier` as the OpenAI `model`. `Spark backend (diagnostic)`
+is the Spark-local serving address LiteLLM forwards to; it is usually
+unreachable from a client and is never the endpoint. The web Profiles view
+shows the same base URL and model for a loaded profile.
+
+Clients authenticate to the gateway with a LiteLLM virtual key, never the
+Controller token. Create one scoped to the alias in the LiteLLM admin UI at
+`https://<controller host>/litellm/ui`, or on the NAS with the LiteLLM master
+key, keeping both out of shell history and output:
+
+```sh
+docker exec vonk-forge-litellm-1 python3 -c 'import json,urllib.request as u; \
+k=open("/run/vonk-normalized-secrets/litellm-master-key").read().strip(); \
+b=json.dumps({"models":["ALIAS"],"key_alias":"CLIENT-NAME"}).encode(); \
+r=u.Request("http://127.0.0.1:4000/key/generate",data=b,headers={"Authorization":"Bearer "+k,"Content-Type":"application/json"}); \
+print(json.load(u.urlopen(r))["key"])' > client-key && chmod 600 client-key
+```
+
+Then `GET https://<controller host>/v1/models` with `Authorization: Bearer
+<key>` lists the alias, and `POST /v1/chat/completions` serves it.
+
 ## Output and recovery
 
 Human results go to stdout; warnings, progress, and errors go to stderr.

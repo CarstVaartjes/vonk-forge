@@ -17,6 +17,7 @@ use crate::{
     client::{
         AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence,
         DistributionProgress, ExactRecipeRunObservation, HEARTBEAT_LEASE_MARGIN,
+        RecipeRunDisposition,
     },
     health::{wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome, HostRuntimePlan},
@@ -342,6 +343,52 @@ impl<R> RecipeExecutor<'_, R> {
         Ok(self.runtime.recipe_run_inspection_results()?.len())
     }
 
+    /// Retire a retained run whose managed metadata cannot be parsed, once
+    /// the Controller confirms it has no record of that run.
+    ///
+    /// Such metadata (for example a lifecycle written by an older agent)
+    /// can never yield the exact binding an observation, probe or stop
+    /// needs, so skipping it only repeats the same diagnostic every sweep.
+    /// The existing retirement path removes just the lifecycle; the run
+    /// directory stays as history and no process is touched.  A run the
+    /// Controller knows keeps its integrity failure visible, and any other
+    /// local error (storage, bounds, binding mismatch) is never retired.
+    async fn retire_unparseable_unowned_run(&self, run_id: &str, error: &OciError) -> bool
+    where
+        R: ProcessRunner,
+    {
+        if !matches!(error, OciError::Json(_)) {
+            return false;
+        }
+        let Ok(id) = uuid::Uuid::parse_str(run_id) else {
+            return false;
+        };
+        match self.client.recipe_run_disposition(id).await {
+            Ok(RecipeRunDisposition::Unowned) => match self.runtime.complete_stop(run_id) {
+                Ok(()) => {
+                    eprintln!(
+                        "vonk-agent: retired exact recipe run {run_id}: unparseable managed metadata and unknown to the Controller"
+                    );
+                    true
+                }
+                Err(retire) => {
+                    eprintln!(
+                        "vonk-agent: exact recipe run {run_id} is unknown to the Controller; retirement failed ({})",
+                        retire.safe_category()
+                    );
+                    false
+                }
+            },
+            Ok(RecipeRunDisposition::Known) => false,
+            Err(lookup) => {
+                eprintln!(
+                    "vonk-agent: exact recipe run {run_id} disposition is unavailable ({lookup})"
+                );
+                false
+            }
+        }
+    }
+
     pub async fn report_exact_recipe_run_observations(
         &self,
     ) -> Result<usize, RecipeObservationError>
@@ -355,6 +402,9 @@ impl<R> RecipeExecutor<'_, R> {
                     Ok(Some(plan)) => Some(Ok(plan)),
                     Ok(None) => None,
                     Err((run_id, error)) => {
+                        if self.retire_unparseable_unowned_run(&run_id, &error).await {
+                            return Some(Err(RecipeObservationError::UnownedRun));
+                        }
                         eprintln!(
                             "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({})",
                             error.safe_category()
@@ -4306,6 +4356,13 @@ mod tests {
 
     impl ObservationServer {
         fn new(status: Option<u16>) -> Self {
+            Self::with_disposition(status, None)
+        }
+
+        /// Also answer run disposition lookups: `Some("unowned")` sends the
+        /// Controller's header, `Some("")` answers known (no header), and
+        /// each lookup is recorded as `{"disposition": "<request path>"}`.
+        fn with_disposition(status: Option<u16>, disposition: Option<&'static str>) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let address = listener.local_addr().unwrap();
             listener.set_nonblocking(true).unwrap();
@@ -4338,6 +4395,29 @@ mod tests {
                         }
                     };
                     let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+                    if let Some(path) = headers
+                        .strip_prefix("GET ")
+                        .and_then(|line| line.split_once(" HTTP/1.1\r\n"))
+                        .map(|(path, _)| path.to_owned())
+                    {
+                        let disposition = disposition.expect("unexpected disposition lookup");
+                        assert!(
+                            path.starts_with("/agent/recipe-runs/")
+                                && path.ends_with("/disposition")
+                        );
+                        reports.push(json!({ "disposition": path }));
+                        let header = if disposition.is_empty() {
+                            String::new()
+                        } else {
+                            format!("x-vonk-recipe-run-disposition: {disposition}\r\n")
+                        };
+                        write!(
+                            stream,
+                            "HTTP/1.1 204 Response\r\n{header}Connection: close\r\n\r\n"
+                        )
+                        .unwrap();
+                        continue;
+                    }
                     assert!(
                         headers.starts_with("POST /agent/recipe-runs/observations HTTP/1.1\r\n")
                     );
@@ -4620,7 +4700,8 @@ mod tests {
         let metadata = data.path().join("run-metadata").join(run_id);
         fs::create_dir_all(&metadata).unwrap();
         fs::write(metadata.join("lifecycle.json"), b"not-json").unwrap();
-        let server = ObservationServer::new(Some(204));
+        // The Controller owns this run, so its integrity failure stays.
+        let server = ObservationServer::with_disposition(Some(204), Some(""));
         let runner = NoProcess;
         let executor = RecipeExecutor {
             client: &server.client,
@@ -4639,7 +4720,68 @@ mod tests {
                 .unwrap(),
             0
         );
-        assert!(server.finish().is_empty());
+        assert_eq!(
+            server.finish(),
+            vec![json!({ "disposition": format!("/agent/recipe-runs/{run_id}/disposition") })]
+        );
+        assert!(metadata.join("lifecycle.json").exists());
+    }
+
+    #[tokio::test]
+    async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever() {
+        // Live regression: a lifecycle written before an agent upgrade could
+        // no longer be parsed, so the run was skipped every sweep forever.
+        use std::os::unix::fs::PermissionsExt;
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let run_id = "e85c4710-e437-4d12-8191-499596aa2a4c";
+        fs::create_dir_all(data.path().join("runs").join(run_id)).unwrap();
+        let metadata = data.path().join("run-metadata").join(run_id);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(metadata.join("lifecycle.json"), br#"{"installation_id":1}"#).unwrap();
+        fs::write(metadata.join("runtime.json"), b"{}").unwrap();
+        let runner = NoProcess;
+        let server = ObservationServer::with_disposition(Some(204), Some("unowned"));
+        let executor = RecipeExecutor {
+            client: &server.client,
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: data.path(),
+                huggingface_curl_config: None,
+            },
+            runtime_root: runtime.path(),
+            observation_receipt_public_key: [0; 32],
+        };
+        assert_eq!(
+            executor
+                .report_exact_recipe_run_observations()
+                .await
+                .unwrap(),
+            0
+        );
+        // The next sweep has nothing left to ask about or skip.
+        assert_eq!(
+            executor
+                .report_exact_recipe_run_observations()
+                .await
+                .unwrap(),
+            0
+        );
+        let requests = server.finish();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            requests[0],
+            json!({ "disposition": format!("/agent/recipe-runs/{run_id}/disposition") })
+        );
+        for report in &requests[1..] {
+            assert_eq!(report["schema_version"], 2);
+            assert_eq!(report["runs"], json!([]));
+        }
+        // Only the unusable lifecycle is retired; the run stays as history.
+        assert!(!metadata.join("lifecycle.json").exists());
+        assert!(metadata.join("runtime.json").exists());
+        assert!(data.path().join("runs").join(run_id).is_dir());
     }
 
     #[test]

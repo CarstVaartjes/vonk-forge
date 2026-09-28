@@ -80,6 +80,19 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+def recipe_run_known(session: Session, run_id: str) -> bool:
+    """Whether this Controller has any record of one recipe run.
+
+    One predicate owns "unowned": the read-only probe grant and the agent's
+    disposition lookup must never disagree about a run this Controller knows.
+    """
+
+    return session.get(RecipeRun, run_id) is not None or (
+        session.scalar(select(RunNode.id).where(RunNode.run_id == run_id).limit(1))
+        is not None
+    )
+
+
 class HostHelperAuthorityError(RuntimeError):
     """The host-helper grant could not be issued safely."""
 
@@ -449,12 +462,7 @@ class HostRuntimeAuthorityService:
                     "recipe run observation identity is invalid"
                 ) from error
             run_id = normalized.get("run_id")
-            if session.get(RecipeRun, run_id) is not None or (
-                session.scalar(
-                    select(RunNode.id).where(RunNode.run_id == run_id).limit(1)
-                )
-                is not None
-            ):
+            if not isinstance(run_id, str) or recipe_run_known(session, run_id):
                 return None
             node = session.get(AgentNode, node_id)
             certificate = session.get(AgentCertificate, certificate_serial)

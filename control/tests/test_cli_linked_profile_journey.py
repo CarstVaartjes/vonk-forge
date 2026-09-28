@@ -968,7 +968,8 @@ def _finish_smoke(
     assert endpoint["alias"] == _ASSIGNMENT
     assert endpoint["state"] == "published"
     assert endpoint["generation"] >= 1
-    assert str(endpoint["api_base"]).startswith("http://192.168.1.211:")
+    assert str(endpoint["api_base"]).startswith("https://")
+    assert str(endpoint["backend_api_base"]).startswith("http://192.168.1.211:")
     print(
         "Linked journey owner boundary passed: the imported Profile's explicit "
         "running revision was reviewed and accepted, its exact application ID "

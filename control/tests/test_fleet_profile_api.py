@@ -100,10 +100,12 @@ def test_profile_request_lookup_is_authenticated_and_reports_missing_key() -> No
 def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None:
     from vonk_control.fleet_profile_contract import FleetProfileEndpointsView
 
-    calls: list[tuple[int, str | None]] = []
+    calls: list[tuple[int, str | None, str]] = []
 
-    def profile_endpoint(number: int, alias: str | None) -> FleetProfileEndpointsView:
-        calls.append((number, alias))
+    def profile_endpoint(
+        number: int, alias: str | None, gateway_api_base: str
+    ) -> FleetProfileEndpointsView:
+        calls.append((number, alias, gateway_api_base))
         if alias != "studio-chat":
             raise KeyError(alias)
         return FleetProfileEndpointsView.model_validate(
@@ -122,7 +124,8 @@ def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None
                         "state": "published",
                         "endpoint": {
                             "alias": "studio-chat",
-                            "api_base": "http://10.0.0.10:8000/v1",
+                            "api_base": gateway_api_base,
+                            "backend_api_base": "http://10.0.0.10:8000/v1",
                             "expires_at": "2026-09-10T00:03:00Z",
                             "generation": 8,
                             "node_id": "spk_" + "a" * 32,
@@ -145,14 +148,21 @@ def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None
         path, params={"alias": "studio-chat"}, headers=_headers(codec)
     )
     assert response.status_code == 200
-    assert response.json()["assignments"][0]["endpoint"]["generation"] == 8
+    endpoint = response.json()["assignments"][0]["endpoint"]
+    assert endpoint["generation"] == 8
+    # The client-facing base is the Controller origin's inference gateway.
+    assert endpoint["api_base"] == "https://testserver/v1"
+    assert endpoint["backend_api_base"] == "http://10.0.0.10:8000/v1"
 
     missing = client.get(
         path, params={"alias": "another-profiles-model"}, headers=_headers(codec)
     )
     assert missing.status_code == 404
     assert "not part of profile 3" in missing.json()["detail"]
-    assert calls == [(3, "studio-chat"), (3, "another-profiles-model")]
+    assert calls == [
+        (3, "studio-chat", "https://testserver/v1"),
+        (3, "another-profiles-model", "https://testserver/v1"),
+    ]
 
 
 def test_definition_roundtrip_keeps_metadata_and_enforces_the_observed_revision() -> (

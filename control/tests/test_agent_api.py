@@ -2638,6 +2638,52 @@ def test_bootstrap_requires_the_host_helper_authority(
     assert response.json() == {"detail": "host runtime authority is unavailable"}
 
 
+def test_recipe_run_disposition_names_only_runs_the_controller_never_owned(
+    agent_system,
+) -> None:
+    # Live regression: a Spark kept a run directory whose metadata the agent
+    # could no longer parse, so it could not build an observation binding and
+    # skipped the run every sweep forever.  The run id alone must answer
+    # whether an owner exists, and a known run must never be named unowned.
+    client, services, _, clock = agent_system
+    known_run_id = "70000000-0000-4000-8000-000000000071"
+    with services.sessions.begin() as session:
+        session.add(
+            RecipeRun(
+                id=known_run_id,
+                installation_id="80000000-0000-4000-8000-000000000008",
+                mapping_id="90000000-0000-4000-8000-000000000009",
+                mapping_generation=1,
+                run_generation=1,
+                alias="known-exact",
+                plan_digest="1" * 64,
+                plan={"schema_version": 1, "observation_schema_version": 2},
+                state="stopped",
+                route_state="withdrawn",
+                actor="admin",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+
+    def disposition(run_id: str, headers: dict[str, str]):
+        return client.get(f"/agent/recipe-runs/{run_id}/disposition", headers=headers)
+
+    unowned = disposition(
+        "e85c4710-e437-4d12-8191-499596aa2a4c", agent_headers(NODE_A, "serial-a")
+    )
+    known = disposition(known_run_id, agent_headers(NODE_A, "serial-a"))
+    malformed = disposition("E85C4710-not-a-run", agent_headers(NODE_A, "serial-a"))
+    anonymous = disposition("e85c4710-e437-4d12-8191-499596aa2a4c", {})
+
+    assert unowned.status_code == 204
+    assert unowned.headers["x-vonk-recipe-run-disposition"] == "unowned"
+    assert known.status_code == 204
+    assert "x-vonk-recipe-run-disposition" not in known.headers
+    assert malformed.status_code == 422
+    assert anonymous.status_code == 401
+
+
 def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     agent_system,
 ) -> None:

@@ -473,7 +473,7 @@ class JobLogsResponse(StrictModel):
 class OperationApiServices:
     """Optional projections backed by accepted durable control state only."""
 
-    endpoint: Callable[[str], Mapping[str, object]]
+    endpoint: Callable[[str, str], Mapping[str, object]]
     agents: Callable[[], Sequence[Mapping[str, object]]]
     job_operations: Callable[[str, str | None, int], OperationPage]
     resume_job: Callable[[str], None]
@@ -488,9 +488,9 @@ class OperationApiServices:
     operation_providers: tuple[OperationProviderProtocol, ...] = ()
     cursor_codec: CursorCodec | None = None
     retire_job: Callable[[str], None] | None = None
-    profile_endpoint: Callable[[int, str | None], FleetProfileEndpointsView] | None = (
-        None
-    )
+    profile_endpoint: (
+        Callable[[int, str | None, str], FleetProfileEndpointsView] | None
+    ) = None
 
 
 @dataclass(frozen=True)
@@ -1728,6 +1728,7 @@ class _DurableOperationProjection:
         alias: str,
         raw: Mapping[str, object],
         active_marker: Mapping[str, object],
+        gateway_api_base: str,
     ) -> EndpointResponse:
         scheme = raw.get("scheme")
         address = raw.get("address")
@@ -1759,7 +1760,8 @@ class _DurableOperationProjection:
             raise TypeError("active endpoint marker is invalid")
         return EndpointResponse(
             alias=alias,
-            api_base=f"{scheme}://{address}:{port}{path.rstrip('/')}",
+            api_base=gateway_api_base,
+            backend_api_base=f"{scheme}://{address}:{port}{path.rstrip('/')}",
             expires_at=expires_at,
             generation=generation,
             node_id=node_id,
@@ -1780,7 +1782,7 @@ class _DurableOperationProjection:
         )
         return None if match is None else match.group(1)
 
-    def endpoint(self, alias: str) -> Mapping[str, object]:
+    def endpoint(self, alias: str, gateway_api_base: str) -> Mapping[str, object]:
         with self._sessions() as session:
             snapshot = self._publication_snapshot(session)
         active_marker, route_document = self._verified_routes(snapshot)
@@ -1789,10 +1791,12 @@ class _DurableOperationProjection:
             raise KeyError(alias)
         if not isinstance(raw, Mapping):
             raise OperationProjectionError("active endpoint is invalid")
-        return self._endpoint_payload(alias, raw, active_marker).model_dump(mode="json")
+        return self._endpoint_payload(
+            alias, raw, active_marker, gateway_api_base
+        ).model_dump(mode="json")
 
     def profile_endpoint(
-        self, number: int, alias: str | None
+        self, number: int, alias: str | None, gateway_api_base: str
     ) -> FleetProfileEndpointsView:
         if self._profile_endpoint_intent is None:
             raise RuntimeError("profile endpoint ownership is unavailable")
@@ -1868,7 +1872,7 @@ class _DurableOperationProjection:
                         continue
                     try:
                         endpoints[item.assignment_id] = self._endpoint_payload(
-                            item.alias, raw, active_marker
+                            item.alias, raw, active_marker, gateway_api_base
                         )
                     except (RuntimeError, TypeError, ValueError):
                         states[item.assignment_id] = "unavailable"
