@@ -8,6 +8,8 @@ state or log evidence.
 
 from __future__ import annotations
 
+import logging
+import traceback
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
@@ -44,11 +46,13 @@ from .fleet_projection import (
     FleetSnapshot,
 )
 from .library_projection import LibrarySelectorAmbiguous
-from .logging import redact_text
+from .logging import current_request_id, log_event, redact_text
 from .models import AgentOperation, AgentOperationAttempt
 from .operation_api import bounded_error_responses
 from .request_fault import RequestFault
 from .strict_json import StrictJSONModel, stored_document_detail
+
+_LOGGER = logging.getLogger(__name__)
 
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 LogSource = Literal["client", "monitor", "runtime", "job"]
@@ -694,6 +698,17 @@ def _operator_error(error: Exception) -> HTTPException:
         return HTTPException(status_code=503, detail=detail[:256])
     if isinstance(error, BoundedJSONError):
         return HTTPException(status_code=503, detail=str(error)[:256])
+    # Nothing above explains this failure, so the caller only learns that the
+    # projection is unavailable. Record the redacted traceback against the
+    # request id the caller sees, so the 503 can be diagnosed from the log.
+    log_event(
+        _LOGGER,
+        "api.operator_projection_failed",
+        service="controller",
+        request_id=current_request_id.get(),
+        failure_type=type(error).__name__,
+        traceback=traceback.format_exception(error)[-64:],
+    )
     return HTTPException(status_code=503, detail="operator projection unavailable")
 
 
