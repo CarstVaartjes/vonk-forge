@@ -1,6 +1,8 @@
 """Per-test time budget for the repository, Controller and Compose suites.
 
-Every test must finish its setup and body within ``DEFAULT_BUDGET_SECONDS``. A
+Every test must finish its setup and body within ``DEFAULT_BUDGET_SECONDS``;
+setting up a fixture shared beyond one test (session, package, module or
+class scope) is excluded, because doing expensive work once is the point. A
 test that genuinely needs longer carries ``@pytest.mark.slow(seconds)`` with a
 comment naming why; ``MAX_BUDGET_SECONDS`` caps that exception.
 
@@ -16,6 +18,7 @@ a machine that is knowingly overloaded; CI runs at the default scale.
 from __future__ import annotations
 
 import sys
+import time
 from collections.abc import Generator
 
 import pytest
@@ -76,13 +79,48 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         budget_seconds(item)
 
 
+class _SharedSetup:
+    """Time spent creating fixtures shared beyond one test.
+
+    A session- or module-scoped fixture (a database server, an installed CLI,
+    pulled base images) is set up once and reused, which is exactly what a
+    slow test should do. Its one-off cost is not charged to whichever test
+    happens to request it first.
+    """
+
+    depth = 0
+    seconds = 0.0
+
+    @classmethod
+    def take(cls) -> float:
+        seconds, cls.seconds = cls.seconds, 0.0
+        return seconds
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_fixture_setup(
+    fixturedef: pytest.FixtureDef[object], request: pytest.FixtureRequest
+) -> Generator[None, object, object]:
+    if fixturedef.scope == "function":
+        return (yield)
+    _SharedSetup.depth += 1
+    started = time.perf_counter()
+    try:
+        return (yield)
+    finally:
+        _SharedSetup.depth -= 1
+        if _SharedSetup.depth == 0:
+            _SharedSetup.seconds += time.perf_counter() - started
+
+
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(
     item: pytest.Item, call: pytest.CallInfo[None]
 ) -> Generator[None, pytest.TestReport, pytest.TestReport]:
     report = yield
+    own_duration = max(0.0, report.duration - _SharedSetup.take())
     if report.when == "setup":
-        item.stash[_SETUP_DURATION] = report.duration
+        item.stash[_SETUP_DURATION] = own_duration
         return report
     if report.when != "call" or not report.passed:
         return report
@@ -90,12 +128,13 @@ def pytest_runtest_makereport(
     if not scale:
         return report
     budget = budget_seconds(item) * scale
-    elapsed = item.stash.get(_SETUP_DURATION, 0.0) + report.duration
+    elapsed = item.stash.get(_SETUP_DURATION, 0.0) + own_duration
     if elapsed > budget:
         report.outcome = "failed"
         report.longrepr = (
-            f"test took {elapsed:.1f}s (setup and call), over its {budget:g}s "
-            "budget; make it faster, or mark it @pytest.mark.slow(<seconds>) "
-            "with a comment saying why (see docs/testing-and-ci.md)"
+            f"test took {elapsed:.1f}s (setup and call, excluding shared "
+            f"session fixtures), over its {budget:g}s budget; make it faster, "
+            "or mark it @pytest.mark.slow(<seconds>) with a comment saying why "
+            "(see docs/testing-and-ci.md)"
         )
     return report

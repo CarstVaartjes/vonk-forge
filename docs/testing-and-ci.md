@@ -57,14 +57,19 @@ imports, so it is a pre-check; run the full suites before requesting review.
 
 Every test in the repository, Controller and Compose suites must finish its
 setup and body within 10 seconds. `tools/pytest_budget.py` checks this after
-each test and fails the test that went over, with its measured time. It does
+each test and fails the test that went over, with its measured time. Setting up
+a fixture shared beyond one test (session, module or class scope, such as the
+PostgreSQL server or the installed CLI) is not charged to the test that first
+requests it: doing expensive work once is the intended fix. It does
 not interrupt the test: an alarm at an arbitrary point can leave shared state
 half-built and fail unrelated tests. pytest-timeout's `timeout = 120` in the
 pytest configuration is only the hang guard.
 
 A test that needs longer because its subject is inherently expensive (a real
 process death, the whole published corpus) carries `@pytest.mark.slow(<seconds>)`
-with at most 60 seconds and a comment saying why. Keep that set small: first
+with at most 60 seconds and a comment saying why. Tests that drive the
+installed `vonkctl` as separate processes against an HTTPS Controller peer get
+20 seconds from one rule in `control/tests/conftest.py`. Keep that set small: first
 remove repeated work (build or start once per session, inject clocks instead
 of sleeping, shrink fixtures to the boundary under test). On a machine that is
 knowingly overloaded, `--test-budget-scale=2` (or `0` to disable) relaxes the
