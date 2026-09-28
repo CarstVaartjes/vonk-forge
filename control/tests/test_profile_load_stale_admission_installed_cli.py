@@ -74,9 +74,10 @@ def test_installed_cli_retries_a_changed_profile_plan_automatically(
     assert completed.returncode == 0, completed.stderr
     receipt = json.loads(completed.stdout)
     assert receipt.get("request_key") == KEY
+    # The Controller applies the latest saved plan, so a mid-load edit no
+    # longer forces a refused submission and a client-side retry.
     paths = Counter(path for _method, path, _ in state.calls)
-    assert paths["/api/profile/1/preview"] >= 2
-    assert paths["/api/profile/1/load"] >= 2
+    assert paths["/api/profile/1/load"] >= 1
     with sessions() as session:
         applications = list(session.scalars(select(FleetProfileApplication)))
         assert len(applications) == 1

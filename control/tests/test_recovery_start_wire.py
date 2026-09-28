@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentOperation,
     RecipeOperationRequest,
     RecipeStartPayload,
+    canonical_message,
 )
-from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+from vonk_control.distributed_lifecycle import DistributedLifecycleError
+from vonk_control.distributed_recovery import (
+    DistributedRecoveryCoordinator,
+    _accepted_start_authority,
+)
 from vonk_control.models import (
     AgentOperation as StoredAgentOperation,
 )
@@ -247,3 +254,33 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         assert parsed.compiled_execution_plan["security"]["network_mode"] == "host"
         assert "expected_bytes" not in child.payload
         assert "kind" not in child.payload
+
+
+@pytest.mark.parametrize("tamper", ["state", "plan_digest", "authority_revision"])
+def test_recovery_authority_requires_succeeded_start_bound_to_current_plan(
+    tmp_path: Path, tamper: str
+) -> None:
+    sessions, _service, started, _restart, nodes, _phases = _queued_recovery_restart(
+        tmp_path
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        original = session.get(Job, started.id)
+        assert run is not None and original is not None
+        run.run_generation = 1
+        if tamper == "state":
+            original.state = "failed"
+        elif tamper == "plan_digest":
+            original.payload = {**original.payload, "plan_digest": "0" * 64}
+            original.payload_digest = hashlib.sha256(
+                canonical_message(original.payload)
+            ).hexdigest()
+        else:
+            original.authority_revision = "0" * 64
+        with pytest.raises(DistributedLifecycleError):
+            _accepted_start_authority(
+                session,
+                run,
+                "0" * 64 if tamper == "authority_revision" else "1" * 64,
+                nodes[0],
+            )

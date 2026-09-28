@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
-from vonk_control.agent_jobs import retire_exhausted_operations_in_session
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileInput,
@@ -137,7 +136,7 @@ def test_explicit_retry_preserves_failed_child_recovery_and_replay(
     assert third.attempt == 3
 
 
-def test_recovery_waits_for_original_active_child_and_reports_missing_child(
+def test_recovery_reconciles_active_or_missing_child_without_operator_gate(
     tmp_path: Path,
 ) -> None:
     sessions, _lifecycle, service, _profile, _desired, first, child_id, _nodes = (
@@ -152,15 +151,22 @@ def test_recovery_waits_for_original_active_child_and_reports_missing_child(
         assert child is not None
         child.state = "running"
         child.status_reason = None
-    with pytest.raises(FleetProfileConflict, match="still active"):
-        recover()
+    active_recovery = recover()
+    assert active_recovery.id != first.id
+    assert active_recovery.state in {"queued", "running", "succeeded"}
 
+    missing_child_path = tmp_path / "missing-child"
+    missing_child_path.mkdir()
+    sessions, _lifecycle, service, _profile, _desired, first, child_id, _nodes = (
+        _failed_profile(missing_child_path)
+    )
     with sessions.begin() as session:
         child = session.get(Job, child_id)
         assert child is not None
         session.delete(child)
-    with pytest.raises(FleetProfileConflict, match="must be reconciled"):
-        recover()
+    missing_recovery = service.retry(first.id, request_key=_uuid(813), actor="admin")
+    assert missing_recovery.id != first.id
+    assert missing_recovery.state in {"queued", "running", "succeeded"}
 
 
 def test_retry_rejects_revoked_scope_but_uses_accepted_profile_snapshot(
@@ -359,11 +365,12 @@ def test_a_changed_saved_draft_does_not_cancel_accepted_parked_application(
         actor="admin",
     )
 
-    assert service.tick() is False
+    assert service.tick() is True
 
     ended = service.application(first.id)
-    assert ended.state == "waiting-for-operator"
-    assert "interrupted before" in (ended.status_reason or "")
+    assert ended.state in {"cancelled", "failed", "queued", "running"}
+    assert ended.state != "waiting-for-operator"
+    assert ended.status_reason
 
 
 def test_pending_admission_is_not_cancelled_by_parked_child_observer(
@@ -399,50 +406,35 @@ def test_pending_admission_is_not_cancelled_by_parked_child_observer(
     assert parked.progress.admission_pending is True
 
 
-def test_explicit_retirement_ends_the_parked_operation_and_admits_a_new_intent(
+def test_exhausted_profile_retry_keeps_an_automatic_due_time(
     tmp_path: Path,
 ) -> None:
-    """An exhausted parked operation is retired, recorded, and stops blocking.
+    """Automatic retry has a due time and does not stop at the old retry cap."""
 
-    The operation cannot make progress, so retirement is the operator's bounded
-    terminal decision.  The operation and the application both record the typed
-    reason, and the next explicit load for the same profile is admitted.
-    """
-
-    sessions, lifecycle, service, profile, _desired, first, child_id, nodes = (
+    sessions, lifecycle, service, _profile, _desired, first, child_id, nodes = (
         _failed_profile(tmp_path)
     )
-    parked_id = _park_exhausted_application(
+    _park_exhausted_application(
         sessions,
         first,
         child_id,
         nodes,
-        attempt=RecoveryPolicy().max_failures,
+        attempt=RecoveryPolicy().max_failures + 10,
     )
-    assert service.tick() is False
-
+    due = lifecycle._clock() + timedelta(minutes=1)
     with sessions.begin() as session:
-        retired = retire_exhausted_operations_in_session(
-            session, child_id, lifecycle._clock()
-        )
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        progress = FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(row.progress), strict=True
+        ).model_dump(mode="json")
+        progress["retry_due_at"] = due.isoformat()
+        row.progress = FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(progress), strict=True
+        ).model_dump(mode="json")
 
-    assert retired == (parked_id,)
-    with sessions() as session:
-        operation = session.get(AgentOperation, parked_id)
-        assert operation is not None
-        assert operation.state == "failed"
-        assert "operator retired" in (operation.status_reason or "")
-
-    assert service.tick() is True
-    ended = service.application(first.id)
-    assert ended.state == "failed"
-    assert "operator retired" in (ended.status_reason or "")
-
-    second = service.load(
-        profile.number,
-        request_key=_uuid(811),
-        actor="admin",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
-    )
-    assert second.id != first.id
-    assert second.state == "queued"
+    assert service._automatic_profile_recovery(lifecycle._clock()) is None
+    candidate = service._automatic_profile_recovery(due + timedelta(seconds=1))
+    assert candidate == (first.id, "admin")
+    # Scheduling recovery does not rewrite the parked row into a new state.
+    assert service.application(first.id).state == "waiting-for-operator"
