@@ -116,7 +116,7 @@ class InstallPlan:
 
 
 class InstallPlanConflict(RuntimeError):
-    pass
+    code = "install.plan_invalid"
 
 
 class InstallAdmissionBusy(InstallPlanConflict):
@@ -125,16 +125,54 @@ class InstallAdmissionBusy(InstallPlanConflict):
     code = "install.capacity_busy"
 
 
-class InstallPreflightExpired(InstallPlanConflict):
-    """Only runtime preflight evidence needs a fresh probe; nothing else changed.
+class InstallPreflightExpired(InstallAdmissionBusy):
+    """The exact plan is admissible except that its runtime evidence expired."""
 
-    The receipt aged out, the host fingerprint moved, or it does not cover this
-    recipe's requirements: each describes the evidence rather than the plan.
-    Acceptance still refuses the plan, so callers that do not know about this
-    narrower outcome keep the ordinary ``InstallPlanConflict`` behaviour.  A
-    caller that owns a bounded preflight refresh may instead rerun its probe
-    and re-present the identical plan.
-    """
+    code = "runtime_preflight.stale"
+
+    def __init__(
+        self, code: str = "runtime_preflight.stale", detail: str | None = None
+    ):
+        self.code = code
+        self.detail = detail
+        super().__init__(f"{code}: {detail}" if detail else code)
+
+
+_RETRYABLE_INSTALL_BLOCKERS = {
+    "install.inventory_missing",
+    "install.stale_inventory",
+    "install.insufficient_disk",
+    "install.artifact_store_read_only",
+    "install.image_distribution_pending",
+    "runtime_preflight.host_changed",
+    "runtime_preflight.requirements_changed",
+    "runtime_preflight.stale",
+}
+
+_REFRESHABLE_PREFLIGHT_BLOCKERS = {
+    "runtime_preflight.host_changed",
+    "runtime_preflight.requirements_changed",
+    "runtime_preflight.stale",
+}
+
+
+def require_admissible(plan: InstallPlan) -> None:
+    if plan.allowed:
+        return
+    codes = {reason.code for node in plan.nodes for reason in node.blockers}
+    if codes and codes <= _REFRESHABLE_PREFLIGHT_BLOCKERS:
+        blocker = next(
+            reason
+            for node in plan.nodes
+            for reason in node.blockers
+            if reason.code in _REFRESHABLE_PREFLIGHT_BLOCKERS
+        )
+        raise InstallPreflightExpired(blocker.code, blocker.detail)
+    if codes and codes <= _RETRYABLE_INSTALL_BLOCKERS:
+        raise InstallAdmissionBusy("install is waiting for inventory or capacity")
+    raise InstallPlanConflict(
+        "install.plan_invalid: install plan is blocked by current admission evidence"
+    )
 
 
 def _active_recipe_revision(
@@ -649,13 +687,7 @@ class InstallAdmissionService:
             now=now,
             profile_application_id=profile_application_id,
         )
-        if fresh.plan_digest != plan.plan_digest or not fresh.allowed:
-            if (
-                fresh.plan_digest == plan.plan_digest
-                and _refreshable_preflight_is_the_only_blocker(plan, fresh)
-            ):
-                raise InstallPreflightExpired("install.plan_stale_or_blocked")
-            raise InstallPlanConflict("install.plan_stale_or_blocked")
+        require_admissible(fresh)
 
     def accept_install_in_session(
         self,
@@ -668,6 +700,15 @@ class InstallAdmissionService:
         workload_intent_ordinal: int | None = None,
     ) -> str:
         try:
+            plan = self.plan_install(
+                plan.mapping_id,
+                plan.recipe_build_id,
+                now=now,
+                _session=session,
+                compiled_execution_plans=plan.compiled_plan_by_node,
+                profile_application_id=profile_application_id,
+            )
+            require_admissible(plan)
             acquire_admission_keys(
                 session,
                 tuple(node_admission_key(node.node_id) for node in plan.nodes),
@@ -766,7 +807,6 @@ class InstallAdmissionService:
         source_build = revision is not None and _is_source_build(revision.document)
         if (
             mapping is None
-            or mapping.generation != plan.mapping_generation
             or mapping.state != "ready"
             or (
                 source_build
@@ -808,14 +848,12 @@ class InstallAdmissionService:
             compiled_execution_plans=plan.compiled_plan_by_node,
             profile_application_id=profile_application_id,
         )
-        identical = (
-            fresh.plan_digest == plan.plan_digest
-            and fresh.mapping_generation == plan.mapping_generation
-        )
-        if not fresh.allowed or not identical:
-            if identical and _refreshable_preflight_is_the_only_blocker(plan, fresh):
-                raise InstallPreflightExpired("install.plan_stale_or_blocked")
-            raise InstallPlanConflict("install.plan_stale_or_blocked")
+        require_admissible(fresh)
+        if {node.node_id for node in fresh.nodes} != set(node_ids):
+            raise InstallAdmissionBusy(
+                "install target membership changed during admission"
+            )
+        plan = fresh
         if (
             revision is None
             or revision.state != "active"
@@ -927,59 +965,6 @@ class InstallAdmissionService:
                     )
                 )
         return installation.id
-
-
-def _refreshable_preflight_is_the_only_blocker(
-    plan: InstallPlan, fresh: InstallPlan
-) -> bool:
-    """Recognise the refusals a bounded preflight rerun can clear.
-
-    The caller has already established that both plans carry the same
-    ``plan_digest``, which binds the mapping generation, recipe revision and
-    content digest, the recipe build, the image identity, the Controller-issued
-    compiled launch documents and every per-node resource envelope.  What is
-    left to establish is that the admitted plan was clean and that runtime
-    preflight *observation validity* is the only thing the fresh admission now
-    objects to.
-
-    These are exactly the codes ``LifecyclePreflight.ensure`` re-probes on its
-    own: evidence aged out, the host fingerprint moved, or the receipt does not
-    cover this recipe's requirements.  All three describe the evidence, not the
-    plan, so the caller may rerun the ordinary probe and re-present the
-    identical plan.  Every other blocker — a failed native probe finding,
-    missing or stale inventory, a read-only artifact store, capacity,
-    topology, licence or compiled-plan evidence — keeps the opaque
-    stale-or-blocked refusal.
-    """
-
-    if not plan.allowed:
-        return False
-    return refreshable_preflight_is_the_only_blocker(fresh)
-
-
-REFRESHABLE_PREFLIGHT_CODES = frozenset(
-    {
-        "runtime_preflight.stale",
-        "runtime_preflight.host_changed",
-        "runtime_preflight.requirements_changed",
-    }
-)
-
-
-def refreshable_preflight_is_the_only_blocker(plan: InstallPlan) -> bool:
-    """True when preflight *evidence* validity is the plan's only objection.
-
-    These are exactly the codes ``LifecyclePreflight.ensure`` re-probes on its
-    own: evidence aged out, the host fingerprint moved, or the receipt does not
-    cover this recipe's requirements.  All three describe the evidence, not the
-    plan, so a caller holding the plan may rerun the ordinary probe and
-    re-present it.  Every other blocker — a failed native probe finding, missing
-    or stale inventory, a read-only artifact store, capacity, topology, licence
-    or compiled-plan evidence — is a real objection to the plan itself.
-    """
-
-    codes = {reason.code for node in plan.nodes for reason in node.blockers}
-    return bool(codes) and codes <= REFRESHABLE_PREFLIGHT_CODES
 
 
 def _primary_model_sha256(document: Mapping[str, object]) -> str:

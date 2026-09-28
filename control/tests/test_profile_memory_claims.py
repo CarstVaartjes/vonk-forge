@@ -17,6 +17,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
 from vonk_control.resource_planning import UnknownRunMemoryResidual
+from vonk_control.run_admission import RunAdmissionBusy
 
 from .test_profile_installed_execution import _drive_to_job
 from .test_profile_port_claims import _load, _ready_profile
@@ -66,7 +67,7 @@ def test_accepted_memory_blocks_competition_and_transfers_same_claim(
         for node in competing.nodes
         for reason in node.blockers
     )
-    with pytest.raises(RecipeOperationConflict):
+    with pytest.raises(RunAdmissionBusy):  # waits; never double-books memory
         lifecycle.start(
             before,
             plan_digest=before.plan_digest,

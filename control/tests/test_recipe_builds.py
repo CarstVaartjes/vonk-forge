@@ -2467,7 +2467,7 @@ def test_distribution_reimports_one_build_digest_for_every_mapped_node(
     assert distribution.targets[0][1]["kind"] == "recipe.image.import.v1"
 
 
-def test_image_distribution_requires_the_previewed_plan_digest(
+def test_image_distribution_replans_when_the_submitted_digest_is_stale(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, builder, revision = setup(tmp_path)
@@ -2548,20 +2548,17 @@ def test_image_distribution_requires_the_previewed_plan_digest(
     assert preview.image_digest == "sha256:" + "b" * 64
     assert preview.node_ids == (builder, target)
     assert len(preview.plan_digest) == 64
-    with pytest.raises(
-        RecipeOperationConflict,
-        match="submitted image distribution plan does not match preview",
-    ):
-        operations.distribute_image(
-            build_plan.build_id,
-            mapping_id,
-            mapping_generation=1,
-            plan_digest="0" * 64,
-            actor="admin",
-            request_id="stale-distribution",
-        )
-
     operation = operations.distribute_image(
+        build_plan.build_id,
+        mapping_id,
+        mapping_generation=1,
+        plan_digest="0" * 64,
+        actor="admin",
+        request_id="accepted-distribution",
+    )
+    assert operation.kind == "recipe.image.import.v1"
+    assert operation.nodes == (builder, target)
+    replay = operations.distribute_image(
         build_plan.build_id,
         mapping_id,
         mapping_generation=1,
@@ -2569,9 +2566,7 @@ def test_image_distribution_requires_the_previewed_plan_digest(
         actor="admin",
         request_id="accepted-distribution",
     )
-    assert operation.kind == "recipe.image.import.v1"
-    assert operation.plan_digest == preview.plan_digest
-    assert operation.nodes == (builder, target)
+    assert replay == operation
 
 
 @pytest.mark.parametrize(

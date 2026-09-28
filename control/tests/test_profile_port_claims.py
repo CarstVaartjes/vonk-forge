@@ -19,6 +19,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
+from vonk_control.run_admission import RunAdmissionBusy
 
 from .test_profile_capacity_admission import _capacity_profile
 from .test_profile_installed_execution import _drive_to_job, _profile_service
@@ -91,7 +92,9 @@ def test_profile_ports_block_competing_start_and_transfer_without_a_gap(
         assert {(claim.node_id, claim.resource_key) for claim in claims} == expected
         assert all(claim.state == "promised" for claim in claims)
         claim_ids = {claim.id for claim in claims}
-    with pytest.raises(RecipeOperationConflict):
+    # The competing start re-plans against the promised ports and waits for
+    # capacity instead of double-booking them.
+    with pytest.raises(RunAdmissionBusy):
         lifecycle.start(
             previously_fitting,
             plan_digest=previously_fitting.plan_digest,
