@@ -6,8 +6,15 @@ import json
 import logging as stdlib_logging
 import re
 import sys
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
+
+#: The API boundary binds each request's correlation id here, so a handler that
+#: only sees an exception can still name the request in its log line.
+current_request_id: ContextVar[str | None] = ContextVar(
+    "vonk_control_request_id", default=None
+)
 
 _SENSITIVE_KEY = re.compile(
     r"(?i)(authorization|api.?key|password|secret|token|private.?key|credential)"

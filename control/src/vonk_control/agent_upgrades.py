@@ -182,12 +182,21 @@ class AgentUpgradeService:
             signature_record = release["artifacts"][
                 "agent-package-signature-linux-arm64"
             ]
+            if not isinstance(artifact, Mapping) or not isinstance(
+                signature_record, Mapping
+            ):
+                raise TypeError("agent release artifact record is not an object")
             signature_response = self._http.get(f"/{signature_record['path']}")
             signature_response.raise_for_status()
             signature = signature_response.text.strip()
         except (httpx2.HTTPError, KeyError, TypeError, ValueError) as error:
+            # Name what could not be resolved and what to do about it; the
+            # operator cannot see the release relay from the CLI.
             raise AgentUpgradeConflict(
-                "current agent release is unavailable"
+                f"the current {self._channel} agent package could not be resolved "
+                f"from the release channel ({type(error).__name__}); check that the "
+                "Controller reaches install.vonkforge.ai and that it serves a "
+                "complete release, then retry"
             ) from error
         if (
             release.get("channel") != self._channel

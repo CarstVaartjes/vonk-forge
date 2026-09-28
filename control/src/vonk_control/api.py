@@ -90,7 +90,7 @@ from .installation_reconciliation_api import (
     install_installation_reconciliation_routes,
 )
 from .library_assessment import LibraryAssessment
-from .logging import configure_controller_logging
+from .logging import configure_controller_logging, current_request_id
 from .metrics import MetricsRegistry, runnable_job_ages
 from .model_cache_api import (
     install_model_operator_routes,
@@ -629,6 +629,9 @@ def create_app(
         except ValueError:
             request_id = str(uuid.uuid4())
         request.state.request_id = request_id
+        # Each request runs in its own task context, so this binding cannot
+        # leak into another request.
+        current_request_id.set(request_id)
         length = request.headers.get("content-length")
         recipe_image_upload = (
             request.method == "PUT"
