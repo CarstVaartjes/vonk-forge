@@ -55,7 +55,6 @@ from .agent_jobs import OperatorRetirementRefused
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_job_api import install_artifact_job_routes
 from .artifact_jobs import ArtifactJobService
-from .audit import AuditRecord, IdentityHistoryRecord
 from .auth import (
     MUTATION_ROLES,
     Actor,
@@ -75,7 +74,6 @@ from .catalog_sync import (
     catalog_sync_retry_delay,
 )
 from .cluster_mappings import ClusterMappingService
-from .deployment_provenance import DeploymentProvenanceService
 from .distribution_executor import CompositeDistributionPhaseExecutor
 from .download_contract import download_responses
 from .endpoint_contract import EndpointResponse, inference_gateway_api_base
@@ -92,22 +90,17 @@ from .installation_reconciliation_api import (
     install_installation_reconciliation_routes,
 )
 from .library_assessment import LibraryAssessment
-from .logging import JobLogCorruptError, configure_controller_logging
+from .logging import configure_controller_logging
 from .metrics import MetricsRegistry, runnable_job_ages
 from .model_cache_api import (
     install_model_operator_routes,
     register_model_cache_operation_provider,
 )
 from .operation_api import (
-    AuditEventResponse,
-    AuditResponse,
     BoundedErrorResponse,
     ErrorContextResponse,
     HealthzResponse,
-    IdentityHistoryItem,
-    IdentityHistoryResponse,
     JobDetailResponse,
-    JobLogsResponse,
     JobProgress,
     JobResumeRequest,
     JobResumeResponse,
@@ -298,8 +291,6 @@ def build_agent_services(
     sessions: Any,
     clock: Callable[[], Any],
     *,
-    revision_eligible: Callable[[str], bool] | None = None,
-    current_revision: Callable[[], str] | None = None,
     distribution: Any | None = None,
     model_cache: Any | None = None,
 ) -> AgentApiServices:
@@ -313,11 +304,6 @@ def build_agent_services(
     )
     from .presence import AgentPresenceService, ManagementAddressPolicy
     from .step_ca import StepCertificateAuthority
-    from .workload_helper_authority import (
-        WorkloadHelperAuthorityService,
-        WorkloadHelperGrantIssuer,
-        WorkloadObjectReceiptIssuer,
-    )
 
     if distribution is None and model_cache is not None:
         from .distribution import build_distribution_service_from_components
@@ -354,8 +340,6 @@ def build_agent_services(
             presence=presence,
             artifact_root=settings.agent_artifact_root,
             source_bundles=DatabaseSourceBundleStore(sessions),
-            workload_tuf_metadata_root=settings.workload_tuf_metadata_root,
-            workload_tuf_target_root=settings.workload_tuf_target_root,
             distribution=distribution,
         )
 
@@ -383,14 +367,7 @@ def build_agent_services(
         provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
         certificate_lifetime_seconds=settings.agent_ca_certificate_lifetime_seconds,
     )
-    workload_tuf_metadata_root = settings.workload_tuf_metadata_root
-    workload_tuf_target_root = settings.workload_tuf_target_root
-    for root in (
-        settings.agent_artifact_root,
-        workload_tuf_metadata_root,
-        workload_tuf_target_root,
-    ):
-        root.mkdir(mode=0o750, parents=True, exist_ok=True)
+    settings.agent_artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
     presence = AgentPresenceService(
         sessions,
         ManagementAddressPolicy.parse(
@@ -408,17 +385,6 @@ def build_agent_services(
         presence.observe_in_session(session, source)
 
     operations.set_contact_consumer(observe_contact)
-    grant_key_path = settings.package_helper_grant_private_key_path
-    receipt_key_path = settings.package_helper_receipt_private_key_path
-    if grant_key_path is None or receipt_key_path is None:
-        raise RuntimeError("workload helper authority keys are unavailable")
-    helper_authority = WorkloadHelperAuthorityService(
-        sessions,
-        WorkloadHelperGrantIssuer.from_private_key_file(grant_key_path, clock=clock),
-        WorkloadObjectReceiptIssuer.from_private_key_file(receipt_key_path),
-        workload_target_root=workload_tuf_target_root,
-        clock=clock,
-    )
     host_runtime_key_path = settings.host_runtime_grant_private_key_path
     if host_runtime_key_path is None:
         raise RuntimeError("host runtime authority key is unavailable")
@@ -435,10 +401,7 @@ def build_agent_services(
         presence=presence,
         artifact_root=settings.agent_artifact_root,
         source_bundles=DatabaseSourceBundleStore(sessions),
-        workload_tuf_metadata_root=workload_tuf_metadata_root,
-        workload_tuf_target_root=workload_tuf_target_root,
         distribution=distribution,
-        workload_helper_authority=helper_authority,
         host_runtime_authority=host_runtime_authority,
         fabric_policy=(
             ManagementAddressPolicy.parse(
@@ -489,12 +452,6 @@ class JobQueue(Protocol):
     ) -> tuple[list[Any], str | None, int]: ...
 
 
-class AuditSink(Protocol):
-    def append(self, event: AuditRecord) -> None: ...
-    def list(self, *, limit: int = 100) -> list[AuditRecord]: ...
-    def identity_history(self, *, limit: int = 100) -> list[IdentityHistoryRecord]: ...
-
-
 def refresh_fleet_metrics(
     metrics: MetricsRegistry,
     fleet_snapshot: FleetSnapshot,
@@ -508,7 +465,6 @@ def create_app(
     *,
     jobs: JobQueue,
     tokens: TokenCodec,
-    audits: AuditSink,
     fleet_projection: Any | None = None,
     fleet_services: FleetOperatorServices | None = None,
     failure_evidence: FailureEvidenceService | None = None,
@@ -518,7 +474,6 @@ def create_app(
     metrics: MetricsRegistry | None = None,
     metrics_token: str | None = None,
     metrics_refresh: Callable[[], None] | None = None,
-    job_logs=None,
     agent: AgentApiServices | None = None,
     trusted_agent_proxy_auth: bytes = b"",
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
@@ -818,7 +773,6 @@ def create_app(
 
     install_agent_routes(
         app,
-        audits=audits,
         services=agent,
         enrollment_rate_limiter=enrollment_rate_limiter,
     )
@@ -830,7 +784,6 @@ def create_app(
         install_auth_routes(
             app,
             browser_auth,
-            audits,
             authenticated_actor,
             tokens=tokens,
             now=now,
@@ -839,7 +792,6 @@ def create_app(
     install_catalog_routes(
         app,
         actor_dependency=authenticated_actor,
-        audits=audits,
         service=catalog,
         managed_sync=managed_catalog_sync,
     )
@@ -848,13 +800,11 @@ def create_app(
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
         operations=operations,
-        audits=audits,
     )
     install_profile_application_cancel_route(
         app,
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
-        audits=audits,
     )
     install_gateway_key_routes(
         app, actor_dependency=authenticated_actor, service=gateway_keys
@@ -873,7 +823,6 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         service=model_cache,
-        audits=audits,
     )
     from .recipe_image_availability_api import install_recipe_operator_routes
 
@@ -881,13 +830,11 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         service=recipe_image_availability,
-        audits=audits,
     )
     install_installation_reconciliation_routes(
         app,
         actor_dependency=authenticated_actor,
         operations=run_switch_operations,
-        audits=audits,
     )
 
     @app.get("/api/healthz", response_model=HealthzResponse)
@@ -970,7 +917,6 @@ def create_app(
         fleet_projection=fleet_projection,
         library_projection=library_projection,
         fleet_services=fleet_services,
-        audits=audits,
     )
 
     @app.get(
@@ -1190,57 +1136,6 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/audit",
-        response_model=AuditResponse,
-        responses=bounded_error_responses(401),
-        operation_id="listAuditEvents",
-    )
-    def audit_view(_actor: Actor = authenticated_actor) -> AuditResponse:
-        return AuditResponse(
-            events=[
-                AuditEventResponse(
-                    request_id=event.request_id,
-                    actor=event.actor,
-                    action=event.action,
-                    authority_revision=event.authority_revision,
-                    targets=list(event.targets),
-                    occurred_at=(
-                        event.occurred_at.isoformat()
-                        if event.occurred_at is not None
-                        else None
-                    ),
-                )
-                for event in audits.list()
-            ]
-        )
-
-    @app.get(
-        "/api/identity-history",
-        response_model=IdentityHistoryResponse,
-        responses=bounded_error_responses(401),
-        operation_id="listIdentityHistory",
-    )
-    def identity_history_view(
-        _actor: Actor = authenticated_actor,
-    ) -> IdentityHistoryResponse:
-        return IdentityHistoryResponse(
-            identities=[
-                IdentityHistoryItem.model_validate(
-                    {
-                        "node_id": record.node_id,
-                        "agent_state": record.agent_state,
-                        "certificate_serial": record.certificate_serial,
-                        "certificate_fingerprint": record.certificate_fingerprint,
-                        "certificate_generation": record.certificate_generation,
-                        "enrolled_at": record.enrolled_at,
-                        "revoked_at": record.revoked_at,
-                    }
-                )
-                for record in audits.identity_history()
-            ]
-        )
-
-    @app.get(
         "/api/jobs/{job_id}",
         response_model=JobDetailResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
@@ -1296,7 +1191,6 @@ def create_app(
         operation_id="resumeJob",
     )
     def resume_job(
-        request: Request,
         job_id: str,
         body: Annotated[JobResumeRequest | None, Body()] = None,
         authenticated: Actor = authenticated_actor,
@@ -1321,15 +1215,6 @@ def create_app(
                 raise HTTPException(
                     status_code=409, detail="job is not waiting for operator"
                 ) from None
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    authenticated.subject,
-                    "job.retire",
-                    None,
-                    (),
-                )
-            )
             return JobResumeResponse(id=job_id, state="failed")
         try:
             operations.resume_job(job_id)
@@ -1339,69 +1224,7 @@ def create_app(
             raise HTTPException(
                 status_code=409, detail="job is not waiting for operator"
             ) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "job.resume",
-                None,
-                (),
-            )
-        )
         return JobResumeResponse(id=job_id, state="queued")
-
-    @app.get(
-        "/api/jobs/{job_id}/logs",
-        response_model=JobLogsResponse,
-        responses=bounded_error_responses(401, 403, 404, 503),
-        operation_id="listJobLogs",
-    )
-    def job_log_list(
-        job_id: str, authenticated: Actor = authenticated_actor
-    ) -> JobLogsResponse:
-        if authenticated.role not in {"operator", "administrator"}:
-            raise HTTPException(status_code=403, detail="insufficient role")
-        if job_logs is None:
-            raise HTTPException(status_code=503, detail="job logs unavailable")
-        try:
-            jobs.get(job_id)
-            return JobLogsResponse(job_id=job_id, digests=list(job_logs.list(job_id)))
-        except JobLogCorruptError:
-            raise HTTPException(
-                status_code=503, detail="job logs unavailable"
-            ) from None
-        except (KeyError, ValueError):
-            raise HTTPException(status_code=404, detail="job not found") from None
-
-    @app.get(
-        "/api/jobs/{job_id}/logs/{digest}",
-        response_class=Response,
-        responses={
-            **bounded_error_responses(401, 403, 404, 503),
-            **download_responses("text/plain"),
-        },
-        openapi_extra={"x-vonk-streaming-transport": True},
-    )
-    def job_log_content(
-        job_id: str, digest: str, authenticated: Actor = authenticated_actor
-    ) -> Response:
-        if authenticated.role not in {"operator", "administrator"}:
-            raise HTTPException(status_code=403, detail="insufficient role")
-        if job_logs is None:
-            raise HTTPException(status_code=503, detail="job logs unavailable")
-        try:
-            jobs.get(job_id)
-            return Response(
-                job_logs.read(job_id, digest), media_type="text/plain; charset=utf-8"
-            )
-        except JobLogCorruptError:
-            # The log exists but no longer matches its digest. Answering 404
-            # would report corrupt retained evidence as absent.
-            raise HTTPException(
-                status_code=503, detail="job logs unavailable"
-            ) from None
-        except (KeyError, ValueError):
-            raise HTTPException(status_code=404, detail="job log not found") from None
 
     return app
 
@@ -1412,11 +1235,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from vonk_forge_contracts import RecipeDefinition, content_sha256
 
     from .agent_upgrades import AgentUpgradeService
-    from .audit import SqlAuditStore
     from .availability_production import build_recipe_image_availability
-    from .database_authority import (
-        DatabaseAuthorityService,
-    )
     from .db import build_engine, session_factory
     from .execution_plan_service import ControllerExecutionPlanService
     from .fleet_events import FleetEventRepository
@@ -1428,7 +1247,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     from .jobs import JobService
     from .library_projection import LibraryProjection
-    from .logging import DatabaseJobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .model_cache import ModelCacheService
     from .models import CatalogDocumentRevision, Job
@@ -1459,13 +1277,10 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     token_codec = TokenCodec(settings.token_signing_key)
     cursor_codec = token_codec.cursor_codec()
     job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
-    authority = DatabaseAuthorityService(sessions, clock=clock)
-    authority.ensure_initialized()
     database_bundles = DatabaseSourceBundleStore(sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
     visual_fleet = FleetProjection(
-        authority,
         sessions,
         clock=clock,
         events=fleet_event_repository,
@@ -1494,16 +1309,10 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     model_cache.resume_operations()
 
-    def revision_eligible(revision: str) -> bool:
-        return revision == authority.head()
-
-    current_revision = authority.head
     agent_services = build_agent_services(
         settings,
         sessions,
         clock,
-        revision_eligible=revision_eligible,
-        current_revision=current_revision,
         model_cache=model_cache,
     )
     runtime_image_transport = SkopeoOCIImageTransport()
@@ -1671,7 +1480,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         sessions,
         agent_services.operations,
         clock=clock,
-        current_revision=current_revision,
         channel=settings.install_channel,
         release_api_url=AGENT_RELEASE_API_URL,
     )
@@ -1773,7 +1581,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         max_parallel=RECIPE_IMAGE_PARALLEL_PREPARATIONS,
         max_parallel_builds=RECIPE_BUILD_PARALLEL_PREPARATIONS,
     )
-    audits_store = SqlAuditStore(sessions, clock)
 
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()
@@ -1861,14 +1668,12 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     app = create_app(
         jobs=job_service,
         tokens=token_codec,
-        audits=audits_store,
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,
         metrics=metrics,
         metrics_token=settings.metrics_token,
         metrics_refresh=refresh_metrics,
-        job_logs=DatabaseJobLogStore(sessions, clock=clock),
         agent=(agent_services if settings.agent_runtime_enabled else None),
         trusted_agent_proxy_auth=settings.agent_proxy_auth,
         operations=register_model_cache_operation_provider(
@@ -1903,8 +1708,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             agent_services=(agent_services if settings.agent_runtime_enabled else None),
             upgrades=agent_upgrades,
             sessions=sessions,
-            job_logs=DatabaseJobLogStore(sessions, clock=clock),
-            provenance=DeploymentProvenanceService(sessions),
         ),
         failure_evidence=FailureEvidenceService(sessions),
         agent_upgrades=agent_upgrades,

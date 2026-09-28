@@ -86,21 +86,25 @@ test("Fleet summary keeps each count above its label at narrow and wide widths",
   }
 });
 
-test("Activity combines friendly audit history and current operations", async ({page}) => {
+test("Activity combines current operations and jobs", async ({page}) => {
   const requestId = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
   const targetId = `spk_${"1".repeat(32)}`;
   const expectedBinary = "b".repeat(64);
   const expectedBuild = `sha256:${"c".repeat(64)}`;
   let detailRequests = 0;
-  await page.route("**/api/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [], total: 0, next_cursor: null}}));
-  await page.route("**/api/audit", route => route.fulfill({json: {events: [{
-    request_id: requestId,
-    actor: "admin",
-    action: "recipe.start",
-    authority_revision: "a".repeat(64),
-    occurred_at: "2026-08-24T08:55:00Z",
-    targets: [targetId],
-  }]}}));
+  await page.route("**/api/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [{
+    schema_version: 2,
+    id: requestId,
+    parent_id: null,
+    kind: "recipe.start",
+    state: "succeeded",
+    attempt: 1,
+    node_ids: [targetId],
+    created_at: "2026-08-24T08:55:00Z",
+    progress: null,
+    failure: null,
+    recovery: null,
+  }], total: 1, next_cursor: null}}));
   await page.route("**/api/jobs?*", route => route.fulfill({json: {
     jobs: [{id: "upgrade-1", kind: "agent-upgrade", state: "waiting-for-operator", created_at: "2026-08-24T08:58:00Z"}],
     next_cursor: null,
@@ -144,7 +148,7 @@ test("Activity combines friendly audit history and current operations", async ({
   await page.goto("/activity");
 
   await expect(page.getByRole("heading", {name: "Activity"})).toBeVisible();
-  await expect(page.getByRole("heading", {name: "Started recipe"})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "Recipe Start · Completed"})).toBeVisible();
   await expect(page.getByRole("heading", {name: "Agent Upgrade · Waiting for operator"})).toBeVisible();
   await page.getByText("View operation progress").click();
   await expect(page.getByText("Retry queued behind safety delay")).toBeVisible();

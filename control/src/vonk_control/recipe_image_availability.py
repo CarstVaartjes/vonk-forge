@@ -1640,16 +1640,14 @@ class RecipeImageAvailabilityService:
         *,
         actor: str,
         request_id: str,
-        review_digest: str | None = None,
         with_model: bool = False,
     ) -> dict[str, object]:
         """Accept a restart-safe removal of the named recipe against current state.
 
-        A previously reviewed digest is advisory. Assets still in use are
-        fenced against new consumers and the removal waits for their owners.
+        Assets still in use are fenced against new consumers and the removal
+        waits for their owners.
         """
 
-        del review_digest
         if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
             raise RecipeImageAvailabilityError(
                 "recipe_image.selector_invalid", "recipe selector is required"

@@ -10,7 +10,6 @@ from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.request_validation_problem import RequestValidationProblem
-from ...models.run_switch_cleanup_preview_request import RunSwitchCleanupPreviewRequest
 from ...models.run_switch_plan import RunSwitchPlan
 from typing import cast
 
@@ -18,11 +17,8 @@ from typing import cast
 
 def _get_kwargs(
     installation_id: str,
-    *,
-    body: RunSwitchCleanupPreviewRequest,
 
 ) -> dict[str, Any]:
-    headers: dict[str, Any] = {}
 
 
 
@@ -34,11 +30,7 @@ def _get_kwargs(
         "url": "/api/recipe/installations/{installation_id}/reconcile/preview".format(installation_id=quote(str(installation_id), safe=""),),
     }
 
-    _kwargs["json"] = body.to_dict()
 
-    headers["Content-Type"] = "application/json"
-
-    _kwargs["headers"] = headers
     return _kwargs
 
 
@@ -105,20 +97,12 @@ def sync_detailed(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RunSwitchCleanupPreviewRequest,
 
 ) -> Response[BoundedErrorResponse | RequestValidationProblem | RunSwitchPlan]:
     """ Preview Installation Reconciliation
 
     Args:
         installation_id (str):
-        body (RunSwitchCleanupPreviewRequest): Ask Run/Switch to remove one installation that is
-            no longer desired.
-
-            Cleanup is authorized by the installation's own uninstall assessment, so it
-            never requires launch readiness: removing work must not depend on being able
-            to start work.  Run/Switch still owns the sequencing, the child reference
-            and the retry budget for the removal.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -131,7 +115,6 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         installation_id=installation_id,
-body=body,
 
     )
 
@@ -145,20 +128,12 @@ def sync(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RunSwitchCleanupPreviewRequest,
 
 ) -> BoundedErrorResponse | RequestValidationProblem | RunSwitchPlan | None:
     """ Preview Installation Reconciliation
 
     Args:
         installation_id (str):
-        body (RunSwitchCleanupPreviewRequest): Ask Run/Switch to remove one installation that is
-            no longer desired.
-
-            Cleanup is authorized by the installation's own uninstall assessment, so it
-            never requires launch readiness: removing work must not depend on being able
-            to start work.  Run/Switch still owns the sequencing, the child reference
-            and the retry budget for the removal.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -172,7 +147,6 @@ def sync(
     return sync_detailed(
         installation_id=installation_id,
 client=client,
-body=body,
 
     ).parsed
 
@@ -180,20 +154,12 @@ async def asyncio_detailed(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RunSwitchCleanupPreviewRequest,
 
 ) -> Response[BoundedErrorResponse | RequestValidationProblem | RunSwitchPlan]:
     """ Preview Installation Reconciliation
 
     Args:
         installation_id (str):
-        body (RunSwitchCleanupPreviewRequest): Ask Run/Switch to remove one installation that is
-            no longer desired.
-
-            Cleanup is authorized by the installation's own uninstall assessment, so it
-            never requires launch readiness: removing work must not depend on being able
-            to start work.  Run/Switch still owns the sequencing, the child reference
-            and the retry budget for the removal.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -206,7 +172,6 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         installation_id=installation_id,
-body=body,
 
     )
 
@@ -220,20 +185,12 @@ async def asyncio(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RunSwitchCleanupPreviewRequest,
 
 ) -> BoundedErrorResponse | RequestValidationProblem | RunSwitchPlan | None:
     """ Preview Installation Reconciliation
 
     Args:
         installation_id (str):
-        body (RunSwitchCleanupPreviewRequest): Ask Run/Switch to remove one installation that is
-            no longer desired.
-
-            Cleanup is authorized by the installation's own uninstall assessment, so it
-            never requires launch readiness: removing work must not depend on being able
-            to start work.  Run/Switch still owns the sequencing, the child reference
-            and the retry budget for the removal.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -247,6 +204,5 @@ async def asyncio(
     return (await asyncio_detailed(
         installation_id=installation_id,
 client=client,
-body=body,
 
     )).parsed

@@ -15,7 +15,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.routing import Route
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.catalog_api import CatalogProblem
@@ -74,19 +73,17 @@ class Jobs:
 
 def _client(role: str, *, agent_upgrades=None, fleet_projection=None):
     codec = TokenCodec(b"k" * 32)
-    audits = MemoryAuditStore()
     jobs = Jobs()
     app = create_app(
         jobs=jobs,
         tokens=codec,
-        audits=audits,
         now=lambda: 10,
         agent_upgrades=agent_upgrades,
         fleet_projection=fleet_projection,
     )
     client = TestClient(app)
     token = codec.issue(Actor(role, role), ttl_seconds=1000, now=0)
-    return client, {"Authorization": f"Bearer {token}"}, jobs, audits
+    return client, {"Authorization": f"Bearer {token}"}, jobs
 
 
 @dataclass
@@ -132,7 +129,6 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
     app = create_app(
         jobs=jobs,
         tokens=codec,
-        audits=MemoryAuditStore(),
         now=lambda: 10,
         browser_auth=service,
         agent_upgrades=agent_upgrades,
@@ -142,13 +138,13 @@ def _browser_client(*, agent_upgrades=None, role: str = "administrator"):
 
 
 def test_health_is_public_but_fleet_requires_authentication() -> None:
-    client, _, _, _ = _client("viewer")
+    client, _, _ = _client("viewer")
     assert client.get("/api/healthz").status_code == 200
     assert client.get("/api/fleet").status_code == 401
 
 
 def test_central_api_http_errors_are_serialized_by_the_declared_models() -> None:
-    client, _, _, _ = _client("viewer")
+    client, _, _ = _client("viewer")
 
     response = client.get("/api/fleet")
 
@@ -184,7 +180,7 @@ def test_fleet_ambiguity_preserves_every_candidate_through_the_cli(tmp_path, cap
         def read(self):
             return snapshot
 
-    server, headers, _, _ = _client("viewer", fleet_projection=Projection())
+    server, headers, _ = _client("viewer", fleet_projection=Projection())
     token_file = tmp_path / "token"
     token_file.write_text(headers["Authorization"].removeprefix("Bearer "))
     token_file.chmod(0o600)
@@ -221,15 +217,13 @@ def test_fleet_ambiguity_preserves_every_candidate_through_the_cli(tmp_path, cap
 
 
 def test_central_api_forbidden_error_has_distinct_safe_code() -> None:
-    client, headers, _, _ = _client("viewer")
+    client, headers, _ = _client("viewer")
 
     response = client.post(
         "/api/model/qwen-code/remove",
         headers=headers,
         json={
             "request_key": "00000000-0000-4000-8000-000000000001",
-            "model_content_sha256": "a" * 64,
-            "review_digest": "b" * 64,
         },
     )
 
@@ -239,7 +233,7 @@ def test_central_api_forbidden_error_has_distinct_safe_code() -> None:
 
 
 def test_unexpected_route_errors_use_bounded_context_and_request_id() -> None:
-    client, headers, jobs, _ = _client("viewer")
+    client, headers, jobs = _client("viewer")
 
     def fail(job_id):
         raise RuntimeError("private token and request body must stay server-side")
@@ -260,9 +254,9 @@ def test_unexpected_route_errors_use_bounded_context_and_request_id() -> None:
 
 
 def test_central_catalog_http_errors_are_serialized_by_catalog_problem() -> None:
-    client, _, _, _ = _client("viewer")
+    client, _, _ = _client("viewer")
 
-    response = client.get("/api/catalog/source-bundles/" + "a" * 64)
+    response = client.get("/api/catalog/managed-recipes/sync-status")
 
     assert response.status_code == 401
     problem = CatalogProblem.model_validate_json(response.content)
@@ -271,7 +265,7 @@ def test_central_catalog_http_errors_are_serialized_by_catalog_problem() -> None
 
 
 def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -> None:
-    client, _, _, _ = _client("viewer")
+    client, _, _ = _client("viewer")
     build_id = "00000000-0000-4000-8000-000000000001"
     route = f"/agent/recipe-builds/{build_id}/image"
     body = b"x" * 1_048_577
@@ -287,7 +281,7 @@ def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -
 
 
 def test_removed_package_and_deployment_routes_are_not_registered() -> None:
-    client, _, _, _ = _client("administrator")
+    client, _, _ = _client("administrator")
     package_prefix = "/api/" + "packages/"
     deployment_prefix = "/api/" + "deployments"
     app = client.app
@@ -305,7 +299,7 @@ def test_removed_package_and_deployment_routes_are_not_registered() -> None:
 
 
 def test_generic_job_submission_route_is_retired() -> None:
-    client, headers, jobs, _audits = _client("administrator")
+    client, headers, jobs = _client("administrator")
 
     assert (
         client.post(
@@ -328,7 +322,7 @@ def test_cookie_authentication_resolves_only_through_browser_sessions() -> None:
     client, issued, _service, _sessions, _clock, _codec, _jobs = _browser_client()
     client.cookies.set("vonk_session", issued.token)
 
-    response = client.get("/api/audit")
+    response = client.get("/api/jobs")
 
     assert response.status_code == 200
 
@@ -361,10 +355,10 @@ def test_cookie_authenticated_mutation_requires_matching_csrf() -> None:
 
 def test_cookie_authentication_is_unavailable_without_browser_service() -> None:
     """A signed bearer token in a cookie must not restore legacy cookie auth."""
-    client, headers, _jobs, _audits = _client("administrator")
+    client, headers, _jobs = _client("administrator")
     client.cookies.set("vonk_session", headers["Authorization"].removeprefix("Bearer "))
 
-    assert client.get("/api/audit").status_code == 401
+    assert client.get("/api/jobs").status_code == 401
 
 
 def test_signed_bearer_authentication_remains_unchanged_and_takes_precedence() -> None:
@@ -373,13 +367,13 @@ def test_signed_bearer_authentication_remains_unchanged_and_takes_precedence() -
     client.cookies.set("vonk_session", "not-an-opaque-session")
     bearer = codec.issue(Actor("operator", "operator"), ttl_seconds=1000, now=0)
 
-    response = client.get("/api/audit", headers={"authorization": f"Bearer {bearer}"})
+    response = client.get("/api/jobs", headers={"authorization": f"Bearer {bearer}"})
 
     assert response.status_code == 200
     client.cookies.set("vonk_session", issued.token)
     assert (
         client.get(
-            "/api/audit", headers={"authorization": f"Bearer {issued.token}"}
+            "/api/jobs", headers={"authorization": f"Bearer {issued.token}"}
         ).status_code
         == 401
     )
@@ -400,7 +394,7 @@ def test_cookie_sessions_reflect_revocation_disablement_and_expiry() -> None:
         else:
             clock.value += timedelta(hours=12)
 
-        assert client.get("/api/audit").status_code == 401
+        assert client.get("/api/jobs").status_code == 401
 
 
 class _RejectedPlan(BaseModel):

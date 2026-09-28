@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Literal
 
 from pydantic import (
     ConfigDict,
@@ -50,8 +50,6 @@ from .strict_json import StrictJSONModel
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
-    TelemetryResolution,
-    TelemetryRollupPointView,
     TelemetrySampleView,
 )
 from .telemetry_contract import (
@@ -140,6 +138,10 @@ NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
 BootId = Annotated[str, StringConstraints(pattern=_BOOT_UUID_PATTERN)]
 AuthorityRevision = Annotated[str, StringConstraints(pattern=_REVISION_PATTERN)]
+# vonkctl qualification compares this snapshot field across views.  The
+# Controller keeps no revisioned authority document, so the value is the fixed
+# digest of the empty document the retired authority head always named.
+_AUTHORITY_REVISION = "ffb039e4a059e137e67110b3f845ab477b048e97ae9383031feb9dcfcbcbba55"
 Text32 = Annotated[str, StringConstraints(min_length=1, max_length=32)]
 Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -225,12 +227,6 @@ def _run_degraded_reason(value: str | None) -> RunDegradedReason | None:
     if value is None:
         return None
     return _RUN_DEGRADED_REASON_ADAPTER.validate_python(value, strict=True)
-
-
-class _AuthorityRevisionSource(Protocol):
-    """The revision head the projection binds its snapshot to."""
-
-    def head(self) -> str: ...
 
 
 class _StrictModel(StrictJSONModel):
@@ -322,54 +318,6 @@ class TelemetryPoint(_StrictModel):
     metrics: TelemetryMetrics
 
 
-class TelemetryMetricSummary(_StrictModel):
-    count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    minimum: float
-    mean: float
-    maximum: float
-    # The storage key is bounded for indexes, so retain the complete series
-    # identity and provenance with the aggregate in every history response.
-    key: Text128 | None = None
-    scope: Text32 | None = None
-    device_id: Text128 | None = None
-    process_id: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_INTEGER)
-    process_name: Text128 | None = None
-    interface_name: (
-        Annotated[str, StringConstraints(min_length=1, max_length=64)] | None
-    ) = None
-    run_id: Text128 | None = None
-    unit: Text32 = "unknown"
-    source: Text128 = "controller-derived"
-    measurement_kind: Text32 = "measured"
-    aggregation: Text32 = "mean"
-
-
-class TelemetryRollupPoint(_StrictModel):
-    node_id: NodeId
-    resolution: Literal["minute", "fifteen-minute", "daily"]
-    bucket_start: datetime
-    bucket_end: datetime
-    source_sample_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    metrics: dict[str, TelemetryMetricSummary] = Field(max_length=512)
-
-
-class TelemetryHistoryMetadata(_StrictModel):
-    """Coverage and downsampling facts for a history/export response."""
-
-    requested_start: datetime
-    requested_end: datetime
-    actual_start: datetime | None = None
-    actual_end: datetime | None = None
-    requested_resolution: TelemetryResolution
-    actual_resolution: TelemetryResolution
-    timezone: Literal["UTC"] = "UTC"
-    point_count: int = Field(ge=0, le=3_000)
-    coverage_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
-    gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    downsampled: bool
-
-
 class TelemetryState(_StrictModel):
     age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     freshness: Literal["live", "delayed", "stale"]
@@ -440,7 +388,6 @@ class FleetNode(_StrictModel):
 
 
 class FleetSnapshot(_StrictModel):
-    schema_version: Literal[1] = 1
     event_cursor: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     generated_at: datetime
     authority_revision: AuthorityRevision
@@ -452,49 +399,6 @@ class FleetNodeIdentity(_StrictModel):
     display_name: Text200
     hostname: Annotated[str, StringConstraints(max_length=255)]
     ip_address: Annotated[str, StringConstraints(max_length=45)] | None = None
-
-
-class TelemetryHistoryResponse(_StrictModel):
-    schema_version: Literal[1] = 1
-    node_id: NodeId
-    start: datetime
-    end: datetime
-    resolution: TelemetryResolution
-    maximum_points: int = Field(ge=1, le=3_000)
-    points: list[TelemetryPoint | TelemetryRollupPoint] = Field(max_length=3_000)
-    metadata: TelemetryHistoryMetadata
-
-
-class TelemetryCurrentResponse(_StrictModel):
-    """Versioned current telemetry response with an explicit rich payload."""
-
-    schema_version: Literal[2] = 2
-    node_id: NodeId
-    observed_at: datetime
-    received_at: datetime
-    freshness: Literal["live", "delayed", "stale"]
-    sample: TelemetryPoint
-
-
-class TelemetryCapabilitiesResponse(_StrictModel):
-    schema_version: Literal[2] = 2
-    node_id: NodeId
-    observed_at: datetime
-    received_at: datetime
-    freshness: Literal["live", "delayed", "stale"]
-    capabilities: list[TelemetryCapability] = Field(max_length=128)
-
-
-class TelemetryWorkloadsResponse(_StrictModel):
-    schema_version: Literal[2] = 2
-    node_id: NodeId
-    observed_at: datetime
-    received_at: datetime
-    freshness: Literal["live", "delayed", "stale"]
-    run_id: str | None = None
-    state: str | None = None
-    runtimes: list[TelemetryRuntime] = Field(max_length=32)
-    workloads: list[TelemetryWorkload] = Field(max_length=128)
 
 
 def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
@@ -543,37 +447,6 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
     )
 
 
-def telemetry_rollup_point(value: TelemetryRollupPointView) -> TelemetryRollupPoint:
-    return TelemetryRollupPoint(
-        node_id=value.node_id,
-        resolution=value.resolution,
-        bucket_start=value.bucket_start,
-        bucket_end=value.bucket_end,
-        source_sample_count=value.source_sample_count,
-        gap_samples=value.gap_samples,
-        metrics={
-            name: TelemetryMetricSummary(
-                count=metric.count,
-                minimum=metric.minimum,
-                mean=metric.mean,
-                maximum=metric.maximum,
-                key=metric.key,
-                scope=metric.scope,
-                device_id=metric.device_id,
-                process_id=metric.process_id,
-                process_name=metric.process_name,
-                interface_name=metric.interface_name,
-                run_id=metric.run_id,
-                unit=metric.unit,
-                source=metric.source,
-                measurement_kind=metric.measurement_kind,
-                aggregation=metric.aggregation,
-            )
-            for name, metric in value.metrics.items()
-        },
-    )
-
-
 def _telemetry_details(value: TelemetryDetailsInput) -> TelemetryDetails:
     return TelemetryDetails(
         accelerator_name=value.accelerator_name,
@@ -617,78 +490,6 @@ def _artifact_workload_state(value: str) -> TelemetryWorkloadState:
     return "unknown"
 
 
-def _metric_matches(
-    key: str | None,
-    device_id: str | None,
-    interface_name: str | None,
-    run_id: str | None,
-    *,
-    requested_key: str | None,
-    requested_device_id: str | None,
-    requested_interface_name: str | None,
-    requested_run_id: str | None,
-) -> bool:
-    return (
-        (requested_key is None or key == requested_key)
-        and (requested_device_id is None or device_id == requested_device_id)
-        and (
-            requested_interface_name is None
-            or interface_name == requested_interface_name
-        )
-        and (requested_run_id is None or run_id == requested_run_id)
-    )
-
-
-def _filter_metrics(
-    value: TelemetryMetrics,
-    *,
-    key: str | None,
-    device_id: str | None,
-    interface_name: str | None,
-    run_id: str | None,
-) -> TelemetryMetrics:
-    if all(item is None for item in (key, device_id, interface_name, run_id)):
-        return value
-    return TelemetryMetrics(
-        schema_version=2,
-        series=[
-            item
-            for item in value.series
-            if _metric_matches(
-                item.key,
-                item.device_id,
-                item.interface_name,
-                item.run_id,
-                requested_key=key,
-                requested_device_id=device_id,
-                requested_interface_name=interface_name,
-                requested_run_id=run_id,
-            )
-        ],
-        capabilities=[
-            item
-            for item in value.capabilities
-            if _metric_matches(
-                item.key,
-                item.device_id,
-                item.interface_name,
-                item.run_id,
-                requested_key=key,
-                requested_device_id=device_id,
-                requested_interface_name=interface_name,
-                requested_run_id=run_id,
-            )
-        ],
-        runtimes=[
-            item for item in value.runtimes if run_id is None or item.run_id == run_id
-        ],
-        workloads=[
-            item for item in value.workloads if run_id is None or item.run_id == run_id
-        ],
-        provenance=value.provenance,
-    )
-
-
 type RunPresenceRow = Row[
     RunNode,
     RecipeRun,
@@ -712,7 +513,6 @@ class FleetProjection:
 
     def __init__(
         self,
-        authority: _AuthorityRevisionSource,
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -735,7 +535,6 @@ class FleetProjection:
             raise ValueError("Fleet projection freshness windows must be positive")
         if telemetry_delayed_seconds < telemetry_live_seconds:
             raise ValueError("Fleet telemetry freshness windows are invalid")
-        self._authority = authority
         self._sessions = sessions
         self._clock = clock
         self._events = events or FleetEventRepository(sessions, clock=clock)
@@ -770,7 +569,6 @@ class FleetProjection:
                         entity_kind="node-profile",
                         entity_id=node_id,
                         payload={
-                            "schema_version": 1,
                             "node_id": node_id,
                             "display_name_changed": True,
                         },
@@ -789,7 +587,6 @@ class FleetProjection:
             or not 0 <= event_cursor <= 9_223_372_036_854_775_807
         ):
             raise CursorError("Fleet event cursor is invalid")
-        revision = self._authority.head()
         current = _utc(self._clock())
         with self._sessions.begin() as session:
             agents = self._registered_agents(session)
@@ -824,7 +621,7 @@ class FleetProjection:
         return FleetSnapshot(
             event_cursor=event_cursor,
             generated_at=current,
-            authority_revision=revision,
+            authority_revision=_AUTHORITY_REVISION,
             nodes=[
                 self._node(
                     node_id,
@@ -841,216 +638,6 @@ class FleetProjection:
                 )
                 for node_id in node_ids
             ],
-        )
-
-    def telemetry_history(
-        self,
-        node_id: str,
-        *,
-        start: datetime,
-        end: datetime,
-        maximum_points: int,
-        resolution: TelemetryResolution,
-        key: str | None = None,
-        device_id: str | None = None,
-        interface_name: str | None = None,
-        run_id: str | None = None,
-    ) -> TelemetryHistoryResponse:
-        if type(maximum_points) is not int or not 1 <= maximum_points <= 3_000:
-            raise ValueError("telemetry history maximum points is invalid")
-        if (
-            start.tzinfo is None
-            or start.utcoffset() is None
-            or end.tzinfo is None
-            or end.utcoffset() is None
-        ):
-            raise ValueError("telemetry history window must be timezone-aware")
-        start_utc = start.astimezone(UTC)
-        end_utc = end.astimezone(UTC)
-        if start_utc >= end_utc:
-            raise ValueError("telemetry history window is invalid")
-        if node_id not in self._registered_node_ids(node_id):
-            raise KeyError(node_id)
-        points = self._telemetry.history(
-            node_id,
-            start_utc,
-            end_utc,
-            maximum_points,
-            resolution=resolution,
-        )
-        points = tuple(
-            replace(
-                point,
-                metrics=_filter_metrics(
-                    point.metrics,
-                    key=key,
-                    device_id=device_id,
-                    interface_name=interface_name,
-                    run_id=run_id,
-                ),
-            )
-            if isinstance(point, TelemetrySampleView)
-            else replace(
-                point,
-                metrics={
-                    name: metric
-                    for name, metric in point.metrics.items()
-                    if _metric_matches(
-                        metric.key or name,
-                        metric.device_id,
-                        metric.interface_name,
-                        metric.run_id,
-                        requested_key=key,
-                        requested_device_id=device_id,
-                        requested_interface_name=interface_name,
-                        requested_run_id=run_id,
-                    )
-                },
-            )
-            for point in points
-        )
-        actual_start: datetime | None = None
-        actual_end: datetime | None = None
-        gap_samples = 0
-        if points:
-            first = points[0]
-            last = points[-1]
-            if isinstance(first, TelemetrySampleView):
-                actual_start = first.observed_at
-                actual_end = last.observed_at  # type: ignore[union-attr]
-                gap_samples = sum(
-                    point.gap_samples
-                    for point in points
-                    if isinstance(point, TelemetrySampleView)
-                )
-            else:
-                actual_start = first.bucket_start
-                actual_end = last.bucket_end  # type: ignore[union-attr]
-                gap_samples = sum(
-                    point.gap_samples
-                    for point in points
-                    if isinstance(point, TelemetryRollupPointView)
-                )
-        coverage_seconds = (
-            max(0.0, (actual_end - actual_start).total_seconds())
-            if actual_start is not None and actual_end is not None
-            else 0.0
-        )
-        return TelemetryHistoryResponse(
-            node_id=node_id,
-            start=start_utc,
-            end=end_utc,
-            resolution=resolution,
-            maximum_points=maximum_points,
-            points=[
-                telemetry_point(value)
-                if isinstance(value, TelemetrySampleView)
-                else telemetry_rollup_point(value)
-                for value in points
-            ],
-            metadata=TelemetryHistoryMetadata(
-                requested_start=start_utc,
-                requested_end=end_utc,
-                actual_start=actual_start,
-                actual_end=actual_end,
-                requested_resolution=resolution,
-                actual_resolution=resolution,
-                point_count=len(points),
-                coverage_seconds=coverage_seconds,
-                gap_samples=gap_samples,
-                downsampled=resolution != "raw",
-            ),
-        )
-
-    def telemetry_current(
-        self,
-        node_id: str,
-        *,
-        key: str | None = None,
-        device_id: str | None = None,
-        interface_name: str | None = None,
-        run_id: str | None = None,
-    ) -> TelemetryCurrentResponse:
-        """Return the latest authenticated sample for one registered node."""
-
-        if node_id not in self._registered_node_ids(node_id):
-            raise KeyError(node_id)
-        with self._sessions.begin() as session:
-            value = self._telemetry.latest_in_session(session, (node_id,)).get(node_id)
-            if value is not None:
-                value = self._telemetry_with_controller(session, node_id, value)
-        if value is None:
-            raise KeyError(node_id)
-        point = telemetry_point(value)
-        point.metrics = _filter_metrics(
-            point.metrics,
-            key=key,
-            device_id=device_id,
-            interface_name=interface_name,
-            run_id=run_id,
-        )
-        return TelemetryCurrentResponse(
-            node_id=node_id,
-            observed_at=point.observed_at,
-            received_at=point.received_at,
-            freshness=self._telemetry_freshness(point.observed_at),
-            sample=point,
-        )
-
-    def telemetry_capabilities(
-        self,
-        node_id: str,
-        *,
-        key: str | None = None,
-        device_id: str | None = None,
-        interface_name: str | None = None,
-        run_id: str | None = None,
-    ) -> TelemetryCapabilitiesResponse:
-        response = self.telemetry_current(
-            node_id,
-            key=key,
-            device_id=device_id,
-            interface_name=interface_name,
-            run_id=run_id,
-        )
-        point = response.sample
-        metrics = point.metrics
-        return TelemetryCapabilitiesResponse(
-            node_id=node_id,
-            observed_at=point.observed_at,
-            received_at=point.received_at,
-            freshness=self._telemetry_freshness(point.observed_at),
-            capabilities=list(metrics.capabilities),
-        )
-
-    def telemetry_workloads(
-        self,
-        node_id: str,
-        *,
-        run_id: str | None = None,
-        state: str | None = None,
-    ) -> TelemetryWorkloadsResponse:
-        response = self.telemetry_current(node_id)
-        point = response.sample
-        metrics = point.metrics
-        runtimes = [
-            item for item in metrics.runtimes if run_id is None or item.run_id == run_id
-        ]
-        workloads = [
-            item
-            for item in metrics.workloads
-            if (run_id is None or item.run_id == run_id)
-            and (state is None or item.state == state)
-        ]
-        return TelemetryWorkloadsResponse(
-            node_id=node_id,
-            observed_at=point.observed_at,
-            received_at=point.received_at,
-            freshness=self._telemetry_freshness(point.observed_at),
-            run_id=run_id,
-            state=state,
-            runtimes=list(runtimes),
-            workloads=list(workloads),
         )
 
     @staticmethod
@@ -1285,24 +872,6 @@ class FleetProjection:
             value,
             metrics=self._telemetry_metrics_in_session(session, node_id, value.metrics),
         )
-
-    def _registered_node_ids(self, node_id: str | None = None) -> tuple[str, ...]:
-        with self._sessions.begin() as session:
-            statement = (
-                select(AgentNode.node_id)
-                .where(
-                    AgentNode.state != "revoked",
-                    AgentNode.revoked_at.is_(None),
-                )
-                .order_by(AgentNode.node_id)
-                .limit(_MAX_FLEET_NODES + 1)
-            )
-            if node_id is not None:
-                statement = statement.where(AgentNode.node_id == node_id)
-            node_ids = tuple(session.scalars(statement))
-        if len(node_ids) > _MAX_FLEET_NODES:
-            raise ValueError("Fleet contains more than 500 registered nodes")
-        return node_ids
 
     @staticmethod
     def _registered_agents(session: Session) -> dict[str, AgentNode]:
@@ -1965,13 +1534,3 @@ class FleetProjection:
             freshness=freshness,
             sample=telemetry_point(value),
         )
-
-    def _telemetry_freshness(
-        self, observed_at: datetime
-    ) -> Literal["live", "delayed", "stale"]:
-        age = max(0.0, (_utc(self._clock()) - _utc(observed_at)).total_seconds())
-        if age <= self._telemetry_live_seconds:
-            return "live"
-        if age <= self._telemetry_delayed_seconds:
-            return "delayed"
-        return "stale"

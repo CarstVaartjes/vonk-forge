@@ -284,7 +284,6 @@ jobs:
               set -euo pipefail
               uv run --project control --frozen pytest -q \
                 control/tests/test_api_response_witness.py \
-                control/tests/test_source_bundle_client_handoff.py \
                 control/tests/test_artifact_job_api.py \
                 control/tests/test_fleet_profile_api.py::test_profile_operator_routes_are_singular_and_unversioned \
                 control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \

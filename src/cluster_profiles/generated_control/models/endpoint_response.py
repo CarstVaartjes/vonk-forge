@@ -34,7 +34,6 @@ class EndpointResponse:
             node_id (str):
             observed_at (str):
             plan_digest (str):
-            state (str):
      """
 
     alias: str
@@ -45,7 +44,6 @@ class EndpointResponse:
     node_id: str
     observed_at: str
     plan_digest: str
-    state: str
 
 
 
@@ -68,8 +66,6 @@ class EndpointResponse:
 
         plan_digest = self.plan_digest
 
-        state = self.state
-
 
         field_dict: dict[str, Any] = {}
 
@@ -82,7 +78,6 @@ class EndpointResponse:
             "node_id": node_id,
             "observed_at": observed_at,
             "plan_digest": plan_digest,
-            "state": state,
         })
 
         return field_dict
@@ -108,8 +103,6 @@ class EndpointResponse:
 
         plan_digest = d.pop("plan_digest")
 
-        state = d.pop("state")
-
         endpoint_response = cls(
             alias=alias,
             api_base=api_base,
@@ -119,7 +112,6 @@ class EndpointResponse:
             node_id=node_id,
             observed_at=observed_at,
             plan_digest=plan_digest,
-            state=state,
         )
 
         return endpoint_response

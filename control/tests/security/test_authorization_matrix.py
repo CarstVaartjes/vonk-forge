@@ -4,7 +4,6 @@ from collections.abc import Mapping, Sequence
 
 from starlette.routing import Route
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import MUTATION_ROLES, TokenCodec
 
 
@@ -38,9 +37,7 @@ def test_every_mutating_route_has_explicit_role() -> None:
         ) -> tuple[list[object], str | None, int]:
             raise AssertionError
 
-    app = create_app(
-        jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore()
-    )
+    app = create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32))
     routes = {
         (method, route.path)
         for route in app.routes

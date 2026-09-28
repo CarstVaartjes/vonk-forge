@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -45,7 +44,6 @@ class RecipeDetailResponse:
             usage (list[str]):
             alignment (None | str | Unset):
             assessment (None | RecipeReadiness | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     document: RecipeDefinition
@@ -60,7 +58,6 @@ class RecipeDetailResponse:
     usage: list[str]
     alignment: None | str | Unset = UNSET
     assessment: None | RecipeReadiness | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -116,8 +113,6 @@ class RecipeDetailResponse:
         else:
             assessment = self.assessment
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -137,8 +132,6 @@ class RecipeDetailResponse:
             field_dict["alignment"] = alignment
         if assessment is not UNSET:
             field_dict["assessment"] = assessment
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -228,10 +221,6 @@ class RecipeDetailResponse:
         assessment = _parse_assessment(d.pop("assessment", UNSET))
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         recipe_detail_response = cls(
             document=document,
             identity=identity,
@@ -245,7 +234,6 @@ class RecipeDetailResponse:
             usage=usage,
             alignment=alignment,
             assessment=assessment,
-            schema_version=schema_version,
         )
 
         return recipe_detail_response

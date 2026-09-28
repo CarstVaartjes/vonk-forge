@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal, Protocol
 
-from fastapi import FastAPI, HTTPException, Path, Query, Request, status
+from fastapi import FastAPI, HTTPException, Path, Query, status
 from pydantic import ConfigDict, Field, model_serializer
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,10 +20,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .agent_api import AgentApiServices, EnrollmentGrantResponse
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
-from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor, CursorError
 from .bounded_json import BoundedJSONError
-from .deployment_provenance_contract import DeploymentProvenance
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
@@ -36,7 +34,6 @@ from .enrollment_contract import (
     EnrollmentId,
 )
 from .failure_evidence import (
-    EvidenceRetention,
     FailureEvidenceBundle,
     collect_failure,
     failed_attempt_condition,
@@ -45,18 +42,13 @@ from .fleet_projection import (
     FleetNode,
     FleetNodeIdentity,
     FleetSnapshot,
-    TelemetryCapabilitiesResponse,
-    TelemetryCurrentResponse,
-    TelemetryHistoryResponse,
-    TelemetryWorkloadsResponse,
 )
 from .library_projection import LibrarySelectorAmbiguous
 from .logging import redact_text
-from .models import AgentOperation, AgentOperationAttempt, Job, JobLogEntry
+from .models import AgentOperation, AgentOperationAttempt
 from .operation_api import bounded_error_responses
 from .request_fault import RequestFault
 from .strict_json import StrictJSONModel, stored_document_detail
-from .telemetry import TelemetryResolution
 
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 LogSource = Literal["client", "monitor", "runtime", "job"]
@@ -66,13 +58,6 @@ _SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
 FLEET_OPERATION_IDS = {
     ("get", "/api/fleet"): "getFleetStatus",
     ("get", "/api/fleet/{selector}"): "getFleetNode",
-    ("get", "/api/fleet/{selector}/metrics/history"): "getFleetMetricsHistory",
-    ("get", "/api/fleet/{selector}/metrics/current"): "getFleetMetricsCurrent",
-    (
-        "get",
-        "/api/fleet/{selector}/metrics/capabilities",
-    ): "getFleetMetricsCapabilities",
-    ("get", "/api/fleet/{selector}/metrics/workloads"): "getFleetMetricsWorkloads",
     ("get", "/api/fleet/{selector}/loginfo"): "getFleetLogInfo",
     ("post", "/api/fleet/{selector}/rename"): "renameFleetNode",
     ("post", "/api/fleet/enroll"): "enrollFleetNode",
@@ -97,9 +82,6 @@ class FleetEnrollRequest(StrictJSONModel):
 
     name: str = Field(min_length=1, max_length=80, pattern=r"^[^\x00-\x1f\x7f]+$")
     request_key: EnrollmentId
-    # The enrollment authority caps a one-time bootstrap grant; advertising a
-    # longer TTL turned its refusal into an unavailable projection.
-    ttl_seconds: int = Field(default=900, ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
 
 
 class FleetReenrollRequest(StrictJSONModel):
@@ -113,11 +95,9 @@ class FleetUpgradeRequest(StrictJSONModel):
     request_key: EnrollmentId
     selectors: list[str] | None = Field(default=None, min_length=1, max_length=64)
     all: bool = False
-    strategy: Literal["one-at-a-time"] = "one-at-a-time"
 
 
 class FleetActionResponse(StrictJSONModel):
-    schema_version: Literal[2] = 2
     action: Literal["enroll", "re-enroll", "remove", "upgrade"]
     state: str = Field(min_length=1, max_length=32)
     operation_id: str | None = Field(default=None, max_length=128)
@@ -127,7 +107,6 @@ class FleetActionResponse(StrictJSONModel):
     request_key: EnrollmentId | None = None
     targets: list[str] = Field(default_factory=list, max_length=64)
     grant: EnrollmentGrantResponse | None = None
-    provenance: DeploymentProvenance | None = None
     detail: str | None = Field(default=None, max_length=256)
 
     @model_serializer(mode="wrap")
@@ -149,7 +128,6 @@ class FleetLogEntry(StrictJSONModel):
 
 
 class FleetLogResponse(StrictJSONModel):
-    schema_version: Literal[2] = 2
     node_id: str = Field(pattern=_NODE_PATTERN)
     since: datetime | None
     lines: int = Field(ge=1, le=1_000)
@@ -171,17 +149,13 @@ class FleetLogProvider(Protocol):
     ) -> FleetLogResponse | Mapping[str, object]: ...
 
 
-class FleetProvenanceProvider(Protocol):
-    def snapshot(self) -> DeploymentProvenance: ...
-
-
 class FleetEnrollmentProvider(Protocol):
     def create_named(
-        self, *, name: str, ttl_seconds: int, actor: str, request_id: str
+        self, *, name: str, actor: str, request_id: str
     ) -> Mapping[str, object]: ...
 
     def create_reenrollment(
-        self, node_id: str, actor: str, ttl_seconds: int, request_id: str
+        self, node_id: str, actor: str, request_id: str
     ) -> Mapping[str, object]: ...
 
     def revoke_node(self, node_id: str, actor: str) -> None: ...
@@ -207,7 +181,6 @@ class FleetUpgradeProvider(Protocol):
         node_ids: Sequence[str],
         package: Mapping[str, object],
         *,
-        strategy: Literal["one-at-a-time"],
         request_intent: Mapping[str, object],
     ) -> Any: ...
 
@@ -219,7 +192,6 @@ class FleetUpgradeProvider(Protocol):
         plan_digest: str,
         actor: str,
         request_id: str,
-        strategy: Literal["one-at-a-time"],
         request_intent: Mapping[str, object],
     ) -> Any: ...
 
@@ -231,18 +203,10 @@ class FleetOperatorServices:
         enrollment: FleetEnrollmentProvider | None = None,
         upgrades: FleetUpgradeProvider | None = None,
         logs: FleetLogProvider | None = None,
-        provenance: FleetProvenanceProvider | None = None,
     ) -> None:
         self.enrollment = enrollment
         self.upgrades = upgrades
         self.logs = logs
-        self.provenance = provenance
-
-
-class FleetNodeDetailResponse(FleetNode):
-    """Current Fleet node projection with supply-chain evidence attached."""
-
-    provenance: DeploymentProvenance | None = None
 
 
 class _AgentEnrollmentAdapter:
@@ -276,12 +240,12 @@ class _AgentEnrollmentAdapter:
         )
 
     def create_named(
-        self, *, name: str, ttl_seconds: int, actor: str, request_id: str
+        self, *, name: str, actor: str, request_id: str
     ) -> Mapping[str, object]:
         services = self._required()
         assert services.enrollment is not None
         grant = services.enrollment.create_named(
-            name, actor, ttl_seconds, request_key=request_id
+            name, actor, MAX_ENROLLMENT_GRANT_TTL_SECONDS, request_key=request_id
         )
         return {
             "display_name": name,
@@ -290,12 +254,12 @@ class _AgentEnrollmentAdapter:
         }
 
     def create_reenrollment(
-        self, node_id: str, actor: str, ttl_seconds: int, request_id: str
+        self, node_id: str, actor: str, request_id: str
     ) -> Mapping[str, object]:
         services = self._required()
         assert services.enrollment is not None
         grant = services.enrollment.create_reenrollment(
-            node_id, actor, ttl_seconds, request_key=request_id
+            node_id, actor, MAX_ENROLLMENT_GRANT_TTL_SECONDS, request_key=request_id
         )
         return {
             "state": "pending",
@@ -320,20 +284,17 @@ class _AgentEnrollmentAdapter:
         services.enrollment.revoke_node(node_id, actor)
 
 
-#: The failure-evidence retention window is owned by ``EvidenceRetention``; the
-#: log projection never scans further back than the evidence it can still read.
-_EVIDENCE_RETENTION = EvidenceRetention()
+#: How far back the log projection narrates failed agent attempts by default.
+_AGENT_LOG_LOOKBACK = timedelta(days=14)
 #: A fixed number of Controller job-log blobs per query, matching the previous
 #: bounded read.
-_JOB_LOG_SCAN_LIMIT = 512
-#: A fixed number of failed agent attempts per query.  Retention, not this
-#: projection, owns how long they stay readable.
+#: A fixed number of failed agent attempts per query.
 _AGENT_LOG_SCAN_LIMIT = 128
 #: A hard ceiling on projected agent entries before the caller's ``lines`` cut.
 _AGENT_LOG_ENTRY_LIMIT = 4_096
 #: Which attempts an operator must be able to read back is owned by
 #: ``failed_attempt_condition`` in the failure-evidence module, so this
-#: projection and the durable evidence collector cannot disagree about it.
+#: projection and the diagnostics download cannot disagree about it.
 #: The headline and level one attempt state narrates.  A lapse and a wait are
 #: things an operator must act on, not errors that claim the start died.
 _ATTEMPT_OUTCOME: Mapping[str, tuple[str, LogLevel]] = {
@@ -467,9 +428,9 @@ def _failure_log_entries(
     # no receipt at all, so the default "operation_failed" would name a refusal
     # that never happened.
     if has_receipt:
-        add(f"error_code={bundle.receipt.error_code}")
-    if bundle.receipt.detail:
-        add(f"detail={bundle.receipt.detail}")
+        add(f"error_code={bundle.error_code}")
+    if bundle.detail:
+        add(f"detail={bundle.detail}")
     # The Controller's own record of the wait, which the agent's receipt cannot
     # carry: it is what says the effect is unobserved rather than dead.
     if controller_reason is not None and controller_reason != bundle.summary:
@@ -491,30 +452,26 @@ def _failure_log_entries(
     return entries
 
 
-class ControllerJobLogProvider:
-    """Project retained, redacted Controller and agent evidence for one Spark.
+class AgentFailureLogProvider:
+    """Project retained, redacted agent failure evidence for one Spark.
 
-    Two durable sources are projected.  The Controller job-log store keeps the
-    redacted, content-addressed log lines of Controller-owned jobs.  The agent
-    operation attempts keep the agent's own bounded failure result -- its reason
+    The agent operation attempts keep the agent's own bounded failure result -- its reason
     (which names the stable refusal code), its operation error code and its
     sanitized process-log tails -- which is the narrative a failed
     ``recipe.start`` never reached the log surface with.  An attempt whose lease
     lapsed left no result at all, so the Controller's own record of the wait and
-    the clock that lapsed are projected in its place.  Neither source is a
-    live stream, neither is written here, and neither becomes an authority for
+    the clock that lapsed are projected in its place.  This is not a live
+    stream, nothing is written here, and it never becomes an authority for
     anything.
     """
 
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        job_logs: Any,
         *,
         clock: Any | None = None,
     ) -> None:
         self._sessions = sessions
-        self._job_logs = job_logs
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def list(
@@ -529,9 +486,6 @@ class ControllerJobLogProvider:
     ) -> FleetLogResponse:
         entries: list[FleetLogEntry] = []
         retained = False
-        if source in (None, "job"):
-            entries.extend(self._job_log_entries(node_id, since=since, recipe=recipe))
-            retained = True
         if source in (None, "job", "runtime"):
             entries.extend(self._agent_failure_entries(node_id, since=since))
             retained = True
@@ -549,54 +503,11 @@ class ControllerJobLogProvider:
             follow=False,
         )
 
-    def _job_log_entries(
-        self, node_id: str, *, since: datetime | None, recipe: str | None
-    ) -> list[FleetLogEntry]:
-        with self._sessions() as session:
-            rows = list(
-                session.execute(
-                    select(Job, JobLogEntry)
-                    .join(JobLogEntry, JobLogEntry.job_id == Job.id)
-                    .order_by(JobLogEntry.created_at.desc(), JobLogEntry.digest.desc())
-                    .limit(_JOB_LOG_SCAN_LIMIT)
-                )
-            )
-        entries: list[FleetLogEntry] = []
-        for job, log in rows:
-            if node_id not in job.targets:
-                continue
-            if since is not None and _aware(log.created_at) < _aware(since):
-                continue
-            if recipe is not None:
-                payload = job.payload if isinstance(job.payload, Mapping) else {}
-                recipe_value = payload.get("recipe") or payload.get("recipe_selector")
-                if recipe_value != recipe:
-                    continue
-            content = self._job_logs.read(job.id, log.digest).decode(
-                "utf-8", errors="replace"
-            )
-            for line in content.splitlines():
-                if line:
-                    entries.append(
-                        FleetLogEntry(
-                            observed_at=log.created_at,
-                            source="job",
-                            level="info",
-                            message=line,
-                            evidence_id=log.digest,
-                        )
-                    )
-        return entries
-
     def _agent_failure_entries(
         self, node_id: str, *, since: datetime | None
     ) -> list[FleetLogEntry]:
         now = _aware(self._clock())
-        cutoff = (
-            _aware(since)
-            if since is not None
-            else now - timedelta(days=_EVIDENCE_RETENTION.days)
-        )
+        cutoff = _aware(since) if since is not None else now - _AGENT_LOG_LOOKBACK
         with self._sessions() as session:
             rows = list(
                 session.execute(
@@ -639,8 +550,6 @@ class ControllerJobLogProvider:
                 "attempt": attempt.attempt,
                 "kind": operation.kind,
                 "node_ids": [operation.node_id],
-                "authority_revision": operation.authority_revision,
-                "payload_digest": operation.payload_digest,
                 "updated_at": observed_at.isoformat(),
                 "source": "agent",
                 "progress": attempt.progress,
@@ -690,15 +599,13 @@ def build_fleet_operator_services(
     agent_services: AgentApiServices | None,
     upgrades: AgentUpgradeService | None,
     logs: FleetLogProvider | None = None,
-    provenance: FleetProvenanceProvider | None = None,
     sessions: sessionmaker[Session] | None = None,
-    job_logs: Any | None = None,
 ) -> FleetOperatorServices:
     """Build Fleet action adapters from existing Controller authorities.
 
     ``logs`` must return retained authenticated evidence when configured.  If
-    ``sessions`` and the existing ``DatabaseJobLogStore`` are supplied, the
-    helper builds the retained Controller evidence provider itself.  Neither
+    ``sessions`` is supplied, the helper builds the retained Controller
+    evidence provider itself.  Neither
     path synthesizes remote log entries or falls back to SSH.
     """
 
@@ -706,13 +613,12 @@ def build_fleet_operator_services(
         None if agent_services is None else _AgentEnrollmentAdapter(agent_services)
     )
     retained_logs = logs
-    if retained_logs is None and sessions is not None and job_logs is not None:
-        retained_logs = ControllerJobLogProvider(sessions, job_logs)
+    if retained_logs is None and sessions is not None:
+        retained_logs = AgentFailureLogProvider(sessions)
     return FleetOperatorServices(
         enrollment=enrollment,
         upgrades=upgrades,
         logs=retained_logs,
-        provenance=provenance,
     )
 
 
@@ -791,24 +697,6 @@ def _operator_error(error: Exception) -> HTTPException:
     return HTTPException(status_code=503, detail="operator projection unavailable")
 
 
-def _deployment_provenance(
-    provider: FleetProvenanceProvider | None,
-) -> DeploymentProvenance | None:
-    """Read configured deployment provenance, keeping absence distinct.
-
-    ``None`` means the provenance feature is not configured. A configured
-    provider that returns a document which no longer validates is corruption
-    and must fail loudly instead of being reported as no provenance.
-    """
-
-    if provider is None:
-        return None
-    try:
-        return DeploymentProvenance.model_validate(provider.snapshot())
-    except (OSError, RuntimeError, TypeError, ValueError) as error:
-        raise _operator_error(error) from None
-
-
 def _require_mutation(actor: Actor, method: str, route: str) -> None:
     """Use the shared role table for both cookie and bearer actors."""
 
@@ -824,7 +712,6 @@ def install_operator_projection_routes(
     fleet_projection: Any | None,
     library_projection: Any | None,
     fleet_services: FleetOperatorServices | None = None,
-    audits: Any | None = None,
 ) -> None:
     """Install the singular operator route hierarchy.
 
@@ -846,25 +733,6 @@ def install_operator_projection_routes(
         if fleet_projection is None:
             raise HTTPException(status_code=503, detail="fleet projection unavailable")
         return fleet_projection
-
-    def audit(
-        request: Request, actor: Actor, action: str, targets: tuple[str, ...]
-    ) -> None:
-        if audits is not None:
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    actor.subject,
-                    action,
-                    None,
-                    targets,
-                )
-            )
-
-    def provenance() -> DeploymentProvenance | None:
-        return _deployment_provenance(
-            None if fleet_services is None else fleet_services.provenance
-        )
 
     def snapshot() -> FleetSnapshot:
         try:
@@ -888,116 +756,6 @@ def install_operator_projection_routes(
     )
     def fleet_status(_actor: Actor = authenticated) -> FleetSnapshot:
         return snapshot()
-
-    @app.get(
-        "/api/fleet/{selector}/metrics/history",
-        response_model=TelemetryHistoryResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetMetricsHistory",
-    )
-    def fleet_metrics_history(
-        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        start: Annotated[datetime, Query()],
-        end: Annotated[datetime, Query()],
-        resolution: Annotated[TelemetryResolution, Query()],
-        maximum_points: Annotated[int, Query(ge=1, le=3_000)] = 1_500,
-        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
-        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[
-            str | None, Query(min_length=1, max_length=64)
-        ] = None,
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        _actor: Actor = authenticated,
-    ) -> TelemetryHistoryResponse:
-        node = selected(selector)
-        try:
-            return fleet().telemetry_history(
-                node.id,
-                start=start,
-                end=end,
-                resolution=resolution,
-                maximum_points=maximum_points,
-                key=key,
-                device_id=device_id,
-                interface_name=interface_name,
-                run_id=run_id,
-            )
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _operator_error(error) from None
-
-    @app.get(
-        "/api/fleet/{selector}/metrics/current",
-        response_model=TelemetryCurrentResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetMetricsCurrent",
-    )
-    def fleet_metrics_current(
-        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
-        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[
-            str | None, Query(min_length=1, max_length=64)
-        ] = None,
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        _actor: Actor = authenticated,
-    ) -> TelemetryCurrentResponse:
-        node = selected(selector)
-        try:
-            return fleet().telemetry_current(
-                node.id,
-                key=key,
-                device_id=device_id,
-                interface_name=interface_name,
-                run_id=run_id,
-            )
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _operator_error(error) from None
-
-    @app.get(
-        "/api/fleet/{selector}/metrics/capabilities",
-        response_model=TelemetryCapabilitiesResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetMetricsCapabilities",
-    )
-    def fleet_metrics_capabilities(
-        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
-        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        interface_name: Annotated[
-            str | None, Query(min_length=1, max_length=64)
-        ] = None,
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        _actor: Actor = authenticated,
-    ) -> TelemetryCapabilitiesResponse:
-        node = selected(selector)
-        try:
-            return fleet().telemetry_capabilities(
-                node.id,
-                key=key,
-                device_id=device_id,
-                interface_name=interface_name,
-                run_id=run_id,
-            )
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _operator_error(error) from None
-
-    @app.get(
-        "/api/fleet/{selector}/metrics/workloads",
-        response_model=TelemetryWorkloadsResponse,
-        responses=bounded_error_responses(401, 404, 422, 503),
-        operation_id="getFleetMetricsWorkloads",
-    )
-    def fleet_metrics_workloads(
-        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        state: Annotated[str | None, Query(min_length=1, max_length=32)] = None,
-        _actor: Actor = authenticated,
-    ) -> TelemetryWorkloadsResponse:
-        node = selected(selector)
-        try:
-            return fleet().telemetry_workloads(node.id, run_id=run_id, state=state)
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _operator_error(error) from None
 
     @app.get(
         "/api/fleet/{selector}/loginfo",
@@ -1036,18 +794,15 @@ def install_operator_projection_routes(
 
     @app.get(
         "/api/fleet/{selector}",
-        response_model=FleetNodeDetailResponse,
+        response_model=FleetNode,
         responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="getFleetNode",
     )
     def fleet_detail(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         _actor: Actor = authenticated,
-    ) -> FleetNodeDetailResponse:
-        node = selected(selector)
-        return FleetNodeDetailResponse.model_validate(
-            node.model_dump() | {"provenance": provenance()}
-        )
+    ) -> FleetNode:
+        return selected(selector)
 
     @app.post(
         "/api/fleet/{selector}/rename",
@@ -1058,7 +813,6 @@ def install_operator_projection_routes(
     def fleet_rename(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         body: FleetRenameRequest,
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetNodeIdentity:
         _require_mutation(actor, "POST", "/api/fleet/{selector}/rename")
@@ -1067,7 +821,6 @@ def install_operator_projection_routes(
             result = fleet().update_display_name(node.id, body.display_name)
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
-        audit(request, actor, "fleet.node.rename", (node.id,))
         return result
 
     @app.post(
@@ -1079,7 +832,6 @@ def install_operator_projection_routes(
     )
     def fleet_enroll(
         body: FleetEnrollRequest,
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/enroll")
@@ -1088,12 +840,10 @@ def install_operator_projection_routes(
         try:
             value = fleet_services.enrollment.create_named(
                 name=body.name,
-                ttl_seconds=body.ttl_seconds,
                 actor=actor.subject,
                 request_id=body.request_key,
             )
             result = FleetActionResponse.model_validate({"action": "enroll", **value})
-            audit(request, actor, "fleet.node.enroll", (body.name,))
             return result
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
@@ -1107,7 +857,6 @@ def install_operator_projection_routes(
     def fleet_reenroll(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
         body: FleetReenrollRequest,
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/{selector}/re-enroll")
@@ -1116,12 +865,11 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
             value = fleet_services.enrollment.create_reenrollment(
-                node.id, actor.subject, 900, body.request_key
+                node.id, actor.subject, body.request_key
             )
             result = FleetActionResponse.model_validate(
                 {"action": "re-enroll", "node_id": node.id, **value}
             )
-            audit(request, actor, "fleet.node.re-enroll", (node.id,))
             return result
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
@@ -1160,7 +908,6 @@ def install_operator_projection_routes(
     )
     def revoke_enrollment(
         grant_id: Annotated[str, Path(pattern=ENROLLMENT_ID_PATTERN)],
-        request: Request,
         actor: Actor = authenticated,
     ) -> EnrollmentGrantStatus:
         _require_mutation(actor, "POST", "/api/fleet/enrollments/{grant_id}/revoke")
@@ -1170,7 +917,6 @@ def install_operator_projection_routes(
             result = fleet_services.enrollment.revoke_grant(
                 grant_id, actor=actor.subject
             )
-            audit(request, actor, "fleet.enrollment.revoke", (grant_id,))
             return result
         except (
             KeyError,
@@ -1191,7 +937,6 @@ def install_operator_projection_routes(
     )
     def fleet_remove(
         selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/{selector}/remove")
@@ -1203,7 +948,6 @@ def install_operator_projection_routes(
             result = FleetActionResponse(
                 action="remove", state="accepted", node_id=node.id
             )
-            audit(request, actor, "fleet.node.remove", (node.id,))
             return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
@@ -1217,7 +961,6 @@ def install_operator_projection_routes(
     )
     def fleet_upgrade(
         body: FleetUpgradeRequest,
-        request: Request,
         actor: Actor = authenticated,
     ) -> FleetActionResponse:
         _require_mutation(actor, "POST", "/api/fleet/upgrade")
@@ -1240,9 +983,7 @@ def install_operator_projection_routes(
                     plan_digest=str(getattr(existing, "payload_digest", "")) or None,
                     request_key=body.request_key,
                     targets=list(getattr(existing, "targets", ())),
-                    provenance=provenance(),
                 )
-                audit(request, actor, "fleet.upgrade", tuple(result.targets))
                 return result
             fleet_snapshot = snapshot()
             nodes = (
@@ -1255,7 +996,6 @@ def install_operator_projection_routes(
             plan = fleet_services.upgrades.preview(
                 node_ids,
                 package,
-                strategy=body.strategy,
                 request_intent=request_intent,
             )
             job = fleet_services.upgrades.apply(
@@ -1264,7 +1004,6 @@ def install_operator_projection_routes(
                 plan_digest=plan.plan_digest,
                 actor=actor.subject,
                 request_id=body.request_key,
-                strategy=body.strategy,
                 request_intent=request_intent,
             )
             result = FleetActionResponse(
@@ -1274,9 +1013,7 @@ def install_operator_projection_routes(
                 plan_digest=str(getattr(job, "payload_digest", plan.plan_digest)),
                 request_key=body.request_key,
                 targets=list(getattr(job, "targets", node_ids)),
-                provenance=provenance(),
             )
-            audit(request, actor, "fleet.upgrade", tuple(result.targets))
             return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
@@ -1289,9 +1026,7 @@ __all__ = [
     "FleetLogEntry",
     "FleetLogProvider",
     "FleetLogResponse",
-    "FleetNodeDetailResponse",
     "FleetOperatorServices",
-    "FleetProvenanceProvider",
     "FleetRenameRequest",
     "FleetUpgradeProvider",
     "FleetUpgradeRequest",

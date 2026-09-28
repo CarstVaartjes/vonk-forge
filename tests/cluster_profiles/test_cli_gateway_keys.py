@@ -26,7 +26,7 @@ class KeyClient:
                 ]
             }
         if path.endswith("/revoke"):
-            return {"name": "laptop", "revoked": True}
+            return {"name": "laptop"}
         assert payload is not None
         return {
             "name": payload["name"],

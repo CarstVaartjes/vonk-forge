@@ -5,10 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Path, Request, status
+from fastapi import FastAPI, HTTPException, Path, status
 from vonk_agent_protocol import OperationProgress
 
-from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
@@ -64,7 +63,6 @@ def _model_operator_response(
         selector=selector,
         request_key=operation.request_key,
         model_content_sha256=operation.model_content_sha256,
-        review_digest=operation.review_digest,
         operation_id=operation.id,
         state=operation.state,
         phase=str(raw.get("phase", progress.phase)),
@@ -96,7 +94,6 @@ def install_model_operator_routes(
     *,
     actor_dependency: Any,
     service: ModelCacheService | None,
-    audits: Any,
 ) -> None:
     """Install the current singular Model mutation routes.
 
@@ -116,20 +113,6 @@ def install_model_operator_routes(
     def require_operator(actor: Actor, route: str) -> None:
         if actor.role not in MUTATION_ROLES[("POST", route)]:
             raise HTTPException(status_code=403, detail="insufficient role")
-
-    def audit(
-        request: Request, actor: Actor, action: str, selector: str, operation_id: str
-    ) -> None:
-        if audits is not None:
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    actor.subject,
-                    action,
-                    None,
-                    (selector, operation_id),
-                )
-            )
 
     def failure(error: BaseException) -> HTTPException:
         if isinstance(error, ModelCacheNotFound):
@@ -208,7 +191,6 @@ def install_model_operator_routes(
     )
     def download(
         body: ModelCacheOperatorRequest,
-        request: Request,
         selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Actor = actor_dependency,
     ) -> ModelCacheOperatorResponse:
@@ -220,7 +202,6 @@ def install_model_operator_routes(
                 request_key=body.request_key,
                 force=True,
             )
-            audit(request, actor, "model.download", selector, operation.id)
             return _model_operator_response(
                 operation, action="download", selector=selector
             )
@@ -238,7 +219,6 @@ def install_model_operator_routes(
     )
     def remove(
         body: ModelCacheRemovalRequest,
-        request: Request,
         selector: Annotated[str, Path(min_length=1, max_length=256)],
         actor: Actor = actor_dependency,
     ) -> ModelCacheOperatorResponse:
@@ -248,10 +228,7 @@ def install_model_operator_routes(
                 selector,
                 actor=actor.subject,
                 request_key=body.request_key,
-                model_content_sha256=body.model_content_sha256,
-                review_digest=body.review_digest,
             )
-            audit(request, actor, "model.remove", selector, operation.id)
             return _model_operator_response(
                 operation, action="remove", selector=selector
             )
@@ -269,7 +246,6 @@ def install_model_operator_routes(
     )
     def cancel_operation(
         body: ModelCacheCancellationRequest,
-        request: Request,
         operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
         actor: Actor = actor_dependency,
     ) -> ModelCacheOperatorResponse:
@@ -283,7 +259,6 @@ def install_model_operator_routes(
                 reason=body.reason,
             )
             operation, action, selector = cache().get_operator_operation(operation_id)
-            audit(request, actor, "model.cancel", selector, operation_id)
             return _model_operator_response(operation, action=action, selector=selector)
         except HTTPException:
             raise

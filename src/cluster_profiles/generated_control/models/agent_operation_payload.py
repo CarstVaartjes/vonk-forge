@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import Literal, cast
 
 
@@ -31,7 +30,6 @@ class AgentOperationPayload:
             node_id (str):
             parent_job_id (str):
             state (str):
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     attempt: int
@@ -41,7 +39,6 @@ class AgentOperationPayload:
     node_id: str
     parent_job_id: str
     state: str
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -62,8 +59,6 @@ class AgentOperationPayload:
 
         state = self.state
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -76,8 +71,6 @@ class AgentOperationPayload:
             "parent_job_id": parent_job_id,
             "state": state,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -102,10 +95,6 @@ class AgentOperationPayload:
 
         state = d.pop("state")
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         agent_operation_payload = cls(
             attempt=attempt,
             entity_id=entity_id,
@@ -114,7 +103,6 @@ class AgentOperationPayload:
             node_id=node_id,
             parent_job_id=parent_job_id,
             state=state,
-            schema_version=schema_version,
         )
 
         return agent_operation_payload

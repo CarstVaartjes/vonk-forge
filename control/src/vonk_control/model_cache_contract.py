@@ -346,27 +346,18 @@ class ModelCacheAccessResumeRequest(StrictModel):
 class ModelCacheOperatorRequest(StrictModel):
     """Body shared by the singular operator model actions."""
 
-    schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
 
 
 class ModelCacheRemovalRequest(StrictModel):
-    """Request key for removing the named model against current state.
+    """Request key for removing the named model against current state."""
 
-    ``model_content_sha256`` and ``review_digest`` are accepted for clients
-    that show a prior review; they are advisory and never refuse the request.
-    """
-
-    schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
-    model_content_sha256: Digest | None = None
-    review_digest: Digest | None = None
 
 
 class ModelCacheCancellationRequest(StrictModel):
     """Stable identity and operator explanation for one cancellation request."""
 
-    schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
     reason: str = Field(min_length=1, max_length=512)
 
@@ -374,12 +365,10 @@ class ModelCacheCancellationRequest(StrictModel):
 class ModelCacheOperatorResponse(StrictModel):
     """CLI-shaped result without exposing an internal plan/digest workflow."""
 
-    schema_version: Literal[2] = 2
     action: ModelCacheOperatorAction
     selector: str = Field(min_length=1, max_length=256)
     request_key: str = Field(pattern=UUID_PATTERN)
     model_content_sha256: Digest | None = None
-    review_digest: Digest | None = None
     operation_id: str | None = Field(default=None, pattern=UUID_PATTERN)
     state: ModelCacheOperatorState
     phase: str = Field(min_length=1, max_length=64)

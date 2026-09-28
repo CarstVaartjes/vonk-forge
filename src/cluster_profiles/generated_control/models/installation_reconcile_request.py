@@ -8,45 +8,38 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from typing import cast
 
 
 
 
 
 
-T = TypeVar("T", bound="JobLogsResponse")
+T = TypeVar("T", bound="InstallationReconcileRequest")
 
 
 
 @_attrs_define
-class JobLogsResponse:
-    """
+class InstallationReconcileRequest:
+    """ Idempotency key for reconciling the installation named by the path.
+
         Attributes:
-            digests (list[str]):
-            job_id (str):
+            request_key (str):
      """
 
-    digests: list[str]
-    job_id: str
+    request_key: str
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        digests = self.digests
-
-
-
-        job_id = self.job_id
+        request_key = self.request_key
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "digests": digests,
-            "job_id": job_id,
+            "request_key": request_key,
         })
 
         return field_dict
@@ -56,14 +49,10 @@ class JobLogsResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        digests = cast(list[str], d.pop("digests"))
+        request_key = d.pop("request_key")
 
-
-        job_id = d.pop("job_id")
-
-        job_logs_response = cls(
-            digests=digests,
-            job_id=job_id,
+        installation_reconcile_request = cls(
+            request_key=request_key,
         )
 
-        return job_logs_response
+        return installation_reconcile_request

@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import Literal, cast
 
 
@@ -29,7 +28,6 @@ class JobPayload:
             kind (str):
             state (str):
             target_count (int):
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     entity_id: str
@@ -37,7 +35,6 @@ class JobPayload:
     kind: str
     state: str
     target_count: int
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -54,8 +51,6 @@ class JobPayload:
 
         target_count = self.target_count
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -66,8 +61,6 @@ class JobPayload:
             "state": state,
             "target_count": target_count,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -88,17 +81,12 @@ class JobPayload:
 
         target_count = d.pop("target_count")
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         job_payload = cls(
             entity_id=entity_id,
             entity_kind=entity_kind,
             kind=kind,
             state=state,
             target_count=target_count,
-            schema_version=schema_version,
         )
 
         return job_payload

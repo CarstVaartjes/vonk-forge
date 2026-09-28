@@ -139,9 +139,7 @@ class FakeClient:
         )
         known_get = {
             "/api/fleet",
-            "/api/model",
             "/api/model/library",
-            "/api/recipe",
             "/api/recipe/library",
             "/api/profile",
             "/api/operations",
@@ -249,10 +247,8 @@ class FakeClient:
             assert payload == {"disposition": "resume"}
             return
         if path.endswith("/preview"):
-            if installation_reconcile_path is not None:
-                validate_control_document("RunSwitchCleanupPreviewRequest", payload)
-            else:
-                assert profile_path is not None and payload is None
+            assert payload is None
+            assert installation_reconcile_path is not None or profile_path is not None
         elif path.endswith("/load"):
             assert profile_path is not None
             validate_control_document("FleetProfileLoadRequest", payload)
@@ -264,55 +260,37 @@ class FakeClient:
             )
             uuid.UUID(payload["request_key"])
         elif installation_reconcile_path is not None and path.endswith("/reconcile"):
-            validate_control_document("RunSwitchCleanupApplyRequest", payload)
+            assert isinstance(payload, dict) and set(payload) == {"request_key"}
+            uuid.UUID(payload["request_key"])
         elif selector_path is not None and selector_path.group(2) in {
             "download",
             "remove",
         }:
             assert isinstance(payload, dict)
             if selector_path.group(1) == "model" and selector_path.group(2) == "remove":
-                assert set(payload) == {
-                    "schema_version",
-                    "request_key",
-                    "model_content_sha256",
-                    "review_digest",
-                }
-                assert payload["schema_version"] == 2
+                assert set(payload) == {"request_key"}
                 uuid.UUID(payload["request_key"])
-                assert re.fullmatch(r"[0-9a-f]{64}", payload["model_content_sha256"])
-                assert re.fullmatch(r"[0-9a-f]{64}", payload["review_digest"])
             else:
-                assert set(payload) <= {
-                    "schema_version",
-                    "request_key",
-                    "with_model",
-                    "review_digest",
-                }
-                assert payload["schema_version"] == 2
+                assert set(payload) <= {"request_key", "with_model"}
                 uuid.UUID(payload["request_key"])
                 if selector_path.group(2) == "remove":
                     assert set(payload) == {
-                        "schema_version",
                         "request_key",
                         "with_model",
-                        "review_digest",
                     }
-                    assert re.fullmatch(r"[0-9a-f]{64}", payload["review_digest"])
             if selector_path.group(1) == "model":
                 assert "with_model" not in payload
             if selector_path.group(2) == "download":
                 assert "yes" not in payload and "with_model" not in payload
         elif path == "/api/recipe/update":
             assert isinstance(payload, dict)
-            assert set(payload) == {"schema_version", "request_key", "selectors", "all"}
-            assert payload["schema_version"] == 2
+            assert set(payload) == {"request_key", "selectors", "all"}
             uuid.UUID(payload["request_key"])
             assert isinstance(payload["selectors"], list)
             assert isinstance(payload["all"], bool)
         elif model_cancel_path is not None:
             assert isinstance(payload, dict)
-            assert set(payload) == {"schema_version", "request_key", "reason"}
-            assert payload["schema_version"] == 2
+            assert set(payload) == {"request_key", "reason"}
             uuid.UUID(payload["request_key"])
             assert isinstance(payload["reason"], str) and payload["reason"].strip()
         elif re.fullmatch(r"/api/recipe/operations/[^/]+/cancel", path):
@@ -320,21 +298,19 @@ class FakeClient:
             validate_control_document("RecipeCancellationRequest", payload)
         elif path == "/api/fleet/upgrade":
             assert (
-                {"all", "request_key", "strategy"}
+                {"all", "request_key"}
                 <= set(payload)
                 <= {
                     "selectors",
                     "all",
                     "request_key",
-                    "strategy",
                 }
             )
-            assert payload["strategy"] == "one-at-a-time"
             uuid.UUID(payload["request_key"])
             if "selectors" in payload:
                 assert isinstance(payload["selectors"], list) and payload["selectors"]
         elif path == "/api/fleet/enroll":
-            assert set(payload) == {"name", "ttl_seconds"}
+            assert set(payload) == {"name"}
         elif path.endswith("/rename"):
             assert set(payload) == {"display_name"}
         elif path.endswith(("/re-enroll", "/remove")):
@@ -377,7 +353,6 @@ def _reconciliation_operation(
 ) -> dict[str, object]:
     node_id = "spk_" + "2" * 32
     return {
-        "schema_version": 2,
         "operation_id": "33333333-3333-4333-8333-333333333333",
         "kind": "recipe.cleanup.v2",
         "action": "cleanup",
@@ -422,7 +397,6 @@ def _operation_owner_page(request_key: str) -> dict[str, object]:
     node_id = "spk_" + "2" * 32
     owner = {"kind": "job", "id": operation_id, "request_id": request_key}
     return {
-        "schema_version": 2,
         "operations": [
             {
                 "id": operation_id,
@@ -483,100 +457,22 @@ def test_recipe_installation_reconcile_review_uses_typed_preview_route(
     )
 
     assert status == 0 and result == plan
-    assert client.calls == [
-        (
-            "POST",
-            path,
-            {
-                "schema_version": 2,
-                "installation_id": installation_id,
-                "cleanup_mode": "reconcile",
-            },
-            None,
-        )
-    ]
+    assert client.calls == [("POST", path, None, None)]
 
 
-def test_recipe_installation_reconcile_rejects_security_or_changed_preview(
-    monkeypatch,
-) -> None:
+def test_recipe_installation_reconcile_submits_without_a_preview() -> None:
     installation_id = "22222222-2222-4222-8222-222222222222"
     key = "11111111-1111-4111-8111-111111111111"
     apply = f"/api/recipe/installations/{installation_id}/reconcile"
-    preview = f"{apply}/preview"
-    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    empty = {"operations": [], "next_cursor": None, "total": 0}
     client = FakeClient(
         {
             ("GET", "/api/operations"): empty,
-            ("POST", preview): _reconciliation_plan(
-                "55555555-5555-4555-8555-555555555555"
-            ),
-        }
-    )
-    _allow_minimal_reconciliation_plan(monkeypatch)
-
-    status, result = run(
-        (
-            "recipe",
-            "installation",
-            "reconcile",
-            installation_id,
-            "--request-key",
-            key,
-            "--yes",
-            "--json",
-        ),
-        client,
-    )
-
-    assert status == 2
-    assert "unavailable" in str(result["error"]).lower()
-    assert all(call[1] != apply for call in client.calls)
-
-    refused = _reconciliation_plan(installation_id, allowed=False)
-    refused["blockers"] = [
-        {"code": "run-switch.node_revoked", "detail": "Spark was revoked"}
-    ]
-    client.responses[("POST", preview)] = refused
-    status, result = run(
-        (
-            "recipe",
-            "installation",
-            "reconcile",
-            installation_id,
-            "--request-key",
-            key,
-            "--yes",
-            "--json",
-        ),
-        client,
-    )
-    assert status == 2
-    assert "run-switch.node_revoked" in str(result["error"])
-    assert all(call[1] != apply for call in client.calls)
-
-
-def test_recipe_installation_reconcile_submits_despite_ordinary_blockers(
-    monkeypatch,
-) -> None:
-    installation_id = "22222222-2222-4222-8222-222222222222"
-    key = "11111111-1111-4111-8111-111111111111"
-    apply = f"/api/recipe/installations/{installation_id}/reconcile"
-    blocked = _reconciliation_plan(installation_id, allowed=False)
-    blocked["blockers"] = [
-        {"code": "run-switch.capacity_busy", "detail": "capacity is busy"}
-    ]
-    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
-    client = FakeClient(
-        {
-            ("GET", "/api/operations"): empty,
-            ("POST", f"{apply}/preview"): blocked,
             ("POST", apply): ControlConflict(409, "installation is busy"),
         }
     )
-    _allow_minimal_reconciliation_plan(monkeypatch)
 
-    run(
+    status, result = run(
         (
             "recipe",
             "installation",
@@ -590,10 +486,13 @@ def test_recipe_installation_reconcile_submits_despite_ordinary_blockers(
         client,
     )
 
-    submitted = [call for call in client.calls if call[:2] == ("POST", apply)]
-    assert len(submitted) == 1
-    assert submitted[0][2] is not None
-    assert submitted[0][2]["plan_digest"] == blocked["plan_digest"]
+    assert status == 2
+    assert "installation is busy" in json.dumps(result)
+    assert [call[:2] for call in client.calls] == [
+        ("GET", "/api/operations"),
+        ("POST", apply),
+    ]
+    assert client.calls[1][2] == {"request_key": key}
 
 
 def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity_rows(
@@ -724,26 +623,23 @@ def test_recipe_installation_reconcile_does_not_replay_after_uncertain_lookup() 
     assert [call[0] for call in client.calls] == ["GET"]
 
 
-def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identity(
-    monkeypatch,
-) -> None:
+def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identity() -> (
+    None
+):
     installation_id = "22222222-2222-4222-8222-222222222222"
     key = "11111111-1111-4111-8111-111111111111"
     apply = f"/api/recipe/installations/{installation_id}/reconcile"
-    preview = f"{apply}/preview"
-    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    empty = {"operations": [], "next_cursor": None, "total": 0}
     operation = _reconciliation_operation(key, installation_id)
     client = FakeClient(
         {
             ("GET", "/api/operations"): [empty, empty],
-            ("POST", preview): _reconciliation_plan(installation_id),
             ("POST", apply): [
                 ControlTransportError("acceptance response was lost"),
                 operation,
             ],
         }
     )
-    _allow_minimal_reconciliation_plan(monkeypatch)
 
     status, result = run(
         (
@@ -763,13 +659,7 @@ def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identit
     assert status == 0 and result["operation_id"] == operation["operation_id"]
     posts = [call[2] for call in client.calls if call[0] == "POST" and call[1] == apply]
     assert len(posts) == 2 and posts[0] == posts[1]
-    assert posts[0] == {
-        "schema_version": 2,
-        "installation_id": installation_id,
-        "cleanup_mode": "reconcile",
-        "plan_digest": _REVIEW_DIGEST,
-        "request_key": key,
-    }
+    assert posts[0] == {"request_key": key}
 
 
 def _model_detail(selector: str = "qwen") -> tuple[dict[str, object], str]:
@@ -781,7 +671,6 @@ def _model_detail(selector: str = "qwen") -> tuple[dict[str, object], str]:
     digest = content_sha256(model)
     return (
         {
-            "schema_version": 2,
             "selector": selector,
             "identity": {
                 "kind": "model",
@@ -808,14 +697,12 @@ def _recipe_removal_receipt(
     selector: str, request_key: str, *, with_model: bool
 ) -> dict[str, object]:
     return {
-        "schema_version": 2,
         "action": "remove",
         "selector": selector,
         "request_key": request_key,
         "operation_id": "11111111-1111-4111-8111-111111111121",
         "recipe_revision_id": "revision-1",
         "with_model": with_model,
-        "review_digest": "b" * 64,
         "progress": {"phase": "queued"},
         "reclaimed_bytes": 0,
         "state": "queued",
@@ -1006,23 +893,11 @@ def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation()
         },
         "recovery": {"actions": ["inspect"]},
     }
-    audit = {
-        "id": "audit:55555555-5555-4555-8555-555555555555",
-        "kind": "audit.fleet.read",
-        "state": "completed",
-        "created_at": "2026-08-05T12:00:00Z",
-        "node_ids": [target],
-        "owner": {
-            "kind": "audit-event",
-            "id": "55555555-5555-4555-8555-555555555555",
-            "request_id": request_id,
-        },
-    }
     output = StringIO()
     with redirect_stdout(output):
         render_payload(
             {
-                "operations": [operation, audit],
+                "operations": [operation],
                 "total": 3,
                 "next_cursor": "opaque+token",
             },
@@ -1037,10 +912,9 @@ def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation()
         )
 
     rendered = output.getvalue()
-    assert "2 of 3 references" in rendered
+    assert "1 of 3 references" in rendered
     assert "Owner: job job-owner-1" in rendered
     assert "vonkctl fleet progress job-owner-1 --follow" in rendered
-    assert "vonkctl fleet activity --request-id " + request_id in rendered
     assert "More results are available" in rendered
     assert (
         "vonkctl fleet activity --limit 1 --cursor opaque+token --state "
@@ -1137,12 +1011,10 @@ def test_download_is_one_step_and_repeated_calls_keep_server_operation_states() 
         client.calls[0][2]
         == client.calls[1][2]
         == {
-            "schema_version": 2,
             "request_key": "11111111-1111-4111-8111-111111111111",
         }
     )
     assert client.calls[2][2] == {
-        "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
     }
 
@@ -1153,7 +1025,6 @@ def test_recipe_download_rejects_a_forced_selector_intent_receipt() -> None:
     path = f"/api/recipe/{selector}/download"
     lookup = f"/api/recipe/requests/{request_key}"
     receipt = {
-        "schema_version": 2,
         "id": "recipe-download",
         "request_id": request_key,
         "kind": "recipe.image.availability.v2",
@@ -1190,7 +1061,7 @@ def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None
                 "resources": {},
                 "document": {},
             },
-            ("GET", "/api/model"): {
+            ("GET", "/api/model/library"): {
                 "models": [
                     {
                         "selector": "qwen",
@@ -1230,12 +1101,10 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "model", "qwen", model_digest=model_digest
             ),
             ("POST", "/api/model/qwen/remove"): {
-                "schema_version": 2,
                 "action": "remove",
                 "selector": "qwen",
                 "request_key": request_key,
                 "model_content_sha256": model_digest,
-                "review_digest": _REVIEW_DIGEST,
                 "state": "cancelled",
                 "operation_id": model_operation_id,
                 "phase": "completed",
@@ -1246,7 +1115,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "recipe", "vision", with_model=True
             ),
             ("POST", "/api/recipe/vision/remove"): {
-                "schema_version": 2,
                 "state": "accepted",
                 "action": "remove",
                 "selector": "vision",
@@ -1254,12 +1122,10 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "operation_id": recipe_operation_id,
                 "recipe_revision_id": "revision-1",
                 "with_model": True,
-                "review_digest": _REVIEW_DIGEST,
                 "progress": {"phase": "completed"},
                 "reclaimed_bytes": 0,
             },
             ("GET", f"/api/recipe/operations/{recipe_operation_id}"): {
-                "schema_version": 2,
                 "state": "succeeded",
                 "action": "remove",
                 "selector": "vision",
@@ -1289,10 +1155,7 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
         ("POST", "/api/model/qwen/remove"),
     ]
     assert client.calls[1][2] == {
-        "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
-        "model_content_sha256": model_digest,
-        "review_digest": _REVIEW_DIGEST,
     }
     assert (
         run(
@@ -1315,18 +1178,16 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
     assert recipe_remove["with_model"] is True
 
 
-def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> None:
+def test_model_remove_reconciles_after_lost_acceptance() -> None:
     selector = "qwen"
     request_key = "11111111-1111-4111-8111-111111111111"
     operation_id = "11111111-1111-4111-8111-111111111121"
     _detail, digest = _model_detail(selector)
     receipt = {
-        "schema_version": 2,
         "action": "remove",
         "selector": selector,
         "request_key": request_key,
         "model_content_sha256": digest,
-        "review_digest": _REVIEW_DIGEST,
         "operation_id": operation_id,
         "state": "queued",
         "phase": "queued",
@@ -1372,10 +1233,7 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
     ]
     body = client.calls[2][2]
     assert body == {
-        "schema_version": 2,
         "request_key": request_key,
-        "model_content_sha256": digest,
-        "review_digest": _REVIEW_DIGEST,
     }
 
 
@@ -1385,12 +1243,10 @@ def test_model_remove_reconnects_to_existing_key_before_resolving_current_head()
     selector = "qwen"
     request_key = "11111111-1111-4111-8111-111111111111"
     receipt = {
-        "schema_version": 2,
         "action": "remove",
         "selector": selector,
         "request_key": request_key,
         "model_content_sha256": "a" * 64,
-        "review_digest": _REVIEW_DIGEST,
         "operation_id": "11111111-1111-4111-8111-111111111121",
         "state": "succeeded",
         "phase": "completed",
@@ -1461,10 +1317,8 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
         ("GET", lookup),
     ]
     assert client.calls[2][2] == {
-        "schema_version": 2,
         "request_key": request_key,
         "with_model": False,
-        "review_digest": _REVIEW_DIGEST,
     }
 
 
@@ -1540,7 +1394,6 @@ def test_recipe_remove_reconnect_rejects_foreign_selector_or_retention(
             "request_key",
             "22222222-2222-4222-8222-222222222222",
         ),
-        ("model", "qwen", "model_content_sha256", "b" * 64),
         ("recipe", "vision", "selector", "other-recipe"),
         (
             "recipe",
@@ -1559,12 +1412,10 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
     if noun == "model":
         model_detail, model_digest = _model_detail(selector)
         receipt: dict[str, object] = {
-            "schema_version": 2,
             "action": "remove",
             "selector": selector,
             "request_key": request_key,
             "model_content_sha256": model_digest,
-            "review_digest": _REVIEW_DIGEST,
             "operation_id": operation_id,
             "state": "succeeded",
             "phase": "completed",
@@ -1573,14 +1424,12 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
         }
     else:
         receipt = {
-            "schema_version": 2,
             "action": "remove",
             "selector": selector,
             "request_key": request_key,
             "operation_id": operation_id,
             "recipe_revision_id": "revision-1",
             "with_model": False,
-            "review_digest": _REVIEW_DIGEST,
             "state": "succeeded",
             "progress": {"phase": "completed"},
             "reclaimed_bytes": 0,
@@ -1824,7 +1673,6 @@ def test_model_cancel_requires_consent_and_reuses_its_stable_identity() -> None:
             "POST",
             path,
             {
-                "schema_version": 2,
                 "request_key": cancel_key,
                 "reason": "switching to another model",
             },
@@ -1878,7 +1726,6 @@ def test_model_cancel_reconciles_a_lost_acceptance_before_replay() -> None:
     assert status == 0 and payload["state"] == "cancelled", payload
     assert [call[0] for call in client.calls] == ["POST", "GET"]
     assert client.calls[0][2] == {
-        "schema_version": 2,
         "request_key": cancel_key,
         "reason": "operator request",
     }
@@ -2326,13 +2173,11 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
 
     assert status == 0 and payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
-        "/api/profile/1/preview",
         "/api/profile/1/load",
         f"/api/profile/applications/{application_id}",
     ]
-    assert client.calls[1][2] == {
+    assert client.calls[0][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111",
-        "plan_digest": "c" * 64,
     }
 
 
@@ -2358,7 +2203,7 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
     )
 
     assert status != 0
-    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
     assert not any(call[1].endswith("/progress") for call in client.calls)
 
 
@@ -2679,7 +2524,7 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
 
     assert status == 0
     assert payload["id"] == operation
-    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
 
 
 def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> None:
@@ -2728,7 +2573,6 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
         "request_key": key,
     }
     assert [call[:2] for call in client.calls] == [
-        ("POST", "/api/profile/1/preview"),
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/applications/{operation}"),
     ]
@@ -3030,7 +2874,6 @@ def test_profile_endpoint_uses_scoped_current_controller_projection(
                             "node_id": "spk_" + "a" * 32,
                             "observed_at": "2026-09-23T12:59:30Z",
                             "plan_digest": "a" * 64,
-                            "state": "published",
                         },
                     },
                     {
@@ -3186,7 +3029,7 @@ def test_error_output_redacts_request_secrets_and_keeps_json_clean() -> None:
 def test_plain_output_is_adaptive_and_keeps_identity_before_optional_columns() -> None:
     client = FakeClient(
         {
-            ("GET", "/api/model"): {
+            ("GET", "/api/model/library"): {
                 "models": [
                     {
                         "selector": "qwen-3.8-nvfp4",
@@ -3355,7 +3198,6 @@ def test_recipe_cancel_recovers_accepted_request_after_lost_response() -> None:
         ("GET", "/api/recipe/operations/recipe-operation"),
     ]
     assert client.calls[0][2] == {
-        "schema_version": 2,
         "request_key": key,
         "reason": "stop preparation",
     }
@@ -3641,7 +3483,6 @@ def test_fleet_upgrade_resolves_friendly_scope_before_explicit_consent() -> None
     assert body == {
         "all": False,
         "request_key": request_key,
-        "strategy": "one-at-a-time",
         "selectors": [node_id],
     }
 
@@ -3689,7 +3530,6 @@ def test_fleet_upgrade_prompts_for_resolved_scope_in_a_terminal(monkeypatch) -> 
 
 def _fleet_log_response(node_id: str, *, follow: bool) -> dict[str, object]:
     return {
-        "schema_version": 2,
         "node_id": node_id,
         "since": "2026-09-24T10:00:00Z",
         "lines": 100,
@@ -3999,26 +3839,11 @@ def test_fleet_upgrade_unknown_acceptance_recommends_exact_request_replay() -> N
     assert status == 2
     assert result["error"] == "Upgrade acceptance is unknown"
     assert result["reconcile"] == {
-        "operation": (
-            "vonkctl fleet upgrade --all --request-key "
-            f"{request_key} --strategy one-at-a-time --yes"
-        ),
+        "operation": (f"vonkctl fleet upgrade --all --request-key {request_key} --yes"),
         "request_key": request_key,
     }
     assert len(client.calls) == 2
     assert client.calls[0][2] == client.calls[1][2]
-
-
-def test_cli_rejects_retired_fleet_upgrade_strategy_before_request() -> None:
-    client = FakeClient({})
-
-    status, _result = run(
-        ("fleet", "upgrade", "--all", "--strategy", "all-at-once", "--json"),
-        client,
-    )
-
-    assert status == 2
-    assert not client.calls
 
 
 @pytest.mark.parametrize("since", ["yesterday", "15", "-1m", "2026-09-13T08:00:00"])
@@ -4177,7 +4002,6 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
                 }
             if path == "/api/profile/1/definition":
                 return {
-                    "schema_version": 2,
                     "id": "22222222-2222-4222-8222-222222222222",
                     "number": 1,
                     "revision": 0,
@@ -4203,9 +4027,7 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
                     "request_key": payload["request_key"],
                     "state": "running",
                     "progress": {
-                        "intended_profile": {
-                            "reviewed_plan_digest": payload["plan_digest"]
-                        }
+                        "intended_profile": {"reviewed_plan_digest": "b" * 64}
                     },
                 }
             if path == f"/api/profile/applications/{application_id}":

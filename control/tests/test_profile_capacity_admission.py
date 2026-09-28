@@ -154,7 +154,7 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
 def test_load_parks_capacity_lost_after_its_last_preview(
     tmp_path, postgres_engine, monkeypatch, change: str
 ) -> None:
-    sessions, _, _, profile, api, headers, review, nodes = _capacity_profile(
+    sessions, _, _, profile, api, headers, _review, nodes = _capacity_profile(
         tmp_path, postgres_engine, node_count=2 if change == "rendezvous-port" else 1
     )
     original_queue = FleetProfileService._queue_application
@@ -221,7 +221,6 @@ def test_load_parks_capacity_lost_after_its_last_preview(
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "plan_digest": review["plan_digest"],
             "request_key": str(uuid4()),
         },
     )
@@ -392,7 +391,7 @@ def test_admission_accepts_changed_headroom_without_reopening_storage_or_capabil
     postgres_engine,
     monkeypatch,
 ) -> None:
-    sessions, _, planner, profile, api, headers, review, _ = _capacity_profile(
+    sessions, _, planner, profile, api, headers, _review, _ = _capacity_profile(
         tmp_path, postgres_engine
     )
     original_queue = FleetProfileService._queue_application
@@ -409,7 +408,6 @@ def test_admission_accepts_changed_headroom_without_reopening_storage_or_capabil
             snapshot.disk_free_bytes -= 1
         monkeypatch.setattr(planner._artifacts, "inspect", unexpected)
         monkeypatch.setattr(planner, "_build_archive_available", unexpected)
-        monkeypatch.setattr(planner, "_model_capability_summary", unexpected)
         return original_queue(service, reviewed, **kwargs)
 
     monkeypatch.setattr(FleetProfileService, "_queue_application", change_observation)
@@ -417,7 +415,6 @@ def test_admission_accepts_changed_headroom_without_reopening_storage_or_capabil
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "plan_digest": review["plan_digest"],
             "request_key": str(uuid4()),
         },
     )
@@ -431,7 +428,7 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
     monkeypatch,
     writer: str,
 ) -> None:
-    sessions, profiles, _, profile, api, headers, review, nodes = _capacity_profile(
+    sessions, profiles, _, profile, api, headers, _review, nodes = _capacity_profile(
         tmp_path, postgres_engine
     )
     reservation_id = str(uuid4())
@@ -468,7 +465,6 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
             f"/api/profile/{profile.number}/load",
             headers=headers,
             json={
-                "plan_digest": review["plan_digest"],
                 "request_key": str(uuid4()),
             },
         )
@@ -571,7 +567,6 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
                     f"/api/profile/{profile.number}/load",
                     headers=headers,
                     json={
-                        "plan_digest": review.json()["plan_digest"],
                         "request_key": request_key,
                     },
                 )
@@ -806,7 +801,7 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
         response = api.post(
             f"/api/profile/{profile.number}/load",
             headers=headers,
-            json={"plan_digest": review["plan_digest"], "request_key": request_key},
+            json={"request_key": request_key},
         )
         assert response.status_code == 202, response.text
         assert "busy" in response.json()["status_reason"].lower()
@@ -992,7 +987,6 @@ def test_late_submitter_cleanup_preserves_superseded_receipt(
     sessions, profiles, _, profile, _, _, _, _ = _capacity_profile(
         tmp_path, postgres_engine
     )
-    review = profiles.preview(profile.id)
     request_key = str(uuid4())
 
     def cancel_before_refusal(_preview, *, pending_application_id, **_kwargs):
@@ -1011,7 +1005,6 @@ def test_late_submitter_cleanup_preserves_superseded_receipt(
 
     result = profiles.apply(
         profile.id,
-        plan_digest=review.plan_digest,
         request_key=request_key,
         actor="admin",
     )

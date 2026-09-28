@@ -49,7 +49,6 @@ class EnrollmentClient:
             if self.lost:
                 raise ControlTransportError("lost response " + TOKEN)
             return {
-                "schema_version": 2,
                 "action": "enroll",
                 "state": "pending",
                 "display_name": "Atlas",
@@ -59,7 +58,6 @@ class EnrollmentClient:
             self.state = "revoked"
         assert path.startswith("/api/fleet/enrollments/")
         return {
-            "schema_version": 2,
             "id": IDENTITY,
             "state": self.state,
             "purpose": "new-node",
@@ -228,7 +226,6 @@ def test_reenrollment_requires_consent_and_pins_the_resolved_node(tmp_path, caps
             assert path == f"/api/fleet/{node_id}/re-enroll"
             assert destination.stat().st_mode & 0o777 == 0o600
             return {
-                "schema_version": 2,
                 "action": "re-enroll",
                 "state": "pending",
                 "node_id": node_id,
@@ -305,7 +302,6 @@ def test_enrollment_refusal_skips_stale_lookup_but_ambiguous_response_reconciles
     calls = []
 
     pending_status = {
-        "schema_version": 2,
         "id": IDENTITY,
         "state": "pending",
         "purpose": "new-node",

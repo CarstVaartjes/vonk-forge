@@ -38,8 +38,6 @@ from vonk_agent_protocol import (
     PackageRollbackAuthority,
     RecipeStopPayload,
     SignedHostHelperGrant,
-    SignedPackageHelperGrant,
-    SignedPackageObjectReceipt,
     canonical_message,
 )
 from vonk_agent_protocol.host_helper import (
@@ -56,7 +54,6 @@ from vonk_control.agent_api import (
 )
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, AgentSource, TokenCodec
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
@@ -81,7 +78,6 @@ from vonk_control.models import (
     Job,
     NodeInventorySnapshot,
     NodeTelemetrySample,
-    Observation,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -95,10 +91,6 @@ from vonk_control.recipe_execution_contract import (
     installation_plan_document,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_control.workload_helper_authority import (
-    WorkloadHelperGrantIssuer,
-    WorkloadObjectReceiptIssuer,
-)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 NODE_A = "spk_" + "a" * 32
@@ -402,8 +394,6 @@ def make_agent_system(tmp_path, *, engine=None):
         presence=presence,
         artifact_root=tmp_path / "artifacts",
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
-        workload_tuf_metadata_root=tmp_path / "workload-tuf-metadata",
-        workload_tuf_target_root=tmp_path / "workload-tuf-targets",
         fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
         bootstrap=EnrollmentBootstrapConfig(
             controller_endpoint="https://agents.example.test:8443",
@@ -420,19 +410,14 @@ def make_agent_system(tmp_path, *, engine=None):
         ),
     )
     services.artifact_root.mkdir()
-    services.workload_tuf_metadata_root.mkdir()
-    services.workload_tuf_target_root.mkdir()
     codec = TokenCodec(b"k" * 32)
-    audits = MemoryAuditStore()
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
-        audits=audits,
         now=lambda: 0,
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,
     )
-    app.state.test_audits = audits
     return CurrentAgentClient(app), services, codec, clock
 
 
@@ -1005,12 +990,6 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         clock=clock,
         request_id_factory=lambda: uuid.UUID(request_id),
     )
-    package_issuer = WorkloadHelperGrantIssuer(
-        ed25519.Ed25519PrivateKey.generate(),
-        clock=clock,
-        request_id_factory=lambda: uuid.UUID(request_id),
-    )
-    receipt_issuer = WorkloadObjectReceiptIssuer(ed25519.Ed25519PrivateKey.generate())
 
     class RecordingHostAuthority:
         def __init__(self) -> None:
@@ -1058,45 +1037,8 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
                 expires_in_seconds=kwargs["expires_in_seconds"],
             )
 
-    class RecordingPackageAuthority:
-        def __init__(self) -> None:
-            self.grant_calls: list[Mapping[str, object]] = []
-            self.receipt_calls: list[Mapping[str, object]] = []
-            self.receipt_output: object | None = None
-
-        def issue_grant(self, **kwargs: object) -> object:
-            self.grant_calls.append(kwargs)
-            return package_issuer.issue_grant(
-                request_id=kwargs["request_id"],
-                node_id=kwargs["node_id"],
-                job_id=kwargs["job_id"],
-                operation_id=kwargs["operation_id"],
-                attempt=kwargs["attempt"],
-                fence=kwargs["fence"],
-                release_digest=kwargs["release_digest"],
-                generation=kwargs["generation"],
-                operation=kwargs["operation"],
-                request_digest=kwargs["request_digest"],
-                expires_in_seconds=kwargs["expires_in_seconds"],
-            )
-
-        def issue_receipts(self, **kwargs: object) -> tuple[object, ...]:
-            self.receipt_calls.append(kwargs)
-            if self.receipt_output is not None:
-                return self.receipt_output  # type: ignore[return-value]
-            objects = kwargs["objects"]
-            assert isinstance(objects, list)
-            return tuple(
-                receipt_issuer.issue_object_receipt(
-                    object_digest=item["object_digest"], size=item["size"]
-                )
-                for item in objects
-            )
-
     host = RecordingHostAuthority()
-    package = RecordingPackageAuthority()
     object.__setattr__(services, "host_runtime_authority", host)
-    object.__setattr__(services, "workload_helper_authority", package)
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
     runtime_request = schemas["HostRuntimeGrantRequest"]
     runtime_properties = runtime_request["properties"]
@@ -1118,37 +1060,6 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
             "runtime_installation_id",
         }
         & set(runtime_request.get("required", ()))
-    )
-    assert (
-        schemas["PackageHelperSignature"]["properties"]["algorithm"]["const"]
-        == "ed25519"
-    )
-    uuid4_pattern = (
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-    )
-    grant_claims = schemas["PackageHelperGrantClaims"]["properties"]
-    assert set(schemas["PackageHelperGrantClaims"]["required"]) >= {
-        "request_id",
-        "job_id",
-        "operation_id",
-        "fence",
-    }
-    for field_name in ("request_id", "job_id", "operation_id", "fence"):
-        assert grant_claims[field_name]["pattern"] == uuid4_pattern
-    assert "relative_name" in schemas["PackageObjectReceiptClaims"]["required"]
-    assert (
-        schemas["PackageObjectReceiptClaims"]["properties"]["relative_name"]["pattern"]
-        == r"^objects/sha256/[0-9a-f]{64}$"
-    )
-    assert (
-        schemas["PackageHelperReceiptsResponse"]["properties"]["receipts"]["items"][
-            "$ref"
-        ]
-        == "#/components/schemas/SignedPackageObjectReceipt"
-    )
-    assert (
-        schemas["PackageHelperGrantResponse"]["properties"]["grant"]["$ref"]
-        == "#/components/schemas/SignedPackageHelperGrant"
     )
     headers = agent_headers(NODE_A, "serial-a")
     common = {
@@ -1199,84 +1110,6 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
         SignedHostHelperGrant,
     )
 
-    receipt_response = client.post(
-        "/agent/package-helper/receipts",
-        headers=headers,
-        json={
-            key: value for key, value in common.items() if key != "expires_in_seconds"
-        }
-        | {
-            "release_digest": "d" * 64,
-            "objects": [{"object_digest": "e" * 64, "size": 17}],
-        },
-    )
-    assert receipt_response.status_code == 200
-    assert isinstance(
-        SignedPackageObjectReceipt.parse(receipt_response.json()["receipts"][0]),
-        SignedPackageObjectReceipt,
-    )
-    assert package.receipt_calls[0]["objects"] == [
-        {"object_digest": "e" * 64, "size": 17}
-    ]
-
-    package.receipt_output = ({"claims": {"unexpected": True}},)
-    malformed_receipt_response = client.post(
-        "/agent/package-helper/receipts",
-        headers=headers,
-        json={
-            key: value for key, value in common.items() if key != "expires_in_seconds"
-        }
-        | {
-            "release_digest": "d" * 64,
-            "objects": [{"object_digest": "e" * 64, "size": 17}],
-        },
-    )
-    assert malformed_receipt_response.status_code == 409
-    package.receipt_output = None
-
-    grant_body = common | {
-        "request_id": request_id,
-        "release_digest": "d" * 64,
-        "generation": "gen-future-stack-001",
-        "operation": "health",
-        "request_digest": "f" * 64,
-    }
-    grant_response = client.post(
-        "/agent/package-helper/grant", headers=headers, json=grant_body
-    )
-    assert grant_response.status_code == 200
-    assert isinstance(
-        SignedPackageHelperGrant.parse(grant_response.json()["grant"]),
-        SignedPackageHelperGrant,
-    )
-    assert package.grant_calls[0]["generation"] == "gen-future-stack-001"
-
-    assert (
-        client.post(
-            "/agent/package-helper/grant",
-            headers=headers,
-            json=grant_body | {"generation": 7},
-        ).status_code
-        == 422
-    )
-    assert len(package.grant_calls) == 1
-    assert (
-        client.post(
-            "/agent/package-helper/receipts",
-            headers=headers,
-            json={
-                key: value
-                for key, value in common.items()
-                if key != "expires_in_seconds"
-            }
-            | {
-                "release_digest": "d" * 64,
-                "objects": [{"object_digest": "e" * 64, "size": 17, "extra": True}],
-            },
-        ).status_code
-        == 422
-    )
-    assert len(package.receipt_calls) == 2
     assert (
         client.post(
             "/agent/host-runtime/grant",
@@ -1823,7 +1656,6 @@ def test_spoofed_agent_header_is_rejected() -> None:
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
     )
 
     response = TestClient(app).post(
@@ -1837,7 +1669,6 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
     )
     sent: list[Message] = []
     body_reads = 0
@@ -1882,7 +1713,6 @@ def test_agent_routes_do_not_require_human_bearer_tokens() -> None:
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
     )
 
     response = TestClient(app).post(
@@ -1908,9 +1738,7 @@ def test_untrusted_proxy_and_malformed_forwarded_identity_are_rejected(
         == 401
     )
 
-    app = create_app(
-        jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore()
-    )
+    app = create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32))
     assert (
         TestClient(app)
         .post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
@@ -2363,8 +2191,6 @@ def test_failed_stop_result_never_writes_health_observation(agent_system) -> Non
         ).status_code
         == 204
     )
-    with services.sessions() as session:
-        assert session.scalar(select(Observation)) is None
 
 
 def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) -> None:
@@ -2958,7 +2784,6 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
-    audits = client.app.state.test_audits
     fixture = json.loads(
         (
             Path(__file__).parents[2]
@@ -2973,10 +2798,6 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
 
     assert response.status_code == 200
     assert response.json()["node_id"] == NODE_C
-    event = audits.for_request(response.headers["x-request-id"])
-    assert event.action == "agent.enrollment.submit.approved"
-    assert event.targets[1] == NODE_C
-    assert body["grant_token"] not in repr(event)
 
 
 def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
@@ -2999,9 +2820,6 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
 
     assert first.status_code == replay.status_code == 503
     assert calls == 1
-    event = client.app.state.test_audits.for_request(first.headers["x-request-id"])
-    assert event.action == "agent.enrollment.submit.uncertain"
-    assert body["grant_token"] not in repr(event)
 
 
 @pytest.mark.parametrize("source", ["published", "controller-build"])
@@ -3528,15 +3346,8 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         from vonk_control.failure_evidence import FailureEvidenceService
 
         evidence = FailureEvidenceService(services.sessions, clock=clock)
-        for _ in range(8):
-            evidence.tick()
-            try:
-                evidence.read(claim["operation_id"], claim["attempt"])
-            except KeyError:
-                continue
-            break
-        content, _, bundle = evidence.read(claim["operation_id"], claim["attempt"])
-        assert "should-never-persist" not in content.decode()
+        bundle = evidence.read(claim["operation_id"], claim["attempt"])
+        assert "should-never-persist" not in bundle.model_dump_json()
         assert "/proc: permission denied" in bundle.diagnostics.stderr.text
 
 
@@ -4022,7 +3833,6 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
-        audits=MemoryAuditStore(),
         agent=services,
         enrollment_rate_limiter=limiter,
     )
@@ -4439,40 +4249,6 @@ def test_retired_agent_update_tuf_routes_are_absent(agent_system) -> None:
     )
 
 
-def test_authenticated_agents_can_fetch_only_signed_workload_tuf_targets(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-    raw = b'{"schema_version":1,"workload":"unknown"}'
-    digest = hashlib.sha256(raw).hexdigest()
-    services.workload_tuf_metadata_root.mkdir(parents=True, exist_ok=True)
-    services.workload_tuf_target_root.mkdir(parents=True, exist_ok=True)
-    (services.workload_tuf_metadata_root / "timestamp.json").write_bytes(
-        b'{"signed":{"_type":"timestamp"}}'
-    )
-    (services.workload_tuf_target_root / digest).write_bytes(raw)
-
-    metadata = client.get(
-        "/agent/workload-tuf/metadata/timestamp.json",
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
-    target = client.get(
-        f"/agent/workload-tuf/targets/releases/{digest}.json",
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
-    assert metadata.status_code == 200
-    assert metadata.content == b'{"signed":{"_type":"timestamp"}}'
-    assert target.status_code == 200
-    assert target.content == raw
-    assert (
-        client.get(
-            "/agent/workload-tuf/targets/platform/releases/1.2.3/" + "a" * 64 + ".json",
-            headers=agent_headers(NODE_A, "serial-a"),
-        ).status_code
-        == 404
-    )
-
-
 def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:
     client, services, _, clock = agent_system
     digest = hashlib.sha256(b"artifact").hexdigest()
@@ -4724,7 +4500,6 @@ def test_cli_enrollment_file_and_recovery_use_the_actual_authority(
         create_app(
             jobs=Jobs(),
             tokens=codec,
-            audits=MemoryAuditStore(),
             now=lambda: 0,
             fleet_services=build_fleet_operator_services(
                 agent_services=services, upgrades=None

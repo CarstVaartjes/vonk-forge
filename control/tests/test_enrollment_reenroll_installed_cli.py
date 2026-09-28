@@ -16,7 +16,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import AgentEnrollmentGrant, AgentNodeProfile
@@ -30,11 +29,6 @@ from .test_profile_load_installed_cli import (
 )
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
-
-
-class _RevisionSource:
-    def head(self) -> str:
-        return "a" * 64
 
 
 def _stack(postgres_engine, tmp_path: Path):
@@ -61,9 +55,8 @@ def _stack(postgres_engine, tmp_path: Path):
         create_app(
             jobs=Jobs(),
             tokens=codec,
-            audits=MemoryAuditStore(),
             now=lambda: 0,
-            fleet_projection=FleetProjection(_RevisionSource(), sessions, clock=clock),
+            fleet_projection=FleetProjection(sessions, clock=clock),
             fleet_services=build_fleet_operator_services(
                 agent_services=services, upgrades=None
             ),

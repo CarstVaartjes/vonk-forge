@@ -8,12 +8,6 @@ export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
 export type FleetTelemetryState = components["schemas"]["TelemetryState"];
 export type VisualFleetNode = components["schemas"]["FleetNode"];
 export type VisualFleetSnapshot = components["schemas"]["FleetSnapshot"];
-export type TelemetryHistory = components["schemas"]["TelemetryHistoryResponse"];
-export type TelemetryResolution = TelemetryHistory["resolution"];
-export type TelemetryHistoryPoint = components["schemas"]["TelemetryPoint"] | components["schemas"]["TelemetryRollupPoint"];
-export type TelemetryHistoryMetadata = components["schemas"]["TelemetryHistoryMetadata"];
-export type TelemetryRollupPoint = components["schemas"]["TelemetryRollupPoint"];
-export type TelemetryMetricSummary = components["schemas"]["TelemetryMetricSummary"];
 export type EnrollmentGrantResponse = components["schemas"]["EnrollmentGrantResponse"];
 export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
@@ -21,14 +15,10 @@ export type JobSummary = components["schemas"]["JobSummary"];
 export type JobsResponse = components["schemas"]["JobsResponse"];
 export type OperationDetail = components["schemas"]["OperationDetailResponse"];
 export type OperationsResponse = components["schemas"]["OperationsResponse"];
-export type AuditSummary = components["schemas"]["AuditEventResponse"];
-export type AuditResponse = components["schemas"]["AuditResponse"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
-export type ModelStatus = components["schemas"]["ModelLibraryResponse"];
 export type ModelLibrary = components["schemas"]["ModelLibraryResponse"];
 export type ModelDetail = components["schemas"]["ModelDetailResponse"];
-export type RecipeStatus = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
 export type CacheRemovalReview = components["schemas"]["CacheRemovalReview"];
@@ -89,14 +79,12 @@ export type LibraryViewModel = {
   recipes: LibraryViewRecipe[];
 };
 export type LibraryViewSnapshot = {
-  schema_version: 2;
   generated_at: string;
   freshness_policy: components["schemas"]["FreshnessPolicy"];
   models: LibraryViewModel[];
   unlinked_recipes: LibraryViewRecipe[];
 };
 export type LibraryViewRecipeDetail = {
-  schema_version: 2;
   generated_at: string;
   definition: RecipeDefinition;
   recipe: LibraryViewRecipe;
@@ -143,10 +131,8 @@ export type FleetStreamEvent = components["schemas"]["FleetStreamEvent"];
 export interface CatalogApi {
 }
 export interface LibraryApi {
-  modelStatus(signal?: AbortSignal): Promise<ModelStatus>;
   modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary>;
   modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail>;
-  recipeStatus(signal?: AbortSignal): Promise<RecipeStatus>;
   recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary>;
   recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail>;
   libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
@@ -159,16 +145,15 @@ export interface LibraryApi {
   submitArtifactJob(jobId: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJob(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   cancelArtifactJob(jobId: string, reason: string, requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
-  artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobResultUrl(jobId: string, name: string, sha256: string): string;
   prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelRemovalReview(selector: string, signal?: AbortSignal): Promise<CacheRemovalReview>;
-  removeModelCache(selector: string, modelContentSha256: string, requestKey: string, reviewDigest: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
+  removeModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelCacheRequest(requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse>;
   downloadRecipe(selector: string, requestKey: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityResponse>;
   recipeRemovalReview(selector: string, withModel: boolean, signal?: AbortSignal): Promise<CacheRemovalReview>;
-  removeRecipe(selector: string, requestKey: string, withModel: boolean, reviewDigest: string, signal?: AbortSignal): Promise<RecipeOperatorResponse>;
+  removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse>;
   recipeCacheRequest(requestKey: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
   updateRecipes(all: boolean, selectors: string[], requestKey: string, signal?: AbortSignal): Promise<RecipeUpdateResponse>;
   recipeCacheOperation(operationId: string, signal?: AbortSignal): Promise<RecipeCacheOperation>;
@@ -184,11 +169,10 @@ export interface ControlApi extends LibraryApi {
   profileProgress(number: number, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   profileEndpoints(number: number, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
-  enrollFleetNode(input: {name: string; request_key: string; ttl_seconds: number}, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
+  enrollFleetNode(input: {name: string; request_key: string}, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
   jobs(cursor?: string): Promise<JobsResponse>;
   operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse>;
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;
-  audit(signal?: AbortSignal): Promise<AuditResponse>;
 }

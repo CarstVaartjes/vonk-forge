@@ -109,7 +109,6 @@ RUN python -m pip install --no-cache-dir --prefix=/install \
 
 FROM ${PYTHON_IMAGE} AS runtime-root
 ARG TARGETARCH
-ARG VONK_SOURCE_COMMIT
 ARG SKOPEO_INDEX_DIGEST
 ARG SKOPEO_AMD64_DIGEST
 ARG SKOPEO_ARM64_DIGEST
@@ -126,11 +125,6 @@ RUN python -m pip uninstall --yes --root-user-action=ignore pip \
     && install -d -o 10001 -g 10001 -m 1777 /var/tmp \
     && rm -rf /etc/ssl/certs
 COPY --from=build /install /usr/local
-COPY install/installer-release-public.pem /usr/local/share/vonk-forge/installer-release-public.pem
-RUN if [ -n "$VONK_SOURCE_COMMIT" ]; then \
-        install -d -m 0755 /usr/local/share/vonk-forge \
-        && VONK_BUILD_SOURCE="$VONK_SOURCE_COMMIT" python -c 'import os; from pathlib import Path; from vonk_control.deployment_provenance_contract import ControllerBuildMetadata; value = ControllerBuildMetadata(source_commit=os.environ["VONK_BUILD_SOURCE"]); Path("/usr/local/share/vonk-forge/controller-build.json").write_text(value.model_dump_json() + "\n")'; \
-    fi
 COPY --from=skopeo /usr/bin/skopeo /usr/local/lib/skopeo/skopeo.real
 COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo
 COPY --from=skopeo /etc/containers /etc/containers

@@ -198,7 +198,7 @@ def source(spec, offset):
 service._open_source = source
 assert service.run_pending() == 1
 app = FastAPI()
-install_model_operator_routes(app, actor_dependency=Depends(lambda: Actor("test", "operator")), service=service, audits=None)
+install_model_operator_routes(app, actor_dependency=Depends(lambda: Actor("test", "operator")), service=service)
 class Response(BytesIO):
     def __init__(self, response):
         super().__init__(response.content)

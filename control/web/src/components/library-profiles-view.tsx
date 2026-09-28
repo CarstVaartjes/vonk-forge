@@ -27,7 +27,7 @@ type ProfileDraft = {
   assignments: AssignmentDraft[];
 };
 type FleetEntry = {id: string; name: string; state: string};
-type PendingProfileLoad = {requestKey: string; planDigest: string};
+type PendingProfileLoad = {requestKey: string};
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
@@ -109,7 +109,7 @@ async function submitProfileLoad(
   number: number,
   pending: PendingProfileLoad,
 ): Promise<FleetProfileApplicationView> {
-  const input = {plan_digest: pending.planDigest, request_key: pending.requestKey};
+  const input = {request_key: pending.requestKey};
   try {
     return await api.loadProfile(number, input);
   } catch (error) {
@@ -275,34 +275,14 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
           if (!(value instanceof ApiError && value.status === 404)) throw value;
         }
       } else {
-        pending = {requestKey: crypto.randomUUID(), planDigest: preview!.plan_digest};
+        pending = {requestKey: crypto.randomUUID()};
         setPendingLoad(pending);
       }
       setApplication(await submitProfileLoad(api, selectedNumber, pending));
       setPendingLoad(undefined);
     }
     catch (value) {
-      if (value instanceof ApiError && value.status === 409) {
-        try {
-          const current = await api.previewProfile(selectedNumber);
-          setPreview(current);
-          if (current.allowed && pending) {
-            const resumed = await submitProfileLoad(api, selectedNumber, {
-              requestKey: pending.requestKey,
-              planDigest: current.plan_digest,
-            });
-            setApplication(resumed);
-            setPendingLoad(undefined);
-            return;
-          }
-          setPendingLoad(undefined);
-          setError(current.reasons[0]?.detail ?? "The current profile plan is waiting for an available dependency.");
-          return;
-        } catch (refreshError) {
-          setError(refreshError instanceof Error ? refreshError.message : "The latest profile plan could not be applied.");
-          return;
-        }
-      }
+      if (value instanceof ApiError && value.status === 409) setPendingLoad(undefined);
       setError(value instanceof Error ? value.message : "The profile could not be loaded.");
     }
     finally { setLoadingProfile(false); }

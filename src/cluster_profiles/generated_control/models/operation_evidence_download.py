@@ -20,18 +20,13 @@ T = TypeVar("T", bound="OperationEvidenceDownload")
 
 @_attrs_define
 class OperationEvidenceDownload:
-    """
+    """ Where this failed attempt's diagnostics render on request.
+
         Attributes:
             href (str):
-            media_type (str):
-            sha256 (str):
-            size_bytes (int):
      """
 
     href: str
-    media_type: str
-    sha256: str
-    size_bytes: int
 
 
 
@@ -40,20 +35,11 @@ class OperationEvidenceDownload:
     def to_dict(self) -> dict[str, Any]:
         href = self.href
 
-        media_type = self.media_type
-
-        sha256 = self.sha256
-
-        size_bytes = self.size_bytes
-
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
             "href": href,
-            "media_type": media_type,
-            "sha256": sha256,
-            "size_bytes": size_bytes,
         })
 
         return field_dict
@@ -65,17 +51,8 @@ class OperationEvidenceDownload:
         d = dict(src_dict)
         href = d.pop("href")
 
-        media_type = d.pop("media_type")
-
-        sha256 = d.pop("sha256")
-
-        size_bytes = d.pop("size_bytes")
-
         operation_evidence_download = cls(
             href=href,
-            media_type=media_type,
-            sha256=sha256,
-            size_bytes=size_bytes,
         )
 
         return operation_evidence_download

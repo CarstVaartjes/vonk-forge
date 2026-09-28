@@ -187,7 +187,6 @@ class Worker:
         worker_id: str,
         handlers: Mapping[str, Handler],
         *,
-        logs=None,
         housekeeping: Callable[[], object] | None = None,
         artifact_housekeeping: Callable[[], object] | None = None,
         recipes=None,
@@ -199,7 +198,6 @@ class Worker:
         self._jobs = jobs
         self._worker_id = worker_id
         self._handlers = dict(handlers)
-        self._logs = logs
         self._housekeeping = housekeeping
         self._artifact_housekeeping = artifact_housekeeping
         self._recipes = recipes
@@ -305,11 +303,6 @@ class Worker:
         attempt = self._jobs.claim(self._worker_id, 30, kinds=tuple(self._handlers))
         if attempt is None:
             return False
-        if self._logs is not None:
-            self._logs.save(
-                attempt.job_id,
-                f"job {attempt.kind} attempt {attempt.attempt} started".encode(),
-            )
         handler = self._handlers[attempt.kind]
         try:
             result = handler(
@@ -323,15 +316,8 @@ class Worker:
             )
         except _SOURCE_FAILURES as error:
             self._jobs.fail(attempt, f"{type(error).__name__}: {error}")
-            if self._logs is not None:
-                self._logs.save(
-                    attempt.job_id,
-                    f"job failed: {type(error).__name__}: {error}".encode(),
-                )
         else:
             self._jobs.succeed(attempt, result)
-            if self._logs is not None:
-                self._logs.save(attempt.job_id, b"job succeeded")
         return True
 
 
@@ -371,7 +357,6 @@ def assemble_production_worker(
     from .distributed_recovery import DistributedRecoveryCoordinator
     from .distribution import build_distribution_service_from_components
     from .distribution_executor import CompositeDistributionPhaseExecutor
-    from .failure_evidence import FailureEvidenceService
     from .fleet_profiles import build_production_fleet_profile_service
     from .install_admission import (
         InstallAdmissionService,
@@ -500,8 +485,7 @@ def assemble_production_worker(
         ),
         manage_route_leases_in_background=True,
     )
-    failure_evidence = FailureEvidenceService(sessions, clock=clock)
-    worker_background_services = (*background_services, failure_evidence.tick)
+    worker_background_services = tuple(background_services)
     worker_background_closers = (*background_closers, recipe_operations.close)
     close_artifact_executor = getattr(artifact_phase_executor, "close", None)
     if callable(close_artifact_executor):
@@ -704,13 +688,6 @@ if __name__ == "__main__":
         model_cache,
         runtime_image_resolver=resolve_runtime_image_receipt,
     )
-    from .deployment_observer import DeploymentObserver
-
-    deployment_observer = DeploymentObserver(
-        sessions,
-        channel=settings.install_channel,
-        clock=clock,
-    )
     worker = assemble_production_worker(
         distributed_start_timeout_seconds=DISTRIBUTED_START_TIMEOUT_SECONDS,
         jobs=jobs,
@@ -726,8 +703,6 @@ if __name__ == "__main__":
         artifact_job_reconcile_interval_seconds=ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS,
         artifact_job_reconcile_batch_limit=ARTIFACT_JOB_RECONCILE_BATCH_LIMIT,
         model_cache=model_cache,
-        background_services=(deployment_observer.tick,),
-        background_closers=(deployment_observer.close,),
         agent_artifact_root=settings.agent_artifact_root,
         recipe_image_artifact_root=settings.agent_artifact_root,
         recipe_image_parallel_preparations=RECIPE_IMAGE_PARALLEL_PREPARATIONS,

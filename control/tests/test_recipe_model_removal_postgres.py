@@ -186,7 +186,6 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         actor="operator",
         request_id=request_id,
         with_model=True,
-        review_digest=review.review_digest,
     )
     assert accepted["state"] == "queued"
     parent_id = str(accepted["operation_id"])
@@ -266,7 +265,6 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         actor="operator",
         request_id=request_id,
         with_model=True,
-        review_digest=str(accepted["review_digest"]),
     )
     assert isinstance(replay, dict)
     assert replay["operation_id"] == parent_id

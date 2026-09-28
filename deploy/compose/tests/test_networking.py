@@ -229,8 +229,6 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
     assert "depends_on" not in api
     api_secrets = {secret["source"] for secret in api["secrets"]}
     assert {
-        "package-helper-grant-private-key",
-        "package-helper-receipt-private-key",
         "host-runtime-grant-private-key",
         "database-url",
         "hf-token",
@@ -344,7 +342,6 @@ def test_caddy_disables_admin_and_sets_edge_guards() -> None:
     text = (root / "deploy/compose/Caddyfile").read_text()
     assert "admin off" in text
     assert "max_size 1MB" in text
-    assert "path /api/catalog/source-bundles/*" in text
-    assert "max_size 67108864" in text
+    assert "source-bundles" not in text
     assert "Strict-Transport-Security" in text
     assert "X-Frame-Options" in text

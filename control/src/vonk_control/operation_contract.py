@@ -152,21 +152,11 @@ OperationFailure = (
 )
 
 
-class OperationEvidenceProvenance(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    source: str = Field(min_length=1, max_length=128)
-    collected_at: str | None = Field(default=None, max_length=64)
-    evidence_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    authority_revision: str | None = Field(default=None, max_length=128)
-
-
 class OperationEvidenceDownload(BaseModel):
+    """Where this failed attempt's diagnostics render on request."""
+
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    media_type: str = Field(min_length=1, max_length=128)
-    size_bytes: int = Field(ge=0)
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     href: str = Field(min_length=1, max_length=512)
 
 
@@ -369,7 +359,6 @@ __all__ = [
     "AvailabilityRecoveryAction",
     "OperationCheckpoint",
     "OperationEvidenceDownload",
-    "OperationEvidenceProvenance",
     "OperationFailureEvidence",
     "OperationMemberProgress",
     "OperationPhase",

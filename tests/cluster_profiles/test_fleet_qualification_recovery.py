@@ -359,7 +359,6 @@ def _snapshot(
             }
         )
     return {
-        "schema_version": 1,
         "event_cursor": cursor,
         "generated_at": at.isoformat(),
         "authority_revision": "authority-42",

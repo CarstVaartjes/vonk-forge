@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .auth import MUTATION_ROLES
-from .bounded_json import integer, require_integer, require_sequence
+from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
 from .logging import redact_text
 from .model_cache_contract import UUID_PATTERN, Digest
@@ -112,7 +112,6 @@ class RecipeImageAvailabilityResult(StrictJSONModel):
 class RecipeImageAvailabilityResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema_version: Literal[2] = 2
     id: str = Field(min_length=1, max_length=128)
     request_id: str = Field(min_length=1, max_length=128)
     request: RecipeAvailabilityIntent
@@ -148,7 +147,6 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
 class RecipeDownloadRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema_version: Literal[2] = 2
     request_key: str = Field(
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     )
@@ -156,8 +154,6 @@ class RecipeDownloadRequest(StrictJSONModel):
 
 class RecipeOperatorRequest(RecipeDownloadRequest):
     with_model: bool
-    # Advisory: removal always applies to the recipe's current state.
-    review_digest: Digest | None = None
 
 
 class RecipeCancellationRequest(RecipeDownloadRequest):
@@ -167,13 +163,11 @@ class RecipeCancellationRequest(RecipeDownloadRequest):
 class RecipeOperatorResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema_version: Literal[2] = 2
     action: RecipeOperatorAction
     selector: str = Field(min_length=1, max_length=256)
     request_key: str = Field(min_length=1, max_length=128)
     operation_id: str = Field(min_length=1, max_length=128)
     recipe_revision_id: str = Field(min_length=1, max_length=128)
-    review_digest: Digest
     with_model: bool
     state: RecipeOperatorState
     progress: OperationProgress
@@ -389,7 +383,6 @@ def install_recipe_operator_routes(
     *,
     actor_dependency: Any,
     service: RecipeImageAvailabilityService | None,
-    audits: Any | None = None,
 ) -> None:
     """Install current singular Recipe download/remove/update mutations."""
 
@@ -419,13 +412,11 @@ def install_recipe_operator_routes(
         )
         return RecipeOperatorResponse.model_validate(
             {
-                "schema_version": integer(result.get("schema_version"), default=2),
                 "action": "remove",
                 "selector": str(result["selector"]),
                 "request_key": str(result["request_key"]),
                 "operation_id": str(result["operation_id"]),
                 "recipe_revision_id": str(result["recipe_revision_id"]),
-                "review_digest": str(result["review_digest"]),
                 "with_model": with_model,
                 "state": result["state"],
                 "progress": progress,
@@ -585,7 +576,6 @@ def install_recipe_operator_routes(
                 actor=actor.subject,
                 request_id=body.request_key,
                 with_model=body.with_model,
-                review_digest=body.review_digest,
             )
             return removal_document(result)
         except HTTPException:

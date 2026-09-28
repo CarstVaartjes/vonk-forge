@@ -1911,7 +1911,6 @@ class SparkLifecycle:
                 FleetEnrollRequest(
                     name="Acceptance Spark",
                     request_key=str(uuid.uuid4()),
-                    ttl_seconds=600,
                 ).to_dict(),
             )
             envelope = require_object(response, "Fleet enrollment")
@@ -2442,9 +2441,7 @@ class SparkLifecycle:
 
         assert self.control is not None
         request = FleetProfileLoadRequest.model_validate_json(
-            _canonical(
-                {"request_key": request_key, "plan_digest": preview.get("plan_digest")}
-            )
+            _canonical({"request_key": request_key})
         )
         _, payload = self.control.request(
             "POST",

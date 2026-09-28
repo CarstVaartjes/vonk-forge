@@ -47,7 +47,7 @@ def test_concurrent_same_request_key_replays_one_typed_application(
     """Both requests miss replay before the authority lock serializes acceptance."""
     sessions, api, _codec, headers, reviewed = _profile_api(postgres_engine)
     request_key = str(uuid4())
-    body = {"request_key": request_key, "plan_digest": reviewed["plan_digest"]}
+    body = {"request_key": request_key}
     effects_before = _effect_ids(sessions)
     both_reviewed = Barrier(2)
     original_preview = FleetProfileService.preview

@@ -9,8 +9,8 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.installation_reconcile_request import InstallationReconcileRequest
 from ...models.request_validation_problem import RequestValidationProblem
-from ...models.run_switch_cleanup_apply_request import RunSwitchCleanupApplyRequest
 from ...models.run_switch_operation import RunSwitchOperation
 from typing import cast
 
@@ -19,7 +19,7 @@ from typing import cast
 def _get_kwargs(
     installation_id: str,
     *,
-    body: RunSwitchCleanupApplyRequest,
+    body: InstallationReconcileRequest,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -112,14 +112,15 @@ def sync_detailed(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RunSwitchCleanupApplyRequest,
+    body: InstallationReconcileRequest,
 
 ) -> Response[BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation]:
     """ Apply Installation Reconciliation
 
     Args:
         installation_id (str):
-        body (RunSwitchCleanupApplyRequest):
+        body (InstallationReconcileRequest): Idempotency key for reconciling the installation
+            named by the path.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -146,14 +147,15 @@ def sync(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RunSwitchCleanupApplyRequest,
+    body: InstallationReconcileRequest,
 
 ) -> BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation | None:
     """ Apply Installation Reconciliation
 
     Args:
         installation_id (str):
-        body (RunSwitchCleanupApplyRequest):
+        body (InstallationReconcileRequest): Idempotency key for reconciling the installation
+            named by the path.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -175,14 +177,15 @@ async def asyncio_detailed(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RunSwitchCleanupApplyRequest,
+    body: InstallationReconcileRequest,
 
 ) -> Response[BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation]:
     """ Apply Installation Reconciliation
 
     Args:
         installation_id (str):
-        body (RunSwitchCleanupApplyRequest):
+        body (InstallationReconcileRequest): Idempotency key for reconciling the installation
+            named by the path.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -209,14 +212,15 @@ async def asyncio(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RunSwitchCleanupApplyRequest,
+    body: InstallationReconcileRequest,
 
 ) -> BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation | None:
     """ Apply Installation Reconciliation
 
     Args:
         installation_id (str):
-        body (RunSwitchCleanupApplyRequest):
+        body (InstallationReconcileRequest): Idempotency key for reconciling the installation
+            named by the path.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

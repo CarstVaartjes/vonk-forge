@@ -8,9 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
@@ -34,7 +32,6 @@ class FleetLogResponse:
             node_id (str):
             retained (bool):
             since (datetime.datetime | None):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     entries: list[FleetLogEntry]
@@ -43,7 +40,6 @@ class FleetLogResponse:
     node_id: str
     retained: bool
     since: datetime.datetime | None
-    schema_version: Literal[2] | Unset = 2
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -73,8 +69,6 @@ class FleetLogResponse:
         else:
             since = self.since
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -86,8 +80,6 @@ class FleetLogResponse:
             "retained": retained,
             "since": since,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -133,10 +125,6 @@ class FleetLogResponse:
         since = _parse_since(d.pop("since"))
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         fleet_log_response = cls(
             entries=entries,
             follow=follow,
@@ -144,7 +132,6 @@ class FleetLogResponse:
             node_id=node_id,
             retained=retained,
             since=since,
-            schema_version=schema_version,
         )
 
 

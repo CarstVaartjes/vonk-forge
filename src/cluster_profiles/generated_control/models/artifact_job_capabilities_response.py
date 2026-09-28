@@ -8,9 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.artifact_job_storage_capabilities import ArtifactJobStorageCapabilities
@@ -30,12 +28,10 @@ class ArtifactJobCapabilitiesResponse:
         Attributes:
             storage (ArtifactJobStorageCapabilities):
             transport (ArtifactJobTransportCapabilities):
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     storage: ArtifactJobStorageCapabilities
     transport: ArtifactJobTransportCapabilities
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -48,8 +44,6 @@ class ArtifactJobCapabilitiesResponse:
 
         transport = self.transport.to_dict()
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -57,8 +51,6 @@ class ArtifactJobCapabilitiesResponse:
             "storage": storage,
             "transport": transport,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -79,14 +71,9 @@ class ArtifactJobCapabilitiesResponse:
 
 
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         artifact_job_capabilities_response = cls(
             storage=storage,
             transport=transport,
-            schema_version=schema_version,
         )
 
         return artifact_job_capabilities_response

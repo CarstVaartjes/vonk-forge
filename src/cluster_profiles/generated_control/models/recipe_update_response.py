@@ -47,7 +47,6 @@ class RecipeUpdateResponse:
             kind (Literal['recipe.cache.update.v2'] | Unset):  Default: 'recipe.cache.update.v2'.
             next_attempt_at (datetime.datetime | None | Unset):
             resume_condition (None | str | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
             wait_owner (Literal['recipe-image-availability'] | None | Unset):
             waiting_on (None | str | Unset):
      """
@@ -66,7 +65,6 @@ class RecipeUpdateResponse:
     kind: Literal['recipe.cache.update.v2'] | Unset = 'recipe.cache.update.v2'
     next_attempt_at: datetime.datetime | None | Unset = UNSET
     resume_condition: None | str | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
     wait_owner: Literal['recipe-image-availability'] | None | Unset = UNSET
     waiting_on: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -129,8 +127,6 @@ class RecipeUpdateResponse:
         else:
             resume_condition = self.resume_condition
 
-        schema_version = self.schema_version
-
         wait_owner: Literal['recipe-image-availability'] | None | Unset
         if isinstance(self.wait_owner, Unset):
             wait_owner = UNSET
@@ -167,8 +163,6 @@ class RecipeUpdateResponse:
             field_dict["next_attempt_at"] = next_attempt_at
         if resume_condition is not UNSET:
             field_dict["resume_condition"] = resume_condition
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
         if wait_owner is not UNSET:
             field_dict["wait_owner"] = wait_owner
         if waiting_on is not UNSET:
@@ -284,10 +278,6 @@ class RecipeUpdateResponse:
         resume_condition = _parse_resume_condition(d.pop("resume_condition", UNSET))
 
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         def _parse_wait_owner(data: object) -> Literal['recipe-image-availability'] | None | Unset:
             if data is None:
                 return data
@@ -327,7 +317,6 @@ class RecipeUpdateResponse:
             kind=kind,
             next_attempt_at=next_attempt_at,
             resume_condition=resume_condition,
-            schema_version=schema_version,
             wait_owner=wait_owner,
             waiting_on=waiting_on,
         )

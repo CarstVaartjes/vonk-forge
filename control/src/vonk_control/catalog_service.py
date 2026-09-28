@@ -163,36 +163,6 @@ class CatalogService:
             files=tuple(item.path for item in manifest.files),
         )
 
-    def read_source_bundle(self, sha256: str) -> bytes:
-        if self._source_bundles is None:
-            raise CatalogError(
-                "bundle.storage_unavailable", "source bundle storage is unavailable"
-            )
-        with self._sessions() as session:
-            row = session.get(RecipeSourceBundle, sha256)
-            if row is None:
-                raise KeyError(sha256)
-            expected = (row.archive_bytes, row.total_bytes, row.file_count)
-            try:
-                manifest = parse_source_bundle_manifest(row.manifest)
-            except SourceBundleError as error:
-                raise CatalogValidationError(error.code, error.detail) from error
-        try:
-            stored = self._source_bundles.get(sha256)
-        except SourceBundleError as error:
-            raise CatalogValidationError(error.code, error.detail) from error
-        observed = (
-            len(stored.archive),
-            stored.manifest.total_bytes,
-            len(stored.manifest.files),
-        )
-        if observed != expected or stored.manifest != manifest:
-            raise CatalogValidationError(
-                "bundle.metadata_mismatch",
-                "source bundle storage does not match its database metadata",
-            )
-        return stored.archive
-
     def get_recipe(self, recipe_id: str) -> RecipeRevisionView:
         with self._sessions() as session:
             revision = _get_active_recipe(session, recipe_id)

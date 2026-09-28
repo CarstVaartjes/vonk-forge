@@ -128,8 +128,6 @@ def test_production_app_recipe_download_auth_and_status(
         state_path=tmp_path / "state",
         agent_artifact_root=tmp_path / "artifacts",
         model_cache_root=tmp_path / "model-cache",
-        workload_tuf_metadata_root=tmp_path / "tuf-meta",
-        workload_tuf_target_root=tmp_path / "tuf-targets",
     )
     (tmp_path / "secrets").mkdir()
     signing_key = tmp_path / "secrets" / "token-signing-key"

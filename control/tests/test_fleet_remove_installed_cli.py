@@ -10,7 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import AgentCertificate, AgentNode, AgentNodeProfile
@@ -20,11 +19,6 @@ from .test_agent_api import NODE_A, NODE_B, Jobs, make_agent_system
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
-
-
-class _RevisionSource:
-    def head(self) -> str:
-        return "a" * 64
 
 
 def _run(
@@ -97,9 +91,8 @@ def test_installed_fleet_remove_requires_consent_and_uses_canonical_node(
         create_app(
             jobs=Jobs(),
             tokens=codec,
-            audits=MemoryAuditStore(),
             now=lambda: 0,
-            fleet_projection=FleetProjection(_RevisionSource(), sessions, clock=clock),
+            fleet_projection=FleetProjection(sessions, clock=clock),
             fleet_services=build_fleet_operator_services(
                 agent_services=agent_services,
                 upgrades=None,

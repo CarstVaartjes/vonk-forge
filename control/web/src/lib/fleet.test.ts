@@ -195,7 +195,6 @@ test("summarizes live delayed stale and offline nodes without treating null as c
     run_id: "run-1", installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen", alias: "chat", expected_rank_count: 1, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "primary", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null,
   };
   const snapshot: VisualFleetSnapshot = {
-    schema_version: 1,
     event_cursor: 8,
     generated_at: NOW.toISOString(),
     authority_revision: "a".repeat(64),
@@ -245,7 +244,7 @@ test("counts unique active warning conditions without duplicating projected fres
       {code: "telemetry.stale", detail: "Telemetry is stale.", severity: "warning"},
     ],
   });
-  const snapshot: VisualFleetSnapshot = {schema_version: 1, event_cursor: 1, generated_at: NOW.toISOString(), authority_revision: "a".repeat(64), nodes: [delayed, offline]};
+  const snapshot: VisualFleetSnapshot = {event_cursor: 1, generated_at: NOW.toISOString(), authority_revision: "a".repeat(64), nodes: [delayed, offline]};
 
   expect(summarizeFleet(snapshot, NOW).warnings).toBe(4);
 });
@@ -254,7 +253,7 @@ test("marks unified live capacity partial or unknown instead of presenting an un
   const reporting = node({id: "node-reporting", telemetry: telemetry("2026-08-15T11:59:58Z", 80)});
   const missingGpu = telemetry("2026-08-15T11:59:58Z", 60);
   missingGpu.sample.gpu_memory_free_bytes = null;
-  const partialSnapshot: VisualFleetSnapshot = {schema_version: 1, event_cursor: 1, generated_at: NOW.toISOString(), authority_revision: "a".repeat(64), nodes: [reporting, node({id: "node-missing", telemetry: missingGpu})]};
+  const partialSnapshot: VisualFleetSnapshot = {event_cursor: 1, generated_at: NOW.toISOString(), authority_revision: "a".repeat(64), nodes: [reporting, node({id: "node-missing", telemetry: missingGpu})]};
   const unknownSnapshot: VisualFleetSnapshot = {...partialSnapshot, nodes: [node({id: "node-missing", telemetry: missingGpu})]};
 
   expect(summarizeFleet(partialSnapshot, NOW)).toMatchObject({

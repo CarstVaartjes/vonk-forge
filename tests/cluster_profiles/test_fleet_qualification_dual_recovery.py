@@ -302,7 +302,6 @@ def _snapshot(
             }
         )
     return {
-        "schema_version": 1,
         "event_cursor": cursor,
         "generated_at": (T0 + timedelta(minutes=minute)).isoformat(),
         "authority_revision": "fleet-revision-3",

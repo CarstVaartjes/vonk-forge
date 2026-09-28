@@ -38,7 +38,6 @@ def _client(service, role="administrator"):
         app,
         actor_dependency=Depends(lambda: Actor("test", role)),
         service=service,
-        audits=[],
     )
     return TestClient(app)
 
@@ -75,41 +74,28 @@ def test_remove_is_the_current_model_eviction_boundary():
     response = _client(service).post(
         "/api/model/model/remove",
         json={
-            "schema_version": 2,
             "request_key": REQUEST_KEY,
-            "model_content_sha256": MODEL_CONTENT_SHA256,
-            "review_digest": REVIEW_DIGEST,
         },
     )
     assert response.status_code == 202, response.text
     parsed = ModelCacheOperatorResponse.model_validate_json(response.content)
     assert parsed.action == "remove"
     assert parsed.model_content_sha256 == MODEL_CONTENT_SHA256
-    assert parsed.review_digest == REVIEW_DIGEST
     service.remove_model_selector.assert_called_once_with(
         "model",
         actor="test",
         request_key=REQUEST_KEY,
-        model_content_sha256=MODEL_CONTENT_SHA256,
-        review_digest=REVIEW_DIGEST,
     )
-    minimal = _client(service).post(
-        "/api/model/model/remove",
-        json={"schema_version": 2, "request_key": REQUEST_KEY},
-    )
-    assert minimal.status_code == 202, minimal.text
     for body in (
-        {"schema_version": 2},
+        {},
         {
-            "schema_version": 2,
             "request_key": REQUEST_KEY,
-            "model_content_sha256": "not-a-digest",
             "review_digest": REVIEW_DIGEST,
         },
     ):
         refused = _client(service).post("/api/model/model/remove", json=body)
         assert refused.status_code == 422
-    assert service.remove_model_selector.call_count == 2
+    assert service.remove_model_selector.call_count == 1
 
 
 def test_remove_review_is_read_only_and_requires_operator_role():
@@ -209,7 +195,6 @@ def test_cancel_route_requires_operator_and_returns_durable_intent():
     service.cancel_operation.return_value = operation
     service.get_operator_operation.return_value = (operation, "download", "model")
     body = {
-        "schema_version": 2,
         "request_key": CANCEL_KEY,
         "reason": "operator stopped this download",
     }

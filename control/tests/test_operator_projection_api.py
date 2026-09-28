@@ -6,23 +6,17 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from vonk_control.agent_api import AgentApiServices, EnrollmentGrantResponse
 from vonk_control.agent_upgrades import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
-from vonk_control.deployment_provenance_contract import (
-    DeploymentProvenance,
-    PlatformObservation,
-)
 from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
 from vonk_control.library_api import _error as library_error
 from vonk_control.operator_projection_api import (
-    FleetNodeDetailResponse,
     FleetOperatorServices,
     _AgentEnrollmentAdapter,
-    _deployment_provenance,
     _operator_error,
     build_fleet_operator_services,
     install_operator_projection_routes,
@@ -121,6 +115,8 @@ def test_operator_routes_use_singular_namespaces_and_shared_mutation_roles() -> 
         assert "/api/model/{selector}" in paths
         assert "/api/recipe/library" in paths
         assert "/api/recipe/{selector}" in paths
+        assert "/api/model" not in paths
+        assert "/api/recipe" not in paths
         assert "/api/fleet" in paths
         assert not any(path.startswith("/api/v1/") for path in paths)
     finally:
@@ -156,64 +152,8 @@ def test_production_service_builder_does_not_enable_missing_authorities() -> Non
     assert services.upgrades is None
 
 
-def test_configured_provenance_document_that_no_longer_validates_fails_loudly() -> None:
-    """An unconfigured provider is absent; a corrupt document is a fault.
-
-    ``_deployment_provenance`` used to swallow the validation failure and the
-    routes reported ``provenance: null`` for a stored observation that no
-    longer satisfies its contract.
-    """
-
-    assert _deployment_provenance(None) is None
-
-    class _CorruptProvenance:
-        def snapshot(self) -> DeploymentProvenance:
-            # The same ValidationError ``stored_observation`` raises for a
-            # malformed stored observation.
-            PlatformObservation.model_validate({})
-            raise AssertionError("unreachable")
-
-    with pytest.raises(HTTPException) as error:
-        _deployment_provenance(_CorruptProvenance())
-    # A corrupt stored document is the Controller's state, not a bad request,
-    # and the detail names the failing field path without echoing its value.
-    assert error.value.status_code == 503
-    assert str(error.value.detail).startswith("stored document is invalid at ")
-
-
-def test_corrupt_stored_observation_fails_the_fleet_node_detail() -> None:
-    """``/api/fleet/{selector}`` must not report a corrupt observation as absent."""
-
-    from vonk_control.fleet_projection import FleetSnapshot
-
-    from .test_metrics import NODE, _fleet_snapshot
-
-    class _Projection:
-        def read(self) -> FleetSnapshot:
-            return _fleet_snapshot()
-
-    class _CorruptProvenance:
-        def snapshot(self) -> DeploymentProvenance:
-            # The same ValidationError ``stored_observation`` raises for a
-            # malformed stored observation.
-            PlatformObservation.model_validate({})
-            raise AssertionError("unreachable")
-
-    app = FastAPI()
-    install_operator_projection_routes(
-        app,
-        actor_dependency=Depends(lambda: Actor("operator", "operator")),
-        fleet_projection=_Projection(),
-        library_projection=None,
-        fleet_services=FleetOperatorServices(provenance=_CorruptProvenance()),
-    )
-    response = TestClient(app).get(f"/api/fleet/{NODE}")
-    assert response.status_code == 503
-    assert response.json()["detail"].startswith("stored document is invalid at ")
-
-
 def test_fleet_node_detail_preserves_typed_live_observations() -> None:
-    from vonk_control.fleet_projection import FleetSnapshot
+    from vonk_control.fleet_projection import FleetNode, FleetSnapshot
 
     from .test_metrics import NODE, _fleet_snapshot
 
@@ -232,8 +172,8 @@ def test_fleet_node_detail_preserves_typed_live_observations() -> None:
     )
     response = TestClient(app).get(f"/api/fleet/{NODE}")
     assert response.status_code == 200, response.text
-    detail = FleetNodeDetailResponse.model_validate_json(response.content)
-    assert detail.model_dump(exclude={"provenance"}) == snapshot.nodes[0].model_dump()
+    detail = FleetNode.model_validate_json(response.content)
+    assert detail.model_dump() == snapshot.nodes[0].model_dump()
 
 
 def test_node_selection_returns_exact_ids_before_names_and_all_ambiguity_candidates():
@@ -275,7 +215,7 @@ def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> No
     """
 
     try:
-        PlatformObservation.model_validate({})
+        EnrollmentGrantResponse.model_validate({})
     except ValidationError as corrupt:
         stored = corrupt
 
@@ -336,78 +276,12 @@ def test_agent_enrollment_adapter_binds_the_reviewed_display_name() -> None:
     adapter = _AgentEnrollmentAdapter(cast(AgentApiServices, services))
     result = adapter.create_named(
         name="Living Spark",
-        ttl_seconds=600,
         actor="admin",
         request_id="11111111-1111-4111-8111-111111111111",
     )
 
-    assert enrollment.created == ("Living Spark", "admin", 600)
+    assert enrollment.created == ("Living Spark", "admin", 900)
     assert result["display_name"] == "Living Spark"
-
-
-def test_metrics_capabilities_forwards_the_telemetry_selectors() -> None:
-    """The capabilities route must expose the selectors its siblings accept.
-
-    ``telemetry_capabilities`` already accepted key, device_id, interface_name
-    and run_id, and ``/metrics/current`` and ``/metrics/history`` declared them,
-    but ``/metrics/capabilities`` declared only ``selector``, so the caller's
-    scope was silently ignored.
-    """
-
-    from vonk_control.fleet_projection import (
-        FleetSnapshot,
-        TelemetryCapabilitiesResponse,
-    )
-
-    from .test_metrics import NODE, _fleet_snapshot
-
-    class _Projection:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, object]] = []
-
-        def read(self) -> FleetSnapshot:
-            return _fleet_snapshot()
-
-        def telemetry_capabilities(
-            self, node_id: str, **selectors: object
-        ) -> TelemetryCapabilitiesResponse:
-            self.calls.append({"node_id": node_id, **selectors})
-            return TelemetryCapabilitiesResponse(
-                node_id=NODE,
-                observed_at=datetime(2026, 8, 5, 12, tzinfo=UTC),
-                received_at=datetime(2026, 8, 5, 12, tzinfo=UTC),
-                freshness="live",
-                capabilities=[],
-            )
-
-    projection = _Projection()
-    app = FastAPI()
-    install_operator_projection_routes(
-        app,
-        actor_dependency=Depends(lambda: Actor("operator", "operator")),
-        fleet_projection=projection,
-        library_projection=None,
-    )
-    response = TestClient(app).get(
-        f"/api/fleet/{NODE}/metrics/capabilities",
-        params={
-            "key": "gpu.utilization",
-            "device_id": "gpu0",
-            "interface_name": "eth0",
-            "run_id": "run-1",
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    assert projection.calls == [
-        {
-            "node_id": NODE,
-            "key": "gpu.utilization",
-            "device_id": "gpu0",
-            "interface_name": "eth0",
-            "run_id": "run-1",
-        }
-    ]
 
 
 class _SnapshotProjection:
@@ -489,26 +363,6 @@ def test_a_refused_upgrade_names_the_authority_reason(reason: str) -> None:
     assert response.status_code == 409, response.text
     assert response.headers["x-vonk-error-code"] == "controller.fleet.upgrade_conflict"
     assert response.json()["detail"] == reason
-
-
-def test_retired_upgrade_strategy_is_rejected_before_dispatch() -> None:
-    app = _action_app(
-        Actor("admin", "administrator"),
-        services=FleetOperatorServices(
-            upgrades=_RefusingUpgrade(AgentUpgradeConflict("must not dispatch"))
-        ),
-    )
-
-    response = TestClient(app).post(
-        "/api/fleet/upgrade",
-        json={
-            "all": True,
-            "request_key": "11111111-1111-4111-8111-111111111111",
-            "strategy": "all-at-once",
-        },
-    )
-
-    assert response.status_code == 422, response.text
 
 
 def test_upgrade_request_replay_returns_the_same_durable_job() -> None:
@@ -620,43 +474,3 @@ def test_a_refused_removal_names_the_enrollment_layer(
     assert response.status_code == status_code, response.text
     assert response.headers["x-vonk-error-code"] == code
     assert response.json()["detail"] == str(error)
-
-
-class _RecordingEnrollment(_Enrollment):
-    def __init__(self) -> None:
-        self.called = False
-
-    def create_named(self, **kwargs: object) -> dict[str, object]:
-        self.called = True
-        # EnrollmentService caps a bootstrap grant at 900 seconds and voices the
-        # refusal as this ValueError.
-        raise ValueError("enrollment grant TTL must be between one and 900 seconds")
-
-    def create_reenrollment(self, *args: object, **kwargs: object) -> dict[str, object]:
-        raise AssertionError("not used")
-
-    def revoke_node(self, node_id: str, actor: str) -> None:
-        raise AssertionError("not used")
-
-
-def test_enroll_rejects_a_ttl_the_bootstrap_authority_would_refuse() -> None:
-    """The request model advertised a TTL the authority always refuses.
-
-    ``ttl_seconds`` accepted up to 86400 while ``EnrollmentService`` caps a
-    bootstrap grant at 900, so an overlong value passed request validation and
-    the authority's ValueError arrived as "operator projection unavailable"
-    instead of a request rejection.
-    """
-
-    enrollment = _RecordingEnrollment()
-    app = _action_app(
-        Actor("admin", "administrator"),
-        services=FleetOperatorServices(enrollment=enrollment),
-    )
-    response = TestClient(app).post(
-        "/api/fleet/enroll",
-        json={"name": "Spark", "ttl_seconds": 901, "request_key": _GRANT["id"]},
-    )
-
-    assert response.status_code == 422, response.text
-    assert not enrollment.called

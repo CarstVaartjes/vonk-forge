@@ -8,7 +8,7 @@ import {LibraryProfilesView} from "./library-profiles-view";
 const nodeA = "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const nodeB = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const profile = {
-  schema_version: 2, id: "11111111-1111-4111-8111-111111111111", number: 2, revision: 4,
+  id: "11111111-1111-4111-8111-111111111111", number: 2, revision: 4,
   name: "Coding", description: "Code on Spark A", installation_policy: "keep-cached", labels: {}, favorite: true,
   definition: {name: "Coding", description: "Code on Spark A", installation_policy: "exact", labels: {team: "research"}, favorite: true, assignments: [{recipe_selector: "vonk-forge/qwen-code", spark_ids: [nodeA], assignment_name: "old-name", model_variant: "nvfp4", desired_state: "installed"}]},
   assignments: [{selector: "qwen-code", display_name: "Qwen Code", recipe_selector: "vonk-forge/qwen-code", recipe_id: null, spark_ids: [nodeA], required_sparks: 1, assigned_sparks: 1, model: {variant: "nvfp4", state: "cached"}, recipe: {selector: "vonk-forge/qwen-code", name: "Qwen Code", state: "cached", revision_id: "33333333-3333-4333-8333-333333333333"}, resources: {}, observed_state: "Not loaded"}],
@@ -18,7 +18,7 @@ const preview = {allowed: true, plan_digest: "b".repeat(64), steps: [{index: 0, 
 const application = {state: "running", progress: {child_progress: {phase: "start", node_ids: [nodeA], bytes: 50, total_bytes: 100}}, status_reason: null} as unknown as FleetProfileApplicationView;
 
 function apiFor(overrides: Partial<ControlApi> = {}): ControlApi {
-  return {profiles: vi.fn(async () => ({schema_version: 2 as const, generated_at: "2026-09-10T00:00:00Z", profiles: [profile]})), previewProfile: vi.fn(async () => preview), autosaveProfile: vi.fn(async () => profile), loadProfile: vi.fn(async () => application), profileApplicationByRequest: vi.fn(async () => application), profileProgress: vi.fn(async () => application), ...overrides} as unknown as ControlApi;
+  return {profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [profile]})), previewProfile: vi.fn(async () => preview), autosaveProfile: vi.fn(async () => profile), loadProfile: vi.fn(async () => application), profileApplicationByRequest: vi.fn(async () => application), profileProgress: vi.fn(async () => application), ...overrides} as unknown as ControlApi;
 }
 
 test("reads and loads a numbered profile without legacy status or application routes", async () => {
@@ -28,11 +28,11 @@ test("reads and loads a numbered profile without legacy status or application ro
   expect((await screen.findAllByText("Profile 2 · Coding"))[0]).toBeVisible();
   await user.click(await screen.findByRole("button", {name: "Load profile"}));
   expect(api.previewProfile).toHaveBeenCalledWith(2, expect.any(AbortSignal));
-  expect(api.loadProfile).toHaveBeenCalledWith(2, {plan_digest: preview.plan_digest, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  expect(api.loadProfile).toHaveBeenCalledWith(2, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(await screen.findByRole("region", {name: "Profile load progress"})).toBeVisible();
 });
 
-test("reconciles an ambiguous profile load with the same request key and preview digest", async () => {
+test("reconciles an ambiguous profile load with the same request key", async () => {
   const user = userEvent.setup();
   const loadProfile = vi.fn(async (..._args: Parameters<ControlApi["loadProfile"]>) => application);
   loadProfile.mockRejectedValueOnce(new TypeError("connection lost"));
@@ -48,7 +48,6 @@ test("reconciles an ambiguous profile load with the same request key and preview
   expect(loadProfile).toHaveBeenCalledTimes(2);
   expect(loadProfile.mock.calls[0]).toEqual(loadProfile.mock.calls[1]);
   expect(loadProfile.mock.calls[0]?.[1]).toEqual({
-    plan_digest: preview.plan_digest,
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
   });
 });
@@ -68,32 +67,31 @@ test("saves the current numbered draft with recipe selectors and Spark IDs", asy
 
 test("renders an empty profile as an explicit whole-fleet idle outcome", async () => {
   const empty = {...profile, number: 3, name: "Idle", assignments: []} as FleetProfile;
-  const api = apiFor({profiles: vi.fn(async () => ({schema_version: 2 as const, generated_at: "2026-09-10T00:00:00Z", profiles: [empty]}))});
+  const api = apiFor({profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [empty]}))});
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
   const saved = await screen.findByRole("region", {name: "Profile 3 saved profile"});
   expect(within(saved).getByText("Idle fleet")).toBeVisible();
   expect(within(saved).getByText("No assignments; every Spark becomes idle on load.")).toBeVisible();
 });
 
-test("refreshes and resumes a profile load after the plan changes", async () => {
+test("shows a refused profile load without resubmitting it", async () => {
   const user = userEvent.setup();
   const loadProfile = vi.fn(async () => application);
-  loadProfile.mockRejectedValueOnce(new ApiError(409, "Current plan changed"));
+  loadProfile.mockRejectedValueOnce(new ApiError(409, "Profile admission refused"));
   const api = apiFor({loadProfile});
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
   await user.click(await screen.findByRole("button", {name: "Load profile"}));
-  expect(await screen.findByRole("region", {name: "Profile load progress"})).toBeVisible();
-  expect(loadProfile).toHaveBeenCalledTimes(2);
-  expect(api.previewProfile).toHaveBeenCalledTimes(2);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Profile admission refused");
+  expect(loadProfile).toHaveBeenCalledTimes(1);
 });
 
 test("a loaded profile names the inference gateway and alias as its client endpoint", async () => {
   const loaded = {...profile, status: "loaded", loaded_revision: 4} as unknown as FleetProfile;
   const profileEndpoints = vi.fn(async () => ({
     number: 2, profile_id: profile.id, application_id: "22222222-2222-4222-8222-222222222222", application_state: "succeeded", observed_at: "2026-09-10T00:00:00Z",
-    assignments: [{assignment_id: "33333333-3333-4333-8333-333333333333", recipe_title: "Qwen Code", desired_state: "running", alias: "qwen-code", state: "published", endpoint: {alias: "qwen-code", api_base: "https://vonk-forge.example.ts.net/v1", backend_api_base: "http://192.168.1.211:8888/v1", expires_at: "2026-09-10T00:03:00Z", generation: 3, node_id: nodeA, observed_at: "2026-09-10T00:00:00Z", plan_digest: "c".repeat(64), state: "published"}}],
+    assignments: [{assignment_id: "33333333-3333-4333-8333-333333333333", recipe_title: "Qwen Code", desired_state: "running", alias: "qwen-code", state: "published", endpoint: {alias: "qwen-code", api_base: "https://vonk-forge.example.ts.net/v1", backend_api_base: "http://192.168.1.211:8888/v1", expires_at: "2026-09-10T00:03:00Z", generation: 3, node_id: nodeA, observed_at: "2026-09-10T00:00:00Z", plan_digest: "c".repeat(64)}}],
   })) as unknown as ControlApi["profileEndpoints"];
-  const api = apiFor({profiles: vi.fn(async () => ({schema_version: 2 as const, generated_at: "2026-09-10T00:00:00Z", profiles: [loaded]})), profileEndpoints});
+  const api = apiFor({profiles: vi.fn(async () => ({generated_at: "2026-09-10T00:00:00Z", profiles: [loaded]})), profileEndpoints});
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
   const endpoint = await screen.findByRole("region", {name: "Qwen Code client endpoint"});
   expect(within(endpoint).getByText("https://vonk-forge.example.ts.net/v1")).toBeVisible();

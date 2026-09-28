@@ -23,7 +23,6 @@ class SharedRuntimePaths:
     agent_artifacts: Path = Path("/state/agent-artifacts")
     routes: Path = Path("/routes")
     supervisor: Path = Path("/supervisor")
-    workload_publication: Path = Path("/workload-tuf")
     state: Path = Path("/state")
 
 
@@ -231,18 +230,13 @@ def stage_compose_secrets(
     """Normalize all file-backed Compose secrets for their runtime consumers."""
     source_root = Path(source_root)
     destination_root = Path(destination_root)
-    for name in (
-        "package-helper-grant-private-key",
-        "package-helper-receipt-private-key",
-        "host-runtime-grant-private-key",
-    ):
-        stage_private_key(
-            source_root / name,
-            destination_root / name,
-            owner_uid=10001,
-            owner_gid=10001,
-            mode=0o400,
-        )
+    stage_private_key(
+        source_root / "host-runtime-grant-private-key",
+        destination_root / "host-runtime-grant-private-key",
+        owner_uid=10001,
+        owner_gid=10001,
+        mode=0o400,
+    )
     for name in (
         "database-url",
         "token-signing-key",
@@ -383,9 +377,6 @@ def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     routes = _directory(paths.routes, 10001, 10001, 0o750)
     _directory(routes / "generations", 10001, 10001, 0o750)
     _directory(paths.supervisor, 10002, 10001, 0o750)
-    workload = _directory(paths.workload_publication, 10001, 10001, 0o750)
-    for name in ("metadata", "targets"):
-        _directory(workload / name, 10003, 10001, 0o750)
 
 
 def _identity(value: os.stat_result) -> tuple[int, ...]:

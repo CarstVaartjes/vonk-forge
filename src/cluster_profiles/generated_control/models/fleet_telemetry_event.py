@@ -8,9 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.telemetry_point import TelemetryPoint
@@ -29,12 +27,10 @@ class FleetTelemetryEvent:
         Attributes:
             node_id (str):
             sample (TelemetryPoint):
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     node_id: str
     sample: TelemetryPoint
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -46,8 +42,6 @@ class FleetTelemetryEvent:
 
         sample = self.sample.to_dict()
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -55,8 +49,6 @@ class FleetTelemetryEvent:
             "node_id": node_id,
             "sample": sample,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -73,14 +65,9 @@ class FleetTelemetryEvent:
 
 
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         fleet_telemetry_event = cls(
             node_id=node_id,
             sample=sample,
-            schema_version=schema_version,
         )
 
         return fleet_telemetry_event

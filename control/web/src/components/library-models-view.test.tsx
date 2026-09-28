@@ -10,7 +10,6 @@ const prepared = {
   action: "download" as const,
   phase: "complete",
   request_key: "request",
-  schema_version: 2 as const,
   selector: "vonk-forge/ling-3-flash",
   state: "succeeded" as const,
   transferred_bytes: 10,
@@ -78,15 +77,13 @@ test("removes a cached model only after an explicit confirmation", async () => {
   const base = {...original, model: {...original.model, content_sha256: "f".repeat(64)}};
   const selector = `${base.model.publisher}/${base.model.slug}`;
   const review = cacheRemovalReview({resource_kind: "model", selector, target_identity: base.model.content_sha256, with_model: null});
-  const removeModelCache = vi.fn().mockImplementation(async (submittedSelector: string, modelContentSha256: string, requestKey: string, reviewDigest: string) => ({
+  const removeModelCache = vi.fn().mockImplementation(async (submittedSelector: string, requestKey: string) => ({
     action: "remove" as const,
     operation_id: "removed-model-operation",
     request_key: requestKey,
     selector: submittedSelector,
-    review_digest: reviewDigest,
-    model_content_sha256: modelContentSha256,
+    model_content_sha256: base.model.content_sha256,
     reclaimed_bytes: 1,
-    schema_version: 2 as const,
     state: "succeeded" as const,
     progress: {phase: "complete"},
   }));
@@ -105,8 +102,7 @@ test("removes a cached model only after an explicit confirmation", async () => {
   fireEvent.click(screen.getByRole("button", {name: "Confirm remove"}));
   await waitFor(() => expect(removeModelCache).toHaveBeenCalledTimes(1));
   expect(removeModelCache).toHaveBeenCalledWith(
-    `${base.model.publisher}/${base.model.slug}`, base.model.content_sha256,
-    expect.any(String), review.review_digest, expect.anything(),
+    `${base.model.publisher}/${base.model.slug}`, expect.any(String), expect.anything(),
   );
 });
 

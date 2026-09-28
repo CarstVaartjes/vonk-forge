@@ -27,7 +27,6 @@ from .fleet_qualification_dual_recovery import (
 
 _SHA256 = re.compile(r"[a-f0-9]{64}\Z")
 _OCI_DIGEST = re.compile(r"sha256:([a-f0-9]{64})\Z")
-_BUILD_DIGEST = re.compile(r"sha256:([a-f0-9]{64})\Z")
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _RECOVERY_EVENTS = frozenset(
     {
@@ -68,15 +67,16 @@ def build_recovery_coverage_receipt(
     lane_id: int,
     ledger_records: Sequence[Mapping[str, object]],
     exact_preparation: Mapping[str, object],
-    deployment_provenance_by_node: Mapping[str, Mapping[str, object]],
+    platform_build_sha256: str,
+    agent_build_sha256_by_node: Mapping[str, str],
     receipt_schema: Mapping[str, object],
 ) -> dict[str, object]:
-    """Build one canonical receipt from exact authority, ledger and provenance.
+    """Build one canonical receipt from exact authority, ledger and builds.
 
     Only current singleton ``dedicated`` coverage definitions are accepted.
     ``ledger_records`` must come from ``EvidenceLedger`` after its full-chain
-    verification; selected records are hash-checked again here. The passed
-    deployment provenance is the full typed projection for each affected node.
+    verification; selected records are hash-checked again here. The build
+    identities name the Controller and the agent build on each affected Spark.
     """
 
     scope = _validate_authority_scope(
@@ -180,8 +180,8 @@ def build_recovery_coverage_receipt(
     runtime_image_digest, architecture = _runtime_image_identity(
         exact_preparation, node_ids, scope
     )
-    platform_build_sha256, agent_builds = _deployment_build_identities(
-        deployment_provenance_by_node, node_ids
+    agent_builds = _build_identities(
+        platform_build_sha256, agent_build_sha256_by_node, node_ids
     )
     if mode == "dual-rank-loss-recovery":
         if rank_recovery is None:
@@ -1534,89 +1534,22 @@ def _runtime_image_identity(
     return digest, "linux/arm64"
 
 
-def _deployment_build_identities(
-    provenance_by_node: Mapping[str, Mapping[str, object]],
+def _build_identities(
+    platform_build_sha256: str,
+    agent_build_sha256_by_node: Mapping[str, str],
     node_ids: Sequence[str],
-) -> tuple[str, dict[str, str]]:
-    if set(provenance_by_node) != set(node_ids):
+) -> dict[str, str]:
+    _required_sha(platform_build_sha256, "Controller build identity")
+    if set(agent_build_sha256_by_node) != set(node_ids):
         raise QualificationError(
-            "DeploymentProvenance does not cover the exact affected Sparks"
+            "agent build identities do not cover the exact affected Sparks"
         )
-    platform_builds: set[str] = set()
-    agent_builds: dict[str, str] = {}
-    for node_id in node_ids:
-        provenance = _mapping(provenance_by_node[node_id], "DeploymentProvenance")
-        platform = provenance.get("platform")
-        agents = provenance.get("agents")
-        if not isinstance(platform, list) or not isinstance(agents, list):
-            raise QualificationError(
-                "DeploymentProvenance omits platform or agent identities"
-            )
-        controller_rows = [
-            _mapping(item, "Controller deployment provenance")
-            for item in platform
-            if isinstance(item, Mapping)
-            and item.get("boundary") == "controller_deployment"
-        ]
-        if len(controller_rows) != 1:
-            raise QualificationError(
-                "current Controller deployment image identity is unavailable"
-            )
-        controller = controller_rows[0]
-        platform_evidence = _mapping(
-            controller.get("evidence"), "Controller deployment evidence age"
+    return {
+        node_id: _required_sha(
+            agent_build_sha256_by_node[node_id], f"agent build identity for {node_id}"
         )
-        image_digest = controller.get("image_digest")
-        image_match = (
-            _OCI_DIGEST.fullmatch(image_digest)
-            if isinstance(image_digest, str)
-            else None
-        )
-        if (
-            controller.get("state") != "observed"
-            or platform_evidence.get("freshness") != "current"
-            or image_match is None
-        ):
-            raise QualificationError(
-                "current Controller deployment image evidence is stale or absent"
-            )
-        platform_builds.add(image_match.group(1))
-        agent_rows = [
-            _mapping(item, "agent deployment provenance")
-            for item in agents
-            if isinstance(item, Mapping) and item.get("node_id") == node_id
-        ]
-        if len(agent_rows) != 1:
-            raise QualificationError(
-                f"current authenticated agent identity is unavailable for {node_id}"
-            )
-        agent = agent_rows[0]
-        contact = _mapping(
-            agent.get("evidence"), "authenticated agent contact evidence"
-        )
-        build_digest = agent.get("build_digest")
-        build_match = (
-            _BUILD_DIGEST.fullmatch(build_digest)
-            if isinstance(build_digest, str)
-            else None
-        )
-        if (
-            agent.get("connectivity") != "recent"
-            or contact.get("freshness") != "current"
-            or agent.get("boundary") not in (None, "agent_deployment")
-            or build_match is None
-            or not isinstance(agent.get("binary_sha256"), str)
-            or _SHA256.fullmatch(str(agent["binary_sha256"])) is None
-        ):
-            raise QualificationError(
-                f"agent build/binary identity is unverified for {node_id}"
-            )
-        agent_builds[node_id] = build_match.group(1)
-    if len(platform_builds) != 1:
-        raise QualificationError(
-            "affected Sparks report different Controller image identities"
-        )
-    return next(iter(platform_builds)), agent_builds
+        for node_id in node_ids
+    }
 
 
 def _unique_event(

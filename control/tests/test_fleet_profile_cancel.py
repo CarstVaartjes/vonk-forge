@@ -145,7 +145,6 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         profile.number,
         actor="admin",
         request_key=_uuid(116),
-        expected_plan_digest=preview.plan_digest,
     )
 
     for _ in range(8):
@@ -451,7 +450,6 @@ def _two_target_stop_case(tmp_path, *, engine):
         profile.number,
         request_key=_uuid(988),
         actor="admin",
-        expected_plan_digest=preview.plan_digest,
     )
     return (
         sessions,
@@ -793,7 +791,6 @@ def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_o
         profile.number,
         request_key=_uuid(992),
         actor="admin",
-        expected_plan_digest=fresh.plan_digest,
     )
 
     with sessions() as session:
@@ -904,7 +901,6 @@ def _application(
         profile.number,
         request_key=_uuid(980),
         actor="admin",
-        expected_plan_digest=preview.plan_digest,
     )
     adapter = service._switch_adapter
     assert isinstance(adapter, RunSwitchFleetProfileAdapter)
@@ -1440,7 +1436,6 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
             profile.number,
             request_key=_uuid(990 + index),
             actor="admin",
-            expected_plan_digest=preview.plan_digest,
         )
         applications.append((profile, application))
 

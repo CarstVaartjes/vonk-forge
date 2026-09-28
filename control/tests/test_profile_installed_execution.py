@@ -86,7 +86,6 @@ def _apply(service, profile):
     assert review.allowed, review.reasons
     return service.apply(
         profile.id,
-        plan_digest=review.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )
@@ -123,7 +122,6 @@ def test_installed_profile_waits_for_every_install_receipt_and_never_starts(
     assert review.allowed
     application = service.apply(
         profile.id,
-        plan_digest=review.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )

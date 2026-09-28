@@ -22,7 +22,6 @@ def _draft(identifier: str) -> FleetEventDraft:
         entity_kind="job",
         entity_id=identifier,
         payload={
-            "schema_version": 1,
             "entity_kind": "job",
             "entity_id": identifier,
             "kind": "deploy",

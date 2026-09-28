@@ -4903,7 +4903,6 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-            plan_digest=preview.plan_digest,
             request_key=str(uuid.uuid4()),
         ),
         actor="admin",
@@ -5048,7 +5047,6 @@ def test_new_reconcile_review_reuses_exact_partial_receipt_and_releases_last_cla
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-            plan_digest=first_plan.plan_digest,
             request_key=str(uuid.uuid4()),
         ),
         actor="admin",
@@ -5123,7 +5121,6 @@ def test_new_reconcile_review_reuses_exact_partial_receipt_and_releases_last_cla
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-            plan_digest=retry_plan.plan_digest,
             request_key=str(uuid.uuid4()),
         ),
         actor="admin",
@@ -5426,15 +5423,14 @@ def test_scoped_cleanup_abandons_a_never_installed_plan(tmp_path: Path) -> None:
         )
 
 
-def test_scoped_cleanup_refuses_a_planned_row_with_install_evidence(
+def test_scoped_cleanup_refuses_a_planned_row_with_installed_bytes(
     tmp_path: Path,
 ) -> None:
     """A planned row that contradicts itself stays a reported blocker.
 
-    Installed bytes or a recorded install evidence digest on a never-launched
-    plan is exactly the contradiction that must not be silently abandoned, so
-    the uninstall assessment keeps refusing it under
-    ``run-switch.uninstall-blocked``.
+    Installed bytes on a never-launched plan are exactly the contradiction that
+    must not be silently abandoned, so the uninstall assessment keeps refusing
+    it under ``run-switch.uninstall-blocked``.
     """
 
     sessions, lifecycle, installation_id, _nodes = _planned_installation(tmp_path)
@@ -5445,9 +5441,8 @@ def test_scoped_cleanup_refuses_a_planned_row_with_install_evidence(
             )
         )
         assert member is not None
-        member.state = "installing"
+        member.state = "planned"
         member.installed_bytes = 120
-        member.evidence_digest = "a" * 64
     service = _service(
         sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
     )

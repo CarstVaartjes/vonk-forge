@@ -4,7 +4,6 @@ import type {paths} from "./generated";
 import type {
   AuthSession,
   CliTokenDownload,
-  AuditResponse,
   ControlApi,
   FleetProfileInput,
   FleetProfileList,
@@ -28,7 +27,6 @@ import type {
   LibrarySort,
   ModelDetail,
   ModelLibrary,
-  ModelStatus,
   ModelCacheOperatorResponse,
   CacheRemovalReview,
   RecipeImageAvailabilityResponse,
@@ -37,7 +35,6 @@ import type {
   RecipeUpdateResponse,
   RecipeDetail,
   RecipeLibrary,
-  RecipeStatus,
 } from "./types";
 
 function csrfToken(): string | undefined {
@@ -209,7 +206,7 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/fleet", {signal}));
   }
 
-  async enrollFleetNode(input: {name: string; request_key: string; ttl_seconds: number}, signal?: AbortSignal) {
+  async enrollFleetNode(input: {name: string; request_key: string}, signal?: AbortSignal) {
     return resultData(await this.generated.POST("/api/fleet/enroll", {body: input, signal}));
   }
 
@@ -268,10 +265,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async modelStatus(signal?: AbortSignal): Promise<ModelStatus> {
-    return resultData(await this.generated.GET("/api/model", {signal}));
-  }
-
   async modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary> {
     return resultData(await this.generated.GET("/api/model/library", {
       params: {query: {cursor, limit: 100, sort, updated_since: updatedSince}},
@@ -284,10 +277,6 @@ export class ApiClient implements ControlApi {
       params: {path: {selector}},
       signal,
     }));
-  }
-
-  async recipeStatus(signal?: AbortSignal): Promise<RecipeStatus> {
-    return resultData(await this.generated.GET("/api/recipe", {signal}));
   }
 
   async recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary> {
@@ -314,7 +303,7 @@ export class ApiClient implements ControlApi {
   async prepareModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
     return resultData(await this.generated.POST("/api/model/{selector}/download", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2},
+      body: {request_key: requestKey},
       signal,
     }));
   }
@@ -325,11 +314,11 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async removeModelCache(selector: string, modelContentSha256: string, requestKey: string, reviewDigest: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
-    // Bind removal to the exact revision the operator reviewed.
+  async removeModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    // Removal applies to what the selector resolves to when the Controller accepts it.
     return resultData(await this.generated.POST("/api/model/{selector}/remove", {
       params: {path: {selector}},
-      body: {model_content_sha256: modelContentSha256, request_key: requestKey, review_digest: reviewDigest, schema_version: 2},
+      body: {request_key: requestKey},
       signal,
     }));
   }
@@ -352,7 +341,7 @@ export class ApiClient implements ControlApi {
     // artifacts together, which is what `vonkctl recipe download` documents.
     return resultData(await this.generated.POST("/api/recipe/{selector}/download", {
       params: {path: {selector}},
-      body: {request_key: requestKey, schema_version: 2},
+      body: {request_key: requestKey},
       signal,
     }));
   }
@@ -363,13 +352,13 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async removeRecipe(selector: string, requestKey: string, withModel: boolean, reviewDigest: string, signal?: AbortSignal): Promise<RecipeOperatorResponse> {
+  async removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse> {
     // The model choice is explicit, like the CLI's mandatory --keep-model or
     // --with-model: the Controller fails closed rather than guessing whether a
     // shared model entry should go too.
     return resultData(await this.generated.POST("/api/recipe/{selector}/remove", {
       params: {path: {selector}},
-      body: {request_key: requestKey, review_digest: reviewDigest, schema_version: 2, with_model: withModel},
+      body: {request_key: requestKey, with_model: withModel},
       signal,
     }));
   }
@@ -379,7 +368,7 @@ export class ApiClient implements ControlApi {
     // or all, and refuses the combination, so the caller states the scope.
     return resultData(await this.generated.POST("/api/recipe/update", {
       params: {},
-      body: {all, selectors, request_key: requestKey, schema_version: 2},
+      body: {all, selectors, request_key: requestKey},
       signal,
     }));
   }
@@ -473,10 +462,6 @@ export class ApiClient implements ControlApi {
     });
   }
 
-  artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/result`, {signal});
-  }
-
   artifactJobResultUrl(jobId: string, name: string, sha256: string): string {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) {
       throw new Error("Unsafe artifact result name");
@@ -518,9 +503,5 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.POST("/api/jobs/{job_id}/resume", {
       params: {path: {job_id: jobId}},
     }));
-  }
-
-  async audit(signal?: AbortSignal): Promise<AuditResponse> {
-    return resultData(await this.generated.GET("/api/audit", {signal}));
   }
 }

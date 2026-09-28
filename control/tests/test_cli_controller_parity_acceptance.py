@@ -22,7 +22,7 @@ import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -57,13 +57,11 @@ RECIPE_SELECTOR = "vonk-forge/synthetic-tiny-image"
 class ModelRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema_version: int = Field(default=2)
     request_key: str
 
 
 def _profile() -> dict[str, Any]:
     return {
-        "schema_version": 2,
         "id": PROFILE_ID,
         "number": 1,
         "revision": 1,
@@ -84,7 +82,6 @@ def _profile() -> dict[str, Any]:
 def _model_operation(state: str = "succeeded") -> dict[str, Any]:
     phase = "completed" if state == "succeeded" else "copying"
     return {
-        "schema_version": 2,
         "action": "download",
         "selector": "qwen-code",
         "request_key": REQUEST_KEY,
@@ -104,7 +101,6 @@ def _model_operation(state: str = "succeeded") -> dict[str, Any]:
 
 def _library(kind: str) -> dict[str, Any]:
     value = {
-        "schema_version": 2,
         "generated_at": NOW,
         kind: [],
         "facets": {"usage": [], "family": [], "version": [], "quantization": []},
@@ -117,7 +113,6 @@ def _library(kind: str) -> dict[str, Any]:
 
 def _fleet() -> dict[str, Any]:
     return {
-        "schema_version": 1,
         "event_cursor": 0,
         "generated_at": NOW,
         "authority_revision": "a" * 64,
@@ -210,7 +205,6 @@ def _auth(request: Request, *, mutation: bool = False) -> None:
 
 def _profile_application() -> dict[str, Any]:
     return {
-        "schema_version": 2,
         "id": OPERATION_ID,
         "request_key": REQUEST_KEY,
         "profile_id": PROFILE_ID,
@@ -450,7 +444,7 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
         cli_transport, "--profile", "1", "profile", "--json"
     ) == browser_transport.request("GET", "/api/profile/1")
 
-    request = {"schema_version": 2, "request_key": REQUEST_KEY}
+    request: dict[str, object] = {"request_key": REQUEST_KEY}
     assert _cli(
         cli_transport, "model", "download", "qwen-code", "--json"
     ) == browser_transport.request("POST", "/api/model/qwen-code/download", request)
@@ -479,7 +473,6 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
 
     load_request: dict[str, object] = {
         "request_key": REQUEST_KEY,
-        "plan_digest": "c" * 64,
     }
     assert _cli(
         cli_transport,

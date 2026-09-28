@@ -1,17 +1,11 @@
 import logging
 
 import pytest
-import vonk_control.logging as control_logging
-from sqlalchemy import Table, create_engine
-from sqlalchemy.orm import sessionmaker
 from vonk_control.logging import (
-    DatabaseJobLogStore,
-    JobLogCorruptError,
     configure_controller_logging,
     log_event,
     redact_text,
 )
-from vonk_control.models import Base, JobLogEntry
 
 
 def test_structured_logger_redacts_secrets(caplog) -> None:
@@ -65,24 +59,6 @@ def test_controller_api_and_worker_info_events_are_emitted_at_runtime_config(
     assert "must-not-be-logged" not in output
 
 
-def test_job_log_store_is_postgres_backed_content_addressed_and_sanitized() -> None:
-    engine = create_engine("sqlite://")
-    log_entry_table = JobLogEntry.__table__
-    assert isinstance(log_entry_table, Table)
-    Base.metadata.create_all(engine, tables=[log_entry_table])
-    store = DatabaseJobLogStore(sessionmaker(engine))
-    job_id = "00000000-0000-4000-8000-000000000001"
-    digest = store.save(job_id, b"started\nAuthorization: Bearer no\nfinished\n")
-    content = store.read(job_id, digest)
-    assert b"started" in content and b"finished" in content
-    assert b"Bearer no" not in content and b"<redacted>" in content
-    assert store.list(job_id) == (digest,)
-
-
-def test_filesystem_job_log_store_is_not_available() -> None:
-    assert not hasattr(control_logging, "JobLogStore")
-
-
 def test_redaction_truncates_remote_output() -> None:
     value = redact_text("x" * 100_000)
     assert len(value) <= 4096
@@ -122,29 +98,3 @@ def test_persisted_failure_evidence_does_not_retain_signed_download_queries() ->
     )
     assert "signed-download-secret" not in str(safe)
     assert "https://cdn.example/model" in str(safe)
-
-
-def test_corrupt_retained_job_log_is_not_reported_as_missing() -> None:
-    """A log that no longer matches its digest is corruption, not absence.
-
-    The log routes answer a ``ValueError`` with 404 "job log not found", so
-    corruption has to arrive as something else or a tampered record reads as a
-    log that never existed.
-    """
-
-    engine = create_engine("sqlite://")
-    log_entry_table = JobLogEntry.__table__
-    assert isinstance(log_entry_table, Table)
-    Base.metadata.create_all(engine, tables=[log_entry_table])
-    sessions = sessionmaker(engine)
-    store = DatabaseJobLogStore(sessions)
-    job_id = "00000000-0000-4000-8000-000000000002"
-    digest = store.save(job_id, b"started\n")
-    with sessions.begin() as session:
-        row = session.get(JobLogEntry, (job_id, digest))
-        assert row is not None
-        row.content = b"tampered\n"
-
-    assert not issubclass(JobLogCorruptError, ValueError)
-    with pytest.raises(JobLogCorruptError, match="recorded digest"):
-        store.read(job_id, digest)

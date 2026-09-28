@@ -28,35 +28,20 @@ test("a protected recipe displays the owner blocker and cannot be removed", asyn
   expect(removeRecipe).not.toHaveBeenCalled();
 });
 
-test("a changed removal plan refreshes and resumes the confirmed request", async () => {
-  const first = cacheRemovalReview();
-  const second = cacheRemovalReview({review_digest: "c".repeat(64)});
-  const recipeRemovalReview = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
-  const removeRecipe = vi.fn()
-    .mockRejectedValueOnce(new ApiError(409, "Removal scope changed; review again"))
-    .mockImplementationOnce(async (_selector: string, requestKey: string, withModel: boolean, reviewDigest: string) => ({
-      action: "remove" as const,
-      operation_id: "second-operation",
-      request_key: requestKey,
-      selector: second.selector,
-      review_digest: reviewDigest,
-      recipe_revision_id: second.target_identity,
-      with_model: withModel,
-      reclaimed_bytes: 0,
-      schema_version: 2 as const,
-      state: "queued" as const,
-      progress: {phase: "queued"},
-    }));
+test("a refused removal is shown without resubmitting it", async () => {
+  const review = cacheRemovalReview();
+  const recipeRemovalReview = vi.fn().mockResolvedValue(review);
+  const removeRecipe = vi.fn().mockRejectedValueOnce(new ApiError(409, "Removal is refused"));
   const recipeCacheRequest = vi.fn().mockRejectedValue(new ApiError(404, "Not found"));
   const api = {recipeRemovalReview, removeRecipe, recipeCacheRequest} as unknown as ControlApi;
-  render(<LibraryRecipeRemoveAction api={api} selector={first.selector} onRemoved={() => undefined}/>);
+  render(<LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={() => undefined}/>);
   fireEvent.click(screen.getByRole("button", {name: "Remove recipe"}));
   fireEvent.click(screen.getByRole("button", {name: "Keep the model"}));
   fireEvent.click(await screen.findByRole("button", {name: "Confirm remove"}));
-  await waitFor(() => expect(removeRecipe).toHaveBeenCalledTimes(2));
-  expect(recipeRemovalReview).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Removal is refused"));
+  expect(removeRecipe).toHaveBeenCalledTimes(1);
+  expect(recipeRemovalReview).toHaveBeenCalledTimes(1);
   expect(recipeCacheRequest).toHaveBeenCalled();
-  expect(screen.getByLabelText("Cache removal progress")).toBeVisible();
 });
 
 test("a model revision changed since Library display cannot be silently removed", async () => {
@@ -89,9 +74,9 @@ test("queued and partial cleanup remain visible until the same owner succeeds", 
   const requestKey = "00000000-0000-4000-8000-000000000931" as `${string}-${string}-${string}-${string}-${string}`;
   const accepted: RecipeOperatorResponse = {
     action: "remove", operation_id: "accepted-cleanup", request_key: requestKey,
-    selector: review.selector, review_digest: review.review_digest,
+    selector: review.selector,
     recipe_revision_id: review.target_identity, with_model: false,
-    reclaimed_bytes: 0, schema_version: 2,
+    reclaimed_bytes: 0,
     state: "queued", progress: {phase: "waiting for worker", completed_bytes: 0, total_bytes_known: false},
   };
   const removeRecipe = vi.fn().mockResolvedValue(accepted);
@@ -123,8 +108,8 @@ test("queued and partial cleanup remain visible until the same owner succeeds", 
 test("an observation of another operation cannot complete accepted cleanup", async () => {
   const initial: RecipeOperatorResponse = {
     action: "remove", operation_id: "accepted-cleanup", request_key: "original-key",
-    selector: "example/recipe", review_digest: "b".repeat(64), with_model: false,
-    recipe_revision_id: "exact-revision", reclaimed_bytes: 0, schema_version: 2,
+    selector: "example/recipe", with_model: false,
+    recipe_revision_id: "exact-revision", reclaimed_bytes: 0,
     state: "queued", progress: {phase: "queued", completed_bytes: 0, total_bytes_known: false},
   };
   const review = cacheRemovalReview({selector: initial.selector, target_identity: initial.recipe_revision_id, with_model: initial.with_model});
@@ -138,12 +123,12 @@ test("an observation of another operation cannot complete accepted cleanup", asy
   expect(screen.getByRole("status")).toHaveTextContent("Removal queued: accepted-cleanup");
 });
 
-test("a wrong-target success receipt is reconciled by key and never reported as complete", async () => {
+test("a receipt for another retention choice is reconciled by key and never reported as complete", async () => {
   const review = cacheRemovalReview({selector: "publisher/recipe", with_model: false});
   const wrongReceipt: RecipeOperatorResponse = {
     action: "remove", operation_id: "wrong-target-operation", request_key: "00000000-0000-4000-8000-000000000932",
-    selector: review.selector, review_digest: review.review_digest, with_model: false,
-    recipe_revision_id: "different-revision", reclaimed_bytes: 10, schema_version: 2,
+    selector: review.selector, with_model: true,
+    recipe_revision_id: "different-revision", reclaimed_bytes: 10,
     state: "succeeded", progress: {phase: "completed", completed_bytes: 10, total_bytes_known: true},
   };
   vi.spyOn(crypto, "randomUUID").mockReturnValue(wrongReceipt.request_key as ReturnType<typeof crypto.randomUUID>);
@@ -166,8 +151,8 @@ test.each(["disconnect", "timeout"])("an accepted POST with %s recovers through 
   const review = cacheRemovalReview({selector: "publisher/recipe", with_model: false});
   const accepted: RecipeOperatorResponse = {
     action: "remove", operation_id: "recovered-operation", request_key: "00000000-0000-4000-8000-000000000933",
-    selector: review.selector, review_digest: review.review_digest, with_model: false,
-    recipe_revision_id: review.target_identity, reclaimed_bytes: 0, schema_version: 2,
+    selector: review.selector, with_model: false,
+    recipe_revision_id: review.target_identity, reclaimed_bytes: 0,
     state: "queued", progress: {phase: "queued", completed_bytes: 0, total_bytes_known: false},
   };
   vi.spyOn(crypto, "randomUUID").mockReturnValue(accepted.request_key as ReturnType<typeof crypto.randomUUID>);
@@ -203,9 +188,8 @@ test.each(["disconnect", "timeout"])("an accepted POST with %s recovers through 
   expect(calls.filter(call => call.method === "POST" && call.path.endsWith("/remove"))).toHaveLength(1);
   const requestLookup = calls.find(call => call.path.endsWith("/requests/" + accepted.request_key));
   expect(requestLookup?.method).toBe("GET");
-  expect(calls[1]?.body).toMatchObject({
+  expect(calls[1]?.body).toEqual({
     request_key: accepted.request_key,
-    review_digest: review.review_digest,
     with_model: false,
   });
 });

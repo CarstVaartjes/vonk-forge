@@ -15,7 +15,6 @@ from typing import Literal, cast
 if TYPE_CHECKING:
   from ..models.evidence_context import EvidenceContext
   from ..models.failure_diagnostics import FailureDiagnostics
-  from ..models.operation_failure_evidence import OperationFailureEvidence
 
 
 
@@ -33,8 +32,9 @@ class FailureEvidenceBundle:
             collector_errors (list[str]):
             context (EvidenceContext):
             diagnostics (FailureDiagnostics):
-            receipt (OperationFailureEvidence): Small, sanitized operator evidence safe to expose in status responses.
+            error_code (str):
             summary (str):
+            detail (None | str | Unset):
             schema_version (Literal[2] | Unset):  Default: 2.
      """
 
@@ -42,8 +42,9 @@ class FailureEvidenceBundle:
     collector_errors: list[str]
     context: EvidenceContext
     diagnostics: FailureDiagnostics
-    receipt: OperationFailureEvidence
+    error_code: str
     summary: str
+    detail: None | str | Unset = UNSET
     schema_version: Literal[2] | Unset = 2
 
 
@@ -53,7 +54,6 @@ class FailureEvidenceBundle:
     def to_dict(self) -> dict[str, Any]:
         from ..models.evidence_context import EvidenceContext # noqa: PLC0415
         from ..models.failure_diagnostics import FailureDiagnostics # noqa: PLC0415
-        from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         collected_at = self.collected_at
 
         collector_errors = self.collector_errors
@@ -64,9 +64,15 @@ class FailureEvidenceBundle:
 
         diagnostics = self.diagnostics.to_dict()
 
-        receipt = self.receipt.to_dict()
+        error_code = self.error_code
 
         summary = self.summary
+
+        detail: None | str | Unset
+        if isinstance(self.detail, Unset):
+            detail = UNSET
+        else:
+            detail = self.detail
 
         schema_version = self.schema_version
 
@@ -78,9 +84,11 @@ class FailureEvidenceBundle:
             "collector_errors": collector_errors,
             "context": context,
             "diagnostics": diagnostics,
-            "receipt": receipt,
+            "error_code": error_code,
             "summary": summary,
         })
+        if detail is not UNSET:
+            field_dict["detail"] = detail
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -92,7 +100,6 @@ class FailureEvidenceBundle:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.evidence_context import EvidenceContext # noqa: PLC0415
         from ..models.failure_diagnostics import FailureDiagnostics # noqa: PLC0415
-        from ..models.operation_failure_evidence import OperationFailureEvidence # noqa: PLC0415
         d = dict(src_dict)
         collected_at = d.pop("collected_at")
 
@@ -109,12 +116,19 @@ class FailureEvidenceBundle:
 
 
 
-        receipt = OperationFailureEvidence.from_dict(d.pop("receipt"))
-
-
-
+        error_code = d.pop("error_code")
 
         summary = d.pop("summary")
+
+        def _parse_detail(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        detail = _parse_detail(d.pop("detail", UNSET))
+
 
         schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
@@ -125,8 +139,9 @@ class FailureEvidenceBundle:
             collector_errors=collector_errors,
             context=context,
             diagnostics=diagnostics,
-            receipt=receipt,
+            error_code=error_code,
             summary=summary,
+            detail=detail,
             schema_version=schema_version,
         )
 

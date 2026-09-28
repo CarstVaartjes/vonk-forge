@@ -80,7 +80,6 @@ MUTATION_ROLES = {
     ("POST", "/api/catalog/managed-recipes/sync"): frozenset({"administrator"}),
     ("POST", "/api/key"): frozenset({"administrator"}),
     ("POST", "/api/key/{name}/revoke"): frozenset({"administrator"}),
-    ("PUT", "/api/catalog/source-bundles/{sha256}"): frozenset({"administrator"}),
     ("POST", "/api/recipe/runs/{run_id}/artifact-jobs"): frozenset(
         {"administrator", "operator"}
     ),

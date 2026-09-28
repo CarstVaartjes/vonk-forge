@@ -122,7 +122,6 @@ def test_selected_running_profile_reconciles_drift_without_roster_change(
     assert preview.allowed is True, preview.reasons
     accepted = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(881),
         actor="admin",
     )
@@ -164,7 +163,6 @@ def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edi
     assert preview.allowed is True, preview.reasons
     accepted = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(880),
         actor="admin",
     )
@@ -242,10 +240,8 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
     profile = service.create(
         FleetProfileInput(name="Idle fleet", assignments=[]), actor="admin"
     )
-    accepted_preview = service.preview(profile.id)
     accepted = service.apply(
         profile.id,
-        plan_digest=accepted_preview.plan_digest,
         request_key=_uuid(887),
         actor="admin",
     )
@@ -307,10 +303,8 @@ def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recover
     profile = service.create(
         FleetProfileInput(name="Idle fleet", assignments=[]), actor="admin"
     )
-    accepted_preview = service.preview(profile.id)
     accepted = service.apply(
         profile.id,
-        plan_digest=accepted_preview.plan_digest,
         request_key=_uuid(889),
         actor="admin",
     )
@@ -423,7 +417,6 @@ def test_empty_live_fleet_accepts_an_all_idle_profile(postgres_engine: Engine) -
     assert preview.scope.node_ids == []
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(888),
         actor="admin",
     )
@@ -445,10 +438,8 @@ def test_failed_newer_load_stays_selected_instead_of_falling_back_to_success(
     profile = service.create(
         FleetProfileInput(name="Idle then running", assignments=[]), actor="admin"
     )
-    first_preview = service.preview(profile.id)
     first = service.apply(
         profile.id,
-        plan_digest=first_preview.plan_digest,
         request_key=_uuid(881),
         actor="admin",
     )
@@ -459,10 +450,8 @@ def test_failed_newer_load_stays_selected_instead_of_falling_back_to_success(
         _input(recipe_revision_id).model_copy(update={"expected_revision": 1}),
         actor="admin",
     )
-    newer_preview = service.preview(profile.id)
     newer = service.apply(
         profile.id,
-        plan_digest=newer_preview.plan_digest,
         request_key=_uuid(882),
         actor="admin",
     )
@@ -508,7 +497,6 @@ def test_pending_profile_edit_is_rejected_before_selection_after_restart(
     assert preview.allowed is True
     accepted = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(883),
         actor="admin",
     )
@@ -631,10 +619,8 @@ def test_retry_uses_selected_snapshot_after_saved_profile_edit(
     _recipe_id, recipe_revision_id = _seed(sessions)
     service = _service(sessions)
     profile = service.create(_input(recipe_revision_id), actor="admin")
-    preview = service.preview(profile.id)
     accepted = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(885),
         actor="admin",
     )

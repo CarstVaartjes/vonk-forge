@@ -12,10 +12,8 @@ from ..models.fleet_action_response_action import check_fleet_action_response_ac
 from ..models.fleet_action_response_action import FleetActionResponseAction
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.deployment_provenance import DeploymentProvenance
   from ..models.enrollment_grant_response import EnrollmentGrantResponse
 
 
@@ -38,9 +36,7 @@ class FleetActionResponse:
             node_id (None | str | Unset):
             operation_id (None | str | Unset):
             plan_digest (None | str | Unset):
-            provenance (DeploymentProvenance | None | Unset):
             request_key (None | str | Unset):
-            schema_version (Literal[2] | Unset):  Default: 2.
             targets (list[str] | Unset):
      """
 
@@ -52,9 +48,7 @@ class FleetActionResponse:
     node_id: None | str | Unset = UNSET
     operation_id: None | str | Unset = UNSET
     plan_digest: None | str | Unset = UNSET
-    provenance: DeploymentProvenance | None | Unset = UNSET
     request_key: None | str | Unset = UNSET
-    schema_version: Literal[2] | Unset = 2
     targets: list[str] | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -63,7 +57,6 @@ class FleetActionResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.deployment_provenance import DeploymentProvenance # noqa: PLC0415
         from ..models.enrollment_grant_response import EnrollmentGrantResponse # noqa: PLC0415
         action: str = self.action
 
@@ -107,21 +100,11 @@ class FleetActionResponse:
         else:
             plan_digest = self.plan_digest
 
-        provenance: dict[str, Any] | None | Unset
-        if isinstance(self.provenance, Unset):
-            provenance = UNSET
-        elif isinstance(self.provenance, DeploymentProvenance):
-            provenance = self.provenance.to_dict()
-        else:
-            provenance = self.provenance
-
         request_key: None | str | Unset
         if isinstance(self.request_key, Unset):
             request_key = UNSET
         else:
             request_key = self.request_key
-
-        schema_version = self.schema_version
 
         targets: list[str] | Unset = UNSET
         if not isinstance(self.targets, Unset):
@@ -148,12 +131,8 @@ class FleetActionResponse:
             field_dict["operation_id"] = operation_id
         if plan_digest is not UNSET:
             field_dict["plan_digest"] = plan_digest
-        if provenance is not UNSET:
-            field_dict["provenance"] = provenance
         if request_key is not UNSET:
             field_dict["request_key"] = request_key
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
         if targets is not UNSET:
             field_dict["targets"] = targets
 
@@ -163,7 +142,6 @@ class FleetActionResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.deployment_provenance import DeploymentProvenance # noqa: PLC0415
         from ..models.enrollment_grant_response import EnrollmentGrantResponse # noqa: PLC0415
         d = dict(src_dict)
         action = check_fleet_action_response_action(d.pop("action"))
@@ -243,26 +221,6 @@ class FleetActionResponse:
         plan_digest = _parse_plan_digest(d.pop("plan_digest", UNSET))
 
 
-        def _parse_provenance(data: object) -> DeploymentProvenance | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                provenance_type_0 = DeploymentProvenance.from_dict(data)
-
-
-
-                return provenance_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(DeploymentProvenance | None | Unset, data)
-
-        provenance = _parse_provenance(d.pop("provenance", UNSET))
-
-
         def _parse_request_key(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -272,10 +230,6 @@ class FleetActionResponse:
 
         request_key = _parse_request_key(d.pop("request_key", UNSET))
 
-
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
         targets = cast(list[str], d.pop("targets", UNSET))
 
@@ -289,9 +243,7 @@ class FleetActionResponse:
             node_id=node_id,
             operation_id=operation_id,
             plan_digest=plan_digest,
-            provenance=provenance,
             request_key=request_key,
-            schema_version=schema_version,
             targets=targets,
         )
 

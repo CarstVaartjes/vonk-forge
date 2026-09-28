@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import Literal, cast
 
 
@@ -33,7 +32,6 @@ class InstallationNodePayload:
             required_bytes (int):
             role (str):
             state (str):
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     entity_id: str
@@ -45,7 +43,6 @@ class InstallationNodePayload:
     required_bytes: int
     role: str
     state: str
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -70,8 +67,6 @@ class InstallationNodePayload:
 
         state = self.state
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -86,8 +81,6 @@ class InstallationNodePayload:
             "role": role,
             "state": state,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -116,10 +109,6 @@ class InstallationNodePayload:
 
         state = d.pop("state")
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         installation_node_payload = cls(
             entity_id=entity_id,
             entity_kind=entity_kind,
@@ -130,7 +119,6 @@ class InstallationNodePayload:
             required_bytes=required_bytes,
             role=role,
             state=state,
-            schema_version=schema_version,
         )
 
         return installation_node_payload

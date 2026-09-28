@@ -96,18 +96,3 @@ def test_every_service_has_bounded_logging() -> None:
         assert service["logging"]["driver"] == "local"
         assert service["logging"]["options"]["max-size"]
         assert service["logging"]["options"]["max-file"]
-
-
-def test_controller_observation_writer_uses_only_its_persistent_named_volume() -> None:
-    document = _rendered()
-    api = document["services"]["control-api"]
-    assert api["user"] == "0:0"
-    [mount] = [
-        item
-        for item in api["volumes"]
-        if item.get("target") == "/run/vonk-deployment-observations"
-    ]
-    assert mount["type"] == "volume"
-    assert mount["source"] == "deployment-observations"
-    assert mount.get("read_only", False) is False
-    assert "deployment-observations" in document["volumes"]

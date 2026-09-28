@@ -51,7 +51,6 @@ class ProfileClient:
             }
         if path == "/api/profile/2/definition":
             return {
-                "schema_version": 2,
                 "id": "11111111-1111-4111-8111-111111111111",
                 "number": 2,
                 "revision": 7,

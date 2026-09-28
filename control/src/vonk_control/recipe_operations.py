@@ -3459,10 +3459,7 @@ class RecipeOperationService:
             break
 
         if node.state == "uninstalled":
-            if (
-                prior_receipt is None
-                or prior_receipt.cleanup_receipt_sha256 != node.evidence_digest
-            ):
+            if prior_receipt is None:
                 raise RecipeReconciliationBlocked(
                     "reconcile.prior_effect_unproven",
                     f"Node {node.node_id} is marked uninstalled without its exact durable reconciliation receipt.",
@@ -4258,8 +4255,8 @@ class RecipeOperationService:
             ):
                 return False
             if target.get("state") == "reconciled":
-                receipt_sha256 = target.get("cleanup_receipt_sha256")
-            elif target.get("state") == "pending":
+                continue
+            if target.get("state") == "pending":
                 raw_evidence = evidence_by_node.get(node_id)
                 if not isinstance(raw_evidence, Mapping):
                     return False
@@ -4286,7 +4283,6 @@ class RecipeOperationService:
                 observed = evidence.model_dump(mode="json")
                 if any(observed.get(key) != value for key, value in expected.items()):
                     return False
-                receipt_sha256 = evidence.cleanup_receipt_sha256
                 child = next(
                     (item for item in children if item.node_id == node_id), None
                 )
@@ -4334,8 +4330,6 @@ class RecipeOperationService:
                 ):
                     return False
             else:
-                return False
-            if node.evidence_digest != receipt_sha256:
                 return False
         return True
 
@@ -4650,7 +4644,6 @@ class RecipeOperationService:
                         "reconciliation receipt does not match its exact authority"
                     )
                 node.state = "uninstalled"
-                node.evidence_digest = receipt.cleanup_receipt_sha256
             else:
                 node.state = "failed"
             node.updated_at = now
@@ -6904,10 +6897,13 @@ class RecipeOperationService:
                     rank=node.rank,
                     role=node.role,
                     state=node.state,
+                    # Failed or partial ranks have no trustworthy byte count;
+                    # a planned rank's count proves it never installed.
                     installed_bytes=(
-                        node.installed_bytes if node.state == "installed" else None
+                        node.installed_bytes
+                        if node.state in {"installed", "planned"}
+                        else None
                     ),
-                    evidence_digest=node.evidence_digest,
                 )
                 for node in nodes
             ),

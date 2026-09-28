@@ -31,13 +31,8 @@ class SettingsError(ValueError):
 
 # Fixed file locations inside the Controller containers.
 SECRETS_ROOT = Path("/run/vonk-normalized-secrets")
-DEPLOYMENT_OBSERVATIONS_PATH = Path(
-    "/run/vonk-deployment-observations/observations.json"
-)
 STATE_ROOT = Path("/state")
 AGENT_ARTIFACT_ROOT = Path("/state/agent-artifacts")
-WORKLOAD_TUF_METADATA_ROOT = Path("/workload-tuf/metadata")
-WORKLOAD_TUF_TARGET_ROOT = Path("/workload-tuf/targets")
 MODEL_CACHE_ROOT = Path("/state/model-cache")
 
 # Fixed in-project relays and the private certificate authority.
@@ -269,8 +264,6 @@ class Settings:
     secrets_root: Path = SECRETS_ROOT
     state_path: Path = STATE_ROOT
     agent_artifact_root: Path = AGENT_ARTIFACT_ROOT
-    workload_tuf_metadata_root: Path = WORKLOAD_TUF_METADATA_ROOT
-    workload_tuf_target_root: Path = WORKLOAD_TUF_TARGET_ROOT
     model_cache_root: Path = MODEL_CACHE_ROOT
 
     @classmethod
@@ -368,14 +361,6 @@ class Settings:
     @property
     def agent_ca_root_path(self) -> Path:
         return self.secrets_root / "step-ca-root-certificate"
-
-    @property
-    def package_helper_grant_private_key_path(self) -> Path | None:
-        return _regular_file(self.secrets_root / "package-helper-grant-private-key")
-
-    @property
-    def package_helper_receipt_private_key_path(self) -> Path | None:
-        return _regular_file(self.secrets_root / "package-helper-receipt-private-key")
 
     @property
     def host_runtime_grant_private_key_path(self) -> Path | None:

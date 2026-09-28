@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
 from typing import Literal, cast
 
 
@@ -32,7 +31,6 @@ class RecipeRunPayload:
             mapping_id (str):
             route_state (str):
             state (str):
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     alias: str
@@ -43,7 +41,6 @@ class RecipeRunPayload:
     mapping_id: str
     route_state: str
     state: str
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -66,8 +63,6 @@ class RecipeRunPayload:
 
         state = self.state
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -81,8 +76,6 @@ class RecipeRunPayload:
             "route_state": route_state,
             "state": state,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -109,10 +102,6 @@ class RecipeRunPayload:
 
         state = d.pop("state")
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         recipe_run_payload = cls(
             alias=alias,
             entity_id=entity_id,
@@ -122,7 +111,6 @@ class RecipeRunPayload:
             mapping_id=mapping_id,
             route_state=route_state,
             state=state,
-            schema_version=schema_version,
         )
 
         return recipe_run_payload

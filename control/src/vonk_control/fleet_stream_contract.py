@@ -32,13 +32,11 @@ class _FleetStreamModel(StrictJSONModel):
 
 
 class FleetSnapshotEvent(_FleetStreamModel):
-    schema_version: Literal[1] = 1
     reset_reason: Annotated[str, Field(min_length=1, max_length=64)]
     snapshot: FleetSnapshot
 
 
 class FleetTelemetryEvent(_FleetStreamModel):
-    schema_version: Literal[1] = 1
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     sample: TelemetryPoint
 
@@ -124,7 +122,6 @@ FleetChangeAdapter = TypeAdapter(FleetChange)
 
 
 class FleetChangeEvent(_FleetStreamModel):
-    schema_version: Literal[1] = 1
     projection_refresh_required: Literal[True] = True
     change: FleetChange
 

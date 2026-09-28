@@ -16,7 +16,6 @@ EnrollmentId = Annotated[str, StringConstraints(pattern=ENROLLMENT_ID_PATTERN)]
 class EnrollmentGrantStatus(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema_version: Literal[2] = 2
     id: EnrollmentId
     state: Literal["pending", "expired", "consumed", "revoked"]
     purpose: Literal["new-node", "re-enroll"]

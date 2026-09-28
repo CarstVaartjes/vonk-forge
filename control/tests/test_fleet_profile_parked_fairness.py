@@ -42,7 +42,6 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
         parked_profile.number,
         request_key=_uuid(930),
         actor="admin",
-        expected_plan_digest=service.preview(parked_profile.id).plan_digest,
     )
     assert service.tick()
     parked_child_id = service.application(parked.id).current_operation_id
@@ -67,7 +66,6 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
         active_profile.number,
         request_key=_uuid(931),
         actor="admin",
-        expected_plan_digest=service.preview(active_profile.id).plan_digest,
     )
     with sessions.begin() as session:
         parked_row = session.get(FleetProfileApplication, parked.id)

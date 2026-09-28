@@ -47,33 +47,20 @@ a missing or rotating credential skips that upload and is logged.
 Every two seconds it takes one fresh snapshot and attempts at most one upload
 with a two-second timeout. Missed ticks are skipped, and a failed upload drops
 its snapshot: there are no retries, queues or local history. The Controller
-stamps receive time and node identity and owns ordering and aggregation.
+stamps receive time and node identity and owns ordering.
 
 Presence comes from successful control-lane contact and telemetry freshness is
 reported separately, so a node can be online while its metrics are stale.
 Inventory is sent at startup, after enrollment or reconnection, and on an
 explicit refresh or change, not on a timer.
 
-## History resolutions and retention
+## History and retention
 
-The history API requires an explicit resolution:
-
-- `raw`: up to 24 hours, individual samples;
-- `minute`: up to 30 days, one-minute buckets;
-- `fifteen-minute`: up to 365 days, 15-minute buckets.
-
-The API caps responses at 1,500 points and returns an honest empty result when
-no data exists. Long windows use the coarsest suitable resolution. The UI uses
-minute buckets through 24 hours, full 15-minute coverage for seven days, and
-the newest bounded 1,500 15-minute buckets for longer windows. The labels make
-that bounded behavior explicit.
-
-Rollup points include source sample count, gap count, and per-metric count,
-minimum, mean, and maximum. Charts show the min–max range and count-weighted
-mean; they do not interpolate missing samples. Retention keeps raw samples for
-24 hours, minute buckets for 30 days, 15-minute buckets for 365 days, and
-expires Fleet events at their expiry time. Maintenance rolls up before pruning
-and uses bounded work with node-first locking.
+The Controller keeps each node's latest sample for the Fleet view and stream,
+and keeps raw samples for 24 hours. It does not keep rollups or serve a
+history API. Metric history lives in Prometheus, which scrapes the
+Controller's `/metrics` gauges and backs the Grafana Fleet dashboard. Fleet
+events expire at their expiry time; a bounded worker pass prunes both.
 
 ## Troubleshooting
 
@@ -82,10 +69,8 @@ and uses bounded work with node-first locking.
   node merely to make a chart non-empty.
 - **Stale telemetry:** inspect the Fleet evidence and stream reconnect state;
   retry the browser request after the agent is healthy.
-- **Empty history:** verify the selected node, time window, and explicit
-  resolution. Empty is valid when the retention window has no samples.
-- **Chart error:** use Retry. The selected window and keyboard focus should be
-  preserved; record the request error without pasting secrets.
+- **Empty Grafana history:** check that Prometheus is scraping the
+  Controller's `/metrics` endpoint.
 
 Use the local fixture for reproduction. Do not experiment with retention,
 agent cadence, migrations, or worker settings against NAS/Spark production

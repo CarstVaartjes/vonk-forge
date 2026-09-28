@@ -89,23 +89,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/artifact-jobs/{job_id}/result": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Result Metadata */
-        get: operations["getArtifactJobResult"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/artifact-jobs/{job_id}/submit": {
         parameters: {
             query?: never;
@@ -117,23 +100,6 @@ export interface paths {
         put?: never;
         /** Submit Job */
         post: operations["submitArtifactJob"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/audit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Audit View */
-        get: operations["listAuditEvents"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -218,23 +184,6 @@ export interface paths {
         /** Get Managed Recipe Catalog Sync Status */
         get: operations["getManagedRecipeCatalogSyncStatus"];
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/catalog/source-bundles/{sha256}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Upload Source Bundle */
-        put: operations["uploadRecipeSourceBundle"];
         post?: never;
         delete?: never;
         options?: never;
@@ -378,74 +327,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/fleet/{selector}/metrics/capabilities": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Fleet Metrics Capabilities */
-        get: operations["getFleetMetricsCapabilities"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/fleet/{selector}/metrics/current": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Fleet Metrics Current */
-        get: operations["getFleetMetricsCurrent"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/fleet/{selector}/metrics/history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Fleet Metrics History */
-        get: operations["getFleetMetricsHistory"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/fleet/{selector}/metrics/workloads": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Fleet Metrics Workloads */
-        get: operations["getFleetMetricsWorkloads"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/fleet/{selector}/re-enroll": {
         parameters: {
             query?: never;
@@ -497,23 +378,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/identity-history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Identity History View */
-        get: operations["listIdentityHistory"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/jobs": {
         parameters: {
             query?: never;
@@ -540,23 +404,6 @@ export interface paths {
         };
         /** Job View */
         get: operations["getJob"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/jobs/{job_id}/logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Job Log List */
-        get: operations["listJobLogs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -611,23 +458,6 @@ export interface paths {
         put?: never;
         /** Revoke Gateway Key */
         post: operations["revokeGatewayKey"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/model": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Model Status */
-        get: operations["getModelStatus"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1012,23 +842,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/recipe": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Recipe Status */
-        get: operations["getRecipeStatus"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/recipe/installations/{installation_id}/reconcile": {
         parameters: {
             query?: never;
@@ -1258,36 +1071,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AgentDeploymentEvidence */
-        AgentDeploymentEvidence: {
-            /** Binary Sha256 */
-            binary_sha256?: string | null;
-            /**
-             * Boundary
-             * @default agent_deployment
-             * @constant
-             */
-            boundary: "agent_deployment";
-            /** Build Digest */
-            build_digest?: string | null;
-            /**
-             * Connectivity
-             * @enum {string}
-             */
-            connectivity: "recent" | "offline" | "unknown";
-            /** Display Name */
-            display_name: string;
-            evidence: components["schemas"]["EvidenceAge"];
-            /** Node Id */
-            node_id: string;
-            package_evidence: components["schemas"]["EvidenceAge"];
-            /** Package Sha256 */
-            package_sha256?: string | null;
-            /** Semantic Version */
-            semantic_version?: string | null;
-            /** State */
-            state: string;
-        };
         /**
          * AgentFailureKind
          * @enum {string}
@@ -1367,12 +1150,6 @@ export interface components {
             node_id: string;
             /** Parent Job Id */
             parent_job_id: string;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
             /** State */
             state: string;
         };
@@ -1441,12 +1218,6 @@ export interface components {
         };
         /** ArtifactJobCapabilitiesResponse */
         ArtifactJobCapabilitiesResponse: {
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
             storage: components["schemas"]["ArtifactJobStorageCapabilities"];
             transport: components["schemas"]["ArtifactJobTransportCapabilities"];
         };
@@ -1712,26 +1483,6 @@ export interface components {
             /** Verified Oci Layout Sha256 */
             verified_oci_layout_sha256?: string | null;
         };
-        /** AuditEventResponse */
-        AuditEventResponse: {
-            /** Action */
-            action: string;
-            /** Actor */
-            actor: string;
-            /** Authority Revision */
-            authority_revision?: string | null;
-            /** Occurred At */
-            occurred_at?: string | null;
-            /** Request Id */
-            request_id: string;
-            /** Targets */
-            targets: string[];
-        };
-        /** AuditResponse */
-        AuditResponse: {
-            /** Events */
-            events: components["schemas"]["AuditEventResponse"][];
-        };
         /** AuthSession */
         AuthSession: {
             /**
@@ -1976,30 +1727,6 @@ export interface components {
             /** Reason */
             reason: string;
         };
-        /**
-         * CapabilityEvidence
-         * @description One capability's declaration and evidence, kept separate by owner.
-         */
-        CapabilityEvidence: {
-            /** Declared */
-            declared: boolean | null;
-            /** Detail */
-            detail?: string | null;
-            /**
-             * Evidence
-             * @enum {string}
-             */
-            evidence: "tested" | "observed" | "not-tested" | "unknown";
-            /** Evidence Digest */
-            evidence_digest?: string | null;
-            /** Name */
-            name: string;
-            /**
-             * Support
-             * @enum {string}
-             */
-            support: "supported" | "unsupported" | "unknown";
-        };
         /** CapacityReservations */
         CapacityReservations: {
             /** Disk Bytes */
@@ -2139,48 +1866,6 @@ export interface components {
             /** Verified Sha256 */
             verified_sha256?: string | null;
         };
-        /** DeploymentModelIdentity */
-        DeploymentModelIdentity: {
-            /** Artifact Key */
-            artifact_key?: string | null;
-            /** Content Sha256 */
-            content_sha256: string;
-            /** Publisher */
-            publisher: string;
-            /** Repository */
-            repository: string;
-            /** Revision */
-            revision: string;
-            /** Selection Id */
-            selection_id: string;
-            /** Slug */
-            slug: string;
-        };
-        /** DeploymentProvenance */
-        DeploymentProvenance: {
-            /** Agents */
-            agents: components["schemas"]["AgentDeploymentEvidence"][];
-            /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Invalid Operation Evidence */
-            invalid_operation_evidence: components["schemas"]["InvalidOperationEvidence"][];
-            /** Invalid Operation Evidence Omitted Count */
-            invalid_operation_evidence_omitted_count: number;
-            /** Platform */
-            platform: components["schemas"]["PlatformBoundary"][];
-            recipe_library: components["schemas"]["RecipeLibraryEvidence"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-            /** Workloads */
-            workloads: components["schemas"]["WorkloadProvenance"][];
-        };
         /**
          * DistributionAssignment
          * @description Controller authorization for one node, generation and object set.
@@ -2301,8 +1986,6 @@ export interface components {
             observed_at: string;
             /** Plan Digest */
             plan_digest: string;
-            /** State */
-            state: string;
         };
         /** EnrollmentGrantResponse */
         EnrollmentGrantResponse: {
@@ -2355,12 +2038,6 @@ export interface components {
             purpose: "new-node" | "re-enroll";
             /** Revoked At */
             revoked_at: string | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /**
              * State
              * @enum {string}
@@ -2417,42 +2094,16 @@ export interface components {
              */
             source: "remote_rejection" | "transport" | "local_io" | "protocol" | "unknown";
         };
-        /** EvidenceAge */
-        EvidenceAge: {
-            /** Age Seconds */
-            age_seconds?: number | null;
-            /**
-             * Freshness
-             * @default unknown
-             * @enum {string}
-             */
-            freshness: "current" | "stale" | "unknown";
-            /** Observed At */
-            observed_at?: string | null;
-            /** Source */
-            source: string;
-        };
         /** EvidenceContext */
         EvidenceContext: {
             /** Attempt */
             attempt: number;
-            /** Authority Revision */
-            authority_revision?: string | null;
             /** Kind */
             kind: string;
             /** Node Ids */
             node_ids: string[];
-            /**
-             * Omitted Node Count
-             * @default 0
-             */
-            omitted_node_count: number;
             /** Operation Id */
             operation_id: string;
-            /** Payload Digest */
-            payload_digest?: string | null;
-            /** Plan Digest */
-            plan_digest?: string | null;
             /** Rank */
             rank?: number | null;
             /**
@@ -2500,8 +2151,11 @@ export interface components {
             /** Collector Errors */
             collector_errors: string[];
             context: components["schemas"]["EvidenceContext"];
+            /** Detail */
+            detail?: string | null;
             diagnostics: components["schemas"]["FailureDiagnostics"];
-            receipt: components["schemas"]["OperationFailureEvidence"];
+            /** Error Code */
+            error_code: string;
             /**
              * Schema Version
              * @default 2
@@ -2547,15 +2201,8 @@ export interface components {
             operation_id?: string | null;
             /** Plan Digest */
             plan_digest?: string | null;
-            provenance?: components["schemas"]["DeploymentProvenance"] | null;
             /** Request Key */
             request_key?: string | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** State */
             state: string;
             /** Targets */
@@ -2571,12 +2218,6 @@ export interface components {
              * @constant
              */
             projection_refresh_required: true;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
         };
         /** FleetEnrollRequest */
         FleetEnrollRequest: {
@@ -2584,11 +2225,6 @@ export interface components {
             name: string;
             /** Request Key */
             request_key: string;
-            /**
-             * Ttl Seconds
-             * @default 900
-             */
-            ttl_seconds: number;
         };
         /** FleetLogEntry */
         FleetLogEntry: {
@@ -2624,12 +2260,6 @@ export interface components {
             node_id: string;
             /** Retained */
             retained: boolean;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Since */
             since: string | null;
         };
@@ -2655,37 +2285,6 @@ export interface components {
             lifecycle: string;
             /** Loaded */
             loaded: components["schemas"]["RunPresence"][];
-            reservations: components["schemas"]["CapacityReservations"];
-            telemetry: components["schemas"]["TelemetryState"] | null;
-            /** Warnings */
-            warnings: components["schemas"]["ProjectionReason"][];
-        };
-        /**
-         * FleetNodeDetailResponse
-         * @description Current Fleet node projection with supply-chain evidence attached.
-         */
-        FleetNodeDetailResponse: {
-            connection: components["schemas"]["NodeConnection"];
-            /** Display Name */
-            display_name: string;
-            /** Hostname */
-            hostname: string;
-            /** Id */
-            id: string;
-            /** Installed */
-            installed: components["schemas"]["RecipePresence"][];
-            inventory: components["schemas"]["InventoryState"] | null;
-            /** Ip Address */
-            ip_address?: string | null;
-            /** Labels */
-            labels: {
-                [key: string]: string;
-            };
-            /** Lifecycle */
-            lifecycle: string;
-            /** Loaded */
-            loaded: components["schemas"]["RunPresence"][];
-            provenance?: components["schemas"]["DeploymentProvenance"] | null;
             reservations: components["schemas"]["CapacityReservations"];
             telemetry: components["schemas"]["TelemetryState"] | null;
             /** Warnings */
@@ -2919,12 +2518,6 @@ export interface components {
             result: components["schemas"]["FleetProfileApplicationResult"] | null;
             /** Retry Of Application Id */
             retry_of_application_id?: string | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /**
              * State
              * @enum {string}
@@ -3161,12 +2754,6 @@ export interface components {
             number: number;
             /** Revision */
             revision: number;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /**
          * FleetProfileEffects
@@ -3308,17 +2895,9 @@ export interface components {
             generated_at: string;
             /** Profiles */
             profiles: components["schemas"]["FleetProfileView"][];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /** FleetProfileLoadRequest */
         FleetProfileLoadRequest: {
-            /** Plan Digest */
-            plan_digest: string;
             /** Request Key */
             request_key: string;
         };
@@ -3707,12 +3286,6 @@ export interface components {
             /** Revision */
             revision: number;
             /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-            /**
              * Status
              * @default draft
              */
@@ -3748,23 +3321,11 @@ export interface components {
             generated_at: string;
             /** Nodes */
             nodes: components["schemas"]["FleetNode"][];
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
         };
         /** FleetSnapshotEvent */
         FleetSnapshotEvent: {
             /** Reset Reason */
             reset_reason: string;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
             snapshot: components["schemas"]["FleetSnapshot"];
         };
         /**
@@ -3777,12 +3338,6 @@ export interface components {
             /** Node Id */
             node_id: string;
             sample: components["schemas"]["TelemetryPoint"];
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
         };
         /** FleetUpgradeRequest */
         FleetUpgradeRequest: {
@@ -3795,12 +3350,6 @@ export interface components {
             request_key: string;
             /** Selectors */
             selectors?: string[] | null;
-            /**
-             * Strategy
-             * @default one-at-a-time
-             * @constant
-             */
-            strategy: "one-at-a-time";
         };
         /** FloatParameter */
         FloatParameter: {
@@ -3894,8 +3443,6 @@ export interface components {
         GatewayKeyRevoked: {
             /** Name */
             name: string;
-            /** Revoked */
-            revoked: boolean;
         };
         /**
          * GatewayKeyView
@@ -3940,28 +3487,6 @@ export interface components {
             /** Repository */
             repository: string;
         };
-        /** IdentityHistoryItem */
-        IdentityHistoryItem: {
-            /** Agent State */
-            agent_state: string;
-            /** Certificate Fingerprint */
-            certificate_fingerprint?: string | null;
-            /** Certificate Generation */
-            certificate_generation?: number | null;
-            /** Certificate Serial */
-            certificate_serial?: string | null;
-            /** Enrolled At */
-            enrolled_at?: string | null;
-            /** Node Id */
-            node_id: string;
-            /** Revoked At */
-            revoked_at?: string | null;
-        };
-        /** IdentityHistoryResponse */
-        IdentityHistoryResponse: {
-            /** Identities */
-            identities: components["schemas"]["IdentityHistoryItem"][];
-        };
         /** InstallationNodeChange */
         InstallationNodeChange: {
             /** Entity Id */
@@ -4001,14 +3526,16 @@ export interface components {
             required_bytes: number;
             /** Role */
             role: string;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
             /** State */
             state: string;
+        };
+        /**
+         * InstallationReconcileRequest
+         * @description Idempotency key for reconciling the installation named by the path.
+         */
+        InstallationReconcileRequest: {
+            /** Request Key */
+            request_key: string;
         };
         /** IntegerParameter */
         IntegerParameter: {
@@ -4029,28 +3556,6 @@ export interface components {
              * @enum {string}
              */
             type: "integer";
-        };
-        /**
-         * InvalidOperationEvidence
-         * @description A bounded diagnostic for a stored agent receipt outside the current contract.
-         */
-        InvalidOperationEvidence: {
-            /** Detail */
-            detail: string;
-            /**
-             * Document
-             * @enum {string}
-             */
-            document: "payload" | "result";
-            /**
-             * Kind
-             * @constant
-             */
-            kind: "recipe.start";
-            /** Node Id */
-            node_id: string;
-            /** Operation Id */
-            operation_id: string;
         };
         /** InventoryState */
         InventoryState: {
@@ -4165,13 +3670,6 @@ export interface components {
             /** Targets */
             targets: string[];
         };
-        /** JobLogsResponse */
-        JobLogsResponse: {
-            /** Digests */
-            digests: string[];
-            /** Job Id */
-            job_id: string;
-        };
         /** JobOperationResponse */
         JobOperationResponse: {
             /** Attempt */
@@ -4186,7 +3684,6 @@ export interface components {
             /** Node Id */
             node_id: string;
             progress?: components["schemas"]["OperationProgress"] | null;
-            provenance?: components["schemas"]["OperationEvidenceProvenance"] | null;
             recovery?: components["schemas"]["OperationRecovery"] | null;
             /** State */
             state: string;
@@ -4204,12 +3701,6 @@ export interface components {
             entity_kind: "job";
             /** Kind */
             kind: string;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
             /** State */
             state: string;
             /** Target Count */
@@ -4402,12 +3893,6 @@ export interface components {
             /** Quantization */
             quantization: string;
             resources: components["schemas"]["LibraryResourceProjection"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Selector */
             selector: string;
             /**
@@ -4460,12 +3945,6 @@ export interface components {
             /** Node Count */
             node_count: number;
             resources: components["schemas"]["LibraryResourceProjection"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Selector */
             selector: string;
             /**
@@ -4598,12 +4077,6 @@ export interface components {
             repository: string;
             /** Request Key */
             request_key: string;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
             /** Skipped Count */
             skipped_count: number;
             /** Stale Recipes */
@@ -4764,12 +4237,6 @@ export interface components {
             reason: string;
             /** Request Key */
             request_key: string;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /** ModelCacheDownloadResult */
         ModelCacheDownloadResult: {
@@ -4793,12 +4260,6 @@ export interface components {
         ModelCacheOperatorRequest: {
             /** Request Key */
             request_key: string;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /**
          * ModelCacheOperatorResponse
@@ -4831,14 +4292,6 @@ export interface components {
             request_key: string;
             /** Result */
             result?: components["schemas"]["ModelCacheDownloadResult"] | components["schemas"]["ModelCacheRemovalResult"] | null;
-            /** Review Digest */
-            review_digest?: string | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Selector */
             selector: string;
             /**
@@ -4854,23 +4307,10 @@ export interface components {
         /**
          * ModelCacheRemovalRequest
          * @description Request key for removing the named model against current state.
-         *
-         *     ``model_content_sha256`` and ``review_digest`` are accepted for clients
-         *     that show a prior review; they are advisory and never refuse the request.
          */
         ModelCacheRemovalRequest: {
-            /** Model Content Sha256 */
-            model_content_sha256?: string | null;
             /** Request Key */
             request_key: string;
-            /** Review Digest */
-            review_digest?: string | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /** ModelCacheRemovalResult */
         ModelCacheRemovalResult: {
@@ -4972,12 +4412,6 @@ export interface components {
             /** Quantization */
             quantization: string;
             resources: components["schemas"]["LibraryResourceProjection"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Selector */
             selector: string;
             /**
@@ -5059,12 +4493,6 @@ export interface components {
             models: components["schemas"]["LibraryModelProjection"][];
             /** Next Cursor */
             next_cursor: string | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /** ModelLicense */
         ModelLicense: {
@@ -5228,12 +4656,6 @@ export interface components {
             node_id: string;
             /** Profile Changed */
             profile_changed?: boolean | null;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
         };
         /**
          * OperationCheckpoint
@@ -5269,14 +4691,7 @@ export interface components {
             /** Parent Id */
             parent_id?: string | null;
             progress?: components["schemas"]["OperationProgress"] | null;
-            provenance?: components["schemas"]["OperationEvidenceProvenance"] | null;
             recovery?: components["schemas"]["OperationRecovery"] | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** State */
             state: string;
             /** Status Reason */
@@ -5284,27 +4699,13 @@ export interface components {
             /** Updated At */
             updated_at?: string | null;
         };
-        /** OperationEvidenceDownload */
+        /**
+         * OperationEvidenceDownload
+         * @description Where this failed attempt's diagnostics render on request.
+         */
         OperationEvidenceDownload: {
             /** Href */
             href: string;
-            /** Media Type */
-            media_type: string;
-            /** Sha256 */
-            sha256: string;
-            /** Size Bytes */
-            size_bytes: number;
-        };
-        /** OperationEvidenceProvenance */
-        OperationEvidenceProvenance: {
-            /** Authority Revision */
-            authority_revision?: string | null;
-            /** Collected At */
-            collected_at?: string | null;
-            /** Evidence Digest */
-            evidence_digest?: string | null;
-            /** Source */
-            source: string;
         };
         /**
          * OperationFailureEvidence
@@ -5452,12 +4853,6 @@ export interface components {
             next_cursor?: string | null;
             /** Operations */
             operations: components["schemas"]["OperationDetailResponse"][];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Total */
             total: number;
         };
@@ -5515,43 +4910,6 @@ export interface components {
         };
         ParameterDefinition: components["schemas"]["StringParameter"] | components["schemas"]["IntegerParameter"] | components["schemas"]["FloatParameter"] | components["schemas"]["BooleanParameter"] | components["schemas"]["EnumParameter"];
         ParameterScalar: boolean | number | string;
-        /** PhysicalAcceptanceEvidence */
-        PhysicalAcceptanceEvidence: {
-            /**
-             * Boundary
-             * @default physical_acceptance
-             * @constant
-             */
-            boundary: "physical_acceptance";
-            evidence: components["schemas"]["EvidenceAge"];
-            /** Evidence Sha256 */
-            evidence_sha256?: string | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "accepted" | "failed" | "not_qualified" | "identity_mismatch";
-        };
-        /** PlatformBoundary */
-        PlatformBoundary: {
-            /**
-             * Boundary
-             * @enum {string}
-             */
-            boundary: "repository" | "publication" | "controller_deployment";
-            evidence: components["schemas"]["EvidenceAge"];
-            /** Image Digest */
-            image_digest?: string | null;
-            /** Manifest Sha256 */
-            manifest_sha256?: string | null;
-            /** Source Commit */
-            source_commit?: string | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "observed" | "unknown" | "repository_not_published" | "publication_not_deployed";
-        };
         /** PreparationReason */
         PreparationReason: {
             /** Code */
@@ -5580,38 +4938,6 @@ export interface components {
              * @enum {string}
              */
             severity: "info" | "warning" | "error";
-        };
-        /** RankProvenance */
-        RankProvenance: {
-            /**
-             * Identity Agreement
-             * @enum {string}
-             */
-            identity_agreement: "match" | "mismatch" | "unknown";
-            installation_evidence: components["schemas"]["EvidenceAge"];
-            /** Installation Evidence Sha256 */
-            installation_evidence_sha256?: string | null;
-            /** Installation State */
-            installation_state: string;
-            /** Node Id */
-            node_id: string;
-            /** Observation Receipt Sha256 */
-            observation_receipt_sha256?: string | null;
-            /** Observed Artifact Set Sha256 */
-            observed_artifact_set_sha256?: string | null;
-            /** Observed Image Digest */
-            observed_image_digest?: string | null;
-            /** Observed Recipe Sha256 */
-            observed_recipe_sha256?: string | null;
-            /** Observed Run Generation */
-            observed_run_generation?: number | null;
-            /** Rank */
-            rank: number;
-            /** Role */
-            role: string;
-            runtime_evidence: components["schemas"]["EvidenceAge"];
-            /** Runtime State */
-            runtime_state: string;
         };
         /** RecipeBenchmark */
         RecipeBenchmark: {
@@ -5702,12 +5028,6 @@ export interface components {
             reason: string;
             /** Request Key */
             request_key: string;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /**
          * RecipeDefinition
@@ -5757,12 +5077,6 @@ export interface components {
             /** Node Count */
             node_count: number;
             resources: components["schemas"]["LibraryResourceProjection"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Selector */
             selector: string;
             /**
@@ -5792,12 +5106,6 @@ export interface components {
         RecipeDownloadRequest: {
             /** Request Key */
             request_key: string;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /** RecipeEmbeddingSettings */
         RecipeEmbeddingSettings: {
@@ -5975,12 +5283,6 @@ export interface components {
             request_id: string;
             result?: components["schemas"]["RecipeImageAvailabilityResult"] | null;
             /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-            /**
              * State
              * @enum {string}
              */
@@ -6099,12 +5401,6 @@ export interface components {
             mapping_id: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
             /** State */
             state: string;
         };
@@ -6197,16 +5493,6 @@ export interface components {
                 [key: string]: components["schemas"]["RecipeSetting"];
             };
         };
-        /** RecipeLibraryEvidence */
-        RecipeLibraryEvidence: {
-            evidence: components["schemas"]["EvidenceAge"];
-            /** Repository */
-            repository?: string | null;
-            /** Source Commit */
-            source_commit?: string | null;
-            /** State */
-            state: string;
-        };
         /** RecipeLibraryResponse */
         RecipeLibraryResponse: {
             facets: components["schemas"]["LibraryFacetValues"];
@@ -6221,12 +5507,6 @@ export interface components {
             next_cursor: string | null;
             /** Recipes */
             recipes: components["schemas"]["LibraryRecipeProjection"][];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /** RecipeLifecycle */
         RecipeLifecycle: {
@@ -6342,14 +5622,6 @@ export interface components {
         RecipeOperatorRequest: {
             /** Request Key */
             request_key: string;
-            /** Review Digest */
-            review_digest?: string | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** With Model */
             with_model: boolean;
         };
@@ -6380,14 +5652,6 @@ export interface components {
             reclaimed_bytes: number;
             /** Request Key */
             request_key: string;
-            /** Review Digest */
-            review_digest: string;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Selector */
             selector: string;
             /**
@@ -6657,12 +5921,6 @@ export interface components {
             mapping_id: string;
             /** Route State */
             route_state: string;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
             /** State */
             state: string;
         };
@@ -6984,12 +6242,6 @@ export interface components {
             all: boolean;
             /** Request Key */
             request_key: string;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /** Selectors */
             selectors?: string[];
         };
@@ -7027,12 +6279,6 @@ export interface components {
             request_id: string;
             /** Resume Condition */
             resume_condition?: string | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
             /**
              * State
              * @enum {string}
@@ -7224,12 +6470,6 @@ export interface components {
             role: string;
             /** Run Id */
             run_id: string;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
             /** State */
             state: string;
         };
@@ -7417,54 +6657,6 @@ export interface components {
              * @default false
              */
             total_bytes_known: boolean;
-        };
-        /** RunSwitchCleanupApplyRequest */
-        RunSwitchCleanupApplyRequest: {
-            /**
-             * Cleanup Mode
-             * @default uninstall
-             * @enum {string}
-             */
-            cleanup_mode: "uninstall" | "reconcile";
-            /** Installation Id */
-            installation_id: string;
-            invocation?: components["schemas"]["InvocationMetadata"];
-            /** Plan Digest */
-            plan_digest?: string | null;
-            /** Request Key */
-            request_key?: string | null;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-        };
-        /**
-         * RunSwitchCleanupPreviewRequest
-         * @description Ask Run/Switch to remove one installation that is no longer desired.
-         *
-         *     Cleanup is authorized by the installation's own uninstall assessment, so it
-         *     never requires launch readiness: removing work must not depend on being able
-         *     to start work.  Run/Switch still owns the sequencing, the child reference
-         *     and the retry budget for the removal.
-         */
-        RunSwitchCleanupPreviewRequest: {
-            /**
-             * Cleanup Mode
-             * @default uninstall
-             * @enum {string}
-             */
-            cleanup_mode: "uninstall" | "reconcile";
-            /** Installation Id */
-            installation_id: string;
-            invocation?: components["schemas"]["InvocationMetadata"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
         };
         /** RunSwitchCleanupResult */
         RunSwitchCleanupResult: {
@@ -7755,12 +6947,6 @@ export interface components {
             request_key: string;
             result?: components["schemas"]["RunSwitchOperationResult"] | null;
             /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-            /**
              * State
              * @enum {string}
              */
@@ -7923,8 +7109,6 @@ export interface components {
             installation_state: string | null;
             invocation: components["schemas"]["InvocationMetadata"];
             mapping: components["schemas"]["MappingSelection"] | null;
-            /** Model Capabilities */
-            model_capabilities: components["schemas"]["CapabilityEvidence"][];
             /** Model Content Sha256 */
             model_content_sha256: string | null;
             /** Phases */
@@ -7936,8 +7120,6 @@ export interface components {
             profile_stop_scope?: components["schemas"]["RunSwitchProfileStopScope"] | null;
             /** Recipe Build Id */
             recipe_build_id: string | null;
-            /** Recipe Capabilities */
-            recipe_capabilities: components["schemas"]["CapabilityEvidence"][];
             /** Recipe Content Sha256 */
             recipe_content_sha256: string | null;
             /** Recipe Revision Id */
@@ -8605,19 +7787,6 @@ export interface components {
              */
             schema_version: 1;
         };
-        /** SourceBundleResponse */
-        SourceBundleResponse: {
-            /** Archive Bytes */
-            archive_bytes: number;
-            /** File Count */
-            file_count: number;
-            /** Files */
-            files: string[];
-            /** Sha256 */
-            sha256: string;
-            /** Total Bytes */
-            total_bytes: number;
-        };
         /** SparkFit */
         SparkFit: {
             /** Allowed */
@@ -8757,34 +7926,6 @@ export interface components {
             /** Verified Sha256 */
             verified_sha256?: string | null;
         };
-        /** TelemetryCapabilitiesResponse */
-        TelemetryCapabilitiesResponse: {
-            /** Capabilities */
-            capabilities: components["schemas"]["TelemetryCapability"][];
-            /**
-             * Freshness
-             * @enum {string}
-             */
-            freshness: "live" | "delayed" | "stale";
-            /** Node Id */
-            node_id: string;
-            /**
-             * Observed At
-             * Format: date-time
-             */
-            observed_at: string;
-            /**
-             * Received At
-             * Format: date-time
-             */
-            received_at: string;
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-        };
         /** TelemetryCapability */
         TelemetryCapability: {
             /** Device Id */
@@ -8822,162 +7963,12 @@ export interface components {
             /** Unit */
             unit: string;
         };
-        /**
-         * TelemetryCurrentResponse
-         * @description Versioned current telemetry response with an explicit rich payload.
-         */
-        TelemetryCurrentResponse: {
-            /**
-             * Freshness
-             * @enum {string}
-             */
-            freshness: "live" | "delayed" | "stale";
-            /** Node Id */
-            node_id: string;
-            /**
-             * Observed At
-             * Format: date-time
-             */
-            observed_at: string;
-            /**
-             * Received At
-             * Format: date-time
-             */
-            received_at: string;
-            sample: components["schemas"]["TelemetryPoint"];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-        };
         /** TelemetryDetails */
         "TelemetryDetails-Output": {
             /** Accelerator Name */
             accelerator_name?: string | null;
             /** Accelerator Performance State */
             accelerator_performance_state?: string | null;
-        };
-        /**
-         * TelemetryHistoryMetadata
-         * @description Coverage and downsampling facts for a history/export response.
-         */
-        TelemetryHistoryMetadata: {
-            /** Actual End */
-            actual_end?: string | null;
-            /**
-             * Actual Resolution
-             * @enum {string}
-             */
-            actual_resolution: "raw" | "minute" | "fifteen-minute" | "daily";
-            /** Actual Start */
-            actual_start?: string | null;
-            /** Coverage Seconds */
-            coverage_seconds: number;
-            /** Downsampled */
-            downsampled: boolean;
-            /** Gap Samples */
-            gap_samples: number;
-            /** Point Count */
-            point_count: number;
-            /**
-             * Requested End
-             * Format: date-time
-             */
-            requested_end: string;
-            /**
-             * Requested Resolution
-             * @enum {string}
-             */
-            requested_resolution: "raw" | "minute" | "fifteen-minute" | "daily";
-            /**
-             * Requested Start
-             * Format: date-time
-             */
-            requested_start: string;
-            /**
-             * Timezone
-             * @default UTC
-             * @constant
-             */
-            timezone: "UTC";
-        };
-        /** TelemetryHistoryResponse */
-        TelemetryHistoryResponse: {
-            /**
-             * End
-             * Format: date-time
-             */
-            end: string;
-            /** Maximum Points */
-            maximum_points: number;
-            metadata: components["schemas"]["TelemetryHistoryMetadata"];
-            /** Node Id */
-            node_id: string;
-            /** Points */
-            points: (components["schemas"]["TelemetryPoint"] | components["schemas"]["TelemetryRollupPoint"])[];
-            /**
-             * Resolution
-             * @enum {string}
-             */
-            resolution: "raw" | "minute" | "fifteen-minute" | "daily";
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
-            /**
-             * Start
-             * Format: date-time
-             */
-            start: string;
-        };
-        /** TelemetryMetricSummary */
-        TelemetryMetricSummary: {
-            /**
-             * Aggregation
-             * @default mean
-             */
-            aggregation: string;
-            /** Count */
-            count: number;
-            /** Device Id */
-            device_id?: string | null;
-            /** Interface Name */
-            interface_name?: string | null;
-            /** Key */
-            key?: string | null;
-            /** Maximum */
-            maximum: number;
-            /** Mean */
-            mean: number;
-            /**
-             * Measurement Kind
-             * @default measured
-             */
-            measurement_kind: string;
-            /** Minimum */
-            minimum: number;
-            /** Process Id */
-            process_id?: number | null;
-            /** Process Name */
-            process_name?: string | null;
-            /** Run Id */
-            run_id?: string | null;
-            /** Scope */
-            scope?: string | null;
-            /**
-             * Source
-             * @default controller-derived
-             */
-            source: string;
-            /**
-             * Unit
-             * @default unknown
-             */
-            unit: string;
         };
         /** TelemetryMetrics */
         TelemetryMetrics: {
@@ -9055,34 +8046,6 @@ export interface components {
             host_uptime_seconds?: number | null;
             /** Source Observed At */
             source_observed_at?: string | null;
-        };
-        /** TelemetryRollupPoint */
-        TelemetryRollupPoint: {
-            /**
-             * Bucket End
-             * Format: date-time
-             */
-            bucket_end: string;
-            /**
-             * Bucket Start
-             * Format: date-time
-             */
-            bucket_start: string;
-            /** Gap Samples */
-            gap_samples: number;
-            /** Metrics */
-            metrics: {
-                [key: string]: components["schemas"]["TelemetryMetricSummary"];
-            };
-            /** Node Id */
-            node_id: string;
-            /**
-             * Resolution
-             * @enum {string}
-             */
-            resolution: "minute" | "fifteen-minute" | "daily";
-            /** Source Sample Count */
-            source_sample_count: number;
         };
         /** TelemetryRuntime */
         TelemetryRuntime: {
@@ -9236,40 +8199,6 @@ export interface components {
             /** Title */
             title?: string | null;
         };
-        /** TelemetryWorkloadsResponse */
-        TelemetryWorkloadsResponse: {
-            /**
-             * Freshness
-             * @enum {string}
-             */
-            freshness: "live" | "delayed" | "stale";
-            /** Node Id */
-            node_id: string;
-            /**
-             * Observed At
-             * Format: date-time
-             */
-            observed_at: string;
-            /**
-             * Received At
-             * Format: date-time
-             */
-            received_at: string;
-            /** Run Id */
-            run_id?: string | null;
-            /** Runtimes */
-            runtimes: components["schemas"]["TelemetryRuntime"][];
-            /**
-             * Schema Version
-             * @default 2
-             * @constant
-             */
-            schema_version: 2;
-            /** State */
-            state?: string | null;
-            /** Workloads */
-            workloads: components["schemas"]["TelemetryWorkload"][];
-        };
         /**
          * TensorParallelStartEvidence
          * @description Exact endpoint evidence for a phase-free tensor-parallel start.
@@ -9311,58 +8240,6 @@ export interface components {
             runtime_arguments_sha256: string;
             /** World Size */
             world_size: number;
-        };
-        /** WorkloadProvenance */
-        WorkloadProvenance: {
-            /** Build Id */
-            build_id?: string | null;
-            /** Build Input Sha256 */
-            build_input_sha256?: string | null;
-            /** Current Mapping Generation */
-            current_mapping_generation?: number | null;
-            /** Image Digest */
-            image_digest: string;
-            /** Installation Id */
-            installation_id: string;
-            /** Installation State */
-            installation_state: string;
-            /**
-             * Mapping Agreement
-             * @enum {string}
-             */
-            mapping_agreement: "match" | "mismatch" | "unknown";
-            /** Mapping Generation */
-            mapping_generation: number;
-            /** Mapping Id */
-            mapping_id: string;
-            /** Models */
-            models: components["schemas"]["DeploymentModelIdentity"][];
-            physical_acceptance: components["schemas"]["PhysicalAcceptanceEvidence"];
-            /**
-             * Rank Agreement
-             * @enum {string}
-             */
-            rank_agreement: "match" | "mismatch" | "unknown";
-            /** Ranks */
-            ranks: components["schemas"]["RankProvenance"][];
-            /** Recipe Content Sha256 */
-            recipe_content_sha256: string;
-            /** Recipe Publisher */
-            recipe_publisher: string;
-            /** Recipe Revision Id */
-            recipe_revision_id: string;
-            /** Recipe Revision Number */
-            recipe_revision_number: number;
-            /** Recipe Slug */
-            recipe_slug: string;
-            /** Run Generation */
-            run_generation?: number | null;
-            /** Run Id */
-            run_id?: string | null;
-            /** Run State */
-            run_state?: string | null;
-            /** Source Bundle Sha256 */
-            source_bundle_sha256?: string | null;
         };
     };
     responses: never;
@@ -9694,73 +8571,6 @@ export interface operations {
             };
         };
     };
-    getArtifactJobResult: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ArtifactJobResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
     submitArtifactJob: {
         parameters: {
             query?: never;
@@ -9835,44 +8645,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    listAuditEvents: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AuditResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -10145,68 +8917,6 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    uploadRecipeSourceBundle: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                sha256: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/octet-stream": string;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SourceBundleResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10628,7 +9338,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FleetNodeDetailResponse"];
+                    "application/json": components["schemas"]["FleetNode"];
                 };
             };
             /** @description Unauthorized */
@@ -10693,260 +9403,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FleetLogResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    getFleetMetricsCapabilities: {
-        parameters: {
-            query?: {
-                key?: string | null;
-                device_id?: string | null;
-                interface_name?: string | null;
-                run_id?: string | null;
-            };
-            header?: never;
-            path: {
-                selector: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TelemetryCapabilitiesResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    getFleetMetricsCurrent: {
-        parameters: {
-            query?: {
-                key?: string | null;
-                device_id?: string | null;
-                interface_name?: string | null;
-                run_id?: string | null;
-            };
-            header?: never;
-            path: {
-                selector: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TelemetryCurrentResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    getFleetMetricsHistory: {
-        parameters: {
-            query: {
-                start: string;
-                end: string;
-                resolution: "raw" | "minute" | "fifteen-minute" | "daily";
-                maximum_points?: number;
-                key?: string | null;
-                device_id?: string | null;
-                interface_name?: string | null;
-                run_id?: string | null;
-            };
-            header?: never;
-            path: {
-                selector: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TelemetryHistoryResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    getFleetMetricsWorkloads: {
-        parameters: {
-            query?: {
-                run_id?: string | null;
-                state?: string | null;
-            };
-            header?: never;
-            path: {
-                selector: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TelemetryWorkloadsResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -11214,44 +9670,6 @@ export interface operations {
             };
         };
     };
-    listIdentityHistory: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IdentityHistoryResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-        };
-    };
     listJobs: {
         parameters: {
             query?: {
@@ -11321,73 +9739,6 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    listJobLogs: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JobLogsResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11696,53 +10047,6 @@ export interface operations {
             };
         };
     };
-    getModelStatus: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelLibraryResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
     listModelLibrary: {
         parameters: {
             query?: {
@@ -11757,6 +10061,7 @@ export interface operations {
                 search?: string | null;
                 updated_since?: string | null;
                 sort?: "updated" | "name";
+                local?: boolean;
             };
             header?: never;
             path?: never;
@@ -13245,53 +11550,6 @@ export interface operations {
             };
         };
     };
-    getRecipeStatus: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeLibraryResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Unprocessable Content */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RequestValidationProblem"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
     applyRecipeInstallationReconciliation: {
         parameters: {
             query?: never;
@@ -13303,7 +11561,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RunSwitchCleanupApplyRequest"];
+                "application/json": components["schemas"]["InstallationReconcileRequest"];
             };
         };
         responses: {
@@ -13381,11 +11639,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RunSwitchCleanupPreviewRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

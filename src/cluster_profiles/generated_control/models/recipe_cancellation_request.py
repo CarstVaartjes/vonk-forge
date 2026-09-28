@@ -8,8 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..types import UNSET, Unset
-from typing import Literal, cast
 
 
 
@@ -26,12 +24,10 @@ class RecipeCancellationRequest:
         Attributes:
             reason (str):
             request_key (str):
-            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     reason: str
     request_key: str
-    schema_version: Literal[2] | Unset = 2
 
 
 
@@ -42,8 +38,6 @@ class RecipeCancellationRequest:
 
         request_key = self.request_key
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -51,8 +45,6 @@ class RecipeCancellationRequest:
             "reason": reason,
             "request_key": request_key,
         })
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -65,14 +57,9 @@ class RecipeCancellationRequest:
 
         request_key = d.pop("request_key")
 
-        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 2 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
-
         recipe_cancellation_request = cls(
             reason=reason,
             request_key=request_key,
-            schema_version=schema_version,
         )
 
         return recipe_cancellation_request

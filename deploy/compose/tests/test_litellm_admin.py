@@ -165,10 +165,6 @@ def test_every_runtime_config_enables_ui_but_keeps_database_models_disabled() ->
     assert bootstrap["general_settings"]["disable_admin_ui"] is False
     assert bootstrap["general_settings"]["store_model_in_db"] is False
 
-    static = (ROOT / "deploy/compose/litellm/config.yaml").read_text()
-    assert "  disable_admin_ui: false\n" in static
-    assert "  store_model_in_db: false\n" in static
-
 
 def test_controller_key_relay_forwards_only_litellm_key_routes() -> None:
     relay = _server_on_port(_adapted_caddy(_environment()), 8087)

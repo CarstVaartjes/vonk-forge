@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.agent_operation_change import AgentOperationChange
@@ -36,12 +35,10 @@ class FleetChangeEvent:
             change (AgentOperationChange | InstallationNodeChange | JobChange | NodeProfileChange | RecipeInstallationChange
                 | RecipeRunChange | RunNodeChange):
             projection_refresh_required (bool | Unset):  Default: True.
-            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     change: AgentOperationChange | InstallationNodeChange | JobChange | NodeProfileChange | RecipeInstallationChange | RecipeRunChange | RunNodeChange
     projection_refresh_required: bool | Unset = True
-    schema_version: Literal[1] | Unset = 1
 
 
 
@@ -74,8 +71,6 @@ class FleetChangeEvent:
 
         projection_refresh_required = self.projection_refresh_required
 
-        schema_version = self.schema_version
-
 
         field_dict: dict[str, Any] = {}
 
@@ -84,8 +79,6 @@ class FleetChangeEvent:
         })
         if projection_refresh_required is not UNSET:
             field_dict["projection_refresh_required"] = projection_refresh_required
-        if schema_version is not UNSET:
-            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -175,14 +168,9 @@ class FleetChangeEvent:
 
         projection_refresh_required = d.pop("projection_refresh_required", UNSET)
 
-        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
-
         fleet_change_event = cls(
             change=change,
             projection_refresh_required=projection_refresh_required,
-            schema_version=schema_version,
         )
 
         return fleet_change_event

@@ -12,7 +12,6 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.jobs import JobService
@@ -58,7 +57,6 @@ def _client(
     app = create_app(
         jobs=JobService(sessions, clock=lambda: datetime(2026, 9, 10, tzinfo=UTC)),
         tokens=codec,
-        audits=MemoryAuditStore(),
         now=lambda: 1,
         fleet_profiles=profiles
         or FleetProfileService(
@@ -136,7 +134,6 @@ def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None
                             "node_id": "spk_" + "a" * 32,
                             "observed_at": "2026-09-10T00:00:00Z",
                             "plan_digest": "a" * 64,
-                            "state": "published",
                         },
                     }
                 ],
@@ -367,7 +364,7 @@ def test_production_app_composes_fleet_profiles_with_preparation_authority() -> 
     assert "FleetProfileService(" not in source
 
 
-def test_profile_load_requires_and_applies_the_reviewed_preview_digest() -> None:
+def test_profile_load_applies_the_current_saved_profile() -> None:
     client, codec = _client(with_idle_spark=True)
     headers = _headers(codec, "administrator")
     saved = client.put(
@@ -379,14 +376,9 @@ def test_profile_load_requires_and_applies_the_reviewed_preview_digest() -> None
 
     first_preview = client.post("/api/profile/1/preview", headers=headers)
     assert first_preview.status_code == 200
-    old_digest = first_preview.json()["plan_digest"]
     assert first_preview.json()["allowed"] is True
 
-    missing = client.post(
-        "/api/profile/1/load",
-        headers=headers,
-        json={"request_key": "11111111-1111-4111-8111-111111111111"},
-    )
+    missing = client.post("/api/profile/1/load", headers=headers, json={})
     assert missing.status_code == 422
 
     changed = client.put(
@@ -400,19 +392,17 @@ def test_profile_load_requires_and_applies_the_reviewed_preview_digest() -> None
         "/api/profile/1/load",
         headers=headers,
         json={
-            "plan_digest": old_digest,
             "request_key": "22222222-2222-4222-8222-222222222222",
         },
     )
     assert stale.status_code == 202
     assert stale.json()["profile_digest"] == changed.json()["profile_digest"]
 
-    current_preview = client.post("/api/profile/1/preview", headers=headers)
+    client.post("/api/profile/1/preview", headers=headers)
     loaded = client.post(
         "/api/profile/1/load",
         headers=headers,
         json={
-            "plan_digest": current_preview.json()["plan_digest"],
             "request_key": "33333333-3333-4333-8333-333333333333",
         },
     )

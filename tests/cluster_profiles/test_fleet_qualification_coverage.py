@@ -154,69 +154,12 @@ def _preparation(row: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _provenance(row: dict[str, object]) -> dict[str, dict[str, object]]:
-    # The authenticated Spark package receipt identifies the agent's Debian
-    # package, independently of this row's recipe source bundle digest.
-    agent_package_sha = "d" * 64
-    return {
-        _NODE: {
-            "schema_version": 2,
-            "platform": [
-                {
-                    "boundary": "controller_deployment",
-                    "state": "observed",
-                    "image_digest": "sha256:" + "8" * 64,
-                    "evidence": {"freshness": "current", "source": "test"},
-                }
-            ],
-            "agents": [
-                {
-                    "boundary": "agent_deployment",
-                    "node_id": _NODE,
-                    "connectivity": "recent",
-                    "state": "online",
-                    "build_digest": "sha256:" + "9" * 64,
-                    "binary_sha256": "b" * 64,
-                    "package_sha256": agent_package_sha,
-                    "evidence": {"freshness": "current", "source": "test"},
-                    # Receipt age is historical; current contact and exact
-                    # observed build/binary identity own reuse validity.
-                    "package_evidence": {"freshness": "stale", "source": "old"},
-                }
-            ],
-        }
-    }
+_PLATFORM_BUILD = "8" * 64
 
 
-def _provenance_for_nodes(
-    row: dict[str, object], node_ids: tuple[str, ...]
-) -> dict[str, dict[str, object]]:
-    agent_package_sha = "d" * 64
+def _agent_builds(node_ids: tuple[str, ...] = (_NODE,)) -> dict[str, str]:
     return {
-        node_id: {
-            "schema_version": 2,
-            "platform": [
-                {
-                    "boundary": "controller_deployment",
-                    "state": "observed",
-                    "image_digest": "sha256:" + "8" * 64,
-                    "evidence": {"freshness": "current", "source": "test"},
-                }
-            ],
-            "agents": [
-                {
-                    "boundary": "agent_deployment",
-                    "node_id": node_id,
-                    "connectivity": "recent",
-                    "state": "online",
-                    "build_digest": "sha256:" + ("9" if index == 0 else "a") * 64,
-                    "binary_sha256": "b" * 64,
-                    "package_sha256": agent_package_sha,
-                    "evidence": {"freshness": "current", "source": "test"},
-                    "package_evidence": {"freshness": "stale", "source": "old"},
-                }
-            ],
-        }
+        node_id: ("9" if index == 0 else "a") * 64
         for index, node_id in enumerate(node_ids)
     }
 
@@ -272,7 +215,6 @@ def _dual_snapshot(
             }
         )
     return {
-        "schema_version": 1,
         "event_cursor": cursor,
         "generated_at": (_DUAL_T0 + timedelta(minutes=minute)).isoformat(),
         "authority_revision": "fleet-revision-3",
@@ -478,7 +420,8 @@ def _build(
         lane_id=1,
         ledger_records=ledger.records,
         exact_preparation=prep,
-        deployment_provenance_by_node=_provenance(row),
+        platform_build_sha256=_PLATFORM_BUILD,
+        agent_build_sha256_by_node=_agent_builds(),
         receipt_schema=recovery_coverage_receipt_json_schema(),
     )
     return envelope, definition, reference, row
@@ -581,15 +524,13 @@ def test_consumer_rejects_rehashed_receipts_that_canonical_validator_rejects(
         )
 
 
-def test_builder_fails_closed_when_current_platform_or_agent_identity_is_missing(
+def test_builder_fails_closed_when_an_agent_build_identity_is_missing(
     tmp_path: Path,
 ) -> None:
     definition, reference, row = _scope()
     prep = _preparation(row)
     ledger = _successful_single_lane_ledger(tmp_path, row, prep)
-    provenance = _provenance(row)
-    provenance[_NODE]["platform"][0]["evidence"]["freshness"] = "stale"  # type: ignore[index]
-    with pytest.raises(QualificationError, match="Controller deployment image"):
+    with pytest.raises(QualificationError, match="agent build identities"):
         build_recovery_coverage_receipt(
             coverage_definition=definition,
             coverage_reference=reference,
@@ -599,7 +540,8 @@ def test_builder_fails_closed_when_current_platform_or_agent_identity_is_missing
             lane_id=1,
             ledger_records=ledger.records,
             exact_preparation=prep,
-            deployment_provenance_by_node=provenance,
+            platform_build_sha256=_PLATFORM_BUILD,
+            agent_build_sha256_by_node={},
             receipt_schema=recovery_coverage_receipt_json_schema(),
         )
 
@@ -620,7 +562,8 @@ def test_builder_rejects_a_ledger_record_tampered_after_append(tmp_path: Path) -
             lane_id=1,
             ledger_records=records,
             exact_preparation=prep,
-            deployment_provenance_by_node=_provenance(row),
+            platform_build_sha256=_PLATFORM_BUILD,
+            agent_build_sha256_by_node=_agent_builds(),
             receipt_schema=recovery_coverage_receipt_json_schema(),
         )
 
@@ -958,7 +901,7 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
         endpoint_exists=lambda _endpoint: False,
     )
 
-    provenance = _provenance_for_nodes(host_row, _DUAL_NODES)
+    agent_builds = _agent_builds(_DUAL_NODES)
     for definition, reference, row, expected_mode in (
         (rank_definition, rank_reference, rank_row, "dual-rank-loss-recovery"),
         (host_definition, host_reference, host_row, "dual-host-restart"),
@@ -972,7 +915,8 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
             lane_id=lane_id,
             ledger_records=ledger.records,
             exact_preparation=prep,
-            deployment_provenance_by_node=provenance,
+            platform_build_sha256=_PLATFORM_BUILD,
+            agent_build_sha256_by_node=agent_builds,
             receipt_schema=recovery_coverage_receipt_json_schema(),
         )
         canonical = RecoveryCoverageReceiptEnvelope.model_validate(envelope)
@@ -1004,7 +948,8 @@ def test_actual_dual_recovery_producer_roundtrips_rank_and_host_receipts(
                         lane_id=lane_id,
                         ledger_records=tampered_records,
                         exact_preparation=prep,
-                        deployment_provenance_by_node=provenance,
+                        platform_build_sha256=_PLATFORM_BUILD,
+                        agent_build_sha256_by_node=agent_builds,
                         receipt_schema=recovery_coverage_receipt_json_schema(),
                     )
 

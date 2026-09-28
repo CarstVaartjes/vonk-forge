@@ -5,7 +5,6 @@ import hashlib
 import pytest
 from fastapi.testclient import TestClient
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 
 from .test_agent_api import Jobs
@@ -25,7 +24,6 @@ def test_create_app_enforces_artifact_mutation_roles_before_owner_effect(
     app = create_app(
         jobs=Jobs(),
         tokens=tokens,
-        audits=MemoryAuditStore(),
         artifact_jobs=service,
         now=lambda: now,
     )

@@ -8,10 +8,9 @@ import {StatusPill} from "./status-pill";
 import {FleetIcon} from "./icons";
 
 const apiFixture = {
-  audit: async () => ({events: []}),
   jobs: async () => ({jobs: [], next_cursor: null, total: 0}),
-  operations: async () => ({schema_version: 2, operations: [], next_cursor: null, total: 0}),
-  visualFleet: async () => ({schema_version: 1, event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
+  operations: async () => ({operations: [], next_cursor: null, total: 0}),
+  visualFleet: async () => ({event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
 } as unknown as ControlApi;
 
 afterEach(() => {

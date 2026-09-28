@@ -1638,10 +1638,6 @@ class ArtifactJobSmokeAdapter:
         created_records = _payloads(records, f"{event_prefix}.created")
         request_key = _request_key(plan_digest, recipe_key, event_prefix)
         capabilities = client.request("GET", "/api/artifact-jobs/capabilities")
-        if capabilities.get("schema_version") != 1:
-            raise QualificationError(
-                "controller artifact-job capabilities are incompatible"
-            )
         if created_records:
             created = _object(created_records[-1].get("job"), "artifact job")
         else:
@@ -1736,11 +1732,8 @@ class ArtifactJobSmokeAdapter:
                 raise QualificationError(
                     f"artifact-job smoke entered terminal state {status.get('state')}"
                 )
-            result = client.request(
-                "GET", f"/api/artifact-jobs/{_quote(job_id)}/result"
-            )
             try:
-                assertions = validate_outputs(recipe, result, client)
+                assertions = validate_outputs(recipe, status, client)
             except FixtureError as error:
                 raise QualificationError(str(error)) from error
         return {
@@ -3517,7 +3510,7 @@ class QualificationRunner:
                 query["cursor"] = cursor
             try:
                 page = RecipeLibraryResponse.from_dict(
-                    self.client.request("GET", "/api/recipe", query=query)
+                    self.client.request("GET", "/api/recipe/library", query=query)
                 )
             except (KeyError, TypeError, ValueError) as error:
                 errors.append(

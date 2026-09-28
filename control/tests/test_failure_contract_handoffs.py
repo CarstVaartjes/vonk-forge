@@ -11,7 +11,6 @@ from vonk_agent_protocol import AgentResult
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.models import (
     AgentCertificate,
@@ -44,7 +43,6 @@ def client_for(sessions, tmp_path):
     app = create_app(
         jobs=Jobs(),
         tokens=tokens,
-        audits=MemoryAuditStore(),
         now=lambda: 0,
         operations=operations,
     )

@@ -141,7 +141,6 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         assert preview.allowed, preview.reasons
         application = profiles.apply(
             profile.id,
-            plan_digest=preview.plan_digest,
             request_key=_uuid(942),
             actor="admin",
         )

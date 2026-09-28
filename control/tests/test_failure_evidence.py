@@ -1,24 +1,20 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-import vonk_control.failure_evidence as failure_evidence_module
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import AgentResult
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.failure_evidence import (
-    EvidenceRetention,
     FailureEvidenceBundle,
     FailureEvidenceService,
     collect_failure,
@@ -27,10 +23,6 @@ from vonk_control.failure_evidence import (
     sanitize_diagnostics,
 )
 from vonk_control.failure_evidence_api import install_failure_evidence_routes
-from vonk_control.failure_evidence_models import (
-    FailureEvidenceCursor,
-    FailureEvidenceRecord,
-)
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -70,15 +62,38 @@ def service(tmp_path):
     return FailureEvidenceService(sessions, clock=lambda: NOW)
 
 
+def store_failed_job(service, value: dict[str, object]) -> None:
+    """Persist ``value`` as a failed Controller job the download renders from."""
+    with service.sessions.begin() as session:
+        session.add(
+            Job(
+                id=value["id"],
+                request_id=str(uuid4()),
+                kind=value["kind"],
+                state="failed",
+                actor="test",
+                authority_revision="a" * 64,
+                targets=value["node_ids"],
+                payload_digest="b" * 64,
+                payload={},
+                result=value["result"],
+                current_attempt=value["attempt"],
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+
+def rendered(value) -> str:
+    return collect_failure(value, now=NOW).model_dump_json()
+
+
 def item(kind="recipe.build.v1", attempt=1):
     return {
         "id": str(uuid4()),
         "attempt": attempt,
         "kind": kind,
         "node_ids": ["spk_" + "a" * 32],
-        "authority_revision": "a" * 64,
-        "plan_digest": "b" * 64,
-        "payload_digest": "c" * 64,
         "updated_at": NOW.isoformat(),
         "progress": {"phase": "prepare"},
         "result": {
@@ -102,20 +117,17 @@ def item(kind="recipe.build.v1", attempt=1):
         "model-cache.download",
     ],
 )
-def test_every_operation_collector_keeps_phase_and_authority(service, kind):
+def test_every_operation_collector_keeps_phase_and_code(kind):
     value = item(kind)
     before = copy.deepcopy(value)
-    assert service.capture(value)
-    content, digest, bundle = service.read(value["id"], 1)
+    bundle = collect_failure(value, now=NOW)
     assert bundle.diagnostics.phase == "prepare"
     assert bundle.diagnostics.category == "platform-policy"
-    assert bundle.context.authority_revision == "a" * 64
+    assert bundle.error_code == "operation_failed"
+    assert bundle.detail == "proc-mount-denied"
     assert "permission denied" in bundle.diagnostics.stderr.text
     assert bundle.context.node_ids == value["node_ids"]
     assert value == before
-    assert not service.capture(value)
-    assert service.read(value["id"], 1)[0] == content
-    assert service.decorate(value)["result"]["evidence_download"]["sha256"] == digest
 
 
 @pytest.mark.parametrize(
@@ -135,110 +147,14 @@ def test_failure_classification_uses_codes(code, expected):
     assert collect_failure(value, now=NOW).diagnostics.category == expected
 
 
-def test_large_fleet_keeps_bounded_evidence_with_explicit_omissions(service):
+def test_large_fleet_keeps_bounded_evidence():
     value = item()
     value["node_ids"] = [f"spk_{index:032x}" for index in range(1024)]
-    service.capture(value)
-    content, _, bundle = service.read(value["id"], 1)
-    assert len(content) <= 32 * 1024
+    bundle = collect_failure(value, now=NOW)
     assert bundle.context.node_ids == value["node_ids"][:128]
-    assert bundle.context.omitted_node_count == 896
 
 
-def test_corrupt_stored_evidence_is_not_reported_as_absent(service):
-    """A stored record that no longer validates must fail, not disappear.
-
-    ``decorate`` used to swallow the read failure and omit
-    ``evidence_download``/``provenance``. The standalone ``/evidence`` route
-    answers the same input with 503, so the operation detail must agree
-    instead of presenting the corruption as missing evidence.
-    """
-
-    value = item()
-    service.capture(value)
-    with service.sessions.begin() as session:
-        record = session.get(FailureEvidenceRecord, (value["id"], 1))
-        assert record is not None
-        record.content = b"corrupt"
-    with pytest.raises(ValueError, match="failure evidence digest mismatch"):
-        service.decorate(value)
-
-
-def test_corrupt_stored_evidence_fails_operation_detail_and_evidence_route_alike(
-    service,
-):
-    """The composed operation detail and the download route agree on corruption."""
-
-    from vonk_control.api import create_app
-    from vonk_control.audit import MemoryAuditStore
-    from vonk_control.auth import Actor, TokenCodec
-    from vonk_control.operation_api import (
-        OperationApiServices,
-        OperationListPage,
-        OperationPage,
-    )
-
-    from .test_api import Jobs
-
-    value: dict[str, object] = {
-        **item(),
-        "state": "failed",
-        "created_at": NOW.isoformat(),
-    }
-    # The composed API consumes the same nested diagnostics as AgentResult.
-    diagnostics = collect_failure(value, now=NOW).diagnostics
-    result = value["result"]
-    assert isinstance(result, dict)
-    result.pop("stderr")
-    result["diagnostics"] = diagnostics.model_dump(mode="json")
-    service.capture(value)
-    codec = TokenCodec(b"k" * 32)
-
-    def job_operations(
-        _job_id: str, _operation_cursor: str | None, _limit: int
-    ) -> OperationPage:
-        raise AssertionError("job operations are not projected in this test")
-
-    operations = OperationApiServices(
-        endpoint=lambda _alias, _gateway: {},
-        agents=list,
-        job_operations=job_operations,
-        resume_job=lambda _: None,
-        get_operation=lambda _: value,
-        list_operations=lambda *_: OperationListPage([value], None, 1),
-    )
-    app = create_app(
-        jobs=Jobs(),
-        tokens=codec,
-        audits=MemoryAuditStore(),
-        now=lambda: 10,
-        operations=operations,
-        failure_evidence=service,
-    )
-    client = TestClient(app)
-    token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
-    headers = {"Authorization": f"Bearer {token}"}
-    url = f"/api/operations/{value['id']}"
-
-    assert client.get(url, headers=headers).status_code == 200
-    with service.sessions.begin() as session:
-        record = session.get(FailureEvidenceRecord, (value["id"], 1))
-        assert record is not None
-        record.content = b"corrupt"
-
-    assert client.get(url, headers=headers).status_code == 503
-    history = client.get("/api/operations", headers=headers)
-    assert history.status_code == 200
-    unreadable = next(
-        row for row in history.json()["operations"] if row["id"] == value["id"]
-    )
-    assert unreadable["state"] == "unavailable"
-    assert unreadable["failure"]["error_code"] == "operation_history_unreadable"
-    assert "resume" not in unreadable.get("recovery", {}).get("actions", [])
-    assert client.get(f"{url}/evidence?attempt=1", headers=headers).status_code == 503
-
-
-def test_redaction_handles_adversarial_values_before_persistence(service):
+def test_redaction_handles_adversarial_values_in_the_download(service):
     value = item()
     value["result"].update(
         {
@@ -257,8 +173,7 @@ def test_redaction_handles_adversarial_values_before_persistence(service):
             "nested": {"environment": {"HF_TOKEN": "sensitive"}},
         }
     )
-    service.capture(value)
-    content = service.read(value["id"], 1)[0].decode()
+    content = rendered(value)
     for secret in (
         "super-sensitive",
         "quoted multi word",
@@ -268,8 +183,6 @@ def test_redaction_handles_adversarial_values_before_persistence(service):
     ):
         assert secret not in content
     assert "permission denied" in content
-    with service.sessions() as session:
-        assert session.scalar(select(FailureEvidenceRecord)).content.decode() == content
 
 
 def test_redaction_keeps_a_constraint_violation_that_names_an_authorization_table() -> (
@@ -393,9 +306,9 @@ def test_collector_failure_preserves_original_result_and_is_separate(
     def fail(*_args, **_kwargs):
         raise RuntimeError("secret diagnostic error")
 
+    store_failed_job(service, value)
     monkeypatch.setattr("vonk_control.failure_evidence.collect_failure", fail)
-    service.capture(value)
-    bundle = service.read(value["id"], 1)[2]
+    bundle = service.read(value["id"], 1)
     assert bundle.collector_errors == ["collector-failed"]
     assert bundle.summary == value["result"]["reason"]
     assert value == before
@@ -404,13 +317,13 @@ def test_collector_failure_preserves_original_result_and_is_separate(
 
 def test_offline_node_uses_durable_evidence_without_probe(service):
     value = item("recipe.start")
-    service.capture(value)
-    bundle = service.read(value["id"], 1)[2]
+    store_failed_job(service, value)
+    bundle = service.read(value["id"], 1)
     assert bundle.diagnostics.collector_errors == ["agent-observations-unavailable"]
     assert bundle.context.node_ids == value["node_ids"]
 
 
-def test_typed_agent_diagnostics_retained_and_resanitized(service):
+def test_typed_agent_diagnostics_retained_and_resanitized():
     value = item()
     diagnostics = collect_failure(value, now=NOW).diagnostics.model_dump(mode="json")
     diagnostics["sandbox"] = [{"name": "NoNewPrivileges", "value": "yes"}]
@@ -420,80 +333,15 @@ def test_typed_agent_diagnostics_retained_and_resanitized(service):
     value["result"]["diagnostics"] = FailureDiagnostics.model_validate(
         diagnostics
     ).model_dump(mode="json")
-    service.capture(value)
-    raw, _, bundle = service.read(value["id"], 1)
-    assert b"should-never-persist" not in raw
+    bundle = collect_failure(value, now=NOW)
+    assert "should-never-persist" not in bundle.model_dump_json()
     assert bundle.diagnostics.sandbox[0].value == "yes"
     assert bundle.diagnostics.storage[0].value == "1024"
 
 
-def test_retention_caps_count_and_age_and_does_not_recapture(service):
-    service.retention = EvidenceRetention(max_entries=2, days=1)
-    ids = []
-    for index in range(4):
-        value = item()
-        ids.append(value["id"])
-        service.clock = lambda index=index: NOW + timedelta(seconds=index)
-        service.capture(value)
-    with service.sessions() as session:
-        assert (
-            session.scalar(select(func.count()).select_from(FailureEvidenceRecord)) == 2
-        )
-    service.clock = lambda: NOW + timedelta(days=2)
-    assert service.prune() == 2
-    with pytest.raises(KeyError):
-        service.read(ids[-1], 1)
-
-
-def test_worker_cursor_survives_restart_and_retention(service, monkeypatch):
-    # This test checks durable cursor/retention semantics, not whether the CI
-    # host can scan SQLite within one 250 ms worker slice. Budget yielding has
-    # its own controlled-clock test below.
-    monkeypatch.setattr(
-        failure_evidence_module, "time", SimpleNamespace(monotonic=lambda: 1.0)
-    )
-    identity = str(uuid4())
-    with service.sessions.begin() as session:
-        session.add(
-            Job(
-                id=identity,
-                request_id=str(uuid4()),
-                kind="recipe.install",
-                state="failed",
-                actor="test",
-                authority_revision="a" * 64,
-                targets=[],
-                payload_digest="b" * 64,
-                payload={},
-                result={
-                    "reason": "installation failed",
-                    "error_code": "permission_denied",
-                },
-                current_attempt=1,
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-    assert service.tick()
-    with service.sessions() as session:
-        assert session.get(FailureEvidenceCursor, "job").operation_id == identity
-    service.retention = EvidenceRetention(days=1)
-    service.clock = lambda: NOW + timedelta(days=2)
-    service.prune()
-    restarted = FailureEvidenceService(
-        service.sessions, clock=service.clock, retention=service.retention
-    )
-    assert not restarted.tick()
-    with service.sessions() as session:
-        assert (
-            session.scalar(select(func.count()).select_from(FailureEvidenceRecord)) == 0
-        )
-    assert restarted.last_collection_error is None
-
-
 def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
     value = item()
-    service.capture(value)
+    store_failed_job(service, value)
     app = FastAPI()
 
     def actor(authorization: str | None = Header(default=None)):
@@ -524,16 +372,14 @@ def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
         ).status_code
         == 404
     )
+    # A job that has not failed renders nothing, rather than an invented failure.
     with service.sessions.begin() as session:
-        session.get(FailureEvidenceRecord, (value["id"], 1)).content = json.dumps(
-            {"invalid": True}
-        ).encode()
-    assert client.get(url, headers={"Authorization": "Bearer test"}).status_code == 503
+        session.get(Job, value["id"]).state = "succeeded"
+    assert client.get(url, headers={"Authorization": "Bearer test"}).status_code == 404
 
 
 def test_composed_controller_exposes_exact_download_on_operation_projection(service):
     from vonk_control.api import create_app
-    from vonk_control.audit import MemoryAuditStore
     from vonk_control.auth import Actor, TokenCodec
     from vonk_control.operation_api import (
         OperationApiServices,
@@ -554,7 +400,7 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
     assert isinstance(result, dict)
     result.pop("stderr")
     result["diagnostics"] = diagnostics.model_dump(mode="json")
-    service.capture(value)
+    store_failed_job(service, value)
     codec = TokenCodec(b"k" * 32)
 
     def job_operations(
@@ -573,7 +419,6 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
-        audits=MemoryAuditStore(),
         now=lambda: 10,
         operations=operations,
         failure_evidence=service,
@@ -584,7 +429,7 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
     response = client.get(f"/api/operations/{value['id']}", headers=headers)
     assert response.status_code == 200
     download = response.json()["evidence_download"]
-    assert download["href"].endswith("/evidence?attempt=1")
+    assert download == {"href": f"/api/operations/{value['id']}/evidence?attempt=1"}
     listing = client.get("/api/operations", headers=headers)
     assert listing.json()["operations"][0]["evidence_download"] == download
     assert client.get(download["href"]).status_code == 401
@@ -595,77 +440,17 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
     )
 
 
-def test_storage_byte_budget_is_enforced(service):
-    service.retention = EvidenceRetention(max_bytes=32 * 1024)
-    for index in range(12):
-        value = item()
-        value["result"]["stderr"] = "useful diagnostic\n" * 1000
-        value["result"].update({f"field_{i}": "x " * 256 for i in range(15)})
-        service.clock = lambda index=index: NOW + timedelta(seconds=index)
-        service.capture(value)
-    with service.sessions() as session:
-        assert (
-            session.scalar(select(func.sum(func.length(FailureEvidenceRecord.content))))
-            <= 32 * 1024
-        )
-
-
-def test_collection_time_budget_yields_and_leaves_cursor_for_next_tick(
-    service, monkeypatch
-):
-    with service.sessions.begin() as session:
-        for _ in range(5):
-            session.add(
-                Job(
-                    request_id=str(uuid4()),
-                    kind="recipe.start",
-                    state="failed",
-                    actor="test",
-                    authority_revision="a" * 64,
-                    targets=[],
-                    payload_digest="b" * 64,
-                    payload={},
-                    result={"reason": "start failed"},
-                    current_attempt=1,
-                    created_at=NOW,
-                    updated_at=NOW,
-                )
-            )
-    observed = iter([0, 0.01, 0.02, 0.03, 0.3])
-    monkeypatch.setattr(
-        "vonk_control.failure_evidence.time.monotonic", lambda: next(observed, 1.0)
-    )
-    assert service.tick()
-    with service.sessions() as session:
-        assert (
-            session.scalar(select(func.count()).select_from(FailureEvidenceRecord)) == 1
-        )
-    assert service.last_collection_error is None
-
-
-def test_secret_control_characters_cannot_evade_redaction(service):
+def test_secret_control_characters_cannot_evade_redaction():
     value = item()
     value["result"]["stderr"] = (
         "Auth\x00orization: Bearer hidden-value\n\x1b[31mpermission denied\n"
     )
     value["result"]["tok\u200ben"] = "hidden-in-obfuscated-key"
-    service.capture(value)
-    content = service.read(value["id"], 1)[0].decode()
+    content = rendered(value)
     assert "hidden-value" not in content
     assert "hidden-in-obfuscated-key" not in content
     assert "\\u001b" not in content
     assert "permission denied" in content
-
-
-class _StepClock:
-    """A clock that advances on every read, for deterministic prune order."""
-
-    def __init__(self, start: datetime) -> None:
-        self.now = start
-
-    def __call__(self) -> datetime:
-        self.now += timedelta(seconds=1)
-        return self.now
 
 
 def _agent_sessions(tmp_path):
@@ -736,7 +521,7 @@ def _enqueue_distribution(jobs, sessions, clock):
 
 
 def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
-    durable_evidence, monkeypatch
+    durable_evidence,
 ):
     """A lapse's own late receipt survives the attempt that supersedes it.
 
@@ -749,15 +534,6 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
     """
 
     jobs, sessions, clock, evidence = durable_evidence
-    # Collection is intentionally time-sliced. Make this behavior boundary
-    # deterministic: the first worker slice expires before scanning, then a
-    # later slice has enough budget to collect the durable attempt receipt.
-    monotonic_values = iter((0.0, 0.3))
-    monkeypatch.setattr(
-        failure_evidence_module,
-        "time",
-        SimpleNamespace(monotonic=lambda: next(monotonic_values, 1.0)),
-    )
     operation = _enqueue_distribution(jobs, sessions, clock)
     capabilities = [
         "agent.runtime.rust.v1",
@@ -800,19 +576,10 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
     assert second is not None and second.attempt == 2
     jobs.succeed(second, DISTRIBUTION_SUCCESS)
 
-    assert not evidence.tick()
-    assert evidence.last_collection_error is None
-    monkeypatch.setattr(
-        failure_evidence_module,
-        "time",
-        SimpleNamespace(monotonic=lambda: 1.0),
-    )
-    assert evidence.tick()
-    content, digest, bundle = evidence.read(operation.id, 1)
+    bundle = evidence.read(operation.id, 1)
     assert bundle.context.attempt == 1
-    assert bundle.receipt.error_code == "artifact_distribution_failed"
+    assert bundle.error_code == "artifact_distribution_failed"
     assert "attempt one transport refused" in bundle.summary
-    assert hashlib.sha256(content).hexdigest() == digest
 
 
 def test_superseded_lease_lapse_without_a_receipt_is_not_fabricated(tmp_path):
@@ -857,7 +624,6 @@ def test_superseded_lease_lapse_without_a_receipt_is_not_fabricated(tmp_path):
             )
         )
     evidence = FailureEvidenceService(sessions, clock=lambda: NOW)
-    evidence.tick()
     with pytest.raises(KeyError):
         evidence.read(operation_id, 1)
 
@@ -911,85 +677,20 @@ def test_a_parked_lease_lapse_is_retained_from_the_controllers_own_reason(tmp_pa
             )
         )
     evidence = FailureEvidenceService(sessions, clock=lambda: NOW)
-    assert evidence.tick()
-    _, _, bundle = evidence.read(operation_id, 1)
+    bundle = evidence.read(operation_id, 1)
     assert bundle.context.attempt == 1
     # The Controller's own record of the lapse is the only narrative there is,
     # and no agent refusal is claimed in its place.
     assert "lease expired" in bundle.summary
-    assert bundle.receipt.error_code == "operation_failed"
+    assert bundle.error_code == "operation_failed"
 
 
-def test_retained_attempt_evidence_is_bounded_by_the_byte_budget(tmp_path):
-    """Per-attempt evidence cannot grow past the byte budget.
-
-    Wrong implementation caught: retaining one bundle per attempt without the
-    byte budget (or copying each attempt's whole result) would grow without
-    limit.  ``prune`` keeps the newest attempts inside ``max_bytes`` and drops
-    the oldest, so the most recent failure an operator needs stays readable.
-    """
-
-    sessions = _agent_sessions(tmp_path)
-    operation_id = str(uuid4())
-    with sessions.begin() as session:
-        session.add(
-            AgentOperation(
-                id=operation_id,
-                parent_job_id=str(uuid4()),
-                node_id=NODE_A,
-                kind=ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
-                payload_digest="b" * 64,
-                payload={},
-                authority_revision=COMMIT,
-                state="running",
-                current_attempt=32,
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-        for attempt in range(1, 33):
-            session.add(
-                AgentOperationAttempt(
-                    id=str(uuid4()),
-                    operation_id=operation_id,
-                    attempt=attempt,
-                    fence=str(uuid4()),
-                    lease_deadline=NOW,
-                    agent_certificate_serial="test-serial",
-                    state="expired",
-                    progress={"phase": "copying"},
-                    result={
-                        "reason": f"attempt {attempt} lapsed",
-                        "error_code": "artifact_distribution_failed",
-                        "stderr": "useful diagnostic\n" * 1000,
-                        **{f"field_{index}": "x " * 256 for index in range(15)},
-                    },
-                )
-            )
-    evidence = FailureEvidenceService(
-        sessions,
-        clock=_StepClock(NOW),
-        retention=EvidenceRetention(max_bytes=32 * 1024),
-    )
-    # ``tick`` stops at a wall-clock collection budget, so a loaded machine may
-    # need more than one pass.  Each pass must still make progress; an unfixed
-    # collector that never selects an expired attempt fails to reach the newest
-    # one here at all.
-    for _ in range(32):
-        evidence.tick()
-        try:
-            evidence.read(operation_id, 32)
-        except KeyError:
-            continue
-        break
-    else:
-        pytest.fail("the newest attempt was never collected")
-    with sessions() as session:
-        total = session.scalar(
-            select(func.sum(func.length(FailureEvidenceRecord.content)))
-        )
-    assert total is not None and total <= 32 * 1024
-    # The newest attempt is what an operator still needs; the oldest fell out.
-    evidence.read(operation_id, 32)
-    with pytest.raises(KeyError):
-        evidence.read(operation_id, 1)
+def test_download_is_named_only_for_a_stored_failed_attempt(service):
+    value = {**item(), "state": "failed"}
+    assert "evidence_download" not in service.decorate(value)
+    store_failed_job(service, value)
+    assert service.decorate(value)["evidence_download"] == {
+        "href": f"/api/operations/{value['id']}/evidence?attempt=1"
+    }
+    assert "evidence_download" not in service.decorate({**value, "attempt": 2})
+    assert "evidence_download" not in service.decorate({**value, "state": "running"})

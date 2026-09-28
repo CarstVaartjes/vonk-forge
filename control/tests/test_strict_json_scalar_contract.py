@@ -356,10 +356,7 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
         assert (
             client.post(
                 "/cache",
-                json={
-                    "request_key": "00000000-0000-4000-8000-000000000001",
-                    "schema_version": 2,
-                },
+                json={"request_key": "00000000-0000-4000-8000-000000000001"},
             ).status_code
             == 200
         )
@@ -369,7 +366,6 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
                 json={
                     "request_key": "00000000-0000-4000-8000-000000000001",
                     "with_model": 1,
-                    "review_digest": "a" * 64,
                 },
             ).status_code
             == 422
@@ -380,7 +376,6 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
                 json={
                     "request_key": "00000000-0000-4000-8000-000000000001",
                     "with_model": True,
-                    "review_digest": "a" * 64,
                 },
             ).status_code
             == 200
@@ -420,10 +415,6 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
         )
 
     schemas = app.openapi()["components"]["schemas"]
-    assert (
-        schemas["ModelCacheOperatorRequest"]["properties"]["schema_version"]["type"]
-        == "integer"
-    )
     assert (
         schemas["RecipeOperatorRequest"]["properties"]["with_model"]["type"]
         == "boolean"

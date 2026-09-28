@@ -539,7 +539,6 @@ def test_profile_recovers_after_worker_process_death(
         assert approved_image.oci_layout_sha256 == expected_receipt.oci_archive_sha256
         accepted = profiles.apply(
             profile_id,
-            plan_digest=review.plan_digest,
             request_key=str(uuid4()),
             actor=actor,
         )

@@ -36,15 +36,10 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 RECIPE_ROUTE_AUTHORITY_ID = str(
     uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes")
 )
-_UPDATE_BOUNDARY_FIELDS = {"key", "schema_version"}
 
 
 class RouteRuntimeError(RuntimeError):
     """A route bundle could not be safely staged, activated, or inspected."""
-
-
-class RouteUpdateFenced(RouteRuntimeError):
-    """Normal publication waits while a Controller update holds the fence."""
 
 
 def _encoded(value: Mapping[str, object]) -> bytes:
@@ -208,89 +203,6 @@ class AtomicRouteBundlePublisher:
                 "live LiteLLM supervisor acknowledgement is unavailable"
             ) from error
 
-    def _read_update_boundary(self) -> str | None:
-        path = self._root / ".update-boundary.json"
-        if not path.exists():
-            return None
-        if path.is_symlink() or not path.is_file():
-            raise RouteRuntimeError("route update boundary is unsafe")
-        try:
-            content = path.read_bytes()
-            raw: Any = json.loads(content)
-        except (OSError, json.JSONDecodeError) as error:
-            raise RouteRuntimeError("route update boundary is unreadable") from error
-        if (
-            len(content) > 256
-            or not isinstance(raw, dict)
-            or set(raw) != _UPDATE_BOUNDARY_FIELDS
-            or raw.get("schema_version") != 1
-            or not isinstance(raw.get("key"), str)
-            or _DIGEST.fullmatch(raw["key"]) is None
-            or content != _encoded(raw)
-        ):
-            raise RouteRuntimeError("route update boundary is invalid")
-        return raw["key"]
-
-    def _require_update_boundary(
-        self,
-        key: str | None,
-    ) -> None:
-        active = self._read_update_boundary()
-        if active is None:
-            if key is not None:
-                raise RouteRuntimeError("route update boundary is not active")
-            return
-        if key != active:
-            raise RouteUpdateFenced("route publication is fenced by an update boundary")
-
-    def claim_update_boundary(self, key: str) -> None:
-        """Fence normal publication behind one durable update boundary key."""
-
-        if _DIGEST.fullmatch(key) is None:
-            raise RouteRuntimeError("route update boundary key is invalid")
-        with self._locked():
-            active = self._read_update_boundary()
-            if active is not None:
-                if active != key:
-                    raise RouteRuntimeError(
-                        "route publication belongs to a different update boundary"
-                    )
-                return
-            self._atomic_write(
-                self._root / ".update-boundary.json",
-                _encoded({"key": key, "schema_version": 1}),
-            )
-
-    def inspect_update_boundary(self) -> str | None:
-        """Return the validated active update fence, if one exists."""
-
-        with self._locked():
-            return self._read_update_boundary()
-
-    def release_update_boundary(self, key: str) -> None:
-        """Release only the exact durable update boundary key."""
-
-        if _DIGEST.fullmatch(key) is None:
-            raise RouteRuntimeError("route update boundary key is invalid")
-        with self._locked():
-            active = self._read_update_boundary()
-            if active != key:
-                raise RouteRuntimeError(
-                    "route update boundary key does not own publication"
-                )
-            path = self._root / ".update-boundary.json"
-            try:
-                path.unlink()
-                directory = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
-                try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
-            except OSError as error:
-                raise RouteRuntimeError(
-                    "route update boundary release is unavailable"
-                ) from error
-
     @staticmethod
     def _valid_json_mapping(content: bytes) -> bool:
         try:
@@ -307,36 +219,6 @@ class AtomicRouteBundlePublisher:
         return isinstance(document, dict) and isinstance(
             document.get("model_list"), list
         )
-
-    @staticmethod
-    def empty_litellm() -> bytes:
-        return _encoded(
-            {
-                "general_settings": {
-                    "database_url": "os.environ/LITELLM_DATABASE_URL",
-                    "disable_admin_ui": False,
-                    "master_key": "os.environ/LITELLM_MASTER_KEY",
-                    "store_model_in_db": False,
-                },
-                "litellm_settings": {
-                    "drop_params": True,
-                    "failure_callback": [],
-                    "set_verbose": False,
-                    "success_callback": [],
-                },
-                "model_list": [],
-                "router_settings": {
-                    "enable_pre_call_checks": True,
-                    "routing_strategy": "simple-shuffle",
-                },
-            }
-        )
-
-    def _current_generation(self) -> int:
-        marker = self._read_marker(
-            optional=True, verify_files=False, verify_lease=False
-        )
-        return marker.generation if marker is not None else 0
 
     def _lease(self, expires_at: datetime) -> tuple[datetime, datetime]:
         issued = _aware(self._clock(), "route clock")
@@ -360,47 +242,6 @@ class AtomicRouteBundlePublisher:
             or _DIGEST.fullmatch(evidence_digest) is None
         ):
             raise RouteRuntimeError("publication digest identity is invalid")
-
-    def publish_compiled(
-        self,
-        *,
-        authority_id: str,
-        plan_digest: str,
-        evidence_set_digest: str,
-        routes: bytes,
-        litellm: bytes,
-        expires_at: datetime,
-        state: str = "published",
-    ) -> ActivationMarker:
-        """Activate a complete controller-validated database recipe bundle.
-
-        Callers compile typed recipe state first; the lock, validators, immutable
-        generation directory, atomic marker, and supervisor acknowledgement
-        remain mandatory.
-        """
-        self._identity(authority_id, plan_digest, evidence_set_digest)
-        if state not in {"published", "maintenance"}:
-            raise RouteRuntimeError("compiled route state is invalid")
-        with self._locked():
-            self._require_update_boundary(None)
-            issued, expires = self._lease(expires_at)
-            current = self._read_marker(
-                optional=True, verify_files=True, verify_lease=False
-            )
-            generation = (current.generation if current is not None else 0) + 1
-            marker = self._activate(
-                generation=generation,
-                state=state,
-                authority_id=authority_id,
-                plan_digest=plan_digest,
-                evidence_set_digest=evidence_set_digest,
-                routes=routes,
-                litellm=litellm,
-                issued=issued,
-                expires=expires,
-            )
-            self._require_supervisor_ack(marker)
-            return marker
 
     @contextmanager
     def _locked(self):

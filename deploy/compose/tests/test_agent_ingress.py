@@ -677,7 +677,7 @@ def test_mtls_image_upload_has_a_dedicated_bound_without_widening_other_edges() 
         ]
 
 
-def test_browser_source_bundle_upload_matches_controller_bound_only() -> None:
+def test_browser_requests_share_the_ordinary_body_bound() -> None:
     adapted = _adapted_caddy(_environment())
     browser = _server_on_port(adapted, 8080)
     trusted = next(
@@ -686,16 +686,9 @@ def test_browser_source_bundle_upload_matches_controller_bound_only() -> None:
         if route.get("match") == [{"host": [_environment()["VONK_CONTROL_HOSTNAME"]]}]
     )
     trusted_routes = trusted["handle"][0]["routes"]
-    upload_match = [
-        {
-            "method": ["PUT"],
-            "path": ["/api/catalog/source-bundles/*"],
-        }
-    ]
 
     assert _request_body_routes(trusted_routes) == [
-        {"match": [{"not": upload_match}], "max_size": 1_000_000},
-        {"match": upload_match, "max_size": 64 * 1024**2},
+        {"match": None, "max_size": 1_000_000}
     ]
 
 

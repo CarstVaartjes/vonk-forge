@@ -35,7 +35,6 @@ def _module():
 
 def _failed_profile_application(reason: str) -> dict[str, object]:
     return {
-        "schema_version": 2,
         "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         "request_key": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
         "profile_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -253,7 +252,6 @@ def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     )
     lifecycle = _module()
     expected_payload = {
-        "schema_version": 1,
         "event_cursor": 0,
         "generated_at": "2026-09-10T00:00:00Z",
         "authority_revision": "a" * 64,
@@ -836,7 +834,6 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
             request = FleetEnrollRequest.from_dict(body)
             assert UUID(request.request_key).version == 4
             assert request.name == "Acceptance Spark"
-            assert request.ttl_seconds == 600
             return 201, {"grant": dict(grant)}
 
     run.control = Control()

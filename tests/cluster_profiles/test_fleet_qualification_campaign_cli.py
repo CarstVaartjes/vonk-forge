@@ -1536,7 +1536,7 @@ def test_submit_load_looks_up_first_and_posts_exact_reviewed_digest() -> None:
         (
             "POST",
             "/api/profile/7/load",
-            {"plan_digest": plan_digest, "request_key": request_key},
+            {"request_key": request_key},
         ),
     ]
 
@@ -1575,7 +1575,7 @@ def test_ambiguous_load_retries_only_after_lookup_and_reuses_exact_identity() ->
     plan_digest = "b" * 64
     profile_id = "12345678-1234-4123-8123-123456789abc"
     profile_digest = "c" * 64
-    payload = {"plan_digest": plan_digest, "request_key": request_key}
+    payload = {"request_key": request_key}
     client = _LoadRequestClient(
         campaign_cli.ControlNotFound(404, "not found"),
         campaign_cli.ControlTransportError("response lost"),
@@ -2328,7 +2328,6 @@ def _typed_paired_fleet(
             "event_cursor": cursor,
             "generated_at": timestamp,
             "nodes": nodes,
-            "schema_version": 1,
         }
     ).to_dict()
 
@@ -4372,71 +4371,6 @@ def test_paired_lifecycle_releases_each_lane_with_typed_controller_receipts(
         ) -> dict[str, object]:
             if method == "GET" and path == "/api/fleet":
                 return self.snapshot()
-            if method == "GET" and path.startswith("/api/fleet/"):
-                node_id = unquote(path.rsplit("/", 1)[-1])
-                snapshot = _typed_paired_fleet(
-                    paired_lanes,
-                    active_runs=self.active_runs,
-                    boot_ids=self.boot_ids,
-                    cursor=self.cursor,
-                )
-                node = next(
-                    item
-                    for item in cast(list[dict[str, object]], snapshot["nodes"])
-                    if item["id"] == node_id
-                )
-                node["provenance"] = {
-                    "schema_version": 2,
-                    "generated_at": "2026-09-25T00:00:00Z",
-                    "platform": [
-                        {
-                            "boundary": "controller_deployment",
-                            "state": "observed",
-                            "image_digest": "sha256:" + "a" * 64,
-                            "evidence": {
-                                "source": "qualification-test",
-                                "freshness": "current",
-                                "age_seconds": 0,
-                                "observed_at": "2026-09-25T00:00:00Z",
-                            },
-                        }
-                    ],
-                    "recipe_library": {
-                        "state": "unknown",
-                        "evidence": {"source": "qualification-test"},
-                    },
-                    "agents": [
-                        {
-                            "node_id": node_id,
-                            "display_name": node_id,
-                            "state": "installed",
-                            "connectivity": "recent",
-                            "build_digest": "sha256:" + "b" * 64,
-                            "binary_sha256": "c" * 64,
-                            "package_sha256": next(
-                                lane.row.package["sha256"]
-                                for lane in paired_lanes
-                                if lane.node_ids[0] == node_id
-                            ),
-                            "evidence": {
-                                "source": "qualification-test",
-                                "freshness": "current",
-                                "age_seconds": 0,
-                                "observed_at": "2026-09-25T00:00:00Z",
-                            },
-                            "package_evidence": {
-                                "source": "qualification-test",
-                                "freshness": "current",
-                                "age_seconds": 0,
-                                "observed_at": "2026-09-25T00:00:00Z",
-                            },
-                        }
-                    ],
-                    "workloads": [],
-                    "invalid_operation_evidence": [],
-                    "invalid_operation_evidence_omitted_count": 0,
-                }
-                return node
             if method == "GET" and path.startswith("/api/endpoints/"):
                 alias = unquote(path.rsplit("/", 1)[-1])
                 if any(
@@ -4463,7 +4397,7 @@ def test_paired_lifecycle_releases_each_lane_with_typed_controller_receipts(
                 self.load_posts += 1
                 body = cast(dict[str, object], payload)
                 request_key = str(body["request_key"])
-                base_plan_digest = str(body["plan_digest"])
+                base_plan_digest = str(self._profile_preview()["plan_digest"])
                 assignment = self._assignment()
                 before_runs = dict(self.active_runs)
                 stop_run_ids: list[str]
@@ -4613,6 +4547,11 @@ def test_paired_lifecycle_releases_each_lane_with_typed_controller_receipts(
         }
 
     monkeypatch.setattr(campaign_cli.ServiceSmokeAdapter, "run", run_service_smoke)
+    monkeypatch.setattr(
+        campaign_cli,
+        "_deployment_build_identities",
+        lambda node_ids: ("a" * 64, {node_id: "b" * 64 for node_id in node_ids}),
+    )
 
     recovery_preview = campaign_cli._review_or_apply_lane_recovery(
         client=controller,
@@ -5239,30 +5178,6 @@ def test_failed_exclusive_dual_canary_requires_exact_cleanup_before_failure_and_
                 )
                 self.cursor += 1
                 return result
-            if method == "GET" and path.startswith("/api/fleet/"):
-                node_id = unquote(path.rsplit("/", 1)[-1])
-                snapshot = _typed_failed_dual_fleet(
-                    lane, active=self.cleanup_post_count == 0, cursor=self.cursor
-                )
-                node = next(
-                    item
-                    for item in cast(list[dict[str, object]], snapshot["nodes"])
-                    if item["id"] == node_id
-                )
-                node["provenance"] = {
-                    "schema_version": 2,
-                    "generated_at": updated_at,
-                    "platform": [],
-                    "recipe_library": {
-                        "state": "unknown",
-                        "evidence": {"source": "qualification-test"},
-                    },
-                    "agents": [],
-                    "workloads": [],
-                    "invalid_operation_evidence": [],
-                    "invalid_operation_evidence_omitted_count": 0,
-                }
-                return node
             if method == "GET" and path.startswith("/api/profile/7/requests/"):
                 key = unquote(path.rsplit("/", 1)[-1])
                 if key not in self.requests:

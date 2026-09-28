@@ -33,8 +33,8 @@ def _upgrade(database_url: str) -> None:
     command.upgrade(_config(database_url), "head")
 
 
-def _initialize_source_checkout(database_url: str) -> str:
-    return initialize_database(database_url, config_path=ROOT / "alembic.ini")
+def _initialize_source_checkout(database_url: str) -> None:
+    initialize_database(database_url, config_path=ROOT / "alembic.ini")
 
 
 def _schema_tables(engine) -> set[str]:

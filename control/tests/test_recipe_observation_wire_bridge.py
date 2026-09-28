@@ -27,7 +27,6 @@ from vonk_agent_protocol import (
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
@@ -330,10 +329,7 @@ def _production_controller_app(
         sessions, ManagementAddressPolicy.parse("10.0.0.0/24"), clock=clock
     )
     operations = AgentJobService(sessions, clock=clock)
-    roots = {
-        name: tmp_path / name
-        for name in ("artifacts", "source-bundles", "tuf-metadata", "tuf-targets")
-    }
+    roots = {name: tmp_path / name for name in ("artifacts", "source-bundles")}
     for root in roots.values():
         root.mkdir()
     services = AgentApiServices(
@@ -344,15 +340,12 @@ def _production_controller_app(
         presence=presence,
         artifact_root=roots["artifacts"],
         source_bundles=SourceBundleStore(roots["source-bundles"]),
-        workload_tuf_metadata_root=roots["tuf-metadata"],
-        workload_tuf_target_root=roots["tuf-targets"],
         fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
         host_runtime_authority=authority,
     )
     app = create_app(
         jobs=_UnusedJobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
         now=lambda: 0,
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,

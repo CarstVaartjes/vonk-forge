@@ -15,7 +15,6 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.jobs import JobService
@@ -107,7 +106,6 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
     api = create_app(
         jobs=JobService(sessions, clock=lambda: _NOW, cursors=codec.cursor_codec()),
         tokens=codec,
-        audits=MemoryAuditStore(),
         library_projection=library,
         model_cache=cache,
         now=lambda: 100,
@@ -218,10 +216,7 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             submitted = peer.calls[reviewed_call_count + 2][2]
             assert isinstance(submitted, dict)
             assert submitted == {
-                "schema_version": 2,
                 "request_key": _REMOVE_KEY,
-                "model_content_sha256": original_digest,
-                "review_digest": review["review_digest"],
             }
 
             # A second installed process with the same key reconnects to the

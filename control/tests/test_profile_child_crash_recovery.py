@@ -91,7 +91,6 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
         assert [step.kind for step in preview.steps] == ["switch"]
         application = service.apply(
             profile.id,
-            plan_digest=preview.plan_digest,
             request_key=_uuid(911),
             actor="admin",
         )
@@ -227,7 +226,6 @@ def test_postgres_completed_cleanup_child_is_adopted_after_checkpoint_crash(
         ]
         application = service.apply(
             profile.id,
-            plan_digest=preview.plan_digest,
             request_key=_uuid(921),
             actor="admin",
         )

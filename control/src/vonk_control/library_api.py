@@ -27,10 +27,8 @@ from .strict_json import stored_document_detail
 _SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
 
 LIBRARY_OPERATION_IDS = {
-    ("get", "/api/model"): "getModelStatus",
     ("get", "/api/model/library"): "listModelLibrary",
     ("get", "/api/model/{selector}"): "getModel",
-    ("get", "/api/recipe"): "getRecipeStatus",
     ("get", "/api/recipe/library"): "listRecipeLibrary",
     ("get", "/api/recipe/{selector}"): "getRecipe",
 }
@@ -88,18 +86,6 @@ def install_library_routes(
         return projection
 
     @app.get(
-        "/api/model",
-        response_model=ModelLibraryResponse,
-        responses=bounded_error_responses(401, 503),
-        operation_id="getModelStatus",
-    )
-    def model_status(_actor: Any = authenticated) -> ModelLibraryResponse:
-        try:
-            return library().models(local_only=True)
-        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _error(error) from None
-
-    @app.get(
         "/api/model/library",
         response_model=ModelLibraryResponse,
         responses=bounded_error_responses(401, 422, 503),
@@ -117,6 +103,7 @@ def install_library_routes(
         search: Annotated[str | None, Query(max_length=256)] = None,
         updated_since: Annotated[datetime | None, Query()] = None,
         sort: Annotated[Literal["updated", "name"], Query()] = "updated",
+        local: Annotated[bool, Query()] = False,
         _actor: Any = authenticated,
     ) -> ModelLibraryResponse:
         try:
@@ -132,6 +119,7 @@ def install_library_routes(
                 search=search,
                 updated_since=updated_since,
                 sort=sort,
+                local_only=local,
             )
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _error(error) from None
@@ -148,18 +136,6 @@ def install_library_routes(
     ) -> ModelDetailResponse:
         try:
             return library().model_detail(selector)
-        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
-            raise _error(error) from None
-
-    @app.get(
-        "/api/recipe",
-        response_model=RecipeLibraryResponse,
-        responses=bounded_error_responses(401, 503),
-        operation_id="getRecipeStatus",
-    )
-    def recipe_status(_actor: Any = authenticated) -> RecipeLibraryResponse:
-        try:
-            return library().recipe_library()
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _error(error) from None
 

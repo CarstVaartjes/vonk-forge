@@ -75,7 +75,6 @@ def _job(
 
 def _capabilities(*, maximum_input_file_bytes: int = 64) -> dict[str, object]:
     return {
-        "schema_version": 1,
         "storage": {
             "in_flight_uploads": 0,
             "max_stored_bytes": 4096,
@@ -197,8 +196,6 @@ class ArtifactJobClient:
             return copy.deepcopy(self.job)
         if path == f"/api/artifact-jobs/{JOB_ID}/finalize" and method == "POST":
             self.job["state"] = "ready"
-            return copy.deepcopy(self.job)
-        if path == f"/api/artifact-jobs/{JOB_ID}/result" and method == "GET":
             return copy.deepcopy(self.job)
         if path == f"/api/artifact-jobs/{JOB_ID}" and method == "GET":
             return copy.deepcopy(self.job)

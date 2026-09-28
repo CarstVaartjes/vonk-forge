@@ -67,7 +67,6 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     assert "EnrollmentDecisionResponse" not in schema["components"]["schemas"]
 
     expected_errors = {
-        "getJobLog": {"401", "403", "404", "503"},
         "getPublishedEndpoint": {"401", "404", "503"},
         "resumeJob": {"401", "403", "404", "409", "503"},
     }
@@ -91,35 +90,6 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     serialized = json.dumps(schema, sort_keys=True).lower()
     assert "certificate_pem" not in serialized
     assert "chain_pem" not in serialized
-
-
-def test_generated_fleet_upgrade_request_rejects_retired_strategy() -> None:
-    from cluster_profiles.generated_control.models.fleet_upgrade_request import (
-        FleetUpgradeRequest,
-    )
-
-    request_key = "11111111-1111-4111-8111-111111111111"
-    request = FleetUpgradeRequest.from_dict(
-        {
-            "all": True,
-            "request_key": request_key,
-            "strategy": "one-at-a-time",
-        }
-    )
-    assert request.to_dict() == {
-        "all": True,
-        "request_key": request_key,
-        "strategy": "one-at-a-time",
-    }
-
-    with pytest.raises(ValueError, match="strategy must match const"):
-        FleetUpgradeRequest.from_dict(
-            {
-                "all": True,
-                "request_key": request_key,
-                "strategy": "all-at-once",
-            }
-        )
 
 
 def test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait() -> (
@@ -268,19 +238,6 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
     assert not (PYTHON_CLIENT / "api/default/upload_artifact_job_input.py").exists()
     assert not (PYTHON_CLIENT / "api/default/download_artifact_job_result.py").exists()
 
-    source_bundle = operations["downloadRecipeSourceBundle"]
-    assert source_bundle["x-vonk-streaming-transport"] is True
-    assert source_bundle["responses"]["200"]["content"] == {
-        "application/vnd.vonk-forge.source-bundle.v1+tar": {
-            "schema": {"format": "binary", "type": "string"}
-        }
-    }
-    assert "downloadRecipeSourceBundle" not in typescript
-    assert not (PYTHON_CLIENT / "api/default/download_recipe_source_bundle.py").exists()
-    assert operations["getJobLog"]["x-vonk-streaming-transport"] is True
-    assert "getJobLog" not in typescript
-    assert not (PYTHON_CLIENT / "api/default/get_job_log.py").exists()
-
 
 def test_admin_schema_is_secret_free() -> None:
     schema = json.loads(OPENAPI.read_text())
@@ -289,9 +246,7 @@ def test_admin_schema_is_secret_free() -> None:
         "/api/fleet",
         "/api/fleet/stream",
         "/api/jobs/{job_id}",
-        "/api/jobs/{job_id}/logs",
         "/api/jobs/{job_id}/resume",
-        "/api/fleet/{selector}/metrics/history",
     }
     assert "/api/nodes/status" not in schema["paths"]
     assert all(path.startswith("/api/") for path in schema["paths"])
@@ -342,9 +297,7 @@ def test_admin_schema_is_secret_free() -> None:
     for operation_id in (
         "getFleetStatus",
         "getJob",
-        "getFleetMetricsHistory",
         "getPublishedEndpoint",
-        "listJobLogs",
         "listJobs",
         "resumeJob",
     ):
@@ -406,15 +359,16 @@ def test_generated_python_models_compile() -> None:
         compile(path.read_text(), str(path), "exec")
 
 
-def test_packaged_profile_load_requires_review_and_refuses_revision_overrides() -> None:
+def test_packaged_profile_load_requires_a_request_key_and_refuses_overrides() -> None:
     request = {
         "request_key": "00000000-0000-4000-8000-000000000001",
-        "plan_digest": "a" * 64,
     }
     assert validate_control_document("FleetProfileLoadRequest", request) == request
     with pytest.raises(ControlClientError):
+        validate_control_document("FleetProfileLoadRequest", {})
+    with pytest.raises(ControlClientError):
         validate_control_document(
-            "FleetProfileLoadRequest", {"request_key": request["request_key"]}
+            "FleetProfileLoadRequest", {**request, "plan_digest": "a" * 64}
         )
     with pytest.raises(ControlClientError):
         validate_control_document(
@@ -566,19 +520,12 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
     for name in (
         "TelemetryCapability",
         "TelemetryDetails-Output",
-        "TelemetryMetricSummary",
         "TelemetryMetrics",
         "TelemetryPoint",
         "TelemetryProvenance",
-        "TelemetryRollupPoint",
         "TelemetryRuntime",
         "TelemetrySeries",
-        "TelemetryHistoryMetadata",
-        "TelemetryHistoryResponse",
         "TelemetryWorkload",
-        "TelemetryCurrentResponse",
-        "TelemetryCapabilitiesResponse",
-        "TelemetryWorkloadsResponse",
     ):
         assert schema[name]["type"] == "object"
         assert schema[name]["additionalProperties"] is False
@@ -591,32 +538,10 @@ def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
         "$ref": "#/components/schemas/TelemetryMetrics"
     }
     assert "metrics" in point["required"]
-    history = schema["TelemetryHistoryResponse"]
-    assert history["properties"]["points"]["items"]["anyOf"] == [
-        {"$ref": "#/components/schemas/TelemetryPoint"},
-        {"$ref": "#/components/schemas/TelemetryRollupPoint"},
-    ]
-    assert history["properties"]["metadata"] == {
-        "$ref": "#/components/schemas/TelemetryHistoryMetadata"
-    }
-    assert "metadata" in history["required"]
-    assert (
-        schema["TelemetryCurrentResponse"]["properties"]["schema_version"]["const"] == 2
-    )
-    assert (
-        schema["TelemetryCapabilitiesResponse"]["properties"]["schema_version"]["const"]
-        == 2
-    )
-    assert (
-        schema["TelemetryWorkloadsResponse"]["properties"]["schema_version"]["const"]
-        == 2
-    )
 
     typescript = TYPESCRIPT_CLIENT.read_text()
     assert "TelemetryPoint: {" in typescript
-    assert "TelemetryHistoryResponse: {" in typescript
     assert "TelemetryPoint: {[key: string]: unknown};" not in typescript
-    assert "TelemetryHistoryResponse: {[key: string]: unknown};" not in typescript
 
 
 def test_generated_python_client_parses_documented_operation_errors() -> None:
@@ -629,7 +554,6 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
 
     client = Client(base_url="https://control.invalid")
     expected = {
-        "list_job_logs": (401, 403, 404, 503),
         "get_published_endpoint": (401, 404, 503),
         "resume_job": (401, 403, 404, 409, 503),
     }
