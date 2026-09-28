@@ -56,22 +56,15 @@ def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
     worker.update({"name": "worker", "count": 2, "endpoint_owner": False})
     raw_recipe["topology"] = {
         "name": "triple-tp3",
-        "mode": "tensor_parallel",
         "node_count": 3,
         "roles": [entrypoint, worker],
         "parallelism": {
-            "world_size": 3,
             "tensor": 3,
             "pipeline": 1,
             "data": 1,
             "backend": "tcp",
         },
-        "fabric": {
-            "connectivity": "full_mesh",
-            "minimum_bandwidth_mbps": 10000,
-        },
         "start_order": ["worker", "entrypoint"],
-        "stop_order": ["entrypoint", "worker"],
     }
     return model, RecipeDefinition.model_validate(raw_recipe)
 
@@ -203,10 +196,10 @@ def setup(tmp_path: Path):
                 artifact_store_read_only=False,
                 capabilities=(
                     "runtime.vonk.v1",
-                    "fabric.full_mesh.mbps.10000",
+                    "fabric.connected.mbps.200000",
                 ),
                 fabric_address=f"192.168.100.{index}",
-                fabric_bandwidth_mbps=10_000,
+                fabric_bandwidth_mbps=200_000,
                 memory_pool="shared",
             )
         )

@@ -80,12 +80,8 @@ def record_passing_preflight(
                     ),
                     state="succeeded",
                     result={
-                        "schema_version": 1,
                         "fingerprint": "a" * 64,
-                        "request_sha256": digest,
                         "observed_at": int(now.timestamp()),
-                        "duration_ms": 1,
-                        "cached": False,
                         "findings": [
                             {
                                 "capability": value,
