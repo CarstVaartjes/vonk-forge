@@ -5342,6 +5342,45 @@ class FleetProfileService:
             session.flush()
             return self._application_view(row)
 
+    def _resume_live_child(
+        self, application_id: str
+    ) -> FleetProfileApplicationView | None:
+        """Hand a failed order whose child is still live back to advancement.
+
+        A transient error while advancing a live child marks the order failed,
+        but only the running path ever advances that child again.  Refusing a
+        retry because the child "is still active" therefore parked the current
+        profile intent forever (live: a profile load stopped the old run, then
+        never started the new one).  The child is the same authorized work, so
+        continuing it is the retry; the bounded retry schedule rate-limits it.
+        """
+
+        now = _aware(self._clock())
+        with self._sessions.begin() as session:
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if (
+                row is None
+                or row.state not in {"failed", "waiting-for-operator"}
+                or not row.current_operation_id
+                or self._switch_adapter is None
+            ):
+                return None
+            try:
+                child = self._switch_adapter.get(
+                    row.current_operation_id, session=session
+                )
+            except (KeyError, RuntimeError, ValueError):
+                return None
+            if child.state not in _CHILD_PENDING_STATES:
+                return None
+            self._set_application_state(session, row, "running")
+            row.status_reason = "Resumed advancing the live child operation"
+            row.updated_at = now
+            session.flush()
+            return self._application_view(row)
+
     def retry_eligible(self, application_id: str) -> bool:
         """Whether this receipt is still the current recoverable profile intent."""
         with self._sessions() as session:
@@ -5467,6 +5506,13 @@ class FleetProfileService:
                     raise FleetProfileConflict(
                         "Current child operation state must be reconciled before retry"
                     ) from error
+                if child.state in _CHILD_PENDING_STATES:
+                    # End this read before the resume takes its row lock.
+                    parent_id = parent.id
+                    session.close()
+                    resumed = self._resume_live_child(parent_id)
+                    if resumed is not None:
+                        return resumed
                 if child.state not in {
                     "succeeded",
                     "failed",

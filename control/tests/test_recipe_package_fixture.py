@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import tarfile
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -176,7 +177,9 @@ def _repack(files: dict[str, bytes]) -> bytes:
             info.uname = info.gname = ""
             info.mtime = 0
             archive.addfile(info, io.BytesIO(files[path]))
-    return gzip.compress(stream.getvalue(), compresslevel=9, mtime=0)
+    # Fixture packages are rebuilt in-test; the fastest level keeps the same
+    # deterministic gzip format while the digest follows the bytes.
+    return gzip.compress(stream.getvalue(), compresslevel=1, mtime=0)
 
 
 def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
@@ -212,6 +215,31 @@ def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
     }
 
 
+def _referenced_entities(
+    entities: Sequence[object], recipes: Sequence[object]
+) -> list[object]:
+    """Return the catalog entities the given recipe rows reference, transitively."""
+
+    by_digest = {
+        row["content_sha256"]: row
+        for row in entities
+        if isinstance(row, dict) and isinstance(row.get("content_sha256"), str)
+    }
+    pending = [json.dumps(recipes, sort_keys=True)]
+    selected: set[str] = set()
+    while pending:
+        text = pending.pop()
+        for digest, row in by_digest.items():
+            if digest not in selected and digest in text:
+                selected.add(digest)
+                pending.append(json.dumps(row["document"], sort_keys=True))
+    return [
+        row
+        for row in entities
+        if isinstance(row, dict) and row.get("content_sha256") in selected
+    ]
+
+
 def _active_recipe_state(session) -> dict[str, tuple[str, str, int]]:
     heads = session.scalars(
         select(CatalogDocumentHead).where(CatalogDocumentHead.kind == "recipe")
@@ -241,6 +269,13 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         published_index["recipes"], "catalog index recipes"
     )[:3]
     index_recipes = require_sequence(original_index["recipes"], "catalog index recipes")
+    # Likewise only the model entities those rows reference (transitively)
+    # are needed; importing all published models on every sync dominated the
+    # runtime of this test without adding any generation semantics.
+    original_index["catalog_entities"] = _referenced_entities(
+        require_sequence(published_index["catalog_entities"], "catalog index entities"),
+        index_recipes,
+    )
     index_entities = require_sequence(
         original_index["catalog_entities"], "catalog index entities"
     )
