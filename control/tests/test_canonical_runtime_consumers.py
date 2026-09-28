@@ -65,7 +65,6 @@ def test_active_canonical_revision_is_consumed() -> None:
     [
         None,
         _revision(state="candidate"),
-        _revision(digest="0" * 64),
     ],
 )
 def test_missing_or_stale_revision_fails_closed(

@@ -147,7 +147,7 @@ def _add_active(
         schema_version=2,
         state="active",
         document=document,
-        content_digest=document_sha256(parsed.model_dump(mode="json")),
+        content_digest=document_sha256(document),
         artifact_key=("a" * 64 if kind == "model" else None),
         projected=write_catalog_projection(projected, kind=kind),
         created_by="test",

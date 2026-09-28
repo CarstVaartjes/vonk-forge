@@ -36,7 +36,10 @@ from cluster_profiles import cli
 
 ROOT = Path(__file__).resolve().parents[2]
 schema_path = Path(
-    os.environ.get("VONK_OPERATOR_OPENAPI", str(ROOT / "src/cluster_profiles/schemas/control-openapi.json"))
+    os.environ.get(
+        "VONK_OPERATOR_OPENAPI",
+        str(ROOT / "src/cluster_profiles/schemas/control-openapi.json"),
+    )
 )
 OPENAPI = json.loads(schema_path.read_text())
 if "/api/model/library" not in OPENAPI.get("paths", {}):

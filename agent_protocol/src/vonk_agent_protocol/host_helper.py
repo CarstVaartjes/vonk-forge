@@ -380,8 +380,6 @@ def host_helper_grant_signing_bytes(claims: HostHelperGrantClaims) -> bytes:
     return HOST_HELPER_GRANT_DOMAIN + canonical_message(claims.to_mapping())
 
 
-
-
 def _parse_model(cls: type[WireModel], value: Any, name: str) -> Any:
     try:
         return cls.model_validate_json(canonical_message(value))

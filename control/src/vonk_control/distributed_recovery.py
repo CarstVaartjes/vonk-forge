@@ -612,10 +612,7 @@ def _singleton_recovery_authority(
     start_timeout = validate_distributed_start_timeout_seconds(start_timeout_seconds)
     deadline = _aware(now) + timedelta(seconds=start_timeout + stop_timeout)
     agent_node = session.get(AgentNode, run_node.node_id)
-    if (
-        agent_node is None
-        or agent_node.state != "active"
-    ):
+    if agent_node is None or agent_node.state != "active":
         raise DistributedLifecycleError(
             "singleton recovery requires exact Stop and observation support"
         )
