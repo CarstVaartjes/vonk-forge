@@ -476,9 +476,7 @@ jobs:
       - name: Pull the pinned test images once
         run: scripts/pull-test-images postgres caddy step-ca tailscale
       - name: Run the complete Compose suite
-        run: >-
-          uv run --project control --frozen pytest -q -n auto -p no:cacheprovider
-          deploy/compose/tests
+        run: scripts/test compose
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
@@ -518,27 +516,9 @@ jobs:
           set -euo pipefail
           timing_file="$RUNNER_TEMP/pytest-durations.json"
           printf '%s\n' "$TIMING_DATA" > "$timing_file"
-          collection=$(mktemp)
-          trap 'rm -f "$collection"' EXIT
-          uv run --project control --frozen \
-            pytest --collect-only -q tests > "$collection" || { cat "$collection"; exit 1; }
-          mapfile -t shard_files < <(
-            awk '/^tests\/.*::/' "$collection" |
-              scripts/select-pytest-shard-files \
-                --durations "$timing_file" --max-duration-age-hours 720 \
-                --index "$SHARD_INDEX" --total "$SHARD_TOTAL"
-          )
-          ((${#shard_files[@]} > 0))
-          # The Rust claim-capability parity test runs in the Rust platform
-          # job, which builds the agent binary. A per-test deadline turns a
-          # hung test into a named failure long before the job timeout cancels
-          # the shard without logs.
-          uv run --project control --frozen \
-            pytest -q -n auto --dist loadfile -o junit_family=xunit1 \
-            --timeout=300 --timeout-method=signal \
-            --junitxml="$RUNNER_TEMP/repository-junit.xml" --basetemp="$RUNNER_TEMP/repository-pytest" \
-            --deselect tests/acceptance/test_rust_agent_parity.py::test_rust_claim_capabilities_cover_current_controller_contract \
-            "${shard_files[@]}"
+          scripts/test repository --shard "$((SHARD_INDEX + 1))/$SHARD_TOTAL" \
+            --durations "$timing_file" -- \
+            -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/repository-junit.xml"
 
       - name: Collect measured file durations
         if: always()
@@ -593,23 +573,9 @@ jobs:
           set -euo pipefail
           timing_file="$RUNNER_TEMP/pytest-durations.json"
           printf '%s\n' "$TIMING_DATA" > "$timing_file"
-          collection=$(mktemp)
-          trap 'rm -f "$collection"' EXIT
-          uv run --project control --frozen \
-            pytest --collect-only -q -m "not built_image" control/tests > "$collection" || { cat "$collection"; exit 1; }
-          mapfile -t shard_files < <(
-            # Every connected wire file runs in the required Linux/Rust lane.
-            awk '/^tests\/.*::/ && $0 !~ /^tests\/test_.*_wire_bridge\.py::/' "$collection" |
-              scripts/select-pytest-shard-files \
-                --durations "$timing_file" --max-duration-age-hours 720 \
-                --index "$SHARD_INDEX" --total "$SHARD_TOTAL" \
-                --prefix control/
-          )
-          ((${#shard_files[@]} > 0))
-          uv run --project control --frozen \
-            pytest -q -n 4 --dist loadfile \
-            -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/control-junit.xml" \
-            -m "not built_image" "${shard_files[@]}"
+          scripts/test control --shard "$((SHARD_INDEX + 1))/$SHARD_TOTAL" \
+            --durations "$timing_file" -- -n 4 \
+            -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/control-junit.xml"
 
       - name: Collect measured file durations
         if: always()
@@ -637,6 +603,10 @@ jobs:
     if: needs.changes.outputs.control == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
     env:
       VONK_TEST_CONTROLLER_IMAGE: vonk-control:ci-test
       VONK_TEST_WORKER_IMAGE: vonk-control-worker:ci-test
@@ -674,9 +644,25 @@ jobs:
           cache-from: type=gha,scope=ci-test-vonk-forge-worker
           cache-to: type=gha,mode=max,scope=ci-test-vonk-forge-worker
       - name: Check the built images
-        run: >-
-          uv run --project control --frozen
-          pytest -q -m built_image control/tests
+        run: scripts/test images
+      - name: Scan the Controller image for fixable vulnerabilities
+        if: always()
+        uses: ./.github/actions/image-scan
+        with:
+          image: ${{ env.VONK_TEST_CONTROLLER_IMAGE }}
+          category: controller-api
+          # skopeo and its runtime libraries are copied unchanged from the
+          # upstream quay.io/skopeo release image.
+          skip-dirs: /usr/local/lib/skopeo
+      - name: Scan the worker image for fixable vulnerabilities
+        if: always()
+        uses: ./.github/actions/image-scan
+        with:
+          image: ${{ env.VONK_TEST_WORKER_IMAGE }}
+          category: controller-worker
+          # skopeo and its runtime libraries are copied unchanged from the
+          # upstream quay.io/skopeo release image.
+          skip-dirs: /usr/local/lib/skopeo
 
   web-suite:
     name: Admin web behavior
@@ -1132,6 +1118,7 @@ jobs:
       contents: read
       id-token: write
       packages: write
+      security-events: write
     outputs:
       api_digest: ${{ steps.api.outputs.digest }}
       worker_digest: ${{ steps.worker.outputs.digest }}
@@ -1336,6 +1323,16 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.release-metadata.outputs.version }}
+      - name: Scan the Hermes release image for fixable vulnerabilities
+        if: steps.existing-hermes.outputs.exists != 'true'
+        uses: ./.github/actions/image-scan
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image: ${{ needs.release-metadata.outputs.hermes_image }}@${{ steps.hermes-build.outputs.digest }}
+          category: release-hermes
+          # An upstream application release with a thin layer of ours.
+          gate: "false"
       - name: Attest Hermes release provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

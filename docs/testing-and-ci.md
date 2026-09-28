@@ -96,7 +96,8 @@ the hash locked in `control/uv.lock`.
 
 On Linux, this runs both suites in full. On macOS, it runs portable tests on
 the host and sends tests marked `linux_only`, `needs_systemd`,
-`needs_rust_probe`, or `postgres` to the `vonk-ci` OrbStack VM when available.
+`needs_rust_probe`, `needs_repair_probe` or `postgres` to the `vonk-ci` OrbStack
+VM when available.
 It prints an explicit prerequisite skip if the VM is unavailable; CI must
 provide its equivalent Linux lane and required recipe checkout, and fail when
 either is missing. The VM uses task-specific uv and Cargo directories under
@@ -158,10 +159,20 @@ uv run --project control --frozen pytest -q tests
 uv run --project control --frozen pytest -q -n auto deploy/compose/tests
 ```
 
-The `lane` marker is applied automatically at collection time for a PostgreSQL
-fixture or a `*_wire_bridge.py` Rust probe module. A test that starts Docker
-carries `@pytest.mark.lane` itself, so the reason stays visible where the
-container starts. Either way `-m "not lane"` stays honest. Investigate every
+`scripts/test SUITE` is the one entry point for the Python suites
+(`repository`, `control`, `compose`, `images`); CI calls it verbatim, with
+`--shard I/N` and the measured per-file durations. `--markers "not lane"`
+narrows any suite to the fast tier, and arguments after `--` go to pytest.
+
+Prerequisites have one registry and one policy, `tools/pytest_prereqs.py`,
+shared by every suite. A test that needs something beyond the locked Python
+environment carries a prerequisite marker (`postgres`, `needs_docker`,
+`linux_only`, `needs_recipe_library`, ...); the Controller suite infers
+`postgres`, `needs_cli_dependencies`, `needs_rust_probe` and
+`needs_recipe_library` from what a test requests. A missing prerequisite skips
+locally with its reason and fails in CI when the runner provides it (or the job
+names it in `VONK_CI_PREREQUISITES`). Every test with a prerequisite marker is
+also marked `lane`, so `-m "not lane"` stays honest. Investigate every
 failure. Distinguish a reproduced defect from a missing lane dependency; neither
 a skip nor an unavailable environment proves the behavior.
 

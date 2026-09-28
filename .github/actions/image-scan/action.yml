@@ -1,0 +1,69 @@
+name: Scan a built image for fixable vulnerabilities
+description: >-
+  Report every fixable HIGH/CRITICAL finding in an image to code scanning, then
+  gate on the ones this repository controls: OS packages and language
+  libraries, excluding upstream release binaries copied in unchanged (the
+  owner's policy: use upstream releases, never rebuild them to silence a
+  scan). The vulnerability database is cached between runs.
+inputs:
+  image:
+    description: Image reference to scan
+    required: true
+  category:
+    description: Code-scanning category, one per scanned image
+    required: true
+  gate:
+    description: >-
+      "false" for an image that is an upstream application release with a thin
+      layer of ours (Hermes, LiteLLM): report only
+    required: false
+    default: "true"
+  skip-dirs:
+    description: Comma-separated directories holding upstream release binaries, excluded from the gate only
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Prepare the findings directory
+      shell: bash
+      run: mkdir -p trivy-results
+    - name: Report ${{ inputs.image }} with Trivy
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        scan-type: image
+        image-ref: ${{ inputs.image }}
+        severity: HIGH,CRITICAL
+        ignore-unfixed: true
+        exit-code: "0"
+        format: sarif
+        # Without this trivy-action silently drops the severity filter for SARIF.
+        limit-severities-for-sarif: true
+        output: trivy-results/${{ inputs.category }}.sarif
+        cache: true
+    - name: Upload ${{ inputs.category }} findings to code scanning
+      if: ${{ !cancelled() }}
+      # A fork pull request has no security-events permission; the gate below
+      # still decides the job.
+      continue-on-error: true
+      uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      with:
+        sarif_file: trivy-results/${{ inputs.category }}.sarif
+        category: trivy-${{ inputs.category }}
+    - name: Gate ${{ inputs.image }} on fixable findings we control
+      if: ${{ !cancelled() && inputs.gate == 'true' }}
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      env:
+        TRIVY_SKIP_DB_UPDATE: "true"
+        TRIVY_SKIP_JAVA_DB_UPDATE: "true"
+      with:
+        scan-type: image
+        image-ref: ${{ inputs.image }}
+        vuln-type: os,library
+        skip-dirs: ${{ inputs.skip-dirs }}
+        severity: HIGH,CRITICAL
+        ignore-unfixed: true
+        exit-code: "1"
+        format: table
+        skip-setup-trivy: true
+        cache: false

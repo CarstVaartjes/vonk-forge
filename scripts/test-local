@@ -77,7 +77,7 @@ if [[ "$include_image_build" == true ]]; then
 fi
 recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
 linux_markers='linux_only or needs_systemd or postgres'
-portable_markers='not linux_only and not needs_systemd and not needs_rust_probe and not postgres'
+portable_markers='not linux_only and not needs_systemd and not needs_rust_probe and not needs_repair_probe and not postgres'
 
 # Every suite runs in the one locked control environment, as in CI.
 uv_control() {
@@ -99,22 +99,23 @@ use_recipe_library() {
 }
 
 run_python_suites() {
-    local marker_expression
-    marker_expression=$(with_image_build_selection "$1")
     local marker_args=()
-    if [[ -n "$marker_expression" ]]; then
-        marker_args=(-m "$marker_expression")
+    if [[ -n "$1" ]]; then
+        marker_args=(--markers "$1")
     fi
     use_recipe_library
     scripts/sync-cli-dependencies
     if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
         scripts/pull-test-images postgres caddy step-ca tailscale python
     fi
-
-    uv_control pytest -q -n auto --dist loadfile --durations=40 "${marker_args[@]}" tests
-    uv_control pytest -q -n auto --dist loadfile --durations=40 \
-        --ignore-glob='*_wire_bridge.py' "${marker_args[@]}" control/tests
-    uv_control pytest -q -n auto --durations=40 "${marker_args[@]}" deploy/compose/tests
+    local status=0
+    for suite in repository control compose; do
+        scripts/test "$suite" "${marker_args[@]}" -- --durations=40 || status=1
+    done
+    if [[ "$include_image_build" == true ]]; then
+        scripts/test images || status=1
+    fi
+    return "$status"
 }
 
 run_ci_wire_boundary() {
