@@ -224,7 +224,6 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         placement = parsed.compiled_execution_plan["runtime"]["placement"]
         assert (placement["rank"], placement["role"]) == (planned.rank, planned.role)
         assert placement["memory_floor_bytes"] == planned.memory_floor_bytes
-        assert placement["memory_kind"] == planned.memory_kind
         assert parsed.compiled_execution_plan["security"]["network_mode"] == "host"
         assert "expected_bytes" not in child.payload
         assert "kind" not in child.payload

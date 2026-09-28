@@ -156,13 +156,12 @@ def setup(
             )
             for node in nodes
         )
-        model = ModelDefinition.model_validate(
-            json.loads(
-                files("vonk_forge_contracts")
-                .joinpath("examples", "model-definition.json")
-                .read_text(encoding="utf-8")
-            )
+        model_document = json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "model-definition.json")
+            .read_text(encoding="utf-8")
         )
+        model = ModelDefinition.model_validate(model_document)
         recipe_document = json.loads(
             files("vonk_forge_contracts")
             .joinpath("examples", "recipe-source-build.json")
@@ -171,7 +170,7 @@ def setup(
         recipe_document["identity"]["slug"] = "qwen"
         recipe_document["metadata"]["title"] = "Qwen"
         recipe_document["models"][0]["model"]["content_sha256"] = document_sha256(
-            model.model_dump(mode="json")
+            model_document
         )
         if interfaces is None:
             recipe_document["interfaces"] = [
@@ -186,9 +185,7 @@ def setup(
             recipe_document["interfaces"] = [
                 {
                     "adapter": "video-job",
-                    "path": "/outputs",
                     "output": {
-                        "path": "/outputs",
                         "max_total_bytes": 1,
                         "slots": [
                             {
@@ -216,7 +213,6 @@ def setup(
                         "request": {
                             "transport": "job",
                             "fixture": "fixture",
-                            "output_path": "/outputs",
                             "output_slot": "output",
                         },
                         "assertions": ["artifact.output"],
@@ -226,7 +222,6 @@ def setup(
         else:
             recipe_document["interfaces"] = interfaces
         recipe = RecipeDefinition.model_validate(recipe_document)
-        recipe_document = recipe.model_dump(mode="json")
         recipe_id = str(uuid4())
         revision_id = str(uuid4())
         model_id = str(uuid4())
@@ -266,7 +261,7 @@ def setup(
             schema_version=2,
             state="active",
             document=recipe_document,
-            content_digest=document_sha256(recipe.model_dump(mode="json")),
+            content_digest=document_sha256(recipe_document),
             projected={},
             created_by="admin",
             created_at=NOW,
@@ -283,8 +278,8 @@ def setup(
                     revision_number=1,
                     schema_version=2,
                     state="active",
-                    document=model.model_dump(mode="json"),
-                    content_digest=document_sha256(model.model_dump(mode="json")),
+                    document=model_document,
+                    content_digest=document_sha256(model_document),
                     projected={},
                     created_by="admin",
                     created_at=NOW,
