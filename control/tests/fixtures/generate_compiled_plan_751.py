@@ -1,4 +1,15 @@
-"""Generate the checked-in 751-artifact launch fixture through production code."""
+"""Generate the checked-in 751-artifact launch fixture through production code.
+
+``compiled_plan_751.json`` is a compiled launch plan just over 500 KiB, the
+size class of a real large model. The Controller tests
+(``test_compiled_execution_plan.py``, ``test_fleet_events.py``) and the Rust
+agent tests (``vonk-agent/tests/polling.rs``, ``runtime_observation.rs``) read
+it to prove such a plan crosses the wire and the agent's persisted loader.
+Regenerate it from the repository root after changing the compiled-plan
+format::
+
+    uv run --project control python -m control.tests.fixtures.generate_compiled_plan_751
+"""
 
 from __future__ import annotations
 
@@ -12,7 +23,9 @@ from vonk_control.compiled_execution_plan import (
     execution_identity_sha256,
 )
 from vonk_control.execution_plan_service import _bind_runtime_artifacts
+from vonk_forge_contracts import ModelDefinition, content_sha256
 
+from control.tests.test_catalog_entities import _model
 from control.tests.test_compiled_execution_plan import _image, _spec
 
 
@@ -41,7 +54,6 @@ def main() -> None:
     artifacts = []
     model_files = []
     model_objects = []
-    model_digest = "e" * 64
     for index in range(751):
         file_id = f"artifact-{index:04d}"
         path = f"model/artifact-{index:04d}.safetensors"
@@ -64,13 +76,13 @@ def main() -> None:
                 "model": {
                     "publisher": "vonk-forge",
                     "slug": "compiled-plan-fixture",
-                    "content_sha256": model_digest,
+                    "content_sha256": "",
                 },
             }
         )
         model_objects.append(
             {
-                "model_content_sha256": model_digest,
+                "model_content_sha256": "",
                 "file_id": file_id,
                 "path": path,
                 "sha256": digest,
@@ -93,6 +105,21 @@ def main() -> None:
                 "roles": role_names,
             }
         )
+    # The binder resolves files through a complete canonical model revision
+    # whose content digest is the artifacts' model identity.
+    model_document = _model()
+    model_document["files"] = model_files
+    _json_object(model_document["identity"])["slug"] = "compiled-plan-fixture"
+    model = ModelDefinition.model_validate(model_document)
+    model_digest = content_sha256(model)
+    for artifact in artifacts:
+        _json_object(artifact["model"]).update(
+            publisher=model.identity.publisher,
+            slug=model.identity.slug,
+            content_sha256=model_digest,
+        )
+    for model_object in model_objects:
+        model_object["model_content_sha256"] = model_digest
     runtime_spec["artifacts"] = artifacts
     _json_object(_json_array(runtime_spec["model_dependencies"])[0])[
         "content_sha256"
@@ -106,7 +133,7 @@ def main() -> None:
             type(
                 "Revision",
                 (),
-                {"document": {"files": model_files}, "content_digest": model_digest},
+                {"document": model_document, "content_digest": model_digest},
             )()
         ],
     )

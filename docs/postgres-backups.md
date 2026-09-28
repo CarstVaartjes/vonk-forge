@@ -36,8 +36,8 @@ It does not restore model/image bytes. The planned
 also keeps artifact manifests and local checkpoints outside database dumps.
 Optional artifact backups must preserve those records together with their data
 through a consistent snapshot or quiesced writers. A surviving artifact cannot
-recreate a lost grant, profile, or approval. See the
-[recovery approach](plans/resilient-artifact-storage.md#4-converge-through-the-normal-operating-path).
+recreate a lost grant, profile, or approval. See
+[artifact recovery](architecture-overview.md#artifact-recovery).
 
 ## Replacing a container
 

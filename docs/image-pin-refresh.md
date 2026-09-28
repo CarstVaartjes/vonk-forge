@@ -233,6 +233,6 @@ the checked-in key `deploy/compose/trust/litellm-cosign.pub` from an exact
 upstream commit, and exposes the resulting digest-pinned references to
 operators. Never treat a new upstream `litellm` or `hermes-agent` tag as a
 published Vonk image, and never point `LITELLM_IMAGE` or `HERMES_AGENT_IMAGE` at
-an upstream tag. See [Verify the platform and workload supply
-chains](runbooks/supply-chain.md) and [Platform release
+an upstream tag. See [Verify the platform supply
+chain](runbooks/supply-chain.md) and [Platform release
 publication](runbooks/platform-release-publication.md).

@@ -91,8 +91,12 @@ def test_canonical_harness_loader_uses_exact_platform_root(
     stale = types.ModuleType("vonk_control")
     stale_harnesses = types.ModuleType("vonk_control.harnesses")
     stale_metadata = types.ModuleType("vonk_control.harnesses.canonical_metadata")
-    stale_metadata.canonical_harness = lambda _slug: (_ for _ in ()).throw(
-        AssertionError("stale package authority was imported")
+    setattr(  # noqa: B010 - a synthetic module has no declared attributes
+        stale_metadata,
+        "canonical_harness",
+        lambda _slug: (_ for _ in ()).throw(
+            AssertionError("stale package authority was imported")
+        ),
     )
     monkeypatch.setitem(sys.modules, "vonk_control", stale)
     monkeypatch.setitem(sys.modules, "vonk_control.harnesses", stale_harnesses)

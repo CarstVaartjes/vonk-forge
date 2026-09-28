@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
-from vonk_control.catalog_repository import CatalogRepository
+from vonk_control.catalog_queries import active_head_revision
 from vonk_control.catalog_service import CatalogService, CatalogValidationError
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService
@@ -17,6 +17,16 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from .test_catalog_entities import _model, _recipe
 
 NOW = datetime(2026, 9, 9, tzinfo=UTC)
+
+
+def _active_revision(session, document_id: str) -> CatalogDocumentRevision | None:
+    return session.scalar(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.document_id == document_id,
+            CatalogDocumentRevision.state == "active",
+            active_head_revision(),
+        )
+    )
 
 
 def _document_section(document: dict[str, object], key: str) -> dict[str, object]:
@@ -84,7 +94,7 @@ def _assert_current(catalog, first, expected):
         )
     } == {expected.id}
     with catalog._sessions() as session:
-        active = CatalogRepository().active_revision(session, first.document_id)
+        active = _active_revision(session, first.document_id)
         assert active is not None
         assert active.id == expected.id
         assert (
@@ -164,7 +174,7 @@ def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
     assert _library(catalog).recipe_library(all_models=True).recipes == []
     assert catalog.get_recipe(first.id).id == first.id
     with catalog._sessions() as session:
-        assert CatalogRepository().active_revision(session, first.document_id) is None
+        assert _active_revision(session, first.document_id) is None
         assert (
             ModelCacheService._latest_recipe_digest(session, first.content_digest)
             is None

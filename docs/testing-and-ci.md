@@ -73,7 +73,9 @@ installed `vonkctl` as separate processes against an HTTPS Controller peer get
 remove repeated work (build or start once per session, inject clocks instead
 of sleeping, shrink fixtures to the boundary under test). On a machine that is
 knowingly overloaded, `--test-budget-scale=2` (or `0` to disable) relaxes the
-check locally; CI always runs at the default scale.
+check locally. CI runs at the default scale but, because shared runners vary in
+speed, fails a test only above twice its budget and reports one between the
+budget and twice it as a warning (summary line and `::warning::` annotation).
 
 No test builds a container image. Checks that need the real Controller or
 worker image carry `@pytest.mark.built_image` and take the image from
@@ -134,7 +136,8 @@ tool dependency goes into a dependency group and the lock.
 Tests never download, build an environment or pull an image. A test that needs
 a wheel builds it with the locked `hatchling` in the running interpreter; one
 that installs a wheel into a scratch venv installs it `--no-deps` and links the
-CLI's own locked dependencies, which `scripts/sync-cli-dependencies` prepares; Docker-backed tests use the pinned images
+CLI's own locked dependencies, which `scripts/sync-cli-dependencies` prepares
+(`scripts/test` runs it first); Docker-backed tests use the pinned images
 `scripts/pull-test-images` pulls beforehand (CI does the same, with retries).
 
 Use a writable, task-specific uv cache. Replace `vonk-example-change` in these

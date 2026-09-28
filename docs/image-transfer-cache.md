@@ -2,8 +2,7 @@
 
 This page describes the current transfer implementation. The target
 [ownership and coordination boundary](architecture-overview.md#state-ownership)
-and [implementation plan](plans/resilient-artifact-storage.md) move remaining
-SQL-owned artifact bookkeeping to managed storage. Existing native OCI caches
+places artifact bookkeeping in managed storage. Existing native OCI caches
 and transfer behavior remain the starting point for that work.
 
 Registry images are prepared independently from model downloads. The Controller
@@ -40,8 +39,7 @@ decided by the verified bytes on disk, not by the build row's status or digest
 fields, and a receipt whose archive is missing is ordinary cache loss that is
 rebuilt instead of reported as a failure. The build row remains the index of
 candidate builder identities and the audit record; it is not the availability
-gate. Making discovery itself storage-only is part of the
-[remaining cutover](plans/resilient-artifact-storage.md).
+gate.
 
 After the exact model and image assets for a profile are ready in the cache, the
 Controller distributes them to all selected Sparks in parallel. The transfer

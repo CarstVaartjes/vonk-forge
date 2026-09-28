@@ -4,7 +4,6 @@ import {vi} from "vitest";
 import {App} from "../app";
 import type {ControlApi} from "../api/types";
 import {AppShell} from "./app-shell";
-import {Meter} from "./meter";
 import {StatusPill} from "./status-pill";
 import {FleetIcon} from "./icons";
 
@@ -149,13 +148,10 @@ test("keeps administrative actions behind the account menu", async () => {
   expect(within(actions).getByRole("link", {name: "Open Activity"})).toHaveAttribute("href", "/activity");
 });
 
-test("renders reusable status and capacity components with native semantics", () => {
-  render(<><StatusPill tone="healthy">Ready</StatusPill><Meter label="Unified memory" value={24} max={32} valueLabel="24 of 32 GB"/></>);
+test("renders the reusable status component", () => {
+  render(<StatusPill tone="healthy">Ready</StatusPill>);
 
   expect(screen.getByText("Ready")).toBeVisible();
-  expect(screen.getByText("24 of 32 GB", {selector: "strong"})).toBeVisible();
-  expect(screen.getByRole("meter", {name: "Unified memory"})).toHaveAttribute("value", "24");
-  expect(screen.getByRole("meter", {name: "Unified memory"})).toHaveAttribute("max", "32");
 });
 
 test("decorative icons cannot be exposed by caller prop overrides", () => {

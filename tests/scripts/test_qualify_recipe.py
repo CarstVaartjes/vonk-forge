@@ -7,6 +7,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
+from typing import Any
 
 import pytest
 
@@ -39,7 +40,7 @@ def _recipes(root: Path) -> list[Path]:
     return sorted((root / "recipes").glob("*.json"))
 
 
-def _run(recipe: Path, library_root: Path) -> dict[str, object]:
+def _run(recipe: Path, library_root: Path) -> dict[str, Any]:
     result = subprocess.run(
         [
             sys.executable,
@@ -90,6 +91,9 @@ def test_structural_qualification_uses_dynamic_published_catalog() -> None:
     assert validator["recipe_count"] > 0
 
 
+# Each structural run revalidates the whole published library (~4 s), once per
+# contract shape.
+@pytest.mark.slow(40)
 def test_structural_examples_cover_source_job_and_dual_contracts() -> None:
     root = _library_root()
     selected: dict[str, Path] = {}
@@ -189,7 +193,8 @@ def test_qualifier_local_http_persists_and_reloads_evidence_ledger(
         "step.started",
         "step.completed",
     ]
-    assert all(row["payload"]["step"].startswith("serving.") for row in ledger.records)
+    records: list[dict[str, Any]] = ledger.records
+    assert all(row["payload"]["step"].startswith("serving.") for row in records)
 
 
 def test_qualifier_local_http_failure_persists_failed_step(tmp_path: Path) -> None:

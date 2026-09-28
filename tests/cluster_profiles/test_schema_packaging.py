@@ -10,7 +10,6 @@ CANONICAL = ROOT / "src/cluster_profiles/schemas"
 MIRROR = ROOT / "schemas"
 STANDALONE_SCHEMAS = {
     "install-release-manifest.schema.json",
-    "workload-artifact-build.schema.json",
 }
 
 

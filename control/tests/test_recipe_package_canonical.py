@@ -442,6 +442,10 @@ def test_published_index_imports_all_models_including_unreferenced_versions(
     index_path = ROOT / "catalog-index.json"
     index = json.loads(index_path.read_text(encoding="utf-8"))
     model_documents = [entry["document"] for entry in index["catalog_entities"]]
+    # A model no recipe references yet (the published library may have none).
+    unreferenced = copy.deepcopy(model_documents[0])
+    unreferenced["identity"]["slug"] = "unreferenced-model-fixture"
+    model_documents.append(unreferenced)
     recipe_models = {
         reference["model"]["slug"]
         for row in index["recipes"]
@@ -469,4 +473,8 @@ def test_published_index_imports_all_models_including_unreferenced_versions(
         ).all()
         assert len(revisions) == len(model_documents)
         assert all(revision.state == "active" for revision in revisions)
-        assert any(revision.slug not in recipe_models for revision in revisions)
+        assert "unreferenced-model-fixture" in {
+            revision.slug
+            for revision in revisions
+            if revision.slug not in recipe_models
+        }

@@ -127,8 +127,6 @@ SQL may reference an exact artifact identity without owning its availability.
 Use a database only where its transactions, coordination, or queries reduce
 total complexity; do not build a second job scheduler out of JSON files.
 
-This is a target boundary, not a claim that the ownership cutover has shipped.
-Follow the [implementation plan](docs/plans/resilient-artifact-storage.md).
 Move each producer, reader, API projection, and meaningful test together, then
 remove its obsolete persistence path. Never add dual writers, fallback readers,
 or a schema-1 compatibility path to make the transition appear complete.
