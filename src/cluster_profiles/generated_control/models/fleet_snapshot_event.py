@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,7 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.fleet_snapshot import FleetSnapshot
@@ -27,19 +29,19 @@ class FleetSnapshotEvent:
         Attributes:
             reset_reason (str):
             snapshot (FleetSnapshot):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     reset_reason: str
-    snapshot: 'FleetSnapshot'
-    schema_version: Union[Literal[1], Unset] = 1
+    snapshot: FleetSnapshot
+    schema_version: Literal[1] | Unset = 1
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_snapshot import FleetSnapshot
+        from ..models.fleet_snapshot import FleetSnapshot # noqa: PLC0415
         reset_reason = self.reset_reason
 
         snapshot = self.snapshot.to_dict()
@@ -62,7 +64,7 @@ class FleetSnapshotEvent:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_snapshot import FleetSnapshot
+        from ..models.fleet_snapshot import FleetSnapshot # noqa: PLC0415
         d = dict(src_dict)
         reset_reason = d.pop("reset_reason")
 
@@ -71,7 +73,7 @@ class FleetSnapshotEvent:
 
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 

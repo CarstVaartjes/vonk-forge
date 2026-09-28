@@ -25,7 +25,7 @@ def _environment() -> dict[str, str]:
         "PROMETHEUS_IMAGE": "prom/prometheus:1@sha256:" + "e" * 64,
         "GRAFANA_IMAGE": "grafana/grafana:1@sha256:" + "f" * 64,
         "STEP_CA_IMAGE": "smallstep/step-ca:0.30.2@sha256:" + "1" * 64,
-        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.3",
+        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.5",
         "DATABASE_URL_FILE": "/dev/null",
         "ADMIN_PASSWORD_FILE": "/dev/null",
         "POSTGRES_PASSWORD_FILE": "/dev/null",

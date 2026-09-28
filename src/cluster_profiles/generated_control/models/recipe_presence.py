@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -14,8 +16,6 @@ from ..models.recipe_presence_rank_state import check_recipe_presence_rank_state
 from ..models.recipe_presence_rank_state import RecipePresenceRankState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -43,7 +43,7 @@ class RecipePresence:
             role (str):
             title (str):
             topology_name (str):
-            degraded_reason (Union[None, RecipePresenceDegradedReasonType0, Unset]):
+            degraded_reason (None | RecipePresenceDegradedReasonType0 | Unset):
      """
 
     complete: bool
@@ -59,7 +59,7 @@ class RecipePresence:
     role: str
     title: str
     topology_name: str
-    degraded_reason: Union[None, RecipePresenceDegradedReasonType0, Unset] = UNSET
+    degraded_reason: None | RecipePresenceDegradedReasonType0 | Unset = UNSET
 
 
 
@@ -96,7 +96,7 @@ class RecipePresence:
 
         topology_name = self.topology_name
 
-        degraded_reason: Union[None, Unset, str]
+        degraded_reason: None | str | Unset
         if isinstance(self.degraded_reason, Unset):
             degraded_reason = UNSET
         elif isinstance(self.degraded_reason, str):
@@ -166,7 +166,7 @@ class RecipePresence:
 
         topology_name = d.pop("topology_name")
 
-        def _parse_degraded_reason(data: object) -> Union[None, RecipePresenceDegradedReasonType0, Unset]:
+        def _parse_degraded_reason(data: object) -> None | RecipePresenceDegradedReasonType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -179,9 +179,9 @@ class RecipePresence:
 
 
                 return degraded_reason_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RecipePresenceDegradedReasonType0, Unset], data)
+            return cast(None | RecipePresenceDegradedReasonType0 | Unset, data)
 
         degraded_reason = _parse_degraded_reason(d.pop("degraded_reason", UNSET))
 

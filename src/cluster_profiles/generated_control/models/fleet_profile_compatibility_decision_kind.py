@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FleetProfileCompatibilityDecisionKind = Literal['engine-generation', 'jit', 'tuning']
 
@@ -6,5 +6,5 @@ FLEET_PROFILE_COMPATIBILITY_DECISION_KIND_VALUES: set[FleetProfileCompatibilityD
 
 def check_fleet_profile_compatibility_decision_kind(value: str) -> FleetProfileCompatibilityDecisionKind:
     if value in FLEET_PROFILE_COMPATIBILITY_DECISION_KIND_VALUES:
-        return cast(FleetProfileCompatibilityDecisionKind, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FLEET_PROFILE_COMPATIBILITY_DECISION_KIND_VALUES!r}")

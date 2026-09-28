@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,17 +9,16 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import Literal, Union, cast
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.recipe_library_evidence import RecipeLibraryEvidence
-  from ..models.platform_boundary import PlatformBoundary
   from ..models.agent_deployment_evidence import AgentDeploymentEvidence
-  from ..models.workload_provenance import WorkloadProvenance
   from ..models.invalid_operation_evidence import InvalidOperationEvidence
+  from ..models.platform_boundary import PlatformBoundary
+  from ..models.recipe_library_evidence import RecipeLibraryEvidence
+  from ..models.workload_provenance import WorkloadProvenance
 
 
 
@@ -31,35 +32,35 @@ T = TypeVar("T", bound="DeploymentProvenance")
 class DeploymentProvenance:
     """
         Attributes:
-            agents (list['AgentDeploymentEvidence']):
+            agents (list[AgentDeploymentEvidence]):
             generated_at (datetime.datetime):
-            invalid_operation_evidence (list['InvalidOperationEvidence']):
+            invalid_operation_evidence (list[InvalidOperationEvidence]):
             invalid_operation_evidence_omitted_count (int):
-            platform (list['PlatformBoundary']):
+            platform (list[PlatformBoundary]):
             recipe_library (RecipeLibraryEvidence):
-            workloads (list['WorkloadProvenance']):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            workloads (list[WorkloadProvenance]):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    agents: list['AgentDeploymentEvidence']
+    agents: list[AgentDeploymentEvidence]
     generated_at: datetime.datetime
-    invalid_operation_evidence: list['InvalidOperationEvidence']
+    invalid_operation_evidence: list[InvalidOperationEvidence]
     invalid_operation_evidence_omitted_count: int
-    platform: list['PlatformBoundary']
-    recipe_library: 'RecipeLibraryEvidence'
-    workloads: list['WorkloadProvenance']
-    schema_version: Union[Literal[2], Unset] = 2
+    platform: list[PlatformBoundary]
+    recipe_library: RecipeLibraryEvidence
+    workloads: list[WorkloadProvenance]
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_library_evidence import RecipeLibraryEvidence
-        from ..models.platform_boundary import PlatformBoundary
-        from ..models.agent_deployment_evidence import AgentDeploymentEvidence
-        from ..models.workload_provenance import WorkloadProvenance
-        from ..models.invalid_operation_evidence import InvalidOperationEvidence
+        from ..models.agent_deployment_evidence import AgentDeploymentEvidence # noqa: PLC0415
+        from ..models.invalid_operation_evidence import InvalidOperationEvidence # noqa: PLC0415
+        from ..models.platform_boundary import PlatformBoundary # noqa: PLC0415
+        from ..models.recipe_library_evidence import RecipeLibraryEvidence # noqa: PLC0415
+        from ..models.workload_provenance import WorkloadProvenance # noqa: PLC0415
         agents = []
         for agents_item_data in self.agents:
             agents_item = agents_item_data.to_dict()
@@ -117,11 +118,11 @@ class DeploymentProvenance:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_library_evidence import RecipeLibraryEvidence
-        from ..models.platform_boundary import PlatformBoundary
-        from ..models.agent_deployment_evidence import AgentDeploymentEvidence
-        from ..models.workload_provenance import WorkloadProvenance
-        from ..models.invalid_operation_evidence import InvalidOperationEvidence
+        from ..models.agent_deployment_evidence import AgentDeploymentEvidence # noqa: PLC0415
+        from ..models.invalid_operation_evidence import InvalidOperationEvidence # noqa: PLC0415
+        from ..models.platform_boundary import PlatformBoundary # noqa: PLC0415
+        from ..models.recipe_library_evidence import RecipeLibraryEvidence # noqa: PLC0415
+        from ..models.workload_provenance import WorkloadProvenance # noqa: PLC0415
         d = dict(src_dict)
         agents = []
         _agents = d.pop("agents")
@@ -133,7 +134,7 @@ class DeploymentProvenance:
             agents.append(agents_item)
 
 
-        generated_at = isoparse(d.pop("generated_at"))
+        generated_at = datetime.datetime.fromisoformat(d.pop("generated_at"))
 
 
 
@@ -175,7 +176,7 @@ class DeploymentProvenance:
             workloads.append(workloads_item)
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

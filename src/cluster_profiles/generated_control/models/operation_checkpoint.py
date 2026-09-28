@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -26,14 +27,14 @@ class OperationCheckpoint:
         Attributes:
             key (str):
             sequence (int):
-            cursor (Union[None, Unset, str]):
-            digest (Union[None, Unset, str]):
+            cursor (None | str | Unset):
+            digest (None | str | Unset):
      """
 
     key: str
     sequence: int
-    cursor: Union[None, Unset, str] = UNSET
-    digest: Union[None, Unset, str] = UNSET
+    cursor: None | str | Unset = UNSET
+    digest: None | str | Unset = UNSET
 
 
 
@@ -44,13 +45,13 @@ class OperationCheckpoint:
 
         sequence = self.sequence
 
-        cursor: Union[None, Unset, str]
+        cursor: None | str | Unset
         if isinstance(self.cursor, Unset):
             cursor = UNSET
         else:
             cursor = self.cursor
 
-        digest: Union[None, Unset, str]
+        digest: None | str | Unset
         if isinstance(self.digest, Unset):
             digest = UNSET
         else:
@@ -79,22 +80,22 @@ class OperationCheckpoint:
 
         sequence = d.pop("sequence")
 
-        def _parse_cursor(data: object) -> Union[None, Unset, str]:
+        def _parse_cursor(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         cursor = _parse_cursor(d.pop("cursor", UNSET))
 
 
-        def _parse_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         digest = _parse_digest(d.pop("digest", UNSET))
 

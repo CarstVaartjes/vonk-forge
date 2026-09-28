@@ -532,8 +532,7 @@ impl AgentHttpClient {
         let ca = Certificate::from_pem(&ca_pem).map_err(|_| ClientError::Identity)?;
         let client = Client::builder()
             .https_only(true)
-            .tls_built_in_root_certs(false)
-            .add_root_certificate(ca)
+            .tls_certs_only([ca])
             .identity(identity)
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(75))

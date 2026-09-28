@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
-from jsonschema import Draft202012Validator, RefResolver
+from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from vonk_control.auth import TokenCodec
@@ -175,14 +175,18 @@ def _route_template(path: str) -> str:
     return path
 
 
+def _validator(schema: dict[str, object]) -> Draft202012Validator:
+    # Component references are document-relative, so validate against the
+    # schema embedded next to the OpenAPI components it points into.
+    return Draft202012Validator({**schema, "components": OPENAPI["components"]})
+
+
 def _validate_contract(path: str, method: str, status: int, payload: object) -> None:
     operation = OPENAPI["paths"][_route_template(path)][method.lower()]
     response = operation["responses"][str(status)]
     schema = response.get("content", {}).get("application/json", {}).get("schema")
     if schema is not None:
-        Draft202012Validator(
-            schema, resolver=RefResolver.from_schema(OPENAPI)
-        ).validate(payload)
+        _validator(schema).validate(payload)
 
 
 def _validate_request(path: str, method: str, payload: object) -> None:
@@ -192,9 +196,7 @@ def _validate_request(path: str, method: str, payload: object) -> None:
     body = operation.get("requestBody", {})
     schema = body.get("content", {}).get("application/json", {}).get("schema")
     if schema is not None:
-        Draft202012Validator(
-            schema, resolver=RefResolver.from_schema(OPENAPI)
-        ).validate(payload)
+        _validator(schema).validate(payload)
 
 
 def _auth(request: Request, *, mutation: bool = False) -> None:
@@ -405,14 +407,13 @@ class HTTPTransport:
     ) -> dict[str, object]:
         _validate_request(path, method, payload)
         headers = dict(extra_headers or {})
-        cookies = None
         if self.browser:
             headers["x-csrf-token"] = CSRF
-            cookies = {"vonk_session": TOKEN}
+            self.client.cookies.set("vonk_session", TOKEN)
         else:
             headers["authorization"] = f"Bearer {TOKEN}"
         response = self.client.request(
-            method, path, headers=headers, cookies=cookies, json=payload, params=query
+            method, path, headers=headers, json=payload, params=query
         )
         if response.status_code >= 400:
             raise AssertionError(response.text)
@@ -434,9 +435,10 @@ def _cli(transport: HTTPTransport, *argv: str) -> dict[str, object]:
 
 
 def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
-    api = TestClient(_app())
-    cli_transport = HTTPTransport(api)
-    browser_transport = HTTPTransport(api, browser=True)
+    app = _app()
+    cli_transport = HTTPTransport(TestClient(app))
+    # The browser carries its session cookie on its own client, as a browser does.
+    browser_transport = HTTPTransport(TestClient(app), browser=True)
 
     assert _cli(
         cli_transport, "model", "library", "--json"

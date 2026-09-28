@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RuntimeImageStorageImpactSparkCoverage = Literal['complete', 'partial', 'unknown']
 
@@ -6,5 +6,5 @@ RUNTIME_IMAGE_STORAGE_IMPACT_SPARK_COVERAGE_VALUES: set[RuntimeImageStorageImpac
 
 def check_runtime_image_storage_impact_spark_coverage(value: str) -> RuntimeImageStorageImpactSparkCoverage:
     if value in RUNTIME_IMAGE_STORAGE_IMPACT_SPARK_COVERAGE_VALUES:
-        return cast(RuntimeImageStorageImpactSparkCoverage, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RUNTIME_IMAGE_STORAGE_IMPACT_SPARK_COVERAGE_VALUES!r}")

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -28,7 +30,7 @@ class FleetProfileSwitchChildResult:
             run_switch_operation_id (str):
      """
 
-    run_switch: 'RunSwitchOperationResult'
+    run_switch: RunSwitchOperationResult
     run_switch_operation_id: str
 
 
@@ -36,7 +38,7 @@ class FleetProfileSwitchChildResult:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_operation_result import RunSwitchOperationResult
+        from ..models.run_switch_operation_result import RunSwitchOperationResult # noqa: PLC0415
         run_switch = self.run_switch.to_dict()
 
         run_switch_operation_id = self.run_switch_operation_id
@@ -55,7 +57,7 @@ class FleetProfileSwitchChildResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_operation_result import RunSwitchOperationResult
+        from ..models.run_switch_operation_result import RunSwitchOperationResult # noqa: PLC0415
         d = dict(src_dict)
         run_switch = RunSwitchOperationResult.from_dict(d.pop("run_switch"))
 

@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 FleetProfileInstallationEffectAction = Literal['keep', 'remove']
 
@@ -6,5 +6,5 @@ FLEET_PROFILE_INSTALLATION_EFFECT_ACTION_VALUES: set[FleetProfileInstallationEff
 
 def check_fleet_profile_installation_effect_action(value: str) -> FleetProfileInstallationEffectAction:
     if value in FLEET_PROFILE_INSTALLATION_EFFECT_ACTION_VALUES:
-        return cast(FleetProfileInstallationEffectAction, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {FLEET_PROFILE_INSTALLATION_EFFECT_ACTION_VALUES!r}")

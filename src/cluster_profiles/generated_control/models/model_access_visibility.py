@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 ModelAccessVisibility = Literal['public', 'restricted']
 
@@ -6,5 +6,5 @@ MODEL_ACCESS_VISIBILITY_VALUES: set[ModelAccessVisibility] = { 'public', 'restri
 
 def check_model_access_visibility(value: str) -> ModelAccessVisibility:
     if value in MODEL_ACCESS_VISIBILITY_VALUES:
-        return cast(ModelAccessVisibility, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {MODEL_ACCESS_VISIBILITY_VALUES!r}")

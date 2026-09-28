@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,17 +9,14 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.library_filter_values import LibraryFilterValues
-  from ..models.library_facet_values import LibraryFacetValues
   from ..models.freshness_policy import FreshnessPolicy
+  from ..models.library_facet_values import LibraryFacetValues
+  from ..models.library_filter_values import LibraryFilterValues
   from ..models.library_model_projection import LibraryModelProjection
 
 
@@ -35,33 +34,33 @@ class ModelLibraryResponse:
             facets (LibraryFacetValues):
             freshness_policy (FreshnessPolicy):
             generated_at (datetime.datetime):
-            models (list['LibraryModelProjection']):
-            next_cursor (Union[None, str]):
-            filters (Union[Unset, LibraryFilterValues]): The filters that produced a Library page, echoed to the client.
+            models (list[LibraryModelProjection]):
+            next_cursor (None | str):
+            filters (LibraryFilterValues | Unset): The filters that produced a Library page, echoed to the client.
 
                 This is a typed echo rather than a free-form map so the request and the
                 response describe the same vocabulary. Every field is optional, so a page
                 that applied no filter stays valid without inventing values.
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    facets: 'LibraryFacetValues'
-    freshness_policy: 'FreshnessPolicy'
+    facets: LibraryFacetValues
+    freshness_policy: FreshnessPolicy
     generated_at: datetime.datetime
-    models: list['LibraryModelProjection']
-    next_cursor: Union[None, str]
-    filters: Union[Unset, 'LibraryFilterValues'] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    models: list[LibraryModelProjection]
+    next_cursor: None | str
+    filters: LibraryFilterValues | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.library_filter_values import LibraryFilterValues
-        from ..models.library_facet_values import LibraryFacetValues
-        from ..models.freshness_policy import FreshnessPolicy
-        from ..models.library_model_projection import LibraryModelProjection
+        from ..models.freshness_policy import FreshnessPolicy # noqa: PLC0415
+        from ..models.library_facet_values import LibraryFacetValues # noqa: PLC0415
+        from ..models.library_filter_values import LibraryFilterValues # noqa: PLC0415
+        from ..models.library_model_projection import LibraryModelProjection # noqa: PLC0415
         facets = self.facets.to_dict()
 
         freshness_policy = self.freshness_policy.to_dict()
@@ -75,10 +74,10 @@ class ModelLibraryResponse:
 
 
 
-        next_cursor: Union[None, str]
+        next_cursor: None | str
         next_cursor = self.next_cursor
 
-        filters: Union[Unset, dict[str, Any]] = UNSET
+        filters: dict[str, Any] | Unset = UNSET
         if not isinstance(self.filters, Unset):
             filters = self.filters.to_dict()
 
@@ -105,10 +104,10 @@ class ModelLibraryResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.library_filter_values import LibraryFilterValues
-        from ..models.library_facet_values import LibraryFacetValues
-        from ..models.freshness_policy import FreshnessPolicy
-        from ..models.library_model_projection import LibraryModelProjection
+        from ..models.freshness_policy import FreshnessPolicy # noqa: PLC0415
+        from ..models.library_facet_values import LibraryFacetValues # noqa: PLC0415
+        from ..models.library_filter_values import LibraryFilterValues # noqa: PLC0415
+        from ..models.library_model_projection import LibraryModelProjection # noqa: PLC0415
         d = dict(src_dict)
         facets = LibraryFacetValues.from_dict(d.pop("facets"))
 
@@ -120,7 +119,7 @@ class ModelLibraryResponse:
 
 
 
-        generated_at = isoparse(d.pop("generated_at"))
+        generated_at = datetime.datetime.fromisoformat(d.pop("generated_at"))
 
 
 
@@ -135,16 +134,16 @@ class ModelLibraryResponse:
             models.append(models_item)
 
 
-        def _parse_next_cursor(data: object) -> Union[None, str]:
+        def _parse_next_cursor(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         next_cursor = _parse_next_cursor(d.pop("next_cursor"))
 
 
         _filters = d.pop("filters", UNSET)
-        filters: Union[Unset, LibraryFilterValues]
+        filters: LibraryFilterValues | Unset
         if isinstance(_filters,  Unset):
             filters = UNSET
         else:
@@ -153,7 +152,7 @@ class ModelLibraryResponse:
 
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

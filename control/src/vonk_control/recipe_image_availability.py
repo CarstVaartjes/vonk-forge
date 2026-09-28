@@ -1009,9 +1009,9 @@ class RecipeImageAvailabilityService:
                     "recipe_image.operation_invalid",
                     "stored removal result does not match its accepted intent",
                 )
-            return result.model_dump(mode="json") | {
-                "progress": self._removal_progress_document(operation, owner),
-            }
+            document: dict[str, object] = result.model_dump(mode="json")
+            document["progress"] = self._removal_progress_document(operation, owner)
+            return document
         if operation.result is not None:
             raise RecipeImageAvailabilityError(
                 "recipe_image.operation_invalid",

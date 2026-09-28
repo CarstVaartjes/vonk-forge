@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -24,15 +25,15 @@ class OperationEvidenceProvenance:
     """
         Attributes:
             source (str):
-            authority_revision (Union[None, Unset, str]):
-            collected_at (Union[None, Unset, str]):
-            evidence_digest (Union[None, Unset, str]):
+            authority_revision (None | str | Unset):
+            collected_at (None | str | Unset):
+            evidence_digest (None | str | Unset):
      """
 
     source: str
-    authority_revision: Union[None, Unset, str] = UNSET
-    collected_at: Union[None, Unset, str] = UNSET
-    evidence_digest: Union[None, Unset, str] = UNSET
+    authority_revision: None | str | Unset = UNSET
+    collected_at: None | str | Unset = UNSET
+    evidence_digest: None | str | Unset = UNSET
 
 
 
@@ -41,19 +42,19 @@ class OperationEvidenceProvenance:
     def to_dict(self) -> dict[str, Any]:
         source = self.source
 
-        authority_revision: Union[None, Unset, str]
+        authority_revision: None | str | Unset
         if isinstance(self.authority_revision, Unset):
             authority_revision = UNSET
         else:
             authority_revision = self.authority_revision
 
-        collected_at: Union[None, Unset, str]
+        collected_at: None | str | Unset
         if isinstance(self.collected_at, Unset):
             collected_at = UNSET
         else:
             collected_at = self.collected_at
 
-        evidence_digest: Union[None, Unset, str]
+        evidence_digest: None | str | Unset
         if isinstance(self.evidence_digest, Unset):
             evidence_digest = UNSET
         else:
@@ -81,32 +82,32 @@ class OperationEvidenceProvenance:
         d = dict(src_dict)
         source = d.pop("source")
 
-        def _parse_authority_revision(data: object) -> Union[None, Unset, str]:
+        def _parse_authority_revision(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         authority_revision = _parse_authority_revision(d.pop("authority_revision", UNSET))
 
 
-        def _parse_collected_at(data: object) -> Union[None, Unset, str]:
+        def _parse_collected_at(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         collected_at = _parse_collected_at(d.pop("collected_at", UNSET))
 
 
-        def _parse_evidence_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_evidence_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         evidence_digest = _parse_evidence_digest(d.pop("evidence_digest", UNSET))
 

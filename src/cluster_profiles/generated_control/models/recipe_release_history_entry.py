@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.recipe_release_history_entry_upgrade_effect import check_recipe_re
 from ..models.recipe_release_history_entry_upgrade_effect import RecipeReleaseHistoryEntryUpgradeEffect
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_release_change import RecipeReleaseChange
@@ -28,25 +28,25 @@ T = TypeVar("T", bound="RecipeReleaseHistoryEntry")
 class RecipeReleaseHistoryEntry:
     """
         Attributes:
-            changes (list['RecipeReleaseChange']):
+            changes (list[RecipeReleaseChange]):
             released_at (str):
             upgrade_effect (RecipeReleaseHistoryEntryUpgradeEffect):
             version (str):
-            prior_recipe_content_sha256 (Union[None, Unset, str]):
+            prior_recipe_content_sha256 (None | str | Unset):
      """
 
-    changes: list['RecipeReleaseChange']
+    changes: list[RecipeReleaseChange]
     released_at: str
     upgrade_effect: RecipeReleaseHistoryEntryUpgradeEffect
     version: str
-    prior_recipe_content_sha256: Union[None, Unset, str] = UNSET
+    prior_recipe_content_sha256: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_release_change import RecipeReleaseChange
+        from ..models.recipe_release_change import RecipeReleaseChange # noqa: PLC0415
         changes = []
         for changes_item_data in self.changes:
             changes_item = changes_item_data.to_dict()
@@ -60,7 +60,7 @@ class RecipeReleaseHistoryEntry:
 
         version = self.version
 
-        prior_recipe_content_sha256: Union[None, Unset, str]
+        prior_recipe_content_sha256: None | str | Unset
         if isinstance(self.prior_recipe_content_sha256, Unset):
             prior_recipe_content_sha256 = UNSET
         else:
@@ -84,7 +84,7 @@ class RecipeReleaseHistoryEntry:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_release_change import RecipeReleaseChange
+        from ..models.recipe_release_change import RecipeReleaseChange # noqa: PLC0415
         d = dict(src_dict)
         changes = []
         _changes = d.pop("changes")
@@ -105,12 +105,12 @@ class RecipeReleaseHistoryEntry:
 
         version = d.pop("version")
 
-        def _parse_prior_recipe_content_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_prior_recipe_content_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         prior_recipe_content_sha256 = _parse_prior_recipe_content_sha256(d.pop("prior_recipe_content_sha256", UNSET))
 

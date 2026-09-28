@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 import vonk_control.model_cache as model_cache_module
 from fastapi import Depends, FastAPI
@@ -596,8 +596,10 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         session.add(revision)
         session.flush()
         document_id = document.id
-    with httpx.Client(
-        transport=httpx.MockTransport(lambda request: httpx.Response(200, content=data))
+    with httpx2.Client(
+        transport=httpx2.MockTransport(
+            lambda request: httpx2.Response(200, content=data)
+        )
     ) as client:
         service = ModelCacheService(
             sessions, tmp_path / "operator-cache", reserve_bytes=0, http_client=client
@@ -2050,10 +2052,10 @@ def test_model_cache_retry_classification_uses_typed_codes() -> None:
         "model_cache.rate_limited",
     ):
         assert _retryable_failure(coded(code)) is True
-    request = httpx.Request("GET", "https://example.invalid/model")
+    request = httpx2.Request("GET", "https://example.invalid/model")
     for status in (404, 429, 500):
-        response = httpx.Response(status, request=request)
-        error = httpx.HTTPStatusError(
+        response = httpx2.Response(status, request=request)
+        error = httpx2.HTTPStatusError(
             "permission denied", request=request, response=response
         )
         assert _retryable_failure(error) is True
@@ -2290,14 +2292,14 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
     cache, tmp_path: Path
 ) -> None:
     _service, sessions = cache
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, request=request, content=b"")
+        return httpx2.Response(200, request=request, content=b"")
 
-    http_client = httpx.Client(
-        transport=httpx.MockTransport(handler),
+    http_client = httpx2.Client(
+        transport=httpx2.MockTransport(handler),
         follow_redirects=False,
     )
     service = ModelCacheService(
@@ -2678,7 +2680,7 @@ def test_large_model_keeps_exact_aggregate_without_truncated_member_list(
     assert progress["measurement"]["members"] == []
 
 
-class _FragmentedByteStream(httpx.SyncByteStream):
+class _FragmentedByteStream(httpx2.SyncByteStream):
     def __init__(
         self,
         payload: bytes,
@@ -2694,7 +2696,7 @@ class _FragmentedByteStream(httpx.SyncByteStream):
         sent = 0
         while sent < len(self._payload):
             if self._fail_after is not None and sent >= self._fail_after:
-                raise httpx.ReadTimeout("read timeout")
+                raise httpx2.ReadTimeout("read timeout")
             end = min(len(self._payload), sent + self._fragment)
             yield self._payload[sent:end]
             sent = end
@@ -2715,8 +2717,8 @@ def _http_artifact(payload: bytes, *, model: str = "b" * 64) -> dict[str, object
 
 
 def _http_cache_service(tmp_path: Path, sessions, handler, *, clock=None):
-    client = httpx.Client(
-        transport=httpx.MockTransport(handler),
+    client = httpx2.Client(
+        transport=httpx2.MockTransport(handler),
         follow_redirects=False,
     )
     service = ModelCacheService(
@@ -2774,8 +2776,8 @@ def test_fragmented_http_download_bounds_checkpoints(
 
     monkeypatch.setattr(model_cache_mod.os, "fsync", counted_fsync)
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
             200,
             request=request,
             stream=_FragmentedByteStream(payload, fragment=fragment),
@@ -2813,30 +2815,30 @@ def test_fragmented_http_final_progress_is_durable_and_resumes(
     _existing, sessions = cache
     payload = bytes(range(256)) * ((3 * _CHUNK_BYTES) // 256)
     durable_after = 2 * _CHUNK_BYTES + _CHUNK_BYTES // 2
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         range_header = request.headers.get("range")
         if range_header:
             start = int(range_header.removeprefix("bytes=").split("-", 1)[0])
             body = payload[start:]
             end = start + len(body) - 1 if body else start
-            return httpx.Response(
+            return httpx2.Response(
                 206,
                 request=request,
                 content=body,
                 headers={"content-range": f"bytes {start}-{end}/{len(payload)}"},
             )
         if mode == "timeout":
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 request=request,
                 stream=_FragmentedByteStream(
                     payload, fragment=16 * 1024, fail_after=durable_after
                 ),
             )
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             stream=_FragmentedByteStream(payload, fragment=16 * 1024),
@@ -2927,7 +2929,7 @@ def test_fragmented_http_shutdown_preserves_sub_chunk_tail(
     payload = b"s" * (2 * _CHUNK_BYTES)
     fragments = []
 
-    class ShutdownStream(httpx.SyncByteStream):
+    class ShutdownStream(httpx2.SyncByteStream):
         def __iter__(self):
             fragments.append(1)
             yield payload[:4096]
@@ -2937,7 +2939,7 @@ def test_fragmented_http_shutdown_preserves_sub_chunk_tail(
             raise AssertionError("read another fragment after shutdown")
 
     def handler(request):
-        return httpx.Response(200, request=request, stream=ShutdownStream())
+        return httpx2.Response(200, request=request, stream=ShutdownStream())
 
     service, client = _http_cache_service(tmp_path, sessions, handler)
     sampled, _writes = _track_checkpoint_sessions(service)
@@ -2998,7 +3000,7 @@ def test_fragmented_http_tail_checkpoint_never_exceeds_synced_bytes(
     monkeypatch.setattr(os, "fsync", sync)
 
     def handler(request):
-        return httpx.Response(
+        return httpx2.Response(
             200, request=request, stream=_FragmentedByteStream(body, fragment=4096)
         )
 
@@ -3052,7 +3054,7 @@ def test_progress_is_sampled_while_source_read_is_blocked(cache, tmp_path, monke
     sampled = threading.Event()
     checkpoints = []
 
-    class SlowStream(httpx.SyncByteStream):
+    class SlowStream(httpx2.SyncByteStream):
         def __iter__(self):
             yield payload[:4096]
             # The socket has supplied no new fragment. Progress still advances
@@ -3062,7 +3064,7 @@ def test_progress_is_sampled_while_source_read_is_blocked(cache, tmp_path, monke
             yield payload[4096:]
 
     def handler(request):
-        return httpx.Response(200, request=request, stream=SlowStream())
+        return httpx2.Response(200, request=request, stream=SlowStream())
 
     service, client = _http_cache_service(
         tmp_path, sessions, handler, clock=lambda: NOW
@@ -3118,7 +3120,7 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
         requests.append(request)
         if "range" in request.headers:
             start = int(request.headers["range"].removeprefix("bytes=").split("-")[0])
-            return httpx.Response(
+            return httpx2.Response(
                 206,
                 request=request,
                 content=payload[start:],
@@ -3126,7 +3128,7 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
                     "content-range": f"bytes {start}-{len(payload) - 1}/{len(payload)}"
                 },
             )
-        return httpx.Response(
+        return httpx2.Response(
             200,
             request=request,
             stream=_FragmentedByteStream(
@@ -3229,7 +3231,7 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
         sessions, tmp_path / "http-nas-cache", reserve_bytes=0, fixture_sources=True
     )
 
-    class CancelStream(httpx.SyncByteStream):
+    class CancelStream(httpx2.SyncByteStream):
         def __iter__(self):
             yield payload[:4096]
             api.cancel_operation(
@@ -3244,7 +3246,7 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
             yield payload[4096:]
 
     def handler(request):
-        return httpx.Response(200, request=request, stream=CancelStream())
+        return httpx2.Response(200, request=request, stream=CancelStream())
 
     service, client = _http_cache_service(tmp_path, sessions, handler)
     artifact = _http_artifact(payload)
@@ -3662,13 +3664,13 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(
             barrier.wait(timeout=3)
         if requested and range_supported:
             start, end = map(int, requested.removeprefix("bytes=").split("-"))
-            return httpx.Response(
+            return httpx2.Response(
                 206,
                 request=request,
                 content=payload[start : end + 1],
                 headers={"content-range": f"bytes {start}-{end}/{len(payload)}"},
             )
-        return httpx.Response(200, request=request, content=payload)
+        return httpx2.Response(200, request=request, content=payload)
 
     service, client = _http_cache_service(tmp_path, sessions, handler)
     artifact = _http_artifact(payload)

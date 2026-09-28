@@ -9,7 +9,7 @@ import tarfile
 from copy import deepcopy
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from vonk_control import recipe_packages
 from vonk_control.bounded_json import require_mapping
@@ -370,11 +370,11 @@ class _Release:
         self.redirect_host = "release-assets.githubusercontent.com"
         self.requests: list[str] = []
 
-    def handler(self, request: httpx.Request) -> httpx.Response:
+    def handler(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(str(request.url))
         path = request.url.path
         if path in {f"{RELEASES}/latest", f"{RELEASES}/tags/{self.tag}"}:
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 json={
                     "tag_name": self.tag,
@@ -388,7 +388,7 @@ class _Release:
         download = f"/CarstVaartjes/vonk-forge-recipes/releases/download/{self.tag}/"
         if path.startswith(download) and path[len(download) :] in self.assets:
             name = path[len(download) :]
-            return httpx.Response(
+            return httpx2.Response(
                 302,
                 headers={
                     "location": f"https://{self.redirect_host}/github-production-"
@@ -397,12 +397,12 @@ class _Release:
             )
         if path.startswith("/github-production-release-asset/1336002555/"):
             assert request.url.query == b"sig=opaque%3D"
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/octet-stream"},
                 content=self.assets[path.rsplit("/", 1)[1]],
             )
-        return httpx.Response(404)
+        return httpx2.Response(404)
 
 
 @pytest.fixture
@@ -439,7 +439,7 @@ def test_production_reader_accepts_only_the_signed_release_assets(
         api_url="http://127.0.0.1:8083",
         asset_url="http://127.0.0.1:8085",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(release.handler),
+        transport=httpx2.MockTransport(release.handler),
     )
     snapshot = client.list()
     item = client.fetch(snapshot.items[0].uri)
@@ -481,7 +481,7 @@ def test_production_reader_can_hold_an_exact_release_tag(
         api_url="http://127.0.0.1",
         release="v1.0.0",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(release.handler),
+        transport=httpx2.MockTransport(release.handler),
     )
     assert client.list().commit == SIGNED_COMMIT
     # Without a relay the reader downloads from github.com and follows only
@@ -510,7 +510,7 @@ def test_unsigned_release_is_refused_even_with_a_previous_generation(
         None,
         api_url="http://127.0.0.1",
         cache_root=cache,
-        transport=httpx.MockTransport(release.handler),
+        transport=httpx2.MockTransport(release.handler),
     )
     client.prepare(client.list())
     release.assets["SHA256SUMS.sigstore.json"] = b'{"forged": true}'
@@ -550,7 +550,7 @@ def test_release_assets_must_match_the_signed_manifest(
         None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(release.handler),
+        transport=httpx2.MockTransport(release.handler),
     )
     with pytest.raises(RecipePackageError, match=error):
         client.prepare(client.list())
@@ -567,20 +567,20 @@ def test_restart_offline_reverifies_the_persisted_release(
         None,
         api_url="http://127.0.0.1",
         cache_root=cache,
-        transport=httpx.MockTransport(release.handler),
+        transport=httpx2.MockTransport(release.handler),
     )
     first.prepare(first.list())
     first.close()
     signed_releases.clear()
 
-    def offline(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("offline", request=request)
+    def offline(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("offline", request=request)
 
     restarted = RecipePackageClient(
         None,
         api_url="http://127.0.0.1",
         cache_root=cache,
-        transport=httpx.MockTransport(offline),
+        transport=httpx2.MockTransport(offline),
     )
     snapshot = restarted.list()
     restarted.prepare(snapshot)
@@ -598,7 +598,7 @@ def test_restart_offline_reverifies_the_persisted_release(
         None,
         api_url="http://127.0.0.1",
         cache_root=cache,
-        transport=httpx.MockTransport(offline),
+        transport=httpx2.MockTransport(offline),
     )
     with pytest.raises(RecipePackageError, match="unavailable"):
         unsigned.list()
@@ -641,7 +641,7 @@ def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(
         None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(release.handler),
+        transport=httpx2.MockTransport(release.handler),
     )
     client.list()
     candidate = client.list()
@@ -666,14 +666,14 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
     changed_index["recipes"] = [changed_row]
     state = {"release": _release_for(index, package)}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         return state["release"].handler(request)
 
     client = RecipePackageClient(
         None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     client.prepare(client.list())
     state["release"] = _release_for(_canonical(changed_index) + b"\n", changed)
@@ -700,14 +700,14 @@ def test_failed_candidate_can_retry_against_previous_good_snapshot(
     bad_index["recipes"] = [bad_row]
     state = {"index": index, "package": package}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/json"},
                 content=state["index"],
             )
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"content-type": "application/octet-stream"},
             content=state["package"],
@@ -716,7 +716,7 @@ def test_failed_candidate_can_retry_against_previous_good_snapshot(
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     client.prepare(client.list())
     state["index"] = _canonical(bad_index) + b"\n"
@@ -734,27 +734,27 @@ def test_restart_offline_reuses_promoted_snapshot_and_package_closure(
 ) -> None:
     index, _, package = _canonical_package_fixture()
 
-    def online(request: httpx.Request) -> httpx.Response:
+    def online(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx.Response(
+            return httpx2.Response(
                 200, headers={"content-type": "application/json"}, content=index
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": "application/octet-stream"}, content=package
         )
 
     cache = tmp_path / "packages"
     first = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(online)
+        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(online)
     )
     first.prepare(first.list())
     first.close()
 
-    def offline(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("offline", request=request)
+    def offline(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("offline", request=request)
 
     restarted = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(offline)
+        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(offline)
     )
     snapshot = restarted.list()
     restarted.prepare(snapshot)

@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -30,11 +31,10 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/recipe/installations/{installation_id}/reconcile".format(installation_id=installation_id,),
+        "url": "/api/recipe/installations/{installation_id}/reconcile".format(installation_id=quote(str(installation_id), safe=""),),
     }
 
     _kwargs["json"] = body.to_dict()
-
 
     headers["Content-Type"] = "application/json"
 
@@ -43,7 +43,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation | None:
     if response.status_code == 202:
         response_202 = RunSwitchOperation.from_dict(response.json())
 
@@ -99,7 +99,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -114,7 +114,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: RunSwitchCleanupApplyRequest,
 
-) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]]:
+) -> Response[BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation]:
     """ Apply Installation Reconciliation
 
     Args:
@@ -123,10 +123,10 @@ def sync_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]]
+        Response[BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation]
      """
 
 
@@ -148,7 +148,7 @@ def sync(
     client: AuthenticatedClient,
     body: RunSwitchCleanupApplyRequest,
 
-) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]]:
+) -> BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation | None:
     """ Apply Installation Reconciliation
 
     Args:
@@ -157,10 +157,10 @@ def sync(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]
+        BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation
      """
 
 
@@ -177,7 +177,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: RunSwitchCleanupApplyRequest,
 
-) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]]:
+) -> Response[BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation]:
     """ Apply Installation Reconciliation
 
     Args:
@@ -186,10 +186,10 @@ async def asyncio_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]]
+        Response[BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation]
      """
 
 
@@ -211,7 +211,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: RunSwitchCleanupApplyRequest,
 
-) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]]:
+) -> BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation | None:
     """ Apply Installation Reconciliation
 
     Args:
@@ -220,10 +220,10 @@ async def asyncio(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RequestValidationProblem, RunSwitchOperation]
+        BoundedErrorResponse | RequestValidationProblem | RunSwitchOperation
      """
 
 

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -28,7 +30,7 @@ class RecipeImageExecution:
             mode (Literal['image']):
      """
 
-    image: 'RecipeImage'
+    image: RecipeImage
     mode: Literal['image']
 
 
@@ -36,7 +38,7 @@ class RecipeImageExecution:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_image import RecipeImage
+        from ..models.recipe_image import RecipeImage # noqa: PLC0415
         image = self.image.to_dict()
 
         mode = self.mode
@@ -55,7 +57,7 @@ class RecipeImageExecution:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_image import RecipeImage
+        from ..models.recipe_image import RecipeImage # noqa: PLC0415
         d = dict(src_dict)
         image = RecipeImage.from_dict(d.pop("image"))
 

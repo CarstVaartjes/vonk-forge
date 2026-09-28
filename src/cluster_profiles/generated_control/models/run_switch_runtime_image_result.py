@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.runtime_image_receipt import RuntimeImageReceipt
@@ -38,25 +38,25 @@ class RunSwitchRuntimeImageResult:
                 execution-plan service performs that one explicit typed projection at the
                 plan boundary.
             subphase (Literal['runtime-image']):
-            build_id (Union[None, Unset, str]):
-            effective_execution_key (Union[None, Unset, str]):
+            build_id (None | str | Unset):
+            effective_execution_key (None | str | Unset):
      """
 
     image_bytes: int
     image_digest: str
     oci_layout_sha256: str
     phase: Literal['prepare']
-    runtime_image: 'RuntimeImageReceipt'
+    runtime_image: RuntimeImageReceipt
     subphase: Literal['runtime-image']
-    build_id: Union[None, Unset, str] = UNSET
-    effective_execution_key: Union[None, Unset, str] = UNSET
+    build_id: None | str | Unset = UNSET
+    effective_execution_key: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.runtime_image_receipt import RuntimeImageReceipt
+        from ..models.runtime_image_receipt import RuntimeImageReceipt # noqa: PLC0415
         image_bytes = self.image_bytes
 
         image_digest = self.image_digest
@@ -69,13 +69,13 @@ class RunSwitchRuntimeImageResult:
 
         subphase = self.subphase
 
-        build_id: Union[None, Unset, str]
+        build_id: None | str | Unset
         if isinstance(self.build_id, Unset):
             build_id = UNSET
         else:
             build_id = self.build_id
 
-        effective_execution_key: Union[None, Unset, str]
+        effective_execution_key: None | str | Unset
         if isinstance(self.effective_execution_key, Unset):
             effective_execution_key = UNSET
         else:
@@ -103,7 +103,7 @@ class RunSwitchRuntimeImageResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.runtime_image_receipt import RuntimeImageReceipt
+        from ..models.runtime_image_receipt import RuntimeImageReceipt # noqa: PLC0415
         d = dict(src_dict)
         image_bytes = d.pop("image_bytes")
 
@@ -124,22 +124,22 @@ class RunSwitchRuntimeImageResult:
         if subphase != 'runtime-image':
             raise ValueError(f"subphase must match const 'runtime-image', got '{subphase}'")
 
-        def _parse_build_id(data: object) -> Union[None, Unset, str]:
+        def _parse_build_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         build_id = _parse_build_id(d.pop("build_id", UNSET))
 
 
-        def _parse_effective_execution_key(data: object) -> Union[None, Unset, str]:
+        def _parse_effective_execution_key(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         effective_execution_key = _parse_effective_execution_key(d.pop("effective_execution_key", UNSET))
 

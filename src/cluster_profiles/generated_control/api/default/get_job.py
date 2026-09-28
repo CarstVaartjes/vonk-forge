@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -12,17 +13,15 @@ from ...models.job_detail_response import JobDetailResponse
 from ...models.request_validation_problem import RequestValidationProblem
 from ...types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
 def _get_kwargs(
     job_id: str,
     *,
-    operation_cursor: Union[None, Unset, str] = UNSET,
-    target_cursor: Union[None, Unset, str] = UNSET,
-    limit: Union[Unset, int] = 20,
+    operation_cursor: None | str | Unset = UNSET,
+    target_cursor: None | str | Unset = UNSET,
+    limit: int | Unset = 20,
 
 ) -> dict[str, Any]:
 
@@ -31,14 +30,14 @@ def _get_kwargs(
 
     params: dict[str, Any] = {}
 
-    json_operation_cursor: Union[None, Unset, str]
+    json_operation_cursor: None | str | Unset
     if isinstance(operation_cursor, Unset):
         json_operation_cursor = UNSET
     else:
         json_operation_cursor = operation_cursor
     params["operation_cursor"] = json_operation_cursor
 
-    json_target_cursor: Union[None, Unset, str]
+    json_target_cursor: None | str | Unset
     if isinstance(target_cursor, Unset):
         json_target_cursor = UNSET
     else:
@@ -53,7 +52,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/jobs/{job_id}".format(job_id=job_id,),
+        "url": "/api/jobs/{job_id}".format(job_id=quote(str(job_id), safe=""),),
         "params": params,
     }
 
@@ -62,7 +61,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | JobDetailResponse | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = JobDetailResponse.from_dict(response.json())
 
@@ -104,7 +103,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | JobDetailResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -117,25 +116,25 @@ def sync_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    operation_cursor: Union[None, Unset, str] = UNSET,
-    target_cursor: Union[None, Unset, str] = UNSET,
-    limit: Union[Unset, int] = 20,
+    operation_cursor: None | str | Unset = UNSET,
+    target_cursor: None | str | Unset = UNSET,
+    limit: int | Unset = 20,
 
-) -> Response[Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | JobDetailResponse | RequestValidationProblem]:
     """ Job View
 
     Args:
         job_id (str):
-        operation_cursor (Union[None, Unset, str]):
-        target_cursor (Union[None, Unset, str]):
-        limit (Union[Unset, int]):  Default: 20.
+        operation_cursor (None | str | Unset):
+        target_cursor (None | str | Unset):
+        limit (int | Unset):  Default: 20.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | JobDetailResponse | RequestValidationProblem]
      """
 
 
@@ -157,25 +156,25 @@ def sync(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    operation_cursor: Union[None, Unset, str] = UNSET,
-    target_cursor: Union[None, Unset, str] = UNSET,
-    limit: Union[Unset, int] = 20,
+    operation_cursor: None | str | Unset = UNSET,
+    target_cursor: None | str | Unset = UNSET,
+    limit: int | Unset = 20,
 
-) -> Optional[Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | JobDetailResponse | RequestValidationProblem | None:
     """ Job View
 
     Args:
         job_id (str):
-        operation_cursor (Union[None, Unset, str]):
-        target_cursor (Union[None, Unset, str]):
-        limit (Union[Unset, int]):  Default: 20.
+        operation_cursor (None | str | Unset):
+        target_cursor (None | str | Unset):
+        limit (int | Unset):  Default: 20.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]
+        BoundedErrorResponse | JobDetailResponse | RequestValidationProblem
      """
 
 
@@ -192,25 +191,25 @@ async def asyncio_detailed(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    operation_cursor: Union[None, Unset, str] = UNSET,
-    target_cursor: Union[None, Unset, str] = UNSET,
-    limit: Union[Unset, int] = 20,
+    operation_cursor: None | str | Unset = UNSET,
+    target_cursor: None | str | Unset = UNSET,
+    limit: int | Unset = 20,
 
-) -> Response[Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | JobDetailResponse | RequestValidationProblem]:
     """ Job View
 
     Args:
         job_id (str):
-        operation_cursor (Union[None, Unset, str]):
-        target_cursor (Union[None, Unset, str]):
-        limit (Union[Unset, int]):  Default: 20.
+        operation_cursor (None | str | Unset):
+        target_cursor (None | str | Unset):
+        limit (int | Unset):  Default: 20.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | JobDetailResponse | RequestValidationProblem]
      """
 
 
@@ -232,25 +231,25 @@ async def asyncio(
     job_id: str,
     *,
     client: AuthenticatedClient,
-    operation_cursor: Union[None, Unset, str] = UNSET,
-    target_cursor: Union[None, Unset, str] = UNSET,
-    limit: Union[Unset, int] = 20,
+    operation_cursor: None | str | Unset = UNSET,
+    target_cursor: None | str | Unset = UNSET,
+    limit: int | Unset = 20,
 
-) -> Optional[Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | JobDetailResponse | RequestValidationProblem | None:
     """ Job View
 
     Args:
         job_id (str):
-        operation_cursor (Union[None, Unset, str]):
-        target_cursor (Union[None, Unset, str]):
-        limit (Union[Unset, int]):  Default: 20.
+        operation_cursor (None | str | Unset):
+        target_cursor (None | str | Unset):
+        limit (int | Unset):  Default: 20.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, JobDetailResponse, RequestValidationProblem]
+        BoundedErrorResponse | JobDetailResponse | RequestValidationProblem
      """
 
 

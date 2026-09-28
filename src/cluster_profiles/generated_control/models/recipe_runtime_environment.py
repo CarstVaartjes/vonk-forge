@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -24,13 +25,13 @@ class RecipeRuntimeEnvironment:
     """
         Attributes:
             name (str):
-            secret (Union[None, Unset, str]):
-            value (Union[None, Unset, bool, float, int, str]):
+            secret (None | str | Unset):
+            value (bool | float | int | None | str | Unset):
      """
 
     name: str
-    secret: Union[None, Unset, str] = UNSET
-    value: Union[None, Unset, bool, float, int, str] = UNSET
+    secret: None | str | Unset = UNSET
+    value: bool | float | int | None | str | Unset = UNSET
 
 
 
@@ -39,13 +40,13 @@ class RecipeRuntimeEnvironment:
     def to_dict(self) -> dict[str, Any]:
         name = self.name
 
-        secret: Union[None, Unset, str]
+        secret: None | str | Unset
         if isinstance(self.secret, Unset):
             secret = UNSET
         else:
             secret = self.secret
 
-        value: Union[None, Unset, bool, float, int, str]
+        value: bool | float | int | None | str | Unset
         if isinstance(self.value, Unset):
             value = UNSET
         else:
@@ -71,22 +72,22 @@ class RecipeRuntimeEnvironment:
         d = dict(src_dict)
         name = d.pop("name")
 
-        def _parse_secret(data: object) -> Union[None, Unset, str]:
+        def _parse_secret(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         secret = _parse_secret(d.pop("secret", UNSET))
 
 
-        def _parse_value(data: object) -> Union[None, Unset, bool, float, int, str]:
+        def _parse_value(data: object) -> bool | float | int | None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, bool, float, int, str], data)
+            return cast(bool | float | int | None | str | Unset, data)
 
         value = _parse_value(d.pop("value", UNSET))
 

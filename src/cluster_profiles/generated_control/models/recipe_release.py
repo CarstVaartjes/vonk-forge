@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -23,12 +25,12 @@ T = TypeVar("T", bound="RecipeRelease")
 class RecipeRelease:
     """
         Attributes:
-            history (list['RecipeReleaseHistoryEntry']):
+            history (list[RecipeReleaseHistoryEntry]):
             released_at (str):
             version (str):
      """
 
-    history: list['RecipeReleaseHistoryEntry']
+    history: list[RecipeReleaseHistoryEntry]
     released_at: str
     version: str
 
@@ -37,7 +39,7 @@ class RecipeRelease:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_release_history_entry import RecipeReleaseHistoryEntry
+        from ..models.recipe_release_history_entry import RecipeReleaseHistoryEntry # noqa: PLC0415
         history = []
         for history_item_data in self.history:
             history_item = history_item_data.to_dict()
@@ -64,7 +66,7 @@ class RecipeRelease:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_release_history_entry import RecipeReleaseHistoryEntry
+        from ..models.recipe_release_history_entry import RecipeReleaseHistoryEntry # noqa: PLC0415
         d = dict(src_dict)
         history = []
         _history = d.pop("history")

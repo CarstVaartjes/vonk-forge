@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -24,12 +25,12 @@ class ArtifactJobResultEvidence:
     """ Known evidence fields with room for engine-specific evidence keys.
 
         Attributes:
-            elapsed_milliseconds (Union[None, Unset, int]):
-            peak_memory_bytes (Union[None, Unset, int]):
+            elapsed_milliseconds (int | None | Unset):
+            peak_memory_bytes (int | None | Unset):
      """
 
-    elapsed_milliseconds: Union[None, Unset, int] = UNSET
-    peak_memory_bytes: Union[None, Unset, int] = UNSET
+    elapsed_milliseconds: int | None | Unset = UNSET
+    peak_memory_bytes: int | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -37,13 +38,13 @@ class ArtifactJobResultEvidence:
 
 
     def to_dict(self) -> dict[str, Any]:
-        elapsed_milliseconds: Union[None, Unset, int]
+        elapsed_milliseconds: int | None | Unset
         if isinstance(self.elapsed_milliseconds, Unset):
             elapsed_milliseconds = UNSET
         else:
             elapsed_milliseconds = self.elapsed_milliseconds
 
-        peak_memory_bytes: Union[None, Unset, int]
+        peak_memory_bytes: int | None | Unset
         if isinstance(self.peak_memory_bytes, Unset):
             peak_memory_bytes = UNSET
         else:
@@ -66,22 +67,22 @@ class ArtifactJobResultEvidence:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        def _parse_elapsed_milliseconds(data: object) -> Union[None, Unset, int]:
+        def _parse_elapsed_milliseconds(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         elapsed_milliseconds = _parse_elapsed_milliseconds(d.pop("elapsed_milliseconds", UNSET))
 
 
-        def _parse_peak_memory_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_peak_memory_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         peak_memory_bytes = _parse_peak_memory_bytes(d.pop("peak_memory_bytes", UNSET))
 

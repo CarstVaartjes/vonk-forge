@@ -91,8 +91,7 @@ pub async fn pair(
     evidence.validate().map_err(|_| PairingError::Response)?;
     let client = Client::builder()
         .https_only(true)
-        .tls_built_in_root_certs(false)
-        .add_root_certificate(Certificate::from_pem(&ca_pem).map_err(|_| PairingError::CaInvalid)?)
+        .tls_certs_only([Certificate::from_pem(&ca_pem).map_err(|_| PairingError::CaInvalid)?])
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
         .build()?;

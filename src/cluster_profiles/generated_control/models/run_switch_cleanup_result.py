@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,9 +12,7 @@ from ..models.run_switch_cleanup_result_subphase_type_0 import check_run_switch_
 from ..models.run_switch_cleanup_result_subphase_type_0 import RunSwitchCleanupResultSubphaseType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 
 
@@ -31,20 +31,20 @@ class RunSwitchCleanupResult:
             phase (Literal['cleanup']):
             reclaimed_bytes (int):
             scope (Literal['spark-local']):
-            protected_digests (Union[Unset, list[str]]):
-            protected_referenced_bytes (Union[Unset, int]):  Default: 0.
-            reclaimed_digests (Union[Unset, list[str]]):
-            subphase (Union[None, RunSwitchCleanupResultSubphaseType0, Unset]):
+            protected_digests (list[str] | Unset):
+            protected_referenced_bytes (int | Unset):  Default: 0.
+            reclaimed_digests (list[str] | Unset):
+            subphase (None | RunSwitchCleanupResultSubphaseType0 | Unset):
      """
 
     nas_evicted: bool
     phase: Literal['cleanup']
     reclaimed_bytes: int
     scope: Literal['spark-local']
-    protected_digests: Union[Unset, list[str]] = UNSET
-    protected_referenced_bytes: Union[Unset, int] = 0
-    reclaimed_digests: Union[Unset, list[str]] = UNSET
-    subphase: Union[None, RunSwitchCleanupResultSubphaseType0, Unset] = UNSET
+    protected_digests: list[str] | Unset = UNSET
+    protected_referenced_bytes: int | Unset = 0
+    reclaimed_digests: list[str] | Unset = UNSET
+    subphase: None | RunSwitchCleanupResultSubphaseType0 | Unset = UNSET
 
 
 
@@ -59,7 +59,7 @@ class RunSwitchCleanupResult:
 
         scope = self.scope
 
-        protected_digests: Union[Unset, list[str]] = UNSET
+        protected_digests: list[str] | Unset = UNSET
         if not isinstance(self.protected_digests, Unset):
             protected_digests = self.protected_digests
 
@@ -67,13 +67,13 @@ class RunSwitchCleanupResult:
 
         protected_referenced_bytes = self.protected_referenced_bytes
 
-        reclaimed_digests: Union[Unset, list[str]] = UNSET
+        reclaimed_digests: list[str] | Unset = UNSET
         if not isinstance(self.reclaimed_digests, Unset):
             reclaimed_digests = self.reclaimed_digests
 
 
 
-        subphase: Union[None, Unset, str]
+        subphase: None | str | Unset
         if isinstance(self.subphase, Unset):
             subphase = UNSET
         elif isinstance(self.subphase, str):
@@ -126,7 +126,7 @@ class RunSwitchCleanupResult:
         reclaimed_digests = cast(list[str], d.pop("reclaimed_digests", UNSET))
 
 
-        def _parse_subphase(data: object) -> Union[None, RunSwitchCleanupResultSubphaseType0, Unset]:
+        def _parse_subphase(data: object) -> None | RunSwitchCleanupResultSubphaseType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -139,9 +139,9 @@ class RunSwitchCleanupResult:
 
 
                 return subphase_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, RunSwitchCleanupResultSubphaseType0, Unset], data)
+            return cast(None | RunSwitchCleanupResultSubphaseType0 | Unset, data)
 
         subphase = _parse_subphase(d.pop("subphase", UNSET))
 

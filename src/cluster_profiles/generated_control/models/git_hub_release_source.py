@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -25,13 +27,13 @@ class GitHubReleaseSource:
     """ An exact asset from one release in a canonical GitHub repository.
 
         Attributes:
-            assets (list['GitHubReleaseAsset']):
+            assets (list[GitHubReleaseAsset]):
             provider (Literal['github-release']):
             release_id (int):
             repository (str):
      """
 
-    assets: list['GitHubReleaseAsset']
+    assets: list[GitHubReleaseAsset]
     provider: Literal['github-release']
     release_id: int
     repository: str
@@ -41,7 +43,7 @@ class GitHubReleaseSource:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.git_hub_release_asset import GitHubReleaseAsset
+        from ..models.git_hub_release_asset import GitHubReleaseAsset # noqa: PLC0415
         assets = []
         for assets_item_data in self.assets:
             assets_item = assets_item_data.to_dict()
@@ -71,7 +73,7 @@ class GitHubReleaseSource:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.git_hub_release_asset import GitHubReleaseAsset
+        from ..models.git_hub_release_asset import GitHubReleaseAsset # noqa: PLC0415
         d = dict(src_dict)
         assets = []
         _assets = d.pop("assets")

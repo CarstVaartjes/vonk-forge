@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -34,7 +36,7 @@ class RunSwitchProfileStopScope:
      """
 
     missing_node_ids: list[str]
-    original_group: 'SparkGroup'
+    original_group: SparkGroup
     target_node_ids: list[str]
 
 
@@ -42,7 +44,7 @@ class RunSwitchProfileStopScope:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.spark_group import SparkGroup
+        from ..models.spark_group import SparkGroup # noqa: PLC0415
         missing_node_ids = self.missing_node_ids
 
 
@@ -68,7 +70,7 @@ class RunSwitchProfileStopScope:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.spark_group import SparkGroup
+        from ..models.spark_group import SparkGroup # noqa: PLC0415
         d = dict(src_dict)
         missing_node_ids = cast(list[str], d.pop("missing_node_ids"))
 

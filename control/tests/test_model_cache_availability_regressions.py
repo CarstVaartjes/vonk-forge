@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 
-import httpx
+import httpx2
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from vonk_control.bounded_json import (
@@ -64,8 +64,8 @@ def _database(tmp_path: Path):
 def _service(tmp_path: Path, sessions, *, maximum: int = 4, handler=None, clock=None):
     client = None
     if handler is not None:
-        client = httpx.Client(
-            transport=httpx.MockTransport(handler),
+        client = httpx2.Client(
+            transport=httpx2.MockTransport(handler),
             follow_redirects=False,
         )
     service = ModelCacheService(
@@ -135,7 +135,7 @@ def test_single_job_saturates_all_controller_transfer_slots(tmp_path: Path) -> N
     lock = threading.Lock()
     responses = {f"/weights-{index}": f"payload-{index}".encode() for index in range(5)}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         nonlocal active, maximum
         with lock:
             active += 1
@@ -146,7 +146,7 @@ def test_single_job_saturates_all_controller_transfer_slots(tmp_path: Path) -> N
         with lock:
             active -= 1
         data = responses[request.url.path]
-        return httpx.Response(200, request=request, content=data)
+        return httpx2.Response(200, request=request, content=data)
 
     service, client = _service(tmp_path, sessions, handler=handler)
     artifacts = [
@@ -179,12 +179,12 @@ def test_two_jobs_each_start_before_surplus_slots_are_round_robin_allocated(
         f"/weights-b{index}": f"b-{index}".encode() for index in range(3)
     }
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         with lock:
             started.append(request.url.path)
         release.wait(2)
         data = responses[request.url.path]
-        return httpx.Response(200, request=request, content=data)
+        return httpx2.Response(200, request=request, content=data)
 
     service, client = _service(tmp_path, sessions, maximum=4, handler=handler)
     first = _start(
@@ -227,12 +227,12 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(
     sibling_started = threading.Event()
     release_sibling = threading.Event()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("fail"):
-            return httpx.Response(200, request=request, content=b"wrongwrongwrong!")
+            return httpx2.Response(200, request=request, content=b"wrongwrongwrong!")
         sibling_started.set()
         release_sibling.wait(2)
-        return httpx.Response(200, request=request, content=b"sibling")
+        return httpx2.Response(200, request=request, content=b"sibling")
 
     service, client = _service(tmp_path, sessions, maximum=2, handler=handler)
     artifacts = [
@@ -376,16 +376,16 @@ def test_hf_rate_limit_cooldown_survives_restart_but_local_work_progresses(
     allow_hf = [False]
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(request.url.host or "")
         if request.url.host == "huggingface.co" and not allow_hf[0]:
-            return httpx.Response(
+            return httpx2.Response(
                 429,
                 request=request,
                 headers={"RateLimit": '"resolvers";r=0;t=30'},
             )
         content = b"hf" if request.url.host == "huggingface.co" else b"local"
-        return httpx.Response(200, request=request, content=content)
+        return httpx2.Response(200, request=request, content=content)
 
     service, client = _service(
         tmp_path,
@@ -624,10 +624,10 @@ def test_close_checkpoints_active_transfer_and_fresh_service_resumes(
     started = threading.Event()
     release = threading.Event()
 
-    def blocking_handler(request: httpx.Request) -> httpx.Response:
+    def blocking_handler(request: httpx2.Request) -> httpx2.Response:
         started.set()
         release.wait(2)
-        return httpx.Response(200, request=request, content=b"resume-me")
+        return httpx2.Response(200, request=request, content=b"resume-me")
 
     service, client = _service(
         tmp_path,
@@ -651,8 +651,8 @@ def test_close_checkpoints_active_transfer_and_fresh_service_resumes(
     assert not closer.is_alive()
     assert service.get_operation(operation.id).state == "partial"
 
-    def resumed_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, request=request, content=b"resume-me")
+    def resumed_handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, request=request, content=b"resume-me")
 
     fresh, fresh_client = _service(
         tmp_path,
@@ -674,22 +674,22 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     sessions = _database(tmp_path)
     token_path = tmp_path / "hf-token"
     token_path.write_text("bad-token\n")
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
     public_data = b"public model"
     hf_data = b"gated model"
     now = [NOW]
     rate_limit_once = [True]
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         if (
             request.url.path.endswith("weights-z-hf")
             and request.headers.get("authorization") == "Bearer bad-token"
         ):
-            return httpx.Response(403, request=request)
+            return httpx2.Response(403, request=request)
         if request.url.path.endswith("weights-z-hf") and rate_limit_once[0]:
             rate_limit_once[0] = False
-            return httpx.Response(
+            return httpx2.Response(
                 429,
                 request=request,
                 headers={"RateLimit": '"resolvers";r=0;t=30'},
@@ -697,10 +697,10 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
         content = (
             public_data if request.url.path.endswith("weights-a-public") else hf_data
         )
-        return httpx.Response(200, request=request, content=content)
+        return httpx2.Response(200, request=request, content=content)
 
-    client = httpx.Client(
-        transport=httpx.MockTransport(handler),
+    client = httpx2.Client(
+        transport=httpx2.MockTransport(handler),
         follow_redirects=False,
     )
     service = ModelCacheService(
@@ -871,11 +871,11 @@ def test_access_recheck_groups_hf_files_by_repository_without_failed_key(
     tmp_path: Path,
 ) -> None:
     sessions = _database(tmp_path)
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, request=request, content=b"ok")
+        return httpx2.Response(200, request=request, content=b"ok")
 
     service, client = _service(tmp_path, sessions, handler=handler)
     artifacts = []
@@ -946,7 +946,7 @@ def test_two_controller_services_share_one_upstream_object_transfer(
         calls.append(str(request.url))
         entered.set()
         assert release.wait(5)
-        return httpx.Response(200, content=data)
+        return httpx2.Response(200, content=data)
 
     first, _ = _service(tmp_path, sessions, handler=handler)
     second, _ = _service(tmp_path, sessions, handler=handler)
@@ -991,7 +991,7 @@ def test_upstream_check_is_explicit_metadata_only_and_keeps_pin(tmp_path: Path) 
         assert sessions.kw["bind"].pool.checkedout() == 0
         calls.append(str(request.url))
         assert request.url.path == "/api/models/acme/model/revision/main"
-        return httpx.Response(200, json={"sha": latest})
+        return httpx2.Response(200, json={"sha": latest})
 
     service, _ = _service(tmp_path, sessions, handler=handler)
     current_doc = _model_document("source-revision-1", "1")
@@ -1034,7 +1034,7 @@ def test_failed_upstream_metadata_check_does_not_hide_catalog_update(
     tmp_path: Path,
 ) -> None:
     sessions = _database(tmp_path)
-    service, _ = _service(tmp_path, sessions, handler=lambda _: httpx.Response(503))
+    service, _ = _service(tmp_path, sessions, handler=lambda _: httpx2.Response(503))
     current_digest = _insert_model_revision(
         sessions, _model_document("old", "1"), created_at=NOW
     )
@@ -1135,17 +1135,17 @@ def test_hf_access_failure_resumes_automatically_after_token_change(
     token_path = tmp_path / "hf-token"
     token_path.write_text("bad-token\n")
     data = b"gated model"
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
     now = [NOW]
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         if request.headers.get("authorization") != "Bearer replacement-token":
-            return httpx.Response(403, request=request)
-        return httpx.Response(200, request=request, content=data)
+            return httpx2.Response(403, request=request)
+        return httpx2.Response(200, request=request, content=data)
 
-    client = httpx.Client(
-        transport=httpx.MockTransport(handler), follow_redirects=False
+    client = httpx2.Client(
+        transport=httpx2.MockTransport(handler), follow_redirects=False
     )
     service = ModelCacheService(
         sessions,
@@ -1185,14 +1185,14 @@ def test_hf_access_failure_resumes_automatically_after_token_change(
 def test_digest_mismatch_discards_bytes_and_downloads_again(tmp_path: Path) -> None:
     sessions = _database(tmp_path)
     data = b"pinned model bytes"
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
     now = [NOW]
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         if len(requests) <= 2:
-            return httpx.Response(200, request=request, content=b"X" * len(data))
-        return httpx.Response(200, request=request, content=data)
+            return httpx2.Response(200, request=request, content=b"X" * len(data))
+        return httpx2.Response(200, request=request, content=data)
 
     service, client = _service(
         tmp_path, sessions, maximum=1, handler=handler, clock=lambda: now[0]

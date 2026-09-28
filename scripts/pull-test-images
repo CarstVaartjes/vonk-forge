@@ -13,7 +13,7 @@ fi
 images=()
 for name in "$@"; do
     case "$name" in
-        python) images+=("python:3.14-bookworm") ;;
+        python) images+=("python:3.14-slim-trixie") ;;
         *)
             image=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["images"][sys.argv[2]])' \
                 "$root/deploy/compose/images.lock.json" "$name")

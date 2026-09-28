@@ -7,12 +7,12 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / "control/Dockerfile"
 
 SKOPEO_IMAGE = (
-    "quay.io/skopeo/stable:v1.22.2-immutable@sha256:"
-    "4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810"
+    "quay.io/skopeo/stable:v1.22.3-immutable@sha256:"
+    "c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5"
 )
-SKOPEO_INDEX = "sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810"
-SKOPEO_AMD64 = "sha256:0e392474a4383b733038b85eff26ade929d2ff10e8deead25a6add3ed79fb362"
-SKOPEO_ARM64 = "sha256:807f42a95c0f05f397eb505b577b6de49048b865c4e29146d1231324c27e1e59"
+SKOPEO_INDEX = "sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5"
+SKOPEO_AMD64 = "sha256:ab4c269c9e2bd11affe2666b860fb651a15afec121c15986b052b02e09d86239"
+SKOPEO_ARM64 = "sha256:916612c4c9bcf1dd633137ec4ce88987e368c16b3d611642006ca5996fe28c98"
 
 
 def test_controller_image_pins_and_packages_the_reviewed_skopeo_transport() -> None:

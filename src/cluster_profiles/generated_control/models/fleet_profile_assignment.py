@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.fleet_profile_assignment_desired_state import check_fleet_profile_
 from ..models.fleet_profile_assignment_desired_state import FleetProfileAssignmentDesiredState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_node import FleetProfileNode
@@ -30,31 +30,31 @@ class FleetProfileAssignment:
         Attributes:
             desired_state (FleetProfileAssignmentDesiredState):
             id (str):
-            nodes (list['FleetProfileNode']):
+            nodes (list[FleetProfileNode]):
             recipe_id (str):
             recipe_revision_id (str):
             recipe_title (str):
             topology_name (str):
-            alias (Union[None, Unset, str]):
-            model_title (Union[None, Unset, str]):
+            alias (None | str | Unset):
+            model_title (None | str | Unset):
      """
 
     desired_state: FleetProfileAssignmentDesiredState
     id: str
-    nodes: list['FleetProfileNode']
+    nodes: list[FleetProfileNode]
     recipe_id: str
     recipe_revision_id: str
     recipe_title: str
     topology_name: str
-    alias: Union[None, Unset, str] = UNSET
-    model_title: Union[None, Unset, str] = UNSET
+    alias: None | str | Unset = UNSET
+    model_title: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_node import FleetProfileNode
+        from ..models.fleet_profile_node import FleetProfileNode # noqa: PLC0415
         desired_state: str = self.desired_state
 
         id = self.id
@@ -74,13 +74,13 @@ class FleetProfileAssignment:
 
         topology_name = self.topology_name
 
-        alias: Union[None, Unset, str]
+        alias: None | str | Unset
         if isinstance(self.alias, Unset):
             alias = UNSET
         else:
             alias = self.alias
 
-        model_title: Union[None, Unset, str]
+        model_title: None | str | Unset
         if isinstance(self.model_title, Unset):
             model_title = UNSET
         else:
@@ -109,7 +109,7 @@ class FleetProfileAssignment:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_node import FleetProfileNode
+        from ..models.fleet_profile_node import FleetProfileNode # noqa: PLC0415
         d = dict(src_dict)
         desired_state = check_fleet_profile_assignment_desired_state(d.pop("desired_state"))
 
@@ -136,22 +136,22 @@ class FleetProfileAssignment:
 
         topology_name = d.pop("topology_name")
 
-        def _parse_alias(data: object) -> Union[None, Unset, str]:
+        def _parse_alias(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         alias = _parse_alias(d.pop("alias", UNSET))
 
 
-        def _parse_model_title(data: object) -> Union[None, Unset, str]:
+        def _parse_model_title(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_title = _parse_model_title(d.pop("model_title", UNSET))
 

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 
-import httpx
+import httpx2
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
@@ -43,9 +43,9 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
     }
     requests: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request.url.path)
-        return httpx.Response(200, request=request, content=payloads[request.url.path])
+        return httpx2.Response(200, request=request, content=payloads[request.url.path])
 
     model_raw = json.loads(
         files("vonk_forge_contracts")
@@ -107,8 +107,8 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         source_bundle_sha256="c" * 64,
     ).id
 
-    client = httpx.Client(
-        transport=httpx.MockTransport(handler),
+    client = httpx2.Client(
+        transport=httpx2.MockTransport(handler),
         follow_redirects=False,
     )
     cache_root = tmp_path / "model-cache"

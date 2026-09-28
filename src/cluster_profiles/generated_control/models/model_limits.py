@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -23,41 +24,41 @@ T = TypeVar("T", bound="ModelLimits")
 class ModelLimits:
     """
         Attributes:
-            context_tokens (Union[None, Unset, int]):
-            frames (Union[None, Unset, int]):
-            resolution_pixels (Union[None, Unset, int]):
-            sample_rate_hz (Union[None, Unset, int]):
+            context_tokens (int | None | Unset):
+            frames (int | None | Unset):
+            resolution_pixels (int | None | Unset):
+            sample_rate_hz (int | None | Unset):
      """
 
-    context_tokens: Union[None, Unset, int] = UNSET
-    frames: Union[None, Unset, int] = UNSET
-    resolution_pixels: Union[None, Unset, int] = UNSET
-    sample_rate_hz: Union[None, Unset, int] = UNSET
+    context_tokens: int | None | Unset = UNSET
+    frames: int | None | Unset = UNSET
+    resolution_pixels: int | None | Unset = UNSET
+    sample_rate_hz: int | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        context_tokens: Union[None, Unset, int]
+        context_tokens: int | None | Unset
         if isinstance(self.context_tokens, Unset):
             context_tokens = UNSET
         else:
             context_tokens = self.context_tokens
 
-        frames: Union[None, Unset, int]
+        frames: int | None | Unset
         if isinstance(self.frames, Unset):
             frames = UNSET
         else:
             frames = self.frames
 
-        resolution_pixels: Union[None, Unset, int]
+        resolution_pixels: int | None | Unset
         if isinstance(self.resolution_pixels, Unset):
             resolution_pixels = UNSET
         else:
             resolution_pixels = self.resolution_pixels
 
-        sample_rate_hz: Union[None, Unset, int]
+        sample_rate_hz: int | None | Unset
         if isinstance(self.sample_rate_hz, Unset):
             sample_rate_hz = UNSET
         else:
@@ -84,42 +85,42 @@ class ModelLimits:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        def _parse_context_tokens(data: object) -> Union[None, Unset, int]:
+        def _parse_context_tokens(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         context_tokens = _parse_context_tokens(d.pop("context_tokens", UNSET))
 
 
-        def _parse_frames(data: object) -> Union[None, Unset, int]:
+        def _parse_frames(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         frames = _parse_frames(d.pop("frames", UNSET))
 
 
-        def _parse_resolution_pixels(data: object) -> Union[None, Unset, int]:
+        def _parse_resolution_pixels(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         resolution_pixels = _parse_resolution_pixels(d.pop("resolution_pixels", UNSET))
 
 
-        def _parse_sample_rate_hz(data: object) -> Union[None, Unset, int]:
+        def _parse_sample_rate_hz(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         sample_rate_hz = _parse_sample_rate_hz(d.pop("sample_rate_hz", UNSET))
 

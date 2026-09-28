@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -32,14 +34,14 @@ class RecipeTopologyRole:
     count: int
     endpoint_owner: bool
     name: str
-    resources: 'RecipeRoleResources'
+    resources: RecipeRoleResources
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_role_resources import RecipeRoleResources
+        from ..models.recipe_role_resources import RecipeRoleResources # noqa: PLC0415
         count = self.count
 
         endpoint_owner = self.endpoint_owner
@@ -64,7 +66,7 @@ class RecipeTopologyRole:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_role_resources import RecipeRoleResources
+        from ..models.recipe_role_resources import RecipeRoleResources # noqa: PLC0415
         d = dict(src_dict)
         count = d.pop("count")
 

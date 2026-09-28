@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -13,10 +14,7 @@ from ...models.get_fleet_metrics_history_resolution import GetFleetMetricsHistor
 from ...models.request_validation_problem import RequestValidationProblem
 from ...models.telemetry_history_response import TelemetryHistoryResponse
 from ...types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
@@ -27,11 +25,11 @@ def _get_kwargs(
     start: datetime.datetime,
     end: datetime.datetime,
     resolution: GetFleetMetricsHistoryResolution,
-    maximum_points: Union[Unset, int] = 1500,
-    key: Union[None, Unset, str] = UNSET,
-    device_id: Union[None, Unset, str] = UNSET,
-    interface_name: Union[None, Unset, str] = UNSET,
-    run_id: Union[None, Unset, str] = UNSET,
+    maximum_points: int | Unset = 1500,
+    key: None | str | Unset = UNSET,
+    device_id: None | str | Unset = UNSET,
+    interface_name: None | str | Unset = UNSET,
+    run_id: None | str | Unset = UNSET,
 
 ) -> dict[str, Any]:
 
@@ -51,28 +49,28 @@ def _get_kwargs(
 
     params["maximum_points"] = maximum_points
 
-    json_key: Union[None, Unset, str]
+    json_key: None | str | Unset
     if isinstance(key, Unset):
         json_key = UNSET
     else:
         json_key = key
     params["key"] = json_key
 
-    json_device_id: Union[None, Unset, str]
+    json_device_id: None | str | Unset
     if isinstance(device_id, Unset):
         json_device_id = UNSET
     else:
         json_device_id = device_id
     params["device_id"] = json_device_id
 
-    json_interface_name: Union[None, Unset, str]
+    json_interface_name: None | str | Unset
     if isinstance(interface_name, Unset):
         json_interface_name = UNSET
     else:
         json_interface_name = interface_name
     params["interface_name"] = json_interface_name
 
-    json_run_id: Union[None, Unset, str]
+    json_run_id: None | str | Unset
     if isinstance(run_id, Unset):
         json_run_id = UNSET
     else:
@@ -85,7 +83,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/fleet/{selector}/metrics/history".format(selector=selector,),
+        "url": "/api/fleet/{selector}/metrics/history".format(selector=quote(str(selector), safe=""),),
         "params": params,
     }
 
@@ -94,7 +92,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse | None:
     if response.status_code == 200:
         response_200 = TelemetryHistoryResponse.from_dict(response.json())
 
@@ -136,7 +134,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -152,13 +150,13 @@ def sync_detailed(
     start: datetime.datetime,
     end: datetime.datetime,
     resolution: GetFleetMetricsHistoryResolution,
-    maximum_points: Union[Unset, int] = 1500,
-    key: Union[None, Unset, str] = UNSET,
-    device_id: Union[None, Unset, str] = UNSET,
-    interface_name: Union[None, Unset, str] = UNSET,
-    run_id: Union[None, Unset, str] = UNSET,
+    maximum_points: int | Unset = 1500,
+    key: None | str | Unset = UNSET,
+    device_id: None | str | Unset = UNSET,
+    interface_name: None | str | Unset = UNSET,
+    run_id: None | str | Unset = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]]:
+) -> Response[BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse]:
     """ Fleet Metrics History
 
     Args:
@@ -166,18 +164,18 @@ def sync_detailed(
         start (datetime.datetime):
         end (datetime.datetime):
         resolution (GetFleetMetricsHistoryResolution):
-        maximum_points (Union[Unset, int]):  Default: 1500.
-        key (Union[None, Unset, str]):
-        device_id (Union[None, Unset, str]):
-        interface_name (Union[None, Unset, str]):
-        run_id (Union[None, Unset, str]):
+        maximum_points (int | Unset):  Default: 1500.
+        key (None | str | Unset):
+        device_id (None | str | Unset):
+        interface_name (None | str | Unset):
+        run_id (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]]
+        Response[BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse]
      """
 
 
@@ -207,13 +205,13 @@ def sync(
     start: datetime.datetime,
     end: datetime.datetime,
     resolution: GetFleetMetricsHistoryResolution,
-    maximum_points: Union[Unset, int] = 1500,
-    key: Union[None, Unset, str] = UNSET,
-    device_id: Union[None, Unset, str] = UNSET,
-    interface_name: Union[None, Unset, str] = UNSET,
-    run_id: Union[None, Unset, str] = UNSET,
+    maximum_points: int | Unset = 1500,
+    key: None | str | Unset = UNSET,
+    device_id: None | str | Unset = UNSET,
+    interface_name: None | str | Unset = UNSET,
+    run_id: None | str | Unset = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]]:
+) -> BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse | None:
     """ Fleet Metrics History
 
     Args:
@@ -221,18 +219,18 @@ def sync(
         start (datetime.datetime):
         end (datetime.datetime):
         resolution (GetFleetMetricsHistoryResolution):
-        maximum_points (Union[Unset, int]):  Default: 1500.
-        key (Union[None, Unset, str]):
-        device_id (Union[None, Unset, str]):
-        interface_name (Union[None, Unset, str]):
-        run_id (Union[None, Unset, str]):
+        maximum_points (int | Unset):  Default: 1500.
+        key (None | str | Unset):
+        device_id (None | str | Unset):
+        interface_name (None | str | Unset):
+        run_id (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]
+        BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse
      """
 
 
@@ -257,13 +255,13 @@ async def asyncio_detailed(
     start: datetime.datetime,
     end: datetime.datetime,
     resolution: GetFleetMetricsHistoryResolution,
-    maximum_points: Union[Unset, int] = 1500,
-    key: Union[None, Unset, str] = UNSET,
-    device_id: Union[None, Unset, str] = UNSET,
-    interface_name: Union[None, Unset, str] = UNSET,
-    run_id: Union[None, Unset, str] = UNSET,
+    maximum_points: int | Unset = 1500,
+    key: None | str | Unset = UNSET,
+    device_id: None | str | Unset = UNSET,
+    interface_name: None | str | Unset = UNSET,
+    run_id: None | str | Unset = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]]:
+) -> Response[BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse]:
     """ Fleet Metrics History
 
     Args:
@@ -271,18 +269,18 @@ async def asyncio_detailed(
         start (datetime.datetime):
         end (datetime.datetime):
         resolution (GetFleetMetricsHistoryResolution):
-        maximum_points (Union[Unset, int]):  Default: 1500.
-        key (Union[None, Unset, str]):
-        device_id (Union[None, Unset, str]):
-        interface_name (Union[None, Unset, str]):
-        run_id (Union[None, Unset, str]):
+        maximum_points (int | Unset):  Default: 1500.
+        key (None | str | Unset):
+        device_id (None | str | Unset):
+        interface_name (None | str | Unset):
+        run_id (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]]
+        Response[BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse]
      """
 
 
@@ -312,13 +310,13 @@ async def asyncio(
     start: datetime.datetime,
     end: datetime.datetime,
     resolution: GetFleetMetricsHistoryResolution,
-    maximum_points: Union[Unset, int] = 1500,
-    key: Union[None, Unset, str] = UNSET,
-    device_id: Union[None, Unset, str] = UNSET,
-    interface_name: Union[None, Unset, str] = UNSET,
-    run_id: Union[None, Unset, str] = UNSET,
+    maximum_points: int | Unset = 1500,
+    key: None | str | Unset = UNSET,
+    device_id: None | str | Unset = UNSET,
+    interface_name: None | str | Unset = UNSET,
+    run_id: None | str | Unset = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]]:
+) -> BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse | None:
     """ Fleet Metrics History
 
     Args:
@@ -326,18 +324,18 @@ async def asyncio(
         start (datetime.datetime):
         end (datetime.datetime):
         resolution (GetFleetMetricsHistoryResolution):
-        maximum_points (Union[Unset, int]):  Default: 1500.
-        key (Union[None, Unset, str]):
-        device_id (Union[None, Unset, str]):
-        interface_name (Union[None, Unset, str]):
-        run_id (Union[None, Unset, str]):
+        maximum_points (int | Unset):  Default: 1500.
+        key (None | str | Unset):
+        device_id (None | str | Unset):
+        interface_name (None | str | Unset):
+        run_id (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, RequestValidationProblem, TelemetryHistoryResponse]
+        BoundedErrorResponse | RequestValidationProblem | TelemetryHistoryResponse
      """
 
 

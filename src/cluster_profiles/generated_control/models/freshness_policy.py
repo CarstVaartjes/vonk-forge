@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,7 +9,6 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import Union
 
 
 
@@ -22,14 +23,14 @@ T = TypeVar("T", bound="FreshnessPolicy")
 class FreshnessPolicy:
     """
         Attributes:
-            inventory_fresh_seconds (Union[Unset, int]):  Default: 300.
-            telemetry_delayed_seconds (Union[Unset, int]):  Default: 20.
-            telemetry_live_seconds (Union[Unset, int]):  Default: 6.
+            inventory_fresh_seconds (int | Unset):  Default: 300.
+            telemetry_delayed_seconds (int | Unset):  Default: 20.
+            telemetry_live_seconds (int | Unset):  Default: 6.
      """
 
-    inventory_fresh_seconds: Union[Unset, int] = 300
-    telemetry_delayed_seconds: Union[Unset, int] = 20
-    telemetry_live_seconds: Union[Unset, int] = 6
+    inventory_fresh_seconds: int | Unset = 300
+    telemetry_delayed_seconds: int | Unset = 20
+    telemetry_live_seconds: int | Unset = 6
 
 
 

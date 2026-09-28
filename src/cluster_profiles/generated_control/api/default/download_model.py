@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -30,11 +31,10 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/model/{selector}/download".format(selector=selector,),
+        "url": "/api/model/{selector}/download".format(selector=quote(str(selector), safe=""),),
     }
 
     _kwargs["json"] = body.to_dict()
-
 
     headers["Content-Type"] = "application/json"
 
@@ -43,7 +43,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem | None:
     if response.status_code == 202:
         response_202 = ModelCacheOperatorResponse.from_dict(response.json())
 
@@ -99,7 +99,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -114,7 +114,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: ModelCacheOperatorRequest,
 
-) -> Response[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem]:
     """ Download
 
     Args:
@@ -123,10 +123,10 @@ def sync_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem]
      """
 
 
@@ -148,7 +148,7 @@ def sync(
     client: AuthenticatedClient,
     body: ModelCacheOperatorRequest,
 
-) -> Optional[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem | None:
     """ Download
 
     Args:
@@ -157,10 +157,10 @@ def sync(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]
+        BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem
      """
 
 
@@ -177,7 +177,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: ModelCacheOperatorRequest,
 
-) -> Response[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem]:
     """ Download
 
     Args:
@@ -186,10 +186,10 @@ async def asyncio_detailed(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem]
      """
 
 
@@ -211,7 +211,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: ModelCacheOperatorRequest,
 
-) -> Optional[Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem | None:
     """ Download
 
     Args:
@@ -220,10 +220,10 @@ async def asyncio(
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, ModelCacheOperatorResponse, RequestValidationProblem]
+        BoundedErrorResponse | ModelCacheOperatorResponse | RequestValidationProblem
      """
 
 

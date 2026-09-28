@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,13 +10,11 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel
-  from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources
   from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe
+  from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources
 
 
 
@@ -34,12 +34,12 @@ class FleetProfileAssignmentView:
             recipe_selector (str):
             selector (str):
             spark_ids (list[str]):
-            model (Union[Unset, FleetProfileAssignmentViewModel]):
-            observed_state (Union[Unset, str]):  Default: 'Not loaded'.
-            recipe (Union[Unset, FleetProfileAssignmentViewRecipe]):
-            recipe_id (Union[None, Unset, str]):
-            required_sparks (Union[None, Unset, int]):
-            resources (Union[Unset, FleetProfileAssignmentViewResources]):
+            model (FleetProfileAssignmentViewModel | Unset):
+            observed_state (str | Unset):  Default: 'Not loaded'.
+            recipe (FleetProfileAssignmentViewRecipe | Unset):
+            recipe_id (None | str | Unset):
+            required_sparks (int | None | Unset):
+            resources (FleetProfileAssignmentViewResources | Unset):
      """
 
     assigned_sparks: int
@@ -47,21 +47,21 @@ class FleetProfileAssignmentView:
     recipe_selector: str
     selector: str
     spark_ids: list[str]
-    model: Union[Unset, 'FleetProfileAssignmentViewModel'] = UNSET
-    observed_state: Union[Unset, str] = 'Not loaded'
-    recipe: Union[Unset, 'FleetProfileAssignmentViewRecipe'] = UNSET
-    recipe_id: Union[None, Unset, str] = UNSET
-    required_sparks: Union[None, Unset, int] = UNSET
-    resources: Union[Unset, 'FleetProfileAssignmentViewResources'] = UNSET
+    model: FleetProfileAssignmentViewModel | Unset = UNSET
+    observed_state: str | Unset = 'Not loaded'
+    recipe: FleetProfileAssignmentViewRecipe | Unset = UNSET
+    recipe_id: None | str | Unset = UNSET
+    required_sparks: int | None | Unset = UNSET
+    resources: FleetProfileAssignmentViewResources | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel
-        from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources
-        from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe
+        from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel # noqa: PLC0415
+        from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe # noqa: PLC0415
+        from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources # noqa: PLC0415
         assigned_sparks = self.assigned_sparks
 
         display_name = self.display_name
@@ -74,29 +74,29 @@ class FleetProfileAssignmentView:
 
 
 
-        model: Union[Unset, dict[str, Any]] = UNSET
+        model: dict[str, Any] | Unset = UNSET
         if not isinstance(self.model, Unset):
             model = self.model.to_dict()
 
         observed_state = self.observed_state
 
-        recipe: Union[Unset, dict[str, Any]] = UNSET
+        recipe: dict[str, Any] | Unset = UNSET
         if not isinstance(self.recipe, Unset):
             recipe = self.recipe.to_dict()
 
-        recipe_id: Union[None, Unset, str]
+        recipe_id: None | str | Unset
         if isinstance(self.recipe_id, Unset):
             recipe_id = UNSET
         else:
             recipe_id = self.recipe_id
 
-        required_sparks: Union[None, Unset, int]
+        required_sparks: int | None | Unset
         if isinstance(self.required_sparks, Unset):
             required_sparks = UNSET
         else:
             required_sparks = self.required_sparks
 
-        resources: Union[Unset, dict[str, Any]] = UNSET
+        resources: dict[str, Any] | Unset = UNSET
         if not isinstance(self.resources, Unset):
             resources = self.resources.to_dict()
 
@@ -129,9 +129,9 @@ class FleetProfileAssignmentView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel
-        from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources
-        from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe
+        from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel # noqa: PLC0415
+        from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe # noqa: PLC0415
+        from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources # noqa: PLC0415
         d = dict(src_dict)
         assigned_sparks = d.pop("assigned_sparks")
 
@@ -145,7 +145,7 @@ class FleetProfileAssignmentView:
 
 
         _model = d.pop("model", UNSET)
-        model: Union[Unset, FleetProfileAssignmentViewModel]
+        model: FleetProfileAssignmentViewModel | Unset
         if isinstance(_model,  Unset):
             model = UNSET
         else:
@@ -157,7 +157,7 @@ class FleetProfileAssignmentView:
         observed_state = d.pop("observed_state", UNSET)
 
         _recipe = d.pop("recipe", UNSET)
-        recipe: Union[Unset, FleetProfileAssignmentViewRecipe]
+        recipe: FleetProfileAssignmentViewRecipe | Unset
         if isinstance(_recipe,  Unset):
             recipe = UNSET
         else:
@@ -166,28 +166,28 @@ class FleetProfileAssignmentView:
 
 
 
-        def _parse_recipe_id(data: object) -> Union[None, Unset, str]:
+        def _parse_recipe_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         recipe_id = _parse_recipe_id(d.pop("recipe_id", UNSET))
 
 
-        def _parse_required_sparks(data: object) -> Union[None, Unset, int]:
+        def _parse_required_sparks(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         required_sparks = _parse_required_sparks(d.pop("required_sparks", UNSET))
 
 
         _resources = d.pop("resources", UNSET)
-        resources: Union[Unset, FleetProfileAssignmentViewResources]
+        resources: FleetProfileAssignmentViewResources | Unset
         if isinstance(_resources,  Unset):
             resources = UNSET
         else:

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,9 +12,7 @@ from ..models.run_switch_container_build_result_state import check_run_switch_co
 from ..models.run_switch_container_build_result_state import RunSwitchContainerBuildResultState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 
 
@@ -32,9 +32,9 @@ class RunSwitchContainerBuildResult:
             phase (Literal['prepare']):
             state (RunSwitchContainerBuildResultState):
             subphase (Literal['container-build']):
-            image_bytes (Union[None, Unset, int]):
-            image_digest (Union[None, Unset, str]):
-            oci_layout_sha256 (Union[None, Unset, str]):
+            image_bytes (int | None | Unset):
+            image_digest (None | str | Unset):
+            oci_layout_sha256 (None | str | Unset):
      """
 
     build_id: str
@@ -42,9 +42,9 @@ class RunSwitchContainerBuildResult:
     phase: Literal['prepare']
     state: RunSwitchContainerBuildResultState
     subphase: Literal['container-build']
-    image_bytes: Union[None, Unset, int] = UNSET
-    image_digest: Union[None, Unset, str] = UNSET
-    oci_layout_sha256: Union[None, Unset, str] = UNSET
+    image_bytes: int | None | Unset = UNSET
+    image_digest: None | str | Unset = UNSET
+    oci_layout_sha256: None | str | Unset = UNSET
 
 
 
@@ -61,19 +61,19 @@ class RunSwitchContainerBuildResult:
 
         subphase = self.subphase
 
-        image_bytes: Union[None, Unset, int]
+        image_bytes: int | None | Unset
         if isinstance(self.image_bytes, Unset):
             image_bytes = UNSET
         else:
             image_bytes = self.image_bytes
 
-        image_digest: Union[None, Unset, str]
+        image_digest: None | str | Unset
         if isinstance(self.image_digest, Unset):
             image_digest = UNSET
         else:
             image_digest = self.image_digest
 
-        oci_layout_sha256: Union[None, Unset, str]
+        oci_layout_sha256: None | str | Unset
         if isinstance(self.oci_layout_sha256, Unset):
             oci_layout_sha256 = UNSET
         else:
@@ -120,32 +120,32 @@ class RunSwitchContainerBuildResult:
         if subphase != 'container-build':
             raise ValueError(f"subphase must match const 'container-build', got '{subphase}'")
 
-        def _parse_image_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_image_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         image_bytes = _parse_image_bytes(d.pop("image_bytes", UNSET))
 
 
-        def _parse_image_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_image_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         image_digest = _parse_image_digest(d.pop("image_digest", UNSET))
 
 
-        def _parse_oci_layout_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_oci_layout_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         oci_layout_sha256 = _parse_oci_layout_sha256(d.pop("oci_layout_sha256", UNSET))
 

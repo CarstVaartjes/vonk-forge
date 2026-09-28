@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
@@ -65,15 +65,15 @@ def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_p
     expected_recipe_count = len(rows)
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(request.url.path)
         if request.url.path.endswith("index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/json"},
                 content=index_path.read_bytes(),
             )
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"content-type": PACKAGE_MEDIA_TYPE},
             content=(fixture / Path(request.url.path).name).read_bytes(),
@@ -81,7 +81,7 @@ def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_p
 
     cache = tmp_path / "packages"
     client = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
     )
     snapshot = client.list()
     client.prepare(snapshot)
@@ -94,7 +94,7 @@ def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_p
 
     calls.clear()
     restarted = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
     )
     restarted.prepare(restarted.list())
     assert calls == ["/v1/recipe-library/index.json"]
@@ -137,22 +137,22 @@ def test_publisher_package_binds_manifest_metadata_identity_and_digest(
     row["package"]["expected_bytes"] = len(tampered)
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(request.url.path)
         if request.url.path.endswith("index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/json"},
                 content=_canonical(index) + b"\n",
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=tampered
         )
 
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     with pytest.raises(RecipePackageError, match="invalid"):
         client.prepare(client.list())
@@ -284,14 +284,14 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     index_bytes = _canonical(original_index) + b"\n"
     calls: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         calls.append(request.url.path)
         if request.url.path.endswith("index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200, headers={"content-type": "application/json"}, content=index_bytes
             )
         name = Path(request.url.path).name
-        return httpx.Response(
+        return httpx2.Response(
             200,
             headers={"content-type": PACKAGE_MEDIA_TYPE},
             content=package_overrides.get(name, (fixture / name).read_bytes()),
@@ -309,7 +309,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     package_overrides: dict[str, bytes] = {}
     cache = tmp_path / "packages"
     client = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
     )
     sync = ManagedRecipeCatalogSyncService(
         sessions,
@@ -396,7 +396,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     # restart; only the trusted index is requested again.
     calls.clear()
     restarted_good = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
     )
     restarted_sync = ManagedRecipeCatalogSyncService(
         sessions, catalog=catalog, reader=restarted_good, clock=sync._clock
@@ -424,7 +424,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     package_overrides[invalid_name] = invalid_bytes
     index_bytes = _canonical(invalid_index) + b"\n"
     restarted = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
     )
     invalid_snapshot = restarted.list()
     with pytest.raises(RecipePackageError, match="extract"):
@@ -464,7 +464,9 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         sessions,
         catalog=catalog,
         reader=RecipePackageClient(
-            "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+            "http://127.0.0.1",
+            cache_root=cache,
+            transport=httpx2.MockTransport(handler),
         ),
         clock=sync._clock,
     )

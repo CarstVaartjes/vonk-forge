@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 CompatibilityPreparationKind = Literal['engine-generation', 'jit', 'tuning']
 
@@ -6,5 +6,5 @@ COMPATIBILITY_PREPARATION_KIND_VALUES: set[CompatibilityPreparationKind] = { 'en
 
 def check_compatibility_preparation_kind(value: str) -> CompatibilityPreparationKind:
     if value in COMPATIBILITY_PREPARATION_KIND_VALUES:
-        return cast(CompatibilityPreparationKind, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {COMPATIBILITY_PREPARATION_KIND_VALUES!r}")

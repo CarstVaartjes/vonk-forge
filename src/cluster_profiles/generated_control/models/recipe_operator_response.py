@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,10 +12,7 @@ from ..models.recipe_operator_response_state import check_recipe_operator_respon
 from ..models.recipe_operator_response_state import RecipeOperatorResponseState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Literal, Union, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.availability_operation_failure import AvailabilityOperationFailure
@@ -41,18 +40,18 @@ class RecipeOperatorResponse:
             selector (str):
             state (RecipeOperatorResponseState):
             with_model (bool):
-            cancelled_builds (Union[Unset, list[str]]):
-            cancelled_operations (Union[Unset, list[str]]):
-            failure (Union['AvailabilityOperationFailure', None, Unset]):
-            model_removals (Union[Unset, list[str]]):
-            next_actions (Union[Unset, list[str]]):
-            preserved (Union[Unset, list[str]]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            cancelled_builds (list[str] | Unset):
+            cancelled_operations (list[str] | Unset):
+            failure (AvailabilityOperationFailure | None | Unset):
+            model_removals (list[str] | Unset):
+            next_actions (list[str] | Unset):
+            preserved (list[str] | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
     action: Literal['remove']
     operation_id: str
-    progress: 'OperationProgress'
+    progress: OperationProgress
     recipe_revision_id: str
     reclaimed_bytes: int
     request_key: str
@@ -60,21 +59,21 @@ class RecipeOperatorResponse:
     selector: str
     state: RecipeOperatorResponseState
     with_model: bool
-    cancelled_builds: Union[Unset, list[str]] = UNSET
-    cancelled_operations: Union[Unset, list[str]] = UNSET
-    failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
-    model_removals: Union[Unset, list[str]] = UNSET
-    next_actions: Union[Unset, list[str]] = UNSET
-    preserved: Union[Unset, list[str]] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
+    cancelled_builds: list[str] | Unset = UNSET
+    cancelled_operations: list[str] | Unset = UNSET
+    failure: AvailabilityOperationFailure | None | Unset = UNSET
+    model_removals: list[str] | Unset = UNSET
+    next_actions: list[str] | Unset = UNSET
+    preserved: list[str] | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.availability_operation_failure import AvailabilityOperationFailure
-        from ..models.operation_progress import OperationProgress
+        from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
         action = self.action
 
         operation_id = self.operation_id
@@ -95,19 +94,19 @@ class RecipeOperatorResponse:
 
         with_model = self.with_model
 
-        cancelled_builds: Union[Unset, list[str]] = UNSET
+        cancelled_builds: list[str] | Unset = UNSET
         if not isinstance(self.cancelled_builds, Unset):
             cancelled_builds = self.cancelled_builds
 
 
 
-        cancelled_operations: Union[Unset, list[str]] = UNSET
+        cancelled_operations: list[str] | Unset = UNSET
         if not isinstance(self.cancelled_operations, Unset):
             cancelled_operations = self.cancelled_operations
 
 
 
-        failure: Union[None, Unset, dict[str, Any]]
+        failure: dict[str, Any] | None | Unset
         if isinstance(self.failure, Unset):
             failure = UNSET
         elif isinstance(self.failure, AvailabilityOperationFailure):
@@ -115,19 +114,19 @@ class RecipeOperatorResponse:
         else:
             failure = self.failure
 
-        model_removals: Union[Unset, list[str]] = UNSET
+        model_removals: list[str] | Unset = UNSET
         if not isinstance(self.model_removals, Unset):
             model_removals = self.model_removals
 
 
 
-        next_actions: Union[Unset, list[str]] = UNSET
+        next_actions: list[str] | Unset = UNSET
         if not isinstance(self.next_actions, Unset):
             next_actions = self.next_actions
 
 
 
-        preserved: Union[Unset, list[str]] = UNSET
+        preserved: list[str] | Unset = UNSET
         if not isinstance(self.preserved, Unset):
             preserved = self.preserved
 
@@ -171,8 +170,8 @@ class RecipeOperatorResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.availability_operation_failure import AvailabilityOperationFailure
-        from ..models.operation_progress import OperationProgress
+        from ..models.availability_operation_failure import AvailabilityOperationFailure # noqa: PLC0415
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
         d = dict(src_dict)
         action = cast(Literal['remove'] , d.pop("action"))
         if action != 'remove':
@@ -208,7 +207,7 @@ class RecipeOperatorResponse:
         cancelled_operations = cast(list[str], d.pop("cancelled_operations", UNSET))
 
 
-        def _parse_failure(data: object) -> Union['AvailabilityOperationFailure', None, Unset]:
+        def _parse_failure(data: object) -> AvailabilityOperationFailure | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -221,9 +220,9 @@ class RecipeOperatorResponse:
 
 
                 return failure_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['AvailabilityOperationFailure', None, Unset], data)
+            return cast(AvailabilityOperationFailure | None | Unset, data)
 
         failure = _parse_failure(d.pop("failure", UNSET))
 
@@ -237,7 +236,7 @@ class RecipeOperatorResponse:
         preserved = cast(list[str], d.pop("preserved", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

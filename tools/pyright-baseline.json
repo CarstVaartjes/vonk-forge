@@ -2,6 +2,12 @@
   "schema_version": 1,
   "exceptions": [
     {
+      "file": "control/src/vonk_control/fleet_projection.py",
+      "rule": "reportArgumentType",
+      "count": 5,
+      "reason": "SQLAlchemy 2.1 now types the joined presence rows, which exposes that the stored installation, run, route and rank states are plain string columns while the strict Pydantic presence views declare their literal state sets. The view model validates each literal at construction, so an unknown stored state is still refused at runtime; typing the columns as literals would need a SQLAlchemy type map for every state enum."
+    },
+    {
       "file": "control/tests/security/test_agent_identity.py",
       "rule": "reportArgumentType",
       "count": 1,

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -14,8 +16,6 @@ from ..models.runtime_image_storage_impact_spark_coverage import check_runtime_i
 from ..models.runtime_image_storage_impact_spark_coverage import RuntimeImageStorageImpactSparkCoverage
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -30,52 +30,52 @@ T = TypeVar("T", bound="RuntimeImageStorageImpact")
 class RuntimeImageStorageImpact:
     """
         Attributes:
-            build_id (Union[None, str]):
-            image_digest (Union[None, str]):
+            build_id (None | str):
+            image_digest (None | str):
             nas_coverage (RuntimeImageStorageImpactNasCoverage):
             preparation_required (bool):
             spark_coverage (RuntimeImageStorageImpactSparkCoverage):
-            copied_bytes (Union[Unset, int]):  Default: 0.
-            image_bytes (Union[None, Unset, int]):
-            missing_image_distribution_bytes (Union[None, Unset, int]):
-            missing_nas_bytes (Union[None, Unset, int]):
-            missing_spark_bytes (Union[None, Unset, int]):
-            oci_layout_sha256 (Union[None, Unset, str]):
-            reclaimable_bytes (Union[Unset, int]):  Default: 0.
-            reclaimable_digests (Union[Unset, list[str]]):
-            registry_manifest_digest (Union[None, Unset, str]):
-            required_bytes (Union[None, Unset, int]):
-            reused_bytes (Union[Unset, int]):  Default: 0.
-            running_coverage (Union[Unset, RuntimeImageStorageImpactRunningCoverage]):  Default: 'unknown'.
+            copied_bytes (int | Unset):  Default: 0.
+            image_bytes (int | None | Unset):
+            missing_image_distribution_bytes (int | None | Unset):
+            missing_nas_bytes (int | None | Unset):
+            missing_spark_bytes (int | None | Unset):
+            oci_layout_sha256 (None | str | Unset):
+            reclaimable_bytes (int | Unset):  Default: 0.
+            reclaimable_digests (list[str] | Unset):
+            registry_manifest_digest (None | str | Unset):
+            required_bytes (int | None | Unset):
+            reused_bytes (int | Unset):  Default: 0.
+            running_coverage (RuntimeImageStorageImpactRunningCoverage | Unset):  Default: 'unknown'.
      """
 
-    build_id: Union[None, str]
-    image_digest: Union[None, str]
+    build_id: None | str
+    image_digest: None | str
     nas_coverage: RuntimeImageStorageImpactNasCoverage
     preparation_required: bool
     spark_coverage: RuntimeImageStorageImpactSparkCoverage
-    copied_bytes: Union[Unset, int] = 0
-    image_bytes: Union[None, Unset, int] = UNSET
-    missing_image_distribution_bytes: Union[None, Unset, int] = UNSET
-    missing_nas_bytes: Union[None, Unset, int] = UNSET
-    missing_spark_bytes: Union[None, Unset, int] = UNSET
-    oci_layout_sha256: Union[None, Unset, str] = UNSET
-    reclaimable_bytes: Union[Unset, int] = 0
-    reclaimable_digests: Union[Unset, list[str]] = UNSET
-    registry_manifest_digest: Union[None, Unset, str] = UNSET
-    required_bytes: Union[None, Unset, int] = UNSET
-    reused_bytes: Union[Unset, int] = 0
-    running_coverage: Union[Unset, RuntimeImageStorageImpactRunningCoverage] = 'unknown'
+    copied_bytes: int | Unset = 0
+    image_bytes: int | None | Unset = UNSET
+    missing_image_distribution_bytes: int | None | Unset = UNSET
+    missing_nas_bytes: int | None | Unset = UNSET
+    missing_spark_bytes: int | None | Unset = UNSET
+    oci_layout_sha256: None | str | Unset = UNSET
+    reclaimable_bytes: int | Unset = 0
+    reclaimable_digests: list[str] | Unset = UNSET
+    registry_manifest_digest: None | str | Unset = UNSET
+    required_bytes: int | None | Unset = UNSET
+    reused_bytes: int | Unset = 0
+    running_coverage: RuntimeImageStorageImpactRunningCoverage | Unset = 'unknown'
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        build_id: Union[None, str]
+        build_id: None | str
         build_id = self.build_id
 
-        image_digest: Union[None, str]
+        image_digest: None | str
         image_digest = self.image_digest
 
         nas_coverage: str = self.nas_coverage
@@ -86,31 +86,31 @@ class RuntimeImageStorageImpact:
 
         copied_bytes = self.copied_bytes
 
-        image_bytes: Union[None, Unset, int]
+        image_bytes: int | None | Unset
         if isinstance(self.image_bytes, Unset):
             image_bytes = UNSET
         else:
             image_bytes = self.image_bytes
 
-        missing_image_distribution_bytes: Union[None, Unset, int]
+        missing_image_distribution_bytes: int | None | Unset
         if isinstance(self.missing_image_distribution_bytes, Unset):
             missing_image_distribution_bytes = UNSET
         else:
             missing_image_distribution_bytes = self.missing_image_distribution_bytes
 
-        missing_nas_bytes: Union[None, Unset, int]
+        missing_nas_bytes: int | None | Unset
         if isinstance(self.missing_nas_bytes, Unset):
             missing_nas_bytes = UNSET
         else:
             missing_nas_bytes = self.missing_nas_bytes
 
-        missing_spark_bytes: Union[None, Unset, int]
+        missing_spark_bytes: int | None | Unset
         if isinstance(self.missing_spark_bytes, Unset):
             missing_spark_bytes = UNSET
         else:
             missing_spark_bytes = self.missing_spark_bytes
 
-        oci_layout_sha256: Union[None, Unset, str]
+        oci_layout_sha256: None | str | Unset
         if isinstance(self.oci_layout_sha256, Unset):
             oci_layout_sha256 = UNSET
         else:
@@ -118,19 +118,19 @@ class RuntimeImageStorageImpact:
 
         reclaimable_bytes = self.reclaimable_bytes
 
-        reclaimable_digests: Union[Unset, list[str]] = UNSET
+        reclaimable_digests: list[str] | Unset = UNSET
         if not isinstance(self.reclaimable_digests, Unset):
             reclaimable_digests = self.reclaimable_digests
 
 
 
-        registry_manifest_digest: Union[None, Unset, str]
+        registry_manifest_digest: None | str | Unset
         if isinstance(self.registry_manifest_digest, Unset):
             registry_manifest_digest = UNSET
         else:
             registry_manifest_digest = self.registry_manifest_digest
 
-        required_bytes: Union[None, Unset, int]
+        required_bytes: int | None | Unset
         if isinstance(self.required_bytes, Unset):
             required_bytes = UNSET
         else:
@@ -138,7 +138,7 @@ class RuntimeImageStorageImpact:
 
         reused_bytes = self.reused_bytes
 
-        running_coverage: Union[Unset, str] = UNSET
+        running_coverage: str | Unset = UNSET
         if not isinstance(self.running_coverage, Unset):
             running_coverage = self.running_coverage
 
@@ -185,18 +185,18 @@ class RuntimeImageStorageImpact:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        def _parse_build_id(data: object) -> Union[None, str]:
+        def _parse_build_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         build_id = _parse_build_id(d.pop("build_id"))
 
 
-        def _parse_image_digest(data: object) -> Union[None, str]:
+        def _parse_image_digest(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         image_digest = _parse_image_digest(d.pop("image_digest"))
 
@@ -215,52 +215,52 @@ class RuntimeImageStorageImpact:
 
         copied_bytes = d.pop("copied_bytes", UNSET)
 
-        def _parse_image_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_image_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         image_bytes = _parse_image_bytes(d.pop("image_bytes", UNSET))
 
 
-        def _parse_missing_image_distribution_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_missing_image_distribution_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         missing_image_distribution_bytes = _parse_missing_image_distribution_bytes(d.pop("missing_image_distribution_bytes", UNSET))
 
 
-        def _parse_missing_nas_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_missing_nas_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         missing_nas_bytes = _parse_missing_nas_bytes(d.pop("missing_nas_bytes", UNSET))
 
 
-        def _parse_missing_spark_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_missing_spark_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         missing_spark_bytes = _parse_missing_spark_bytes(d.pop("missing_spark_bytes", UNSET))
 
 
-        def _parse_oci_layout_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_oci_layout_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         oci_layout_sha256 = _parse_oci_layout_sha256(d.pop("oci_layout_sha256", UNSET))
 
@@ -270,22 +270,22 @@ class RuntimeImageStorageImpact:
         reclaimable_digests = cast(list[str], d.pop("reclaimable_digests", UNSET))
 
 
-        def _parse_registry_manifest_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_registry_manifest_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         registry_manifest_digest = _parse_registry_manifest_digest(d.pop("registry_manifest_digest", UNSET))
 
 
-        def _parse_required_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_required_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         required_bytes = _parse_required_bytes(d.pop("required_bytes", UNSET))
 
@@ -293,7 +293,7 @@ class RuntimeImageStorageImpact:
         reused_bytes = d.pop("reused_bytes", UNSET)
 
         _running_coverage = d.pop("running_coverage", UNSET)
-        running_coverage: Union[Unset, RuntimeImageStorageImpactRunningCoverage]
+        running_coverage: RuntimeImageStorageImpactRunningCoverage | Unset
         if isinstance(_running_coverage,  Unset):
             running_coverage = UNSET
         else:

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -23,25 +24,25 @@ T = TypeVar("T", bound="TelemetryDetails")
 class TelemetryDetails:
     """
         Attributes:
-            accelerator_name (Union[None, Unset, str]):
-            accelerator_performance_state (Union[None, Unset, str]):
+            accelerator_name (None | str | Unset):
+            accelerator_performance_state (None | str | Unset):
      """
 
-    accelerator_name: Union[None, Unset, str] = UNSET
-    accelerator_performance_state: Union[None, Unset, str] = UNSET
+    accelerator_name: None | str | Unset = UNSET
+    accelerator_performance_state: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        accelerator_name: Union[None, Unset, str]
+        accelerator_name: None | str | Unset
         if isinstance(self.accelerator_name, Unset):
             accelerator_name = UNSET
         else:
             accelerator_name = self.accelerator_name
 
-        accelerator_performance_state: Union[None, Unset, str]
+        accelerator_performance_state: None | str | Unset
         if isinstance(self.accelerator_performance_state, Unset):
             accelerator_performance_state = UNSET
         else:
@@ -64,22 +65,22 @@ class TelemetryDetails:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        def _parse_accelerator_name(data: object) -> Union[None, Unset, str]:
+        def _parse_accelerator_name(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         accelerator_name = _parse_accelerator_name(d.pop("accelerator_name", UNSET))
 
 
-        def _parse_accelerator_performance_state(data: object) -> Union[None, Unset, str]:
+        def _parse_accelerator_performance_state(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         accelerator_performance_state = _parse_accelerator_performance_state(d.pop("accelerator_performance_state", UNSET))
 

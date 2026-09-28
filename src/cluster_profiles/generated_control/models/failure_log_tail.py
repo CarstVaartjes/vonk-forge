@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from typing import cast, Union
+from typing import cast
 
 
 
@@ -21,14 +23,14 @@ T = TypeVar("T", bound="FailureLogTail")
 class FailureLogTail:
     """
         Attributes:
-            dropped_bytes (Union[None, int]):
-            dropped_lines (Union[None, int]):
+            dropped_bytes (int | None):
+            dropped_lines (int | None):
             text (str):
             truncated (bool):
      """
 
-    dropped_bytes: Union[None, int]
-    dropped_lines: Union[None, int]
+    dropped_bytes: int | None
+    dropped_lines: int | None
     text: str
     truncated: bool
 
@@ -37,10 +39,10 @@ class FailureLogTail:
 
 
     def to_dict(self) -> dict[str, Any]:
-        dropped_bytes: Union[None, int]
+        dropped_bytes: int | None
         dropped_bytes = self.dropped_bytes
 
-        dropped_lines: Union[None, int]
+        dropped_lines: int | None
         dropped_lines = self.dropped_lines
 
         text = self.text
@@ -64,18 +66,18 @@ class FailureLogTail:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        def _parse_dropped_bytes(data: object) -> Union[None, int]:
+        def _parse_dropped_bytes(data: object) -> int | None:
             if data is None:
                 return data
-            return cast(Union[None, int], data)
+            return cast(int | None, data)
 
         dropped_bytes = _parse_dropped_bytes(d.pop("dropped_bytes"))
 
 
-        def _parse_dropped_lines(data: object) -> Union[None, int]:
+        def _parse_dropped_lines(data: object) -> int | None:
             if data is None:
                 return data
-            return cast(Union[None, int], data)
+            return cast(int | None, data)
 
         dropped_lines = _parse_dropped_lines(d.pop("dropped_lines"))
 

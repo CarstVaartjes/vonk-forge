@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi.testclient import TestClient
@@ -271,7 +271,7 @@ class _QwenCPUAssets:
     image_evidence: PulledImageEvidence
 
 
-class _FileResponseStream(httpx.SyncByteStream):
+class _FileResponseStream(httpx2.SyncByteStream):
     def __init__(self, path: Path) -> None:
         self._path = path
 
@@ -1183,23 +1183,23 @@ def _walkthrough_app(
         }
     )
 
-    def serve_only_ready_model_artifact(request: httpx.Request) -> httpx.Response:
+    def serve_only_ready_model_artifact(request: httpx2.Request) -> httpx2.Response:
         model_requests.append(f"{request.method} {request.url.host}{request.url.path}")
         if request.method != "GET" or request.url.host != "huggingface.co":
-            return httpx.Response(403, request=request)
+            return httpx2.Response(403, request=request)
         source = expected_model_paths.get(request.url.path)
         if request.url.path not in expected_model_paths:
-            return httpx.Response(403, request=request)
+            return httpx2.Response(403, request=request)
         if source is None:
-            return httpx.Response(200, content=_READY_MODEL_PAYLOAD, request=request)
-        return httpx.Response(
+            return httpx2.Response(200, content=_READY_MODEL_PAYLOAD, request=request)
+        return httpx2.Response(
             200,
             stream=_FileResponseStream(source),
             request=request,
         )
 
-    with httpx.Client(
-        transport=httpx.MockTransport(serve_only_ready_model_artifact),
+    with httpx2.Client(
+        transport=httpx2.MockTransport(serve_only_ready_model_artifact),
         follow_redirects=False,
     ) as model_source:
         # fixture_sources intentionally stays at ModelCacheService's secure

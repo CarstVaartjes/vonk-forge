@@ -2456,7 +2456,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         for component in cyclone["components"]
         if component.get("name") == "oras"
     )
-    assert oras_component["version"] == "1.3.2"
+    assert oras_component["version"] == "1.3.4"
     assert oras_component["hashes"] == [
         {"alg": "SHA-256", "content": hashlib.sha256(oras.read_bytes()).hexdigest()}
     ]

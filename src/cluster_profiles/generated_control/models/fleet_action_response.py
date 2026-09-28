@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,13 +12,11 @@ from ..models.fleet_action_response_action import check_fleet_action_response_ac
 from ..models.fleet_action_response_action import FleetActionResponseAction
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
-from typing import Union
+from typing import Literal, cast
 
 if TYPE_CHECKING:
-  from ..models.enrollment_grant_response import EnrollmentGrantResponse
   from ..models.deployment_provenance import DeploymentProvenance
+  from ..models.enrollment_grant_response import EnrollmentGrantResponse
 
 
 
@@ -32,30 +32,30 @@ class FleetActionResponse:
         Attributes:
             action (FleetActionResponseAction):
             state (str):
-            detail (Union[None, Unset, str]):
-            display_name (Union[None, Unset, str]):
-            grant (Union['EnrollmentGrantResponse', None, Unset]):
-            node_id (Union[None, Unset, str]):
-            operation_id (Union[None, Unset, str]):
-            plan_digest (Union[None, Unset, str]):
-            provenance (Union['DeploymentProvenance', None, Unset]):
-            request_key (Union[None, Unset, str]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
-            targets (Union[Unset, list[str]]):
+            detail (None | str | Unset):
+            display_name (None | str | Unset):
+            grant (EnrollmentGrantResponse | None | Unset):
+            node_id (None | str | Unset):
+            operation_id (None | str | Unset):
+            plan_digest (None | str | Unset):
+            provenance (DeploymentProvenance | None | Unset):
+            request_key (None | str | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
+            targets (list[str] | Unset):
      """
 
     action: FleetActionResponseAction
     state: str
-    detail: Union[None, Unset, str] = UNSET
-    display_name: Union[None, Unset, str] = UNSET
-    grant: Union['EnrollmentGrantResponse', None, Unset] = UNSET
-    node_id: Union[None, Unset, str] = UNSET
-    operation_id: Union[None, Unset, str] = UNSET
-    plan_digest: Union[None, Unset, str] = UNSET
-    provenance: Union['DeploymentProvenance', None, Unset] = UNSET
-    request_key: Union[None, Unset, str] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
-    targets: Union[Unset, list[str]] = UNSET
+    detail: None | str | Unset = UNSET
+    display_name: None | str | Unset = UNSET
+    grant: EnrollmentGrantResponse | None | Unset = UNSET
+    node_id: None | str | Unset = UNSET
+    operation_id: None | str | Unset = UNSET
+    plan_digest: None | str | Unset = UNSET
+    provenance: DeploymentProvenance | None | Unset = UNSET
+    request_key: None | str | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
+    targets: list[str] | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -63,25 +63,25 @@ class FleetActionResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.enrollment_grant_response import EnrollmentGrantResponse
-        from ..models.deployment_provenance import DeploymentProvenance
+        from ..models.deployment_provenance import DeploymentProvenance # noqa: PLC0415
+        from ..models.enrollment_grant_response import EnrollmentGrantResponse # noqa: PLC0415
         action: str = self.action
 
         state = self.state
 
-        detail: Union[None, Unset, str]
+        detail: None | str | Unset
         if isinstance(self.detail, Unset):
             detail = UNSET
         else:
             detail = self.detail
 
-        display_name: Union[None, Unset, str]
+        display_name: None | str | Unset
         if isinstance(self.display_name, Unset):
             display_name = UNSET
         else:
             display_name = self.display_name
 
-        grant: Union[None, Unset, dict[str, Any]]
+        grant: dict[str, Any] | None | Unset
         if isinstance(self.grant, Unset):
             grant = UNSET
         elif isinstance(self.grant, EnrollmentGrantResponse):
@@ -89,25 +89,25 @@ class FleetActionResponse:
         else:
             grant = self.grant
 
-        node_id: Union[None, Unset, str]
+        node_id: None | str | Unset
         if isinstance(self.node_id, Unset):
             node_id = UNSET
         else:
             node_id = self.node_id
 
-        operation_id: Union[None, Unset, str]
+        operation_id: None | str | Unset
         if isinstance(self.operation_id, Unset):
             operation_id = UNSET
         else:
             operation_id = self.operation_id
 
-        plan_digest: Union[None, Unset, str]
+        plan_digest: None | str | Unset
         if isinstance(self.plan_digest, Unset):
             plan_digest = UNSET
         else:
             plan_digest = self.plan_digest
 
-        provenance: Union[None, Unset, dict[str, Any]]
+        provenance: dict[str, Any] | None | Unset
         if isinstance(self.provenance, Unset):
             provenance = UNSET
         elif isinstance(self.provenance, DeploymentProvenance):
@@ -115,7 +115,7 @@ class FleetActionResponse:
         else:
             provenance = self.provenance
 
-        request_key: Union[None, Unset, str]
+        request_key: None | str | Unset
         if isinstance(self.request_key, Unset):
             request_key = UNSET
         else:
@@ -123,7 +123,7 @@ class FleetActionResponse:
 
         schema_version = self.schema_version
 
-        targets: Union[Unset, list[str]] = UNSET
+        targets: list[str] | Unset = UNSET
         if not isinstance(self.targets, Unset):
             targets = self.targets
 
@@ -163,8 +163,8 @@ class FleetActionResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.enrollment_grant_response import EnrollmentGrantResponse
-        from ..models.deployment_provenance import DeploymentProvenance
+        from ..models.deployment_provenance import DeploymentProvenance # noqa: PLC0415
+        from ..models.enrollment_grant_response import EnrollmentGrantResponse # noqa: PLC0415
         d = dict(src_dict)
         action = check_fleet_action_response_action(d.pop("action"))
 
@@ -173,27 +173,27 @@ class FleetActionResponse:
 
         state = d.pop("state")
 
-        def _parse_detail(data: object) -> Union[None, Unset, str]:
+        def _parse_detail(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         detail = _parse_detail(d.pop("detail", UNSET))
 
 
-        def _parse_display_name(data: object) -> Union[None, Unset, str]:
+        def _parse_display_name(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         display_name = _parse_display_name(d.pop("display_name", UNSET))
 
 
-        def _parse_grant(data: object) -> Union['EnrollmentGrantResponse', None, Unset]:
+        def _parse_grant(data: object) -> EnrollmentGrantResponse | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -206,44 +206,44 @@ class FleetActionResponse:
 
 
                 return grant_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['EnrollmentGrantResponse', None, Unset], data)
+            return cast(EnrollmentGrantResponse | None | Unset, data)
 
         grant = _parse_grant(d.pop("grant", UNSET))
 
 
-        def _parse_node_id(data: object) -> Union[None, Unset, str]:
+        def _parse_node_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         node_id = _parse_node_id(d.pop("node_id", UNSET))
 
 
-        def _parse_operation_id(data: object) -> Union[None, Unset, str]:
+        def _parse_operation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         operation_id = _parse_operation_id(d.pop("operation_id", UNSET))
 
 
-        def _parse_plan_digest(data: object) -> Union[None, Unset, str]:
+        def _parse_plan_digest(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         plan_digest = _parse_plan_digest(d.pop("plan_digest", UNSET))
 
 
-        def _parse_provenance(data: object) -> Union['DeploymentProvenance', None, Unset]:
+        def _parse_provenance(data: object) -> DeploymentProvenance | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -256,24 +256,24 @@ class FleetActionResponse:
 
 
                 return provenance_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['DeploymentProvenance', None, Unset], data)
+            return cast(DeploymentProvenance | None | Unset, data)
 
         provenance = _parse_provenance(d.pop("provenance", UNSET))
 
 
-        def _parse_request_key(data: object) -> Union[None, Unset, str]:
+        def _parse_request_key(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         request_key = _parse_request_key(d.pop("request_key", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

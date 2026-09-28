@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,8 +14,6 @@ from ..models.fleet_profile_switch_child_state_state import check_fleet_profile_
 from ..models.fleet_profile_switch_child_state_state import FleetProfileSwitchChildStateState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_switch_child_result import FleetProfileSwitchChildResult
@@ -34,27 +34,27 @@ class FleetProfileSwitchChildState:
             kind (FleetProfileSwitchChildStateKind):
             operation_id (str):
             state (FleetProfileSwitchChildStateState):
-            result (Union['FleetProfileSwitchChildResult', None, Unset]):
+            result (FleetProfileSwitchChildResult | None | Unset):
      """
 
     kind: FleetProfileSwitchChildStateKind
     operation_id: str
     state: FleetProfileSwitchChildStateState
-    result: Union['FleetProfileSwitchChildResult', None, Unset] = UNSET
+    result: FleetProfileSwitchChildResult | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_switch_child_result import FleetProfileSwitchChildResult
+        from ..models.fleet_profile_switch_child_result import FleetProfileSwitchChildResult # noqa: PLC0415
         kind: str = self.kind
 
         operation_id = self.operation_id
 
         state: str = self.state
 
-        result: Union[None, Unset, dict[str, Any]]
+        result: dict[str, Any] | None | Unset
         if isinstance(self.result, Unset):
             result = UNSET
         elif isinstance(self.result, FleetProfileSwitchChildResult):
@@ -79,7 +79,7 @@ class FleetProfileSwitchChildState:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_switch_child_result import FleetProfileSwitchChildResult
+        from ..models.fleet_profile_switch_child_result import FleetProfileSwitchChildResult # noqa: PLC0415
         d = dict(src_dict)
         kind = check_fleet_profile_switch_child_state_kind(d.pop("kind"))
 
@@ -93,7 +93,7 @@ class FleetProfileSwitchChildState:
 
 
 
-        def _parse_result(data: object) -> Union['FleetProfileSwitchChildResult', None, Unset]:
+        def _parse_result(data: object) -> FleetProfileSwitchChildResult | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -106,9 +106,9 @@ class FleetProfileSwitchChildState:
 
 
                 return result_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['FleetProfileSwitchChildResult', None, Unset], data)
+            return cast(FleetProfileSwitchChildResult | None | Unset, data)
 
         result = _parse_result(d.pop("result", UNSET))
 

@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -25,21 +25,21 @@ def _item(tmp_path: Path):
     row = index["recipes"][0]
     package = (ROOT / row["package"]["path"]).read_bytes()
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("index.json"):
-            return httpx.Response(
+            return httpx2.Response(
                 200,
                 headers={"content-type": "application/json"},
                 content=json.dumps(index).encode(),
             )
-        return httpx.Response(
+        return httpx2.Response(
             200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
         )
 
     client = RecipePackageClient(
         "http://127.0.0.1",
         cache_root=tmp_path / "packages",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     item = client.fetch(client.list().items[0].uri)
     return client, item

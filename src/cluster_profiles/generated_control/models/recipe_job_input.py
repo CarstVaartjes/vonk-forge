@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.recipe_input_slot import RecipeInputSlot
@@ -31,21 +31,21 @@ class RecipeJobInput:
             media_types (list[str]):
             path (Literal['/inputs']):
             required (bool):
-            slots (Union[None, Unset, list['RecipeInputSlot']]):
+            slots (list[RecipeInputSlot] | None | Unset):
      """
 
     max_bytes: int
     media_types: list[str]
     path: Literal['/inputs']
     required: bool
-    slots: Union[None, Unset, list['RecipeInputSlot']] = UNSET
+    slots: list[RecipeInputSlot] | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_input_slot import RecipeInputSlot
+        from ..models.recipe_input_slot import RecipeInputSlot # noqa: PLC0415
         max_bytes = self.max_bytes
 
         media_types = self.media_types
@@ -56,7 +56,7 @@ class RecipeJobInput:
 
         required = self.required
 
-        slots: Union[None, Unset, list[dict[str, Any]]]
+        slots: list[dict[str, Any]] | None | Unset
         if isinstance(self.slots, Unset):
             slots = UNSET
         elif isinstance(self.slots, list):
@@ -87,7 +87,7 @@ class RecipeJobInput:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_input_slot import RecipeInputSlot
+        from ..models.recipe_input_slot import RecipeInputSlot # noqa: PLC0415
         d = dict(src_dict)
         max_bytes = d.pop("max_bytes")
 
@@ -100,7 +100,7 @@ class RecipeJobInput:
 
         required = d.pop("required")
 
-        def _parse_slots(data: object) -> Union[None, Unset, list['RecipeInputSlot']]:
+        def _parse_slots(data: object) -> list[RecipeInputSlot] | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -118,9 +118,9 @@ class RecipeJobInput:
                     slots_type_0.append(slots_type_0_item)
 
                 return slots_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, list['RecipeInputSlot']], data)
+            return cast(list[RecipeInputSlot] | None | Unset, data)
 
         slots = _parse_slots(d.pop("slots", UNSET))
 

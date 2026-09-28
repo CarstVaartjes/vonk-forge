@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..models.telemetry_rollup_point_resolution import check_telemetry_rollup_point_resolution
 from ..models.telemetry_rollup_point_resolution import TelemetryRollupPointResolution
-from dateutil.parser import isoparse
 from typing import cast
 import datetime
 
@@ -39,7 +40,7 @@ class TelemetryRollupPoint:
     bucket_end: datetime.datetime
     bucket_start: datetime.datetime
     gap_samples: int
-    metrics: 'TelemetryRollupPointMetrics'
+    metrics: TelemetryRollupPointMetrics
     node_id: str
     resolution: TelemetryRollupPointResolution
     source_sample_count: int
@@ -49,7 +50,7 @@ class TelemetryRollupPoint:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.telemetry_rollup_point_metrics import TelemetryRollupPointMetrics
+        from ..models.telemetry_rollup_point_metrics import TelemetryRollupPointMetrics # noqa: PLC0415
         bucket_end = self.bucket_end.isoformat()
 
         bucket_start = self.bucket_start.isoformat()
@@ -83,14 +84,14 @@ class TelemetryRollupPoint:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.telemetry_rollup_point_metrics import TelemetryRollupPointMetrics
+        from ..models.telemetry_rollup_point_metrics import TelemetryRollupPointMetrics # noqa: PLC0415
         d = dict(src_dict)
-        bucket_end = isoparse(d.pop("bucket_end"))
+        bucket_end = datetime.datetime.fromisoformat(d.pop("bucket_end"))
 
 
 
 
-        bucket_start = isoparse(d.pop("bucket_start"))
+        bucket_start = datetime.datetime.fromisoformat(d.pop("bucket_start"))
 
 
 

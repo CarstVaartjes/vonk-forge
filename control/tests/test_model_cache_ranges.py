@@ -1,6 +1,6 @@
 from threading import Barrier, Event
 
-import httpx
+import httpx2
 import pytest
 from vonk_control.model_cache_ranges import (
     RangeResponseError,
@@ -11,11 +11,11 @@ from vonk_control.model_cache_ranges import (
 
 
 def response(start, end, total, content, status=206, content_range=None):
-    return httpx.Response(
+    return httpx2.Response(
         status,
         content=content,
         headers={"content-range": content_range or f"bytes {start}-{end}/{total}"},
-        request=httpx.Request("GET", "https://example.com/model"),
+        request=httpx2.Request("GET", "https://example.com/model"),
     )
 
 
@@ -106,17 +106,17 @@ def test_interruption_keeps_received_ranges_for_resume(tmp_path):
     data = b"a" * (3 * 1024 * 1024)
     stop = Event()
 
-    class Chunks(httpx.SyncByteStream):
+    class Chunks(httpx2.SyncByteStream):
         def __iter__(self):
             for offset in range(0, len(data), 1024 * 1024):
                 yield data[offset : offset + 1024 * 1024]
 
     def streaming(start, end):
-        return httpx.Response(
+        return httpx2.Response(
             206,
             stream=Chunks(),
             headers={"content-range": f"bytes {start}-{end}/{len(data)}"},
-            request=httpx.Request("GET", "https://example.com/model"),
+            request=httpx2.Request("GET", "https://example.com/model"),
         )
 
     def progress(count):

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,18 +11,14 @@ from ..types import UNSET, Unset
 from ..models.recipe_update_response_state import check_recipe_update_response_state
 from ..models.recipe_update_response_state import RecipeUpdateResponseState
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Literal, Union, cast
-from typing import Union
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.recipe_update_child import RecipeUpdateChild
   from ..models.operation_progress import OperationProgress
   from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
+  from ..models.recipe_update_child import RecipeUpdateChild
   from ..models.recipe_update_scope import RecipeUpdateScope
 
 
@@ -36,7 +34,7 @@ class RecipeUpdateResponse:
     """
         Attributes:
             attempt (int):
-            children (list['RecipeUpdateChild']):
+            children (list[RecipeUpdateChild]):
             created_at (datetime.datetime):
             id (str):
             progress (OperationProgress): Canonical durable progress payload shared by Controller and agents.
@@ -44,33 +42,33 @@ class RecipeUpdateResponse:
             request_id (str):
             state (RecipeUpdateResponseState):
             updated_at (datetime.datetime):
-            action (Union[Literal['update'], Unset]):  Default: 'update'.
-            cancellation (Union['RecipeOperationCancellationResult', None, Unset]):
-            kind (Union[Literal['recipe.cache.update.v2'], Unset]):  Default: 'recipe.cache.update.v2'.
-            next_attempt_at (Union[None, Unset, datetime.datetime]):
-            resume_condition (Union[None, Unset, str]):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
-            wait_owner (Union[Literal['recipe-image-availability'], None, Unset]):
-            waiting_on (Union[None, Unset, str]):
+            action (Literal['update'] | Unset):  Default: 'update'.
+            cancellation (None | RecipeOperationCancellationResult | Unset):
+            kind (Literal['recipe.cache.update.v2'] | Unset):  Default: 'recipe.cache.update.v2'.
+            next_attempt_at (datetime.datetime | None | Unset):
+            resume_condition (None | str | Unset):
+            schema_version (Literal[2] | Unset):  Default: 2.
+            wait_owner (Literal['recipe-image-availability'] | None | Unset):
+            waiting_on (None | str | Unset):
      """
 
     attempt: int
-    children: list['RecipeUpdateChild']
+    children: list[RecipeUpdateChild]
     created_at: datetime.datetime
     id: str
-    progress: 'OperationProgress'
-    request: 'RecipeUpdateScope'
+    progress: OperationProgress
+    request: RecipeUpdateScope
     request_id: str
     state: RecipeUpdateResponseState
     updated_at: datetime.datetime
-    action: Union[Literal['update'], Unset] = 'update'
-    cancellation: Union['RecipeOperationCancellationResult', None, Unset] = UNSET
-    kind: Union[Literal['recipe.cache.update.v2'], Unset] = 'recipe.cache.update.v2'
-    next_attempt_at: Union[None, Unset, datetime.datetime] = UNSET
-    resume_condition: Union[None, Unset, str] = UNSET
-    schema_version: Union[Literal[2], Unset] = 2
-    wait_owner: Union[Literal['recipe-image-availability'], None, Unset] = UNSET
-    waiting_on: Union[None, Unset, str] = UNSET
+    action: Literal['update'] | Unset = 'update'
+    cancellation: None | RecipeOperationCancellationResult | Unset = UNSET
+    kind: Literal['recipe.cache.update.v2'] | Unset = 'recipe.cache.update.v2'
+    next_attempt_at: datetime.datetime | None | Unset = UNSET
+    resume_condition: None | str | Unset = UNSET
+    schema_version: Literal[2] | Unset = 2
+    wait_owner: Literal['recipe-image-availability'] | None | Unset = UNSET
+    waiting_on: None | str | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -78,10 +76,10 @@ class RecipeUpdateResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_update_child import RecipeUpdateChild
-        from ..models.operation_progress import OperationProgress
-        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
-        from ..models.recipe_update_scope import RecipeUpdateScope
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
+        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult # noqa: PLC0415
+        from ..models.recipe_update_child import RecipeUpdateChild # noqa: PLC0415
+        from ..models.recipe_update_scope import RecipeUpdateScope # noqa: PLC0415
         attempt = self.attempt
 
         children = []
@@ -107,7 +105,7 @@ class RecipeUpdateResponse:
 
         action = self.action
 
-        cancellation: Union[None, Unset, dict[str, Any]]
+        cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
             cancellation = UNSET
         elif isinstance(self.cancellation, RecipeOperationCancellationResult):
@@ -117,7 +115,7 @@ class RecipeUpdateResponse:
 
         kind = self.kind
 
-        next_attempt_at: Union[None, Unset, str]
+        next_attempt_at: None | str | Unset
         if isinstance(self.next_attempt_at, Unset):
             next_attempt_at = UNSET
         elif isinstance(self.next_attempt_at, datetime.datetime):
@@ -125,7 +123,7 @@ class RecipeUpdateResponse:
         else:
             next_attempt_at = self.next_attempt_at
 
-        resume_condition: Union[None, Unset, str]
+        resume_condition: None | str | Unset
         if isinstance(self.resume_condition, Unset):
             resume_condition = UNSET
         else:
@@ -133,13 +131,13 @@ class RecipeUpdateResponse:
 
         schema_version = self.schema_version
 
-        wait_owner: Union[Literal['recipe-image-availability'], None, Unset]
+        wait_owner: Literal['recipe-image-availability'] | None | Unset
         if isinstance(self.wait_owner, Unset):
             wait_owner = UNSET
         else:
             wait_owner = self.wait_owner
 
-        waiting_on: Union[None, Unset, str]
+        waiting_on: None | str | Unset
         if isinstance(self.waiting_on, Unset):
             waiting_on = UNSET
         else:
@@ -182,10 +180,10 @@ class RecipeUpdateResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_update_child import RecipeUpdateChild
-        from ..models.operation_progress import OperationProgress
-        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
-        from ..models.recipe_update_scope import RecipeUpdateScope
+        from ..models.operation_progress import OperationProgress # noqa: PLC0415
+        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult # noqa: PLC0415
+        from ..models.recipe_update_child import RecipeUpdateChild # noqa: PLC0415
+        from ..models.recipe_update_scope import RecipeUpdateScope # noqa: PLC0415
         d = dict(src_dict)
         attempt = d.pop("attempt")
 
@@ -199,7 +197,7 @@ class RecipeUpdateResponse:
             children.append(children_item)
 
 
-        created_at = isoparse(d.pop("created_at"))
+        created_at = datetime.datetime.fromisoformat(d.pop("created_at"))
 
 
 
@@ -223,16 +221,16 @@ class RecipeUpdateResponse:
 
 
 
-        updated_at = isoparse(d.pop("updated_at"))
+        updated_at = datetime.datetime.fromisoformat(d.pop("updated_at"))
 
 
 
 
-        action = cast(Union[Literal['update'], Unset] , d.pop("action", UNSET))
+        action = cast(Literal['update'] | Unset , d.pop("action", UNSET))
         if action != 'update' and not isinstance(action, Unset):
             raise ValueError(f"action must match const 'update', got '{action}'")
 
-        def _parse_cancellation(data: object) -> Union['RecipeOperationCancellationResult', None, Unset]:
+        def _parse_cancellation(data: object) -> None | RecipeOperationCancellationResult | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -245,18 +243,18 @@ class RecipeUpdateResponse:
 
 
                 return cancellation_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['RecipeOperationCancellationResult', None, Unset], data)
+            return cast(None | RecipeOperationCancellationResult | Unset, data)
 
         cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
 
 
-        kind = cast(Union[Literal['recipe.cache.update.v2'], Unset] , d.pop("kind", UNSET))
+        kind = cast(Literal['recipe.cache.update.v2'] | Unset , d.pop("kind", UNSET))
         if kind != 'recipe.cache.update.v2' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'recipe.cache.update.v2', got '{kind}'")
 
-        def _parse_next_attempt_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_next_attempt_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -264,33 +262,33 @@ class RecipeUpdateResponse:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                next_attempt_at_type_0 = isoparse(data)
+                next_attempt_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return next_attempt_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
 
 
-        def _parse_resume_condition(data: object) -> Union[None, Unset, str]:
+        def _parse_resume_condition(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         resume_condition = _parse_resume_condition(d.pop("resume_condition", UNSET))
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
-        def _parse_wait_owner(data: object) -> Union[Literal['recipe-image-availability'], None, Unset]:
+        def _parse_wait_owner(data: object) -> Literal['recipe-image-availability'] | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -299,17 +297,17 @@ class RecipeUpdateResponse:
             if wait_owner_type_0 != 'recipe-image-availability':
                 raise ValueError(f"wait_owner_type_0 must match const 'recipe-image-availability', got '{wait_owner_type_0}'")
             return wait_owner_type_0
-            return cast(Union[Literal['recipe-image-availability'], None, Unset], data)
+            return cast(Literal['recipe-image-availability'] | None | Unset, data)
 
         wait_owner = _parse_wait_owner(d.pop("wait_owner", UNSET))
 
 
-        def _parse_waiting_on(data: object) -> Union[None, Unset, str]:
+        def _parse_waiting_on(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         waiting_on = _parse_waiting_on(d.pop("waiting_on", UNSET))
 

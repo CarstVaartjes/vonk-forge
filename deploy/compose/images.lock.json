@@ -2,19 +2,19 @@
   "schema_version": 1,
   "images": {
     "caddy": "caddy:2.11.4",
-    "grafana": "grafana/grafana:13.2.0",
+    "grafana": "grafana/grafana:13.2.2",
     "postgres": "postgres:18.6",
-    "prometheus": "prom/prometheus:v3.14.0",
-    "registry": "registry:3.1.1",
+    "prometheus": "prom/prometheus:v3.15.0",
+    "registry": "registry:3.1.2",
     "step-ca": "smallstep/step-ca:0.30.2",
-    "tailscale": "tailscale/tailscale:v1.102.3"
+    "tailscale": "tailscale/tailscale:v1.102.5"
   },
   "build_bases": {
-    "hermes": "nousresearch/hermes-agent:v2026.7.20",
-    "litellm": "ghcr.io/berriai/litellm:v1.83.14-stable.patch.3",
-    "node": "node:24-bookworm-slim",
-    "python": "python:3.14-slim-bookworm",
-    "skopeo": "quay.io/skopeo/stable:v1.22.2-immutable"
+    "hermes": "nousresearch/hermes-agent:v2026.9.24",
+    "litellm": "ghcr.io/berriai/litellm:v1.103.0",
+    "node": "node:26-trixie-slim",
+    "python": "python:3.14-slim-trixie",
+    "skopeo": "quay.io/skopeo/stable:v1.22.3-immutable"
   },
   "release_images": [
     {

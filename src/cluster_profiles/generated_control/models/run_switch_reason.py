@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,7 +14,6 @@ from ..models.run_switch_reason_severity import check_run_switch_reason_severity
 from ..models.run_switch_reason_severity import RunSwitchReasonSeverity
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Union
 
 
 
@@ -31,16 +32,16 @@ class RunSwitchReason:
             detail (str):
             scope (RunSwitchReasonScope):
             severity (RunSwitchReasonSeverity):
-            node_ids (Union[Unset, list[str]]):
-            stale (Union[Unset, bool]):  Default: False.
+            node_ids (list[str] | Unset):
+            stale (bool | Unset):  Default: False.
      """
 
     code: str
     detail: str
     scope: RunSwitchReasonScope
     severity: RunSwitchReasonSeverity
-    node_ids: Union[Unset, list[str]] = UNSET
-    stale: Union[Unset, bool] = False
+    node_ids: list[str] | Unset = UNSET
+    stale: bool | Unset = False
 
 
 
@@ -55,7 +56,7 @@ class RunSwitchReason:
 
         severity: str = self.severity
 
-        node_ids: Union[Unset, list[str]] = UNSET
+        node_ids: list[str] | Unset = UNSET
         if not isinstance(self.node_ids, Unset):
             node_ids = self.node_ids
 

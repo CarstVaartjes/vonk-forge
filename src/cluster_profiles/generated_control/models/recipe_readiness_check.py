@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,7 +12,6 @@ from ..models.recipe_readiness_check_state import check_recipe_readiness_check_s
 from ..models.recipe_readiness_check_state import RecipeReadinessCheckState
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.run_switch_reason import RunSwitchReason
@@ -28,21 +29,21 @@ class RecipeReadinessCheck:
     """
         Attributes:
             state (RecipeReadinessCheckState):
-            reasons (Union[Unset, list['RunSwitchReason']]):
+            reasons (list[RunSwitchReason] | Unset):
      """
 
     state: RecipeReadinessCheckState
-    reasons: Union[Unset, list['RunSwitchReason']] = UNSET
+    reasons: list[RunSwitchReason] | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_reason import RunSwitchReason
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
         state: str = self.state
 
-        reasons: Union[Unset, list[dict[str, Any]]] = UNSET
+        reasons: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.reasons, Unset):
             reasons = []
             for reasons_item_data in self.reasons:
@@ -66,21 +67,23 @@ class RecipeReadinessCheck:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_reason import RunSwitchReason
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
         d = dict(src_dict)
         state = check_recipe_readiness_check_state(d.pop("state"))
 
 
 
 
-        reasons = []
         _reasons = d.pop("reasons", UNSET)
-        for reasons_item_data in (_reasons or []):
-            reasons_item = RunSwitchReason.from_dict(reasons_item_data)
+        reasons: list[RunSwitchReason] | Unset = UNSET
+        if _reasons is not UNSET:
+            reasons = []
+            for reasons_item_data in _reasons:
+                reasons_item = RunSwitchReason.from_dict(reasons_item_data)
 
 
 
-            reasons.append(reasons_item)
+                reasons.append(reasons_item)
 
 
         recipe_readiness_check = cls(

@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 ModelDefinitionModalitiesItem = Literal['3d', 'audio', 'embeddings', 'image', 'text', 'video']
 
@@ -6,5 +6,5 @@ MODEL_DEFINITION_MODALITIES_ITEM_VALUES: set[ModelDefinitionModalitiesItem] = { 
 
 def check_model_definition_modalities_item(value: str) -> ModelDefinitionModalitiesItem:
     if value in MODEL_DEFINITION_MODALITIES_ITEM_VALUES:
-        return cast(ModelDefinitionModalitiesItem, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {MODEL_DEFINITION_MODALITIES_ITEM_VALUES!r}")

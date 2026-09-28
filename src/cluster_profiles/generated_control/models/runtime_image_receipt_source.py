@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 RuntimeImageReceiptSource = Literal['controller-build', 'published']
 
@@ -6,5 +6,5 @@ RUNTIME_IMAGE_RECEIPT_SOURCE_VALUES: set[RuntimeImageReceiptSource] = { 'control
 
 def check_runtime_image_receipt_source(value: str) -> RuntimeImageReceiptSource:
     if value in RUNTIME_IMAGE_RECEIPT_SOURCE_VALUES:
-        return cast(RuntimeImageReceiptSource, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {RUNTIME_IMAGE_RECEIPT_SOURCE_VALUES!r}")

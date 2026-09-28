@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,10 +13,8 @@ from ..models.enrollment_grant_status_purpose import EnrollmentGrantStatusPurpos
 from ..models.enrollment_grant_status_state import check_enrollment_grant_status_state
 from ..models.enrollment_grant_status_state import EnrollmentGrantStatusState
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Literal, Union, cast
+from typing import Literal, cast
 import datetime
 
 
@@ -30,51 +30,51 @@ T = TypeVar("T", bound="EnrollmentGrantStatus")
 class EnrollmentGrantStatus:
     """
         Attributes:
-            consumed_at (Union[None, datetime.datetime]):
-            display_name (Union[None, str]):
+            consumed_at (datetime.datetime | None):
+            display_name (None | str):
             expires_at (datetime.datetime):
             id (str):
-            node_id (Union[None, str]):
+            node_id (None | str):
             purpose (EnrollmentGrantStatusPurpose):
-            revoked_at (Union[None, datetime.datetime]):
+            revoked_at (datetime.datetime | None):
             state (EnrollmentGrantStatusState):
-            schema_version (Union[Literal[2], Unset]):  Default: 2.
+            schema_version (Literal[2] | Unset):  Default: 2.
      """
 
-    consumed_at: Union[None, datetime.datetime]
-    display_name: Union[None, str]
+    consumed_at: datetime.datetime | None
+    display_name: None | str
     expires_at: datetime.datetime
     id: str
-    node_id: Union[None, str]
+    node_id: None | str
     purpose: EnrollmentGrantStatusPurpose
-    revoked_at: Union[None, datetime.datetime]
+    revoked_at: datetime.datetime | None
     state: EnrollmentGrantStatusState
-    schema_version: Union[Literal[2], Unset] = 2
+    schema_version: Literal[2] | Unset = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        consumed_at: Union[None, str]
+        consumed_at: None | str
         if isinstance(self.consumed_at, datetime.datetime):
             consumed_at = self.consumed_at.isoformat()
         else:
             consumed_at = self.consumed_at
 
-        display_name: Union[None, str]
+        display_name: None | str
         display_name = self.display_name
 
         expires_at = self.expires_at.isoformat()
 
         id = self.id
 
-        node_id: Union[None, str]
+        node_id: None | str
         node_id = self.node_id
 
         purpose: str = self.purpose
 
-        revoked_at: Union[None, str]
+        revoked_at: None | str
         if isinstance(self.revoked_at, datetime.datetime):
             revoked_at = self.revoked_at.isoformat()
         else:
@@ -107,43 +107,43 @@ class EnrollmentGrantStatus:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        def _parse_consumed_at(data: object) -> Union[None, datetime.datetime]:
+        def _parse_consumed_at(data: object) -> datetime.datetime | None:
             if data is None:
                 return data
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                consumed_at_type_0 = isoparse(data)
+                consumed_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return consumed_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, datetime.datetime], data)
+            return cast(datetime.datetime | None, data)
 
         consumed_at = _parse_consumed_at(d.pop("consumed_at"))
 
 
-        def _parse_display_name(data: object) -> Union[None, str]:
+        def _parse_display_name(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         display_name = _parse_display_name(d.pop("display_name"))
 
 
-        expires_at = isoparse(d.pop("expires_at"))
+        expires_at = datetime.datetime.fromisoformat(d.pop("expires_at"))
 
 
 
 
         id = d.pop("id")
 
-        def _parse_node_id(data: object) -> Union[None, str]:
+        def _parse_node_id(data: object) -> None | str:
             if data is None:
                 return data
-            return cast(Union[None, str], data)
+            return cast(None | str, data)
 
         node_id = _parse_node_id(d.pop("node_id"))
 
@@ -153,20 +153,20 @@ class EnrollmentGrantStatus:
 
 
 
-        def _parse_revoked_at(data: object) -> Union[None, datetime.datetime]:
+        def _parse_revoked_at(data: object) -> datetime.datetime | None:
             if data is None:
                 return data
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                revoked_at_type_0 = isoparse(data)
+                revoked_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return revoked_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, datetime.datetime], data)
+            return cast(datetime.datetime | None, data)
 
         revoked_at = _parse_revoked_at(d.pop("revoked_at"))
 
@@ -176,7 +176,7 @@ class EnrollmentGrantStatus:
 
 
 
-        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[2] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 

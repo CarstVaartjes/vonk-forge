@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 ErrorContextResponseDecision = Literal['defer', 'exit', 'retry']
 
@@ -6,5 +6,5 @@ ERROR_CONTEXT_RESPONSE_DECISION_VALUES: set[ErrorContextResponseDecision] = { 'd
 
 def check_error_context_response_decision(value: str) -> ErrorContextResponseDecision:
     if value in ERROR_CONTEXT_RESPONSE_DECISION_VALUES:
-        return cast(ErrorContextResponseDecision, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {ERROR_CONTEXT_RESPONSE_DECISION_VALUES!r}")

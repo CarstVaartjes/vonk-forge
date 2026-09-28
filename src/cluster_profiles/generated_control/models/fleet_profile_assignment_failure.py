@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -24,15 +25,15 @@ class FleetProfileAssignmentFailure:
     """
         Attributes:
             reason (str):
-            assignment_id (Union[None, Unset, str]):
-            operation_id (Union[None, Unset, str]):
-            terminal (Union[Unset, bool]):  Default: False.
+            assignment_id (None | str | Unset):
+            operation_id (None | str | Unset):
+            terminal (bool | Unset):  Default: False.
      """
 
     reason: str
-    assignment_id: Union[None, Unset, str] = UNSET
-    operation_id: Union[None, Unset, str] = UNSET
-    terminal: Union[Unset, bool] = False
+    assignment_id: None | str | Unset = UNSET
+    operation_id: None | str | Unset = UNSET
+    terminal: bool | Unset = False
 
 
 
@@ -41,13 +42,13 @@ class FleetProfileAssignmentFailure:
     def to_dict(self) -> dict[str, Any]:
         reason = self.reason
 
-        assignment_id: Union[None, Unset, str]
+        assignment_id: None | str | Unset
         if isinstance(self.assignment_id, Unset):
             assignment_id = UNSET
         else:
             assignment_id = self.assignment_id
 
-        operation_id: Union[None, Unset, str]
+        operation_id: None | str | Unset
         if isinstance(self.operation_id, Unset):
             operation_id = UNSET
         else:
@@ -77,22 +78,22 @@ class FleetProfileAssignmentFailure:
         d = dict(src_dict)
         reason = d.pop("reason")
 
-        def _parse_assignment_id(data: object) -> Union[None, Unset, str]:
+        def _parse_assignment_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         assignment_id = _parse_assignment_id(d.pop("assignment_id", UNSET))
 
 
-        def _parse_operation_id(data: object) -> Union[None, Unset, str]:
+        def _parse_operation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         operation_id = _parse_operation_id(d.pop("operation_id", UNSET))
 

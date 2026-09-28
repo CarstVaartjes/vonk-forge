@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,8 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -29,16 +29,16 @@ class ModelArtifactIdentity:
             artifact_set_bytes (int):
             artifact_set_sha256 (str):
             model_content_sha256 (str):
-            dependency_model_content_sha256 (Union[Unset, list[str]]):
-            recipe_revision_sha256 (Union[None, Unset, str]):
+            dependency_model_content_sha256 (list[str] | Unset):
+            recipe_revision_sha256 (None | str | Unset):
      """
 
     artifact_count: int
     artifact_set_bytes: int
     artifact_set_sha256: str
     model_content_sha256: str
-    dependency_model_content_sha256: Union[Unset, list[str]] = UNSET
-    recipe_revision_sha256: Union[None, Unset, str] = UNSET
+    dependency_model_content_sha256: list[str] | Unset = UNSET
+    recipe_revision_sha256: None | str | Unset = UNSET
 
 
 
@@ -53,13 +53,13 @@ class ModelArtifactIdentity:
 
         model_content_sha256 = self.model_content_sha256
 
-        dependency_model_content_sha256: Union[Unset, list[str]] = UNSET
+        dependency_model_content_sha256: list[str] | Unset = UNSET
         if not isinstance(self.dependency_model_content_sha256, Unset):
             dependency_model_content_sha256 = self.dependency_model_content_sha256
 
 
 
-        recipe_revision_sha256: Union[None, Unset, str]
+        recipe_revision_sha256: None | str | Unset
         if isinstance(self.recipe_revision_sha256, Unset):
             recipe_revision_sha256 = UNSET
         else:
@@ -97,12 +97,12 @@ class ModelArtifactIdentity:
         dependency_model_content_sha256 = cast(list[str], d.pop("dependency_model_content_sha256", UNSET))
 
 
-        def _parse_recipe_revision_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_recipe_revision_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         recipe_revision_sha256 = _parse_recipe_revision_sha256(d.pop("recipe_revision_sha256", UNSET))
 

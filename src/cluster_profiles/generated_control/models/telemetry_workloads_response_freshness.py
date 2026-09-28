@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 TelemetryWorkloadsResponseFreshness = Literal['delayed', 'live', 'stale']
 
@@ -6,5 +6,5 @@ TELEMETRY_WORKLOADS_RESPONSE_FRESHNESS_VALUES: set[TelemetryWorkloadsResponseFre
 
 def check_telemetry_workloads_response_freshness(value: str) -> TelemetryWorkloadsResponseFreshness:
     if value in TELEMETRY_WORKLOADS_RESPONSE_FRESHNESS_VALUES:
-        return cast(TelemetryWorkloadsResponseFreshness, value)
+        return value
     raise TypeError(f"Unexpected value {value!r}. Expected one of {TELEMETRY_WORKLOADS_RESPONSE_FRESHNESS_VALUES!r}")

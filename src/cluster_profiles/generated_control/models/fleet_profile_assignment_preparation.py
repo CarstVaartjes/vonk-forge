@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -28,14 +30,14 @@ class FleetProfileAssignmentPreparation:
      """
 
     assignment_id: str
-    preparation: 'RolloutPreparation'
+    preparation: RolloutPreparation
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.rollout_preparation import RolloutPreparation
+        from ..models.rollout_preparation import RolloutPreparation # noqa: PLC0415
         assignment_id = self.assignment_id
 
         preparation = self.preparation.to_dict()
@@ -54,7 +56,7 @@ class FleetProfileAssignmentPreparation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.rollout_preparation import RolloutPreparation
+        from ..models.rollout_preparation import RolloutPreparation # noqa: PLC0415
         d = dict(src_dict)
         assignment_id = d.pop("assignment_id")
 

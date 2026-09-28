@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,8 @@ from typing import cast
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_installation_effect import FleetProfileInstallationEffect
-  from ..models.fleet_profile_run_effect import FleetProfileRunEffect
   from ..models.fleet_profile_pending_effect import FleetProfilePendingEffect
+  from ..models.fleet_profile_run_effect import FleetProfileRunEffect
 
 
 
@@ -26,23 +28,23 @@ class FleetProfileEffects:
     """ Identified live effects, including complete distributed membership.
 
         Attributes:
-            installations (list['FleetProfileInstallationEffect']):
-            runs (list['FleetProfileRunEffect']):
-            superseded (list['FleetProfilePendingEffect']):
+            installations (list[FleetProfileInstallationEffect]):
+            runs (list[FleetProfileRunEffect]):
+            superseded (list[FleetProfilePendingEffect]):
      """
 
-    installations: list['FleetProfileInstallationEffect']
-    runs: list['FleetProfileRunEffect']
-    superseded: list['FleetProfilePendingEffect']
+    installations: list[FleetProfileInstallationEffect]
+    runs: list[FleetProfileRunEffect]
+    superseded: list[FleetProfilePendingEffect]
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_installation_effect import FleetProfileInstallationEffect
-        from ..models.fleet_profile_run_effect import FleetProfileRunEffect
-        from ..models.fleet_profile_pending_effect import FleetProfilePendingEffect
+        from ..models.fleet_profile_installation_effect import FleetProfileInstallationEffect # noqa: PLC0415
+        from ..models.fleet_profile_pending_effect import FleetProfilePendingEffect # noqa: PLC0415
+        from ..models.fleet_profile_run_effect import FleetProfileRunEffect # noqa: PLC0415
         installations = []
         for installations_item_data in self.installations:
             installations_item = installations_item_data.to_dict()
@@ -79,9 +81,9 @@ class FleetProfileEffects:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_installation_effect import FleetProfileInstallationEffect
-        from ..models.fleet_profile_run_effect import FleetProfileRunEffect
-        from ..models.fleet_profile_pending_effect import FleetProfilePendingEffect
+        from ..models.fleet_profile_installation_effect import FleetProfileInstallationEffect # noqa: PLC0415
+        from ..models.fleet_profile_pending_effect import FleetProfilePendingEffect # noqa: PLC0415
+        from ..models.fleet_profile_run_effect import FleetProfileRunEffect # noqa: PLC0415
         d = dict(src_dict)
         installations = []
         _installations = d.pop("installations")

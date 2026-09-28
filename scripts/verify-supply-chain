@@ -23,7 +23,7 @@ from pathlib import Path
 # digest reference fails this check.
 VERSIONED_IMAGE = re.compile(r"^[^\s@]+:[^\s@]+$")
 FLOATING_TAGS = frozenset({"latest", "main", "edge", "stable", "master", "dev"})
-PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl"
+PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl"
 PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
 PUBLIC_CONTRACT_WHEEL = (
     "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
@@ -148,7 +148,7 @@ def protocol_version(lock: bytes) -> str:
     ]
     expected_source = (
         'source = { path = "../inventory/wheels/'
-        'vonk_agent_protocol-3.0.0-py3-none-any.whl" }'
+        'vonk_agent_protocol-3.0.1-py3-none-any.whl" }'
     )
     if len(packages) != 1 or expected_source not in packages[0]["record"].splitlines():
         raise ValueError("control and agent must resolve the verified protocol wheel")

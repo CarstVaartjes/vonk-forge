@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,9 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Literal, cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.model_cache_download_result import ModelCacheDownloadResult
@@ -35,31 +35,31 @@ class RunSwitchModelDownloadResult:
             progress (RunSwitchChildProgress): Progress nested in a durable child receipt.
             schema_version (Literal[2]):
             subphase (Literal['model-download']):
-            evidence (Union['ModelCacheDownloadResult', None, Unset]):
-            reason (Union[None, Unset, str]):
-            skipped (Union[Unset, bool]):  Default: True.
-            total_bytes (Union[None, Unset, int]):
+            evidence (ModelCacheDownloadResult | None | Unset):
+            reason (None | str | Unset):
+            skipped (bool | Unset):  Default: True.
+            total_bytes (int | None | Unset):
      """
 
     artifact_set_sha256: str
     coverage: Literal['complete']
     downloaded_bytes: int
     phase: Literal['transfer']
-    progress: 'RunSwitchChildProgress'
+    progress: RunSwitchChildProgress
     schema_version: Literal[2]
     subphase: Literal['model-download']
-    evidence: Union['ModelCacheDownloadResult', None, Unset] = UNSET
-    reason: Union[None, Unset, str] = UNSET
-    skipped: Union[Unset, bool] = True
-    total_bytes: Union[None, Unset, int] = UNSET
+    evidence: ModelCacheDownloadResult | None | Unset = UNSET
+    reason: None | str | Unset = UNSET
+    skipped: bool | Unset = True
+    total_bytes: int | None | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.model_cache_download_result import ModelCacheDownloadResult
-        from ..models.run_switch_child_progress import RunSwitchChildProgress
+        from ..models.model_cache_download_result import ModelCacheDownloadResult # noqa: PLC0415
+        from ..models.run_switch_child_progress import RunSwitchChildProgress # noqa: PLC0415
         artifact_set_sha256 = self.artifact_set_sha256
 
         coverage = self.coverage
@@ -74,7 +74,7 @@ class RunSwitchModelDownloadResult:
 
         subphase = self.subphase
 
-        evidence: Union[None, Unset, dict[str, Any]]
+        evidence: dict[str, Any] | None | Unset
         if isinstance(self.evidence, Unset):
             evidence = UNSET
         elif isinstance(self.evidence, ModelCacheDownloadResult):
@@ -82,7 +82,7 @@ class RunSwitchModelDownloadResult:
         else:
             evidence = self.evidence
 
-        reason: Union[None, Unset, str]
+        reason: None | str | Unset
         if isinstance(self.reason, Unset):
             reason = UNSET
         else:
@@ -90,7 +90,7 @@ class RunSwitchModelDownloadResult:
 
         skipped = self.skipped
 
-        total_bytes: Union[None, Unset, int]
+        total_bytes: int | None | Unset
         if isinstance(self.total_bytes, Unset):
             total_bytes = UNSET
         else:
@@ -123,8 +123,8 @@ class RunSwitchModelDownloadResult:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.model_cache_download_result import ModelCacheDownloadResult
-        from ..models.run_switch_child_progress import RunSwitchChildProgress
+        from ..models.model_cache_download_result import ModelCacheDownloadResult # noqa: PLC0415
+        from ..models.run_switch_child_progress import RunSwitchChildProgress # noqa: PLC0415
         d = dict(src_dict)
         artifact_set_sha256 = d.pop("artifact_set_sha256")
 
@@ -151,7 +151,7 @@ class RunSwitchModelDownloadResult:
         if subphase != 'model-download':
             raise ValueError(f"subphase must match const 'model-download', got '{subphase}'")
 
-        def _parse_evidence(data: object) -> Union['ModelCacheDownloadResult', None, Unset]:
+        def _parse_evidence(data: object) -> ModelCacheDownloadResult | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -164,31 +164,31 @@ class RunSwitchModelDownloadResult:
 
 
                 return evidence_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['ModelCacheDownloadResult', None, Unset], data)
+            return cast(ModelCacheDownloadResult | None | Unset, data)
 
         evidence = _parse_evidence(d.pop("evidence", UNSET))
 
 
-        def _parse_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         reason = _parse_reason(d.pop("reason", UNSET))
 
 
         skipped = d.pop("skipped", UNSET)
 
-        def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_total_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         total_bytes = _parse_total_bytes(d.pop("total_bytes", UNSET))
 

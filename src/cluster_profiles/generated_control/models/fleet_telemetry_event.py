@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,7 +10,7 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Literal, Union, cast
+from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.telemetry_point import TelemetryPoint
@@ -27,19 +29,19 @@ class FleetTelemetryEvent:
         Attributes:
             node_id (str):
             sample (TelemetryPoint):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            schema_version (Literal[1] | Unset):  Default: 1.
      """
 
     node_id: str
-    sample: 'TelemetryPoint'
-    schema_version: Union[Literal[1], Unset] = 1
+    sample: TelemetryPoint
+    schema_version: Literal[1] | Unset = 1
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.telemetry_point import TelemetryPoint
+        from ..models.telemetry_point import TelemetryPoint # noqa: PLC0415
         node_id = self.node_id
 
         sample = self.sample.to_dict()
@@ -62,7 +64,7 @@ class FleetTelemetryEvent:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.telemetry_point import TelemetryPoint
+        from ..models.telemetry_point import TelemetryPoint # noqa: PLC0415
         d = dict(src_dict)
         node_id = d.pop("node_id")
 
@@ -71,7 +73,7 @@ class FleetTelemetryEvent:
 
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        schema_version = cast(Literal[1] | Unset , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 

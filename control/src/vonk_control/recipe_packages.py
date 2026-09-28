@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from urllib.parse import urljoin, urlsplit
 
-import httpx
+import httpx2
 from pydantic import BaseModel, ConfigDict, ValidationError
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.resolver import validate_recipe_models
@@ -223,7 +223,7 @@ class RecipePackageClient:
         base_url: str | None = None,
         *,
         cache_root: Path,
-        transport: httpx.BaseTransport | None = None,
+        transport: httpx2.BaseTransport | None = None,
         timeout_seconds: float = 8.0,
         publication_commit: str | None = None,
         api_url: str = PACKAGE_API_ORIGIN,
@@ -289,9 +289,9 @@ class RecipePackageClient:
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
         self._publication_commit = publication_commit
-        self._client = httpx.Client(
+        self._client = httpx2.Client(
             base_url=self._base_url,
-            timeout=httpx.Timeout(timeout_seconds),
+            timeout=httpx2.Timeout(timeout_seconds),
             follow_redirects=False,
             trust_env=False,
             transport=transport,
@@ -314,7 +314,7 @@ class RecipePackageClient:
             raw, publication, release = (
                 self._fetch_release() if self._production else self._fetch_channel()
             )
-        except (httpx.HTTPError, OSError) as error:
+        except (httpx2.HTTPError, OSError) as error:
             persisted = self._read_persisted_snapshot()
             if persisted is not None:
                 return persisted
@@ -943,7 +943,7 @@ class RecipePackageClient:
             content = self._download_asset(
                 release.tag, release.assets, name, MAX_PACKAGE_BYTES, sha256=digest
             )
-        except (httpx.HTTPError, OSError) as error:
+        except (httpx2.HTTPError, OSError) as error:
             raise RecipePackageError(
                 "recipe_package.unavailable", "recipe package is unavailable"
             ) from error
@@ -963,7 +963,7 @@ class RecipePackageClient:
     ) -> bytes:
         try:
             response = self._client.get(urljoin(self._base_url + "/", location))
-        except (httpx.HTTPError, OSError) as error:
+        except (httpx2.HTTPError, OSError) as error:
             raise RecipePackageError(
                 "recipe_package.unavailable", "recipe package is unavailable"
             ) from error

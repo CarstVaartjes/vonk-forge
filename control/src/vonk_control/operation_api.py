@@ -20,6 +20,7 @@ from pydantic import (
     model_serializer,
 )
 from sqlalchemy import String, and_, cast, false, func, or_, select, true, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
@@ -2439,7 +2440,7 @@ class _DurableOperationProjection:
                 )
                 .execution_options(synchronize_session=False)
             )
-            if result.rowcount != 1:
+            if not isinstance(result, CursorResult) or result.rowcount != 1:
                 raise ValueError("job is not waiting for operator")
             # The parent transition alone does not release the parked child:
             # the claim predicate requires the operation's own retry

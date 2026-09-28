@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use base64ct::{Base64UrlUnpadded, Encoding};
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
     Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519,
@@ -885,7 +885,7 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     let (label, encrypted_document) = pkcs8::SecretDocument::from_pem(&encrypted_intermediate)
         .expect("encrypted intermediate PEM");
     assert_eq!(label, "ENCRYPTED PRIVATE KEY");
-    let encrypted_info = pkcs8::EncryptedPrivateKeyInfo::try_from(encrypted_document.as_bytes())
+    let encrypted_info = pkcs8::EncryptedPrivateKeyInfoRef::try_from(encrypted_document.as_bytes())
         .expect("encrypted intermediate PKCS#8");
     assert!(matches!(
         encrypted_info.encryption_algorithm,
@@ -922,7 +922,7 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
         Base64UrlUnpadded::decode_vec(private_jwk["d"].as_str().expect("private scalar"))
             .expect("base64url private scalar");
     let secret_key = p256::SecretKey::from_slice(&private_scalar).expect("P-256 private scalar");
-    let point = secret_key.public_key().to_encoded_point(false);
+    let point = secret_key.public_key().to_sec1_point(false);
     assert_eq!(
         Base64UrlUnpadded::decode_vec(public_jwk["x"].as_str().expect("x")).expect("x"),
         point.x().expect("x coordinate").as_slice()

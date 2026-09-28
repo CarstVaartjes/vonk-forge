@@ -3,12 +3,12 @@
 # upstream patch releases. They hold no operator data, run only our own code,
 # and are rebuilt through CI on every change; see docs/image-pin-refresh.md.
 # Third-party bases below stay digest-pinned.
-ARG NODE_IMAGE=node:24-bookworm-slim
-ARG PYTHON_IMAGE=python:3.14-slim-bookworm
-ARG SKOPEO_IMAGE=quay.io/skopeo/stable:v1.22.2-immutable@sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810
-ARG SKOPEO_INDEX_DIGEST=sha256:4a16d57b37617a04b3d643079a477a2848efe892dffcdf0ce56df4262b65f810
-ARG SKOPEO_AMD64_DIGEST=sha256:0e392474a4383b733038b85eff26ade929d2ff10e8deead25a6add3ed79fb362
-ARG SKOPEO_ARM64_DIGEST=sha256:807f42a95c0f05f397eb505b577b6de49048b865c4e29146d1231324c27e1e59
+ARG NODE_IMAGE=node:26-trixie-slim
+ARG PYTHON_IMAGE=python:3.14-slim-trixie
+ARG SKOPEO_IMAGE=quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
+ARG SKOPEO_INDEX_DIGEST=sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5
+ARG SKOPEO_AMD64_DIGEST=sha256:ab4c269c9e2bd11affe2666b860fb651a15afec121c15986b052b02e09d86239
+ARG SKOPEO_ARM64_DIGEST=sha256:916612c4c9bcf1dd633137ec4ce88987e368c16b3d611642006ca5996fe28c98
 
 FROM ${SKOPEO_IMAGE} AS skopeo
 ARG TARGETARCH
@@ -88,7 +88,7 @@ COPY control/migrations ./migrations
 COPY --from=web /web/dist ./src/vonk_control/web
 # The repository image build runs scripts/build-control-wheel before invoking
 # Docker so this local dependency exists and has the digest pinned in uv.lock.
-COPY inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl /wheels/
+COPY inventory/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl /wheels/
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends git \
     && public_contracts_revision="$(sed -n 's/^revision = "//p' packaging/public-contracts.lock | tr -d '"')" \
@@ -98,11 +98,11 @@ RUN apt-get update \
     && git -C /public-contracts checkout --detach "$public_contracts_revision" \
     && python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels \
         /public-contracts/contracts \
-    && python -c 'import hashlib, pathlib, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl").read_bytes()).hexdigest()' \
+    && python -c 'import hashlib, pathlib, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl").read_bytes()).hexdigest()' \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /public-contracts /var/lib/apt/lists/*
 RUN python -m pip install --no-cache-dir --prefix=/install \
-    /wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl \
+    /wheels/vonk_agent_protocol-3.0.1-py3-none-any.whl \
     /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl \
     /vonk-cluster-profiles .
 
@@ -115,7 +115,10 @@ ARG SKOPEO_ARM64_DIGEST
 # The pinned skopeo image ships /etc/ssl/certs as a symlink into /etc/pki/tls,
 # while the Python base has a real directory there; COPY cannot replace a
 # directory with a symlink, so drop the base directory before the copy below.
-RUN groupadd --gid 10001 control \
+# The runtime installs nothing, so the base image's pip (and the libraries it
+# vendors) is removed rather than shipped.
+RUN python -m pip uninstall --yes --root-user-action=ignore pip \
+    && groupadd --gid 10001 control \
     && useradd --uid 10001 --gid 10001 --no-create-home control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control-cache \

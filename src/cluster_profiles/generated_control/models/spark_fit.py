@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import Union
 
 if TYPE_CHECKING:
   from ..models.run_switch_reason import RunSwitchReason
@@ -27,23 +28,23 @@ class SparkFit:
     """
         Attributes:
             allowed (bool):
-            nodes (list['SparkFitNode']):
-            blockers (Union[Unset, list['RunSwitchReason']]):
-            warnings (Union[Unset, list['RunSwitchReason']]):
+            nodes (list[SparkFitNode]):
+            blockers (list[RunSwitchReason] | Unset):
+            warnings (list[RunSwitchReason] | Unset):
      """
 
     allowed: bool
-    nodes: list['SparkFitNode']
-    blockers: Union[Unset, list['RunSwitchReason']] = UNSET
-    warnings: Union[Unset, list['RunSwitchReason']] = UNSET
+    nodes: list[SparkFitNode]
+    blockers: list[RunSwitchReason] | Unset = UNSET
+    warnings: list[RunSwitchReason] | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.spark_fit_node import SparkFitNode
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
+        from ..models.spark_fit_node import SparkFitNode # noqa: PLC0415
         allowed = self.allowed
 
         nodes = []
@@ -53,7 +54,7 @@ class SparkFit:
 
 
 
-        blockers: Union[Unset, list[dict[str, Any]]] = UNSET
+        blockers: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.blockers, Unset):
             blockers = []
             for blockers_item_data in self.blockers:
@@ -62,7 +63,7 @@ class SparkFit:
 
 
 
-        warnings: Union[Unset, list[dict[str, Any]]] = UNSET
+        warnings: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.warnings, Unset):
             warnings = []
             for warnings_item_data in self.warnings:
@@ -89,8 +90,8 @@ class SparkFit:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.spark_fit_node import SparkFitNode
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
+        from ..models.spark_fit_node import SparkFitNode # noqa: PLC0415
         d = dict(src_dict)
         allowed = d.pop("allowed")
 
@@ -104,24 +105,28 @@ class SparkFit:
             nodes.append(nodes_item)
 
 
-        blockers = []
         _blockers = d.pop("blockers", UNSET)
-        for blockers_item_data in (_blockers or []):
-            blockers_item = RunSwitchReason.from_dict(blockers_item_data)
+        blockers: list[RunSwitchReason] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = RunSwitchReason.from_dict(blockers_item_data)
 
 
 
-            blockers.append(blockers_item)
+                blockers.append(blockers_item)
 
 
-        warnings = []
         _warnings = d.pop("warnings", UNSET)
-        for warnings_item_data in (_warnings or []):
-            warnings_item = RunSwitchReason.from_dict(warnings_item_data)
+        warnings: list[RunSwitchReason] | Unset = UNSET
+        if _warnings is not UNSET:
+            warnings = []
+            for warnings_item_data in _warnings:
+                warnings_item = RunSwitchReason.from_dict(warnings_item_data)
 
 
 
-            warnings.append(warnings_item)
+                warnings.append(warnings_item)
 
 
         spark_fit = cls(

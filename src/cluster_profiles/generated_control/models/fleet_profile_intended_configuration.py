@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -11,8 +13,8 @@ from ..models.fleet_profile_intended_configuration_installation_policy import Fl
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.fleet_profile_scope import FleetProfileScope
   from ..models.fleet_profile_assignment import FleetProfileAssignment
+  from ..models.fleet_profile_scope import FleetProfileScope
 
 
 
@@ -27,7 +29,7 @@ class FleetProfileIntendedConfiguration:
     """ Immutable desired configuration captured when execution is admitted.
 
         Attributes:
-            assignments (list['FleetProfileAssignment']):
+            assignments (list[FleetProfileAssignment]):
             installation_policy (FleetProfileIntendedConfigurationInstallationPolicy):
             profile_digest (str):
             reviewed_application_id (str):
@@ -39,20 +41,20 @@ class FleetProfileIntendedConfiguration:
                 operation cannot silently expand or shrink with fleet membership changes.
      """
 
-    assignments: list['FleetProfileAssignment']
+    assignments: list[FleetProfileAssignment]
     installation_policy: FleetProfileIntendedConfigurationInstallationPolicy
     profile_digest: str
     reviewed_application_id: str
     reviewed_plan_digest: str
-    scope: 'FleetProfileScope'
+    scope: FleetProfileScope
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.fleet_profile_scope import FleetProfileScope
-        from ..models.fleet_profile_assignment import FleetProfileAssignment
+        from ..models.fleet_profile_assignment import FleetProfileAssignment # noqa: PLC0415
+        from ..models.fleet_profile_scope import FleetProfileScope # noqa: PLC0415
         assignments = []
         for assignments_item_data in self.assignments:
             assignments_item = assignments_item_data.to_dict()
@@ -88,8 +90,8 @@ class FleetProfileIntendedConfiguration:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.fleet_profile_scope import FleetProfileScope
-        from ..models.fleet_profile_assignment import FleetProfileAssignment
+        from ..models.fleet_profile_assignment import FleetProfileAssignment # noqa: PLC0415
+        from ..models.fleet_profile_scope import FleetProfileScope # noqa: PLC0415
         d = dict(src_dict)
         assignments = []
         _assignments = d.pop("assignments")

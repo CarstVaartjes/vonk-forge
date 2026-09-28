@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -15,10 +17,7 @@ from ..models.telemetry_series_scope import TelemetrySeriesScope
 from ..models.telemetry_series_support_status import check_telemetry_series_support_status
 from ..models.telemetry_series_support_status import TelemetrySeriesSupportStatus
 from ..types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
@@ -43,16 +42,16 @@ class TelemetrySeries:
             source (str):
             support_status (TelemetrySeriesSupportStatus):
             unit (str):
-            value (Union[None, bool, float, int, str]):
-            device_id (Union[None, Unset, str]):
-            freshness (Union[Unset, TelemetrySeriesFreshness]):  Default: 'fresh'.
-            interface_name (Union[None, Unset, str]):
-            node_id (Union[None, Unset, str]):
-            process_id (Union[None, Unset, int]):
-            process_name (Union[None, Unset, str]):
-            reason (Union[None, Unset, str]):
-            received_at (Union[None, Unset, datetime.datetime]):
-            run_id (Union[None, Unset, str]):
+            value (bool | float | int | None | str):
+            device_id (None | str | Unset):
+            freshness (TelemetrySeriesFreshness | Unset):  Default: 'fresh'.
+            interface_name (None | str | Unset):
+            node_id (None | str | Unset):
+            process_id (int | None | Unset):
+            process_name (None | str | Unset):
+            reason (None | str | Unset):
+            received_at (datetime.datetime | None | Unset):
+            run_id (None | str | Unset):
      """
 
     aggregation: str
@@ -64,16 +63,16 @@ class TelemetrySeries:
     source: str
     support_status: TelemetrySeriesSupportStatus
     unit: str
-    value: Union[None, bool, float, int, str]
-    device_id: Union[None, Unset, str] = UNSET
-    freshness: Union[Unset, TelemetrySeriesFreshness] = 'fresh'
-    interface_name: Union[None, Unset, str] = UNSET
-    node_id: Union[None, Unset, str] = UNSET
-    process_id: Union[None, Unset, int] = UNSET
-    process_name: Union[None, Unset, str] = UNSET
-    reason: Union[None, Unset, str] = UNSET
-    received_at: Union[None, Unset, datetime.datetime] = UNSET
-    run_id: Union[None, Unset, str] = UNSET
+    value: bool | float | int | None | str
+    device_id: None | str | Unset = UNSET
+    freshness: TelemetrySeriesFreshness | Unset = 'fresh'
+    interface_name: None | str | Unset = UNSET
+    node_id: None | str | Unset = UNSET
+    process_id: int | None | Unset = UNSET
+    process_name: None | str | Unset = UNSET
+    reason: None | str | Unset = UNSET
+    received_at: datetime.datetime | None | Unset = UNSET
+    run_id: None | str | Unset = UNSET
 
 
 
@@ -98,51 +97,51 @@ class TelemetrySeries:
 
         unit = self.unit
 
-        value: Union[None, bool, float, int, str]
+        value: bool | float | int | None | str
         value = self.value
 
-        device_id: Union[None, Unset, str]
+        device_id: None | str | Unset
         if isinstance(self.device_id, Unset):
             device_id = UNSET
         else:
             device_id = self.device_id
 
-        freshness: Union[Unset, str] = UNSET
+        freshness: str | Unset = UNSET
         if not isinstance(self.freshness, Unset):
             freshness = self.freshness
 
 
-        interface_name: Union[None, Unset, str]
+        interface_name: None | str | Unset
         if isinstance(self.interface_name, Unset):
             interface_name = UNSET
         else:
             interface_name = self.interface_name
 
-        node_id: Union[None, Unset, str]
+        node_id: None | str | Unset
         if isinstance(self.node_id, Unset):
             node_id = UNSET
         else:
             node_id = self.node_id
 
-        process_id: Union[None, Unset, int]
+        process_id: int | None | Unset
         if isinstance(self.process_id, Unset):
             process_id = UNSET
         else:
             process_id = self.process_id
 
-        process_name: Union[None, Unset, str]
+        process_name: None | str | Unset
         if isinstance(self.process_name, Unset):
             process_name = UNSET
         else:
             process_name = self.process_name
 
-        reason: Union[None, Unset, str]
+        reason: None | str | Unset
         if isinstance(self.reason, Unset):
             reason = UNSET
         else:
             reason = self.reason
 
-        received_at: Union[None, Unset, str]
+        received_at: None | str | Unset
         if isinstance(self.received_at, Unset):
             received_at = UNSET
         elif isinstance(self.received_at, datetime.datetime):
@@ -150,7 +149,7 @@ class TelemetrySeries:
         else:
             received_at = self.received_at
 
-        run_id: Union[None, Unset, str]
+        run_id: None | str | Unset
         if isinstance(self.run_id, Unset):
             run_id = UNSET
         else:
@@ -208,7 +207,7 @@ class TelemetrySeries:
 
 
 
-        observed_at = isoparse(d.pop("observed_at"))
+        observed_at = datetime.datetime.fromisoformat(d.pop("observed_at"))
 
 
 
@@ -227,26 +226,26 @@ class TelemetrySeries:
 
         unit = d.pop("unit")
 
-        def _parse_value(data: object) -> Union[None, bool, float, int, str]:
+        def _parse_value(data: object) -> bool | float | int | None | str:
             if data is None:
                 return data
-            return cast(Union[None, bool, float, int, str], data)
+            return cast(bool | float | int | None | str, data)
 
         value = _parse_value(d.pop("value"))
 
 
-        def _parse_device_id(data: object) -> Union[None, Unset, str]:
+        def _parse_device_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         device_id = _parse_device_id(d.pop("device_id", UNSET))
 
 
         _freshness = d.pop("freshness", UNSET)
-        freshness: Union[Unset, TelemetrySeriesFreshness]
+        freshness: TelemetrySeriesFreshness | Unset
         if isinstance(_freshness,  Unset):
             freshness = UNSET
         else:
@@ -255,57 +254,57 @@ class TelemetrySeries:
 
 
 
-        def _parse_interface_name(data: object) -> Union[None, Unset, str]:
+        def _parse_interface_name(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         interface_name = _parse_interface_name(d.pop("interface_name", UNSET))
 
 
-        def _parse_node_id(data: object) -> Union[None, Unset, str]:
+        def _parse_node_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         node_id = _parse_node_id(d.pop("node_id", UNSET))
 
 
-        def _parse_process_id(data: object) -> Union[None, Unset, int]:
+        def _parse_process_id(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         process_id = _parse_process_id(d.pop("process_id", UNSET))
 
 
-        def _parse_process_name(data: object) -> Union[None, Unset, str]:
+        def _parse_process_name(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         process_name = _parse_process_name(d.pop("process_name", UNSET))
 
 
-        def _parse_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         reason = _parse_reason(d.pop("reason", UNSET))
 
 
-        def _parse_received_at(data: object) -> Union[None, Unset, datetime.datetime]:
+        def _parse_received_at(data: object) -> datetime.datetime | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -313,24 +312,24 @@ class TelemetrySeries:
             try:
                 if not isinstance(data, str):
                     raise TypeError()
-                received_at_type_0 = isoparse(data)
+                received_at_type_0 = datetime.datetime.fromisoformat(data)
 
 
 
                 return received_at_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, Unset, datetime.datetime], data)
+            return cast(datetime.datetime | None | Unset, data)
 
         received_at = _parse_received_at(d.pop("received_at", UNSET))
 
 
-        def _parse_run_id(data: object) -> Union[None, Unset, str]:
+        def _parse_run_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         run_id = _parse_run_id(d.pop("run_id", UNSET))
 

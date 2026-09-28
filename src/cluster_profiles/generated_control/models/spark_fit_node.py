@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -12,13 +14,11 @@ from ..models.spark_fit_node_memory_pool_type_0 import check_spark_fit_node_memo
 from ..models.spark_fit_node_memory_pool_type_0 import SparkFitNodeMemoryPoolType0
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.run_switch_reason import RunSwitchReason
-  from ..models.resource_demand_evidence import ResourceDemandEvidence
   from ..models.memory_usage_uncertainty import MemoryUsageUncertainty
+  from ..models.resource_demand_evidence import ResourceDemandEvidence
+  from ..models.run_switch_reason import RunSwitchReason
 
 
 
@@ -37,20 +37,20 @@ class SparkFitNode:
             ports_required (list[int]):
             rank (int):
             role (str):
-            blockers (Union[Unset, list['RunSwitchReason']]):
-            disk_free_after_bytes (Union[None, Unset, int]):
-            disk_free_bytes (Union[None, Unset, int]):
-            disk_required_bytes (Union[None, Unset, int]):
-            memory_available_bytes (Union[None, Unset, int]):
-            memory_capacity_bytes (Union[None, Unset, int]):
-            memory_floor_bytes (Union[None, Unset, int]):
-            memory_free_after_bytes (Union[None, Unset, int]):
-            memory_kind (Union[None, SparkFitNodeMemoryKindType0, Unset]):
-            memory_pool (Union[None, SparkFitNodeMemoryPoolType0, Unset]):
-            memory_required_bytes (Union[None, Unset, int]):
-            memory_usage_uncertainty (Union['MemoryUsageUncertainty', None, Unset]):
-            resource_demand (Union['ResourceDemandEvidence', None, Unset]):
-            warnings (Union[Unset, list['RunSwitchReason']]):
+            blockers (list[RunSwitchReason] | Unset):
+            disk_free_after_bytes (int | None | Unset):
+            disk_free_bytes (int | None | Unset):
+            disk_required_bytes (int | None | Unset):
+            memory_available_bytes (int | None | Unset):
+            memory_capacity_bytes (int | None | Unset):
+            memory_floor_bytes (int | None | Unset):
+            memory_free_after_bytes (int | None | Unset):
+            memory_kind (None | SparkFitNodeMemoryKindType0 | Unset):
+            memory_pool (None | SparkFitNodeMemoryPoolType0 | Unset):
+            memory_required_bytes (int | None | Unset):
+            memory_usage_uncertainty (MemoryUsageUncertainty | None | Unset):
+            resource_demand (None | ResourceDemandEvidence | Unset):
+            warnings (list[RunSwitchReason] | Unset):
      """
 
     allowed: bool
@@ -58,29 +58,29 @@ class SparkFitNode:
     ports_required: list[int]
     rank: int
     role: str
-    blockers: Union[Unset, list['RunSwitchReason']] = UNSET
-    disk_free_after_bytes: Union[None, Unset, int] = UNSET
-    disk_free_bytes: Union[None, Unset, int] = UNSET
-    disk_required_bytes: Union[None, Unset, int] = UNSET
-    memory_available_bytes: Union[None, Unset, int] = UNSET
-    memory_capacity_bytes: Union[None, Unset, int] = UNSET
-    memory_floor_bytes: Union[None, Unset, int] = UNSET
-    memory_free_after_bytes: Union[None, Unset, int] = UNSET
-    memory_kind: Union[None, SparkFitNodeMemoryKindType0, Unset] = UNSET
-    memory_pool: Union[None, SparkFitNodeMemoryPoolType0, Unset] = UNSET
-    memory_required_bytes: Union[None, Unset, int] = UNSET
-    memory_usage_uncertainty: Union['MemoryUsageUncertainty', None, Unset] = UNSET
-    resource_demand: Union['ResourceDemandEvidence', None, Unset] = UNSET
-    warnings: Union[Unset, list['RunSwitchReason']] = UNSET
+    blockers: list[RunSwitchReason] | Unset = UNSET
+    disk_free_after_bytes: int | None | Unset = UNSET
+    disk_free_bytes: int | None | Unset = UNSET
+    disk_required_bytes: int | None | Unset = UNSET
+    memory_available_bytes: int | None | Unset = UNSET
+    memory_capacity_bytes: int | None | Unset = UNSET
+    memory_floor_bytes: int | None | Unset = UNSET
+    memory_free_after_bytes: int | None | Unset = UNSET
+    memory_kind: None | SparkFitNodeMemoryKindType0 | Unset = UNSET
+    memory_pool: None | SparkFitNodeMemoryPoolType0 | Unset = UNSET
+    memory_required_bytes: int | None | Unset = UNSET
+    memory_usage_uncertainty: MemoryUsageUncertainty | None | Unset = UNSET
+    resource_demand: None | ResourceDemandEvidence | Unset = UNSET
+    warnings: list[RunSwitchReason] | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.resource_demand_evidence import ResourceDemandEvidence
-        from ..models.memory_usage_uncertainty import MemoryUsageUncertainty
+        from ..models.memory_usage_uncertainty import MemoryUsageUncertainty # noqa: PLC0415
+        from ..models.resource_demand_evidence import ResourceDemandEvidence # noqa: PLC0415
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
         allowed = self.allowed
 
         node_id = self.node_id
@@ -93,7 +93,7 @@ class SparkFitNode:
 
         role = self.role
 
-        blockers: Union[Unset, list[dict[str, Any]]] = UNSET
+        blockers: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.blockers, Unset):
             blockers = []
             for blockers_item_data in self.blockers:
@@ -102,49 +102,49 @@ class SparkFitNode:
 
 
 
-        disk_free_after_bytes: Union[None, Unset, int]
+        disk_free_after_bytes: int | None | Unset
         if isinstance(self.disk_free_after_bytes, Unset):
             disk_free_after_bytes = UNSET
         else:
             disk_free_after_bytes = self.disk_free_after_bytes
 
-        disk_free_bytes: Union[None, Unset, int]
+        disk_free_bytes: int | None | Unset
         if isinstance(self.disk_free_bytes, Unset):
             disk_free_bytes = UNSET
         else:
             disk_free_bytes = self.disk_free_bytes
 
-        disk_required_bytes: Union[None, Unset, int]
+        disk_required_bytes: int | None | Unset
         if isinstance(self.disk_required_bytes, Unset):
             disk_required_bytes = UNSET
         else:
             disk_required_bytes = self.disk_required_bytes
 
-        memory_available_bytes: Union[None, Unset, int]
+        memory_available_bytes: int | None | Unset
         if isinstance(self.memory_available_bytes, Unset):
             memory_available_bytes = UNSET
         else:
             memory_available_bytes = self.memory_available_bytes
 
-        memory_capacity_bytes: Union[None, Unset, int]
+        memory_capacity_bytes: int | None | Unset
         if isinstance(self.memory_capacity_bytes, Unset):
             memory_capacity_bytes = UNSET
         else:
             memory_capacity_bytes = self.memory_capacity_bytes
 
-        memory_floor_bytes: Union[None, Unset, int]
+        memory_floor_bytes: int | None | Unset
         if isinstance(self.memory_floor_bytes, Unset):
             memory_floor_bytes = UNSET
         else:
             memory_floor_bytes = self.memory_floor_bytes
 
-        memory_free_after_bytes: Union[None, Unset, int]
+        memory_free_after_bytes: int | None | Unset
         if isinstance(self.memory_free_after_bytes, Unset):
             memory_free_after_bytes = UNSET
         else:
             memory_free_after_bytes = self.memory_free_after_bytes
 
-        memory_kind: Union[None, Unset, str]
+        memory_kind: None | str | Unset
         if isinstance(self.memory_kind, Unset):
             memory_kind = UNSET
         elif isinstance(self.memory_kind, str):
@@ -152,7 +152,7 @@ class SparkFitNode:
         else:
             memory_kind = self.memory_kind
 
-        memory_pool: Union[None, Unset, str]
+        memory_pool: None | str | Unset
         if isinstance(self.memory_pool, Unset):
             memory_pool = UNSET
         elif isinstance(self.memory_pool, str):
@@ -160,13 +160,13 @@ class SparkFitNode:
         else:
             memory_pool = self.memory_pool
 
-        memory_required_bytes: Union[None, Unset, int]
+        memory_required_bytes: int | None | Unset
         if isinstance(self.memory_required_bytes, Unset):
             memory_required_bytes = UNSET
         else:
             memory_required_bytes = self.memory_required_bytes
 
-        memory_usage_uncertainty: Union[None, Unset, dict[str, Any]]
+        memory_usage_uncertainty: dict[str, Any] | None | Unset
         if isinstance(self.memory_usage_uncertainty, Unset):
             memory_usage_uncertainty = UNSET
         elif isinstance(self.memory_usage_uncertainty, MemoryUsageUncertainty):
@@ -174,7 +174,7 @@ class SparkFitNode:
         else:
             memory_usage_uncertainty = self.memory_usage_uncertainty
 
-        resource_demand: Union[None, Unset, dict[str, Any]]
+        resource_demand: dict[str, Any] | None | Unset
         if isinstance(self.resource_demand, Unset):
             resource_demand = UNSET
         elif isinstance(self.resource_demand, ResourceDemandEvidence):
@@ -182,7 +182,7 @@ class SparkFitNode:
         else:
             resource_demand = self.resource_demand
 
-        warnings: Union[Unset, list[dict[str, Any]]] = UNSET
+        warnings: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.warnings, Unset):
             warnings = []
             for warnings_item_data in self.warnings:
@@ -236,9 +236,9 @@ class SparkFitNode:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_reason import RunSwitchReason
-        from ..models.resource_demand_evidence import ResourceDemandEvidence
-        from ..models.memory_usage_uncertainty import MemoryUsageUncertainty
+        from ..models.memory_usage_uncertainty import MemoryUsageUncertainty # noqa: PLC0415
+        from ..models.resource_demand_evidence import ResourceDemandEvidence # noqa: PLC0415
+        from ..models.run_switch_reason import RunSwitchReason # noqa: PLC0415
         d = dict(src_dict)
         allowed = d.pop("allowed")
 
@@ -251,87 +251,89 @@ class SparkFitNode:
 
         role = d.pop("role")
 
-        blockers = []
         _blockers = d.pop("blockers", UNSET)
-        for blockers_item_data in (_blockers or []):
-            blockers_item = RunSwitchReason.from_dict(blockers_item_data)
+        blockers: list[RunSwitchReason] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = RunSwitchReason.from_dict(blockers_item_data)
 
 
 
-            blockers.append(blockers_item)
+                blockers.append(blockers_item)
 
 
-        def _parse_disk_free_after_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_disk_free_after_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         disk_free_after_bytes = _parse_disk_free_after_bytes(d.pop("disk_free_after_bytes", UNSET))
 
 
-        def _parse_disk_free_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_disk_free_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         disk_free_bytes = _parse_disk_free_bytes(d.pop("disk_free_bytes", UNSET))
 
 
-        def _parse_disk_required_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_disk_required_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         disk_required_bytes = _parse_disk_required_bytes(d.pop("disk_required_bytes", UNSET))
 
 
-        def _parse_memory_available_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_memory_available_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         memory_available_bytes = _parse_memory_available_bytes(d.pop("memory_available_bytes", UNSET))
 
 
-        def _parse_memory_capacity_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_memory_capacity_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         memory_capacity_bytes = _parse_memory_capacity_bytes(d.pop("memory_capacity_bytes", UNSET))
 
 
-        def _parse_memory_floor_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_memory_floor_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         memory_floor_bytes = _parse_memory_floor_bytes(d.pop("memory_floor_bytes", UNSET))
 
 
-        def _parse_memory_free_after_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_memory_free_after_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         memory_free_after_bytes = _parse_memory_free_after_bytes(d.pop("memory_free_after_bytes", UNSET))
 
 
-        def _parse_memory_kind(data: object) -> Union[None, SparkFitNodeMemoryKindType0, Unset]:
+        def _parse_memory_kind(data: object) -> None | SparkFitNodeMemoryKindType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -344,14 +346,14 @@ class SparkFitNode:
 
 
                 return memory_kind_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, SparkFitNodeMemoryKindType0, Unset], data)
+            return cast(None | SparkFitNodeMemoryKindType0 | Unset, data)
 
         memory_kind = _parse_memory_kind(d.pop("memory_kind", UNSET))
 
 
-        def _parse_memory_pool(data: object) -> Union[None, SparkFitNodeMemoryPoolType0, Unset]:
+        def _parse_memory_pool(data: object) -> None | SparkFitNodeMemoryPoolType0 | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -364,24 +366,24 @@ class SparkFitNode:
 
 
                 return memory_pool_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union[None, SparkFitNodeMemoryPoolType0, Unset], data)
+            return cast(None | SparkFitNodeMemoryPoolType0 | Unset, data)
 
         memory_pool = _parse_memory_pool(d.pop("memory_pool", UNSET))
 
 
-        def _parse_memory_required_bytes(data: object) -> Union[None, Unset, int]:
+        def _parse_memory_required_bytes(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         memory_required_bytes = _parse_memory_required_bytes(d.pop("memory_required_bytes", UNSET))
 
 
-        def _parse_memory_usage_uncertainty(data: object) -> Union['MemoryUsageUncertainty', None, Unset]:
+        def _parse_memory_usage_uncertainty(data: object) -> MemoryUsageUncertainty | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -394,14 +396,14 @@ class SparkFitNode:
 
 
                 return memory_usage_uncertainty_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['MemoryUsageUncertainty', None, Unset], data)
+            return cast(MemoryUsageUncertainty | None | Unset, data)
 
         memory_usage_uncertainty = _parse_memory_usage_uncertainty(d.pop("memory_usage_uncertainty", UNSET))
 
 
-        def _parse_resource_demand(data: object) -> Union['ResourceDemandEvidence', None, Unset]:
+        def _parse_resource_demand(data: object) -> None | ResourceDemandEvidence | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -414,21 +416,23 @@ class SparkFitNode:
 
 
                 return resource_demand_type_0
-            except: # noqa: E722
+            except (TypeError, ValueError, AttributeError, KeyError):
                 pass
-            return cast(Union['ResourceDemandEvidence', None, Unset], data)
+            return cast(None | ResourceDemandEvidence | Unset, data)
 
         resource_demand = _parse_resource_demand(d.pop("resource_demand", UNSET))
 
 
-        warnings = []
         _warnings = d.pop("warnings", UNSET)
-        for warnings_item_data in (_warnings or []):
-            warnings_item = RunSwitchReason.from_dict(warnings_item_data)
+        warnings: list[RunSwitchReason] | Unset = UNSET
+        if _warnings is not UNSET:
+            warnings = []
+            for warnings_item_data in _warnings:
+                warnings_item = RunSwitchReason.from_dict(warnings_item_data)
 
 
 
-            warnings.append(warnings_item)
+                warnings.append(warnings_item)
 
 
         spark_fit_node = cls(

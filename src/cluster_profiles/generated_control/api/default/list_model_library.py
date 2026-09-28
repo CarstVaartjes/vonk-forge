@@ -1,7 +1,8 @@
 from http import HTTPStatus
-from typing import Any, Optional, Union, cast
+from typing import Any, cast
+from urllib.parse import quote
 
-import httpx
+import httpx2
 
 from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
@@ -13,27 +14,24 @@ from ...models.list_model_library_sort import ListModelLibrarySort
 from ...models.model_library_response import ModelLibraryResponse
 from ...models.request_validation_problem import RequestValidationProblem
 from ...types import UNSET, Unset
-from dateutil.parser import isoparse
 from typing import cast
-from typing import cast, Union
-from typing import Union
 import datetime
 
 
 
 def _get_kwargs(
     *,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    family: Union[None, Unset, list[str]] = UNSET,
-    version: Union[None, Unset, list[str]] = UNSET,
-    quantization: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListModelLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    usage: list[str] | None | Unset = UNSET,
+    family: list[str] | None | Unset = UNSET,
+    version: list[str] | None | Unset = UNSET,
+    quantization: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListModelLibrarySort | Unset = 'updated',
 
 ) -> dict[str, Any]:
 
@@ -44,14 +42,14 @@ def _get_kwargs(
 
     params["limit"] = limit
 
-    json_cursor: Union[None, Unset, str]
+    json_cursor: None | str | Unset
     if isinstance(cursor, Unset):
         json_cursor = UNSET
     else:
         json_cursor = cursor
     params["cursor"] = json_cursor
 
-    json_usage: Union[None, Unset, list[str]]
+    json_usage: list[str] | None | Unset
     if isinstance(usage, Unset):
         json_usage = UNSET
     elif isinstance(usage, list):
@@ -62,7 +60,7 @@ def _get_kwargs(
         json_usage = usage
     params["usage"] = json_usage
 
-    json_family: Union[None, Unset, list[str]]
+    json_family: list[str] | None | Unset
     if isinstance(family, Unset):
         json_family = UNSET
     elif isinstance(family, list):
@@ -73,7 +71,7 @@ def _get_kwargs(
         json_family = family
     params["family"] = json_family
 
-    json_version: Union[None, Unset, list[str]]
+    json_version: list[str] | None | Unset
     if isinstance(version, Unset):
         json_version = UNSET
     elif isinstance(version, list):
@@ -84,7 +82,7 @@ def _get_kwargs(
         json_version = version
     params["version"] = json_version
 
-    json_quantization: Union[None, Unset, list[str]]
+    json_quantization: list[str] | None | Unset
     if isinstance(quantization, Unset):
         json_quantization = UNSET
     elif isinstance(quantization, list):
@@ -95,7 +93,7 @@ def _get_kwargs(
         json_quantization = quantization
     params["quantization"] = json_quantization
 
-    json_publisher: Union[None, Unset, list[str]]
+    json_publisher: list[str] | None | Unset
     if isinstance(publisher, Unset):
         json_publisher = UNSET
     elif isinstance(publisher, list):
@@ -106,7 +104,7 @@ def _get_kwargs(
         json_publisher = publisher
     params["publisher"] = json_publisher
 
-    json_alignment: Union[None, Unset, list[str]]
+    json_alignment: list[str] | None | Unset
     if isinstance(alignment, Unset):
         json_alignment = UNSET
     elif isinstance(alignment, list):
@@ -117,14 +115,14 @@ def _get_kwargs(
         json_alignment = alignment
     params["alignment"] = json_alignment
 
-    json_search: Union[None, Unset, str]
+    json_search: None | str | Unset
     if isinstance(search, Unset):
         json_search = UNSET
     else:
         json_search = search
     params["search"] = json_search
 
-    json_updated_since: Union[None, Unset, str]
+    json_updated_since: None | str | Unset
     if isinstance(updated_since, Unset):
         json_updated_since = UNSET
     elif isinstance(updated_since, datetime.datetime):
@@ -133,7 +131,7 @@ def _get_kwargs(
         json_updated_since = updated_since
     params["updated_since"] = json_updated_since
 
-    json_sort: Union[Unset, str] = UNSET
+    json_sort: str | Unset = UNSET
     if not isinstance(sort, Unset):
         json_sort = sort
 
@@ -154,7 +152,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]]:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = ModelLibraryResponse.from_dict(response.json())
 
@@ -189,7 +187,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -201,40 +199,40 @@ def _build_response(*, client: Union[AuthenticatedClient, Client], response: htt
 def sync_detailed(
     *,
     client: AuthenticatedClient,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    family: Union[None, Unset, list[str]] = UNSET,
-    version: Union[None, Unset, list[str]] = UNSET,
-    quantization: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListModelLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    usage: list[str] | None | Unset = UNSET,
+    family: list[str] | None | Unset = UNSET,
+    version: list[str] | None | Unset = UNSET,
+    quantization: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListModelLibrarySort | Unset = 'updated',
 
-) -> Response[Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]:
     """ Model Library
 
     Args:
-        limit (Union[Unset, int]):  Default: 100.
-        cursor (Union[None, Unset, str]):
-        usage (Union[None, Unset, list[str]]):
-        family (Union[None, Unset, list[str]]):
-        version (Union[None, Unset, list[str]]):
-        quantization (Union[None, Unset, list[str]]):
-        publisher (Union[None, Unset, list[str]]):
-        alignment (Union[None, Unset, list[str]]):
-        search (Union[None, Unset, str]):
-        updated_since (Union[None, Unset, datetime.datetime]):
-        sort (Union[Unset, ListModelLibrarySort]):  Default: 'updated'.
+        limit (int | Unset):  Default: 100.
+        cursor (None | str | Unset):
+        usage (list[str] | None | Unset):
+        family (list[str] | None | Unset):
+        version (list[str] | None | Unset):
+        quantization (list[str] | None | Unset):
+        publisher (list[str] | None | Unset):
+        alignment (list[str] | None | Unset):
+        search (None | str | Unset):
+        updated_since (datetime.datetime | None | Unset):
+        sort (ListModelLibrarySort | Unset):  Default: 'updated'.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]
      """
 
 
@@ -262,40 +260,40 @@ sort=sort,
 def sync(
     *,
     client: AuthenticatedClient,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    family: Union[None, Unset, list[str]] = UNSET,
-    version: Union[None, Unset, list[str]] = UNSET,
-    quantization: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListModelLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    usage: list[str] | None | Unset = UNSET,
+    family: list[str] | None | Unset = UNSET,
+    version: list[str] | None | Unset = UNSET,
+    quantization: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListModelLibrarySort | Unset = 'updated',
 
-) -> Optional[Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem | None:
     """ Model Library
 
     Args:
-        limit (Union[Unset, int]):  Default: 100.
-        cursor (Union[None, Unset, str]):
-        usage (Union[None, Unset, list[str]]):
-        family (Union[None, Unset, list[str]]):
-        version (Union[None, Unset, list[str]]):
-        quantization (Union[None, Unset, list[str]]):
-        publisher (Union[None, Unset, list[str]]):
-        alignment (Union[None, Unset, list[str]]):
-        search (Union[None, Unset, str]):
-        updated_since (Union[None, Unset, datetime.datetime]):
-        sort (Union[Unset, ListModelLibrarySort]):  Default: 'updated'.
+        limit (int | Unset):  Default: 100.
+        cursor (None | str | Unset):
+        usage (list[str] | None | Unset):
+        family (list[str] | None | Unset):
+        version (list[str] | None | Unset):
+        quantization (list[str] | None | Unset):
+        publisher (list[str] | None | Unset):
+        alignment (list[str] | None | Unset):
+        search (None | str | Unset):
+        updated_since (datetime.datetime | None | Unset):
+        sort (ListModelLibrarySort | Unset):  Default: 'updated'.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]
+        BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem
      """
 
 
@@ -318,40 +316,40 @@ sort=sort,
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    family: Union[None, Unset, list[str]] = UNSET,
-    version: Union[None, Unset, list[str]] = UNSET,
-    quantization: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListModelLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    usage: list[str] | None | Unset = UNSET,
+    family: list[str] | None | Unset = UNSET,
+    version: list[str] | None | Unset = UNSET,
+    quantization: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListModelLibrarySort | Unset = 'updated',
 
-) -> Response[Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]]:
+) -> Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]:
     """ Model Library
 
     Args:
-        limit (Union[Unset, int]):  Default: 100.
-        cursor (Union[None, Unset, str]):
-        usage (Union[None, Unset, list[str]]):
-        family (Union[None, Unset, list[str]]):
-        version (Union[None, Unset, list[str]]):
-        quantization (Union[None, Unset, list[str]]):
-        publisher (Union[None, Unset, list[str]]):
-        alignment (Union[None, Unset, list[str]]):
-        search (Union[None, Unset, str]):
-        updated_since (Union[None, Unset, datetime.datetime]):
-        sort (Union[Unset, ListModelLibrarySort]):  Default: 'updated'.
+        limit (int | Unset):  Default: 100.
+        cursor (None | str | Unset):
+        usage (list[str] | None | Unset):
+        family (list[str] | None | Unset):
+        version (list[str] | None | Unset):
+        quantization (list[str] | None | Unset):
+        publisher (list[str] | None | Unset):
+        alignment (list[str] | None | Unset):
+        search (None | str | Unset):
+        updated_since (datetime.datetime | None | Unset):
+        sort (ListModelLibrarySort | Unset):  Default: 'updated'.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]]
+        Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]
      """
 
 
@@ -379,40 +377,40 @@ sort=sort,
 async def asyncio(
     *,
     client: AuthenticatedClient,
-    limit: Union[Unset, int] = 100,
-    cursor: Union[None, Unset, str] = UNSET,
-    usage: Union[None, Unset, list[str]] = UNSET,
-    family: Union[None, Unset, list[str]] = UNSET,
-    version: Union[None, Unset, list[str]] = UNSET,
-    quantization: Union[None, Unset, list[str]] = UNSET,
-    publisher: Union[None, Unset, list[str]] = UNSET,
-    alignment: Union[None, Unset, list[str]] = UNSET,
-    search: Union[None, Unset, str] = UNSET,
-    updated_since: Union[None, Unset, datetime.datetime] = UNSET,
-    sort: Union[Unset, ListModelLibrarySort] = 'updated',
+    limit: int | Unset = 100,
+    cursor: None | str | Unset = UNSET,
+    usage: list[str] | None | Unset = UNSET,
+    family: list[str] | None | Unset = UNSET,
+    version: list[str] | None | Unset = UNSET,
+    quantization: list[str] | None | Unset = UNSET,
+    publisher: list[str] | None | Unset = UNSET,
+    alignment: list[str] | None | Unset = UNSET,
+    search: None | str | Unset = UNSET,
+    updated_since: datetime.datetime | None | Unset = UNSET,
+    sort: ListModelLibrarySort | Unset = 'updated',
 
-) -> Optional[Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]]:
+) -> BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem | None:
     """ Model Library
 
     Args:
-        limit (Union[Unset, int]):  Default: 100.
-        cursor (Union[None, Unset, str]):
-        usage (Union[None, Unset, list[str]]):
-        family (Union[None, Unset, list[str]]):
-        version (Union[None, Unset, list[str]]):
-        quantization (Union[None, Unset, list[str]]):
-        publisher (Union[None, Unset, list[str]]):
-        alignment (Union[None, Unset, list[str]]):
-        search (Union[None, Unset, str]):
-        updated_since (Union[None, Unset, datetime.datetime]):
-        sort (Union[Unset, ListModelLibrarySort]):  Default: 'updated'.
+        limit (int | Unset):  Default: 100.
+        cursor (None | str | Unset):
+        usage (list[str] | None | Unset):
+        family (list[str] | None | Unset):
+        version (list[str] | None | Unset):
+        quantization (list[str] | None | Unset):
+        publisher (list[str] | None | Unset):
+        alignment (list[str] | None | Unset):
+        search (None | str | Unset):
+        updated_since (datetime.datetime | None | Unset):
+        sort (ListModelLibrarySort | Unset):  Default: 'updated'.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
-        httpx.TimeoutException: If the request takes longer than Client.timeout.
+        httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, ModelLibraryResponse, RequestValidationProblem]
+        BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem
      """
 
 

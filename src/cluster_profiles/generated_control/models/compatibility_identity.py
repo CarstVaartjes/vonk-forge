@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -7,8 +9,7 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
-from typing import cast, Union
-from typing import Union
+from typing import cast
 
 
 
@@ -28,14 +29,14 @@ class CompatibilityIdentity:
             parameters_sha256 (str):
             recipe_revision_sha256 (str):
             runtime_image_digest (str):
-            hardware_profile_sha256 (Union[None, Unset, str]):
+            hardware_profile_sha256 (None | str | Unset):
      """
 
     model_content_sha256: str
     parameters_sha256: str
     recipe_revision_sha256: str
     runtime_image_digest: str
-    hardware_profile_sha256: Union[None, Unset, str] = UNSET
+    hardware_profile_sha256: None | str | Unset = UNSET
 
 
 
@@ -50,7 +51,7 @@ class CompatibilityIdentity:
 
         runtime_image_digest = self.runtime_image_digest
 
-        hardware_profile_sha256: Union[None, Unset, str]
+        hardware_profile_sha256: None | str | Unset
         if isinstance(self.hardware_profile_sha256, Unset):
             hardware_profile_sha256 = UNSET
         else:
@@ -83,12 +84,12 @@ class CompatibilityIdentity:
 
         runtime_image_digest = d.pop("runtime_image_digest")
 
-        def _parse_hardware_profile_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_hardware_profile_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         hardware_profile_sha256 = _parse_hardware_profile_sha256(d.pop("hardware_profile_sha256", UNSET))
 

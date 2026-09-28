@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -9,7 +11,6 @@ from ..types import UNSET, Unset
 from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
-from typing import Union
 
 
 
@@ -27,13 +28,13 @@ class FleetProfilePlanStep:
             index (int):
             kind (Literal['switch']):
             label (str):
-            node_ids (Union[Unset, list[str]]):
+            node_ids (list[str] | Unset):
      """
 
     index: int
     kind: Literal['switch']
     label: str
-    node_ids: Union[Unset, list[str]] = UNSET
+    node_ids: list[str] | Unset = UNSET
 
 
 
@@ -46,7 +47,7 @@ class FleetProfilePlanStep:
 
         label = self.label
 
-        node_ids: Union[Unset, list[str]] = UNSET
+        node_ids: list[str] | Unset = UNSET
         if not isinstance(self.node_ids, Unset):
             node_ids = self.node_ids
 

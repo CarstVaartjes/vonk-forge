@@ -72,7 +72,11 @@ async def _serve(args: argparse.Namespace) -> None:
     while not server.started and not serving.done():
         await asyncio.sleep(0.01)
     if server.started:
-        args.ready.write_text(str(os.getpid()), encoding="ascii")
+        # Publish the pid atomically: the parent polls for the file to exist
+        # and reads it at once, so a non-atomic write can be seen empty.
+        pending = args.ready.with_name(f"{args.ready.name}.pending")
+        pending.write_text(str(os.getpid()), encoding="ascii")
+        pending.replace(args.ready)
     try:
         await serving
     finally:

@@ -141,7 +141,7 @@ _EXTERNAL_PREFIXES = (
     "subprocess.",
     "shutil.",
     "socket.",
-    "httpx.",
+    "httpx2.",
     "requests.",
     "urllib.",
     "os.",

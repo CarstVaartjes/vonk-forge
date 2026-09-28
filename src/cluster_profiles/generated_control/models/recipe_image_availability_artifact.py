@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -8,8 +10,6 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -32,9 +32,9 @@ class RecipeImageAvailabilityArtifact:
             roles (list[str]):
             sha256 (str):
             source (str):
-            model_content_sha256 (Union[None, Unset, str]):
-            repository (Union[None, Unset, str]):
-            revision (Union[None, Unset, str]):
+            model_content_sha256 (None | str | Unset):
+            repository (None | str | Unset):
+            revision (None | str | Unset):
      """
 
     download_bytes: int
@@ -45,9 +45,9 @@ class RecipeImageAvailabilityArtifact:
     roles: list[str]
     sha256: str
     source: str
-    model_content_sha256: Union[None, Unset, str] = UNSET
-    repository: Union[None, Unset, str] = UNSET
-    revision: Union[None, Unset, str] = UNSET
+    model_content_sha256: None | str | Unset = UNSET
+    repository: None | str | Unset = UNSET
+    revision: None | str | Unset = UNSET
 
 
 
@@ -72,19 +72,19 @@ class RecipeImageAvailabilityArtifact:
 
         source = self.source
 
-        model_content_sha256: Union[None, Unset, str]
+        model_content_sha256: None | str | Unset
         if isinstance(self.model_content_sha256, Unset):
             model_content_sha256 = UNSET
         else:
             model_content_sha256 = self.model_content_sha256
 
-        repository: Union[None, Unset, str]
+        repository: None | str | Unset
         if isinstance(self.repository, Unset):
             repository = UNSET
         else:
             repository = self.repository
 
-        revision: Union[None, Unset, str]
+        revision: None | str | Unset
         if isinstance(self.revision, Unset):
             revision = UNSET
         else:
@@ -134,32 +134,32 @@ class RecipeImageAvailabilityArtifact:
 
         source = d.pop("source")
 
-        def _parse_model_content_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_model_content_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256", UNSET))
 
 
-        def _parse_repository(data: object) -> Union[None, Unset, str]:
+        def _parse_repository(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         repository = _parse_repository(d.pop("repository", UNSET))
 
 
-        def _parse_revision(data: object) -> Union[None, Unset, str]:
+        def _parse_revision(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         revision = _parse_revision(d.pop("revision", UNSET))
 

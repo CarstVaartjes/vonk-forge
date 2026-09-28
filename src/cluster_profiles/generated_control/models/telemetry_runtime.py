@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Any, TypeVar, Optional, BinaryIO, TextIO, TYPE_CHECKING, Generator
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -10,8 +12,6 @@ from ..models.telemetry_runtime_readiness import check_telemetry_runtime_readine
 from ..models.telemetry_runtime_readiness import TelemetryRuntimeReadiness
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
-from typing import Union
 
 
 
@@ -34,15 +34,15 @@ class TelemetryRuntime:
             readiness (TelemetryRuntimeReadiness):
             run_id (str):
             serving_node_ids (list[str]):
-            adapter_reason (Union[None, Unset, str]):
-            adapter_version (Union[None, Unset, str]):
-            context_limit_tokens (Union[None, Unset, int]):
-            endpoint (Union[None, Unset, str]):
-            error (Union[None, Unset, str]):
-            model (Union[None, Unset, str]):
-            model_version (Union[None, Unset, str]):
-            recipe_revision (Union[None, Unset, str]):
-            version (Union[None, Unset, str]):
+            adapter_reason (None | str | Unset):
+            adapter_version (None | str | Unset):
+            context_limit_tokens (int | None | Unset):
+            endpoint (None | str | Unset):
+            error (None | str | Unset):
+            model (None | str | Unset):
+            model_version (None | str | Unset):
+            recipe_revision (None | str | Unset):
+            version (None | str | Unset):
      """
 
     adapter: str
@@ -53,15 +53,15 @@ class TelemetryRuntime:
     readiness: TelemetryRuntimeReadiness
     run_id: str
     serving_node_ids: list[str]
-    adapter_reason: Union[None, Unset, str] = UNSET
-    adapter_version: Union[None, Unset, str] = UNSET
-    context_limit_tokens: Union[None, Unset, int] = UNSET
-    endpoint: Union[None, Unset, str] = UNSET
-    error: Union[None, Unset, str] = UNSET
-    model: Union[None, Unset, str] = UNSET
-    model_version: Union[None, Unset, str] = UNSET
-    recipe_revision: Union[None, Unset, str] = UNSET
-    version: Union[None, Unset, str] = UNSET
+    adapter_reason: None | str | Unset = UNSET
+    adapter_version: None | str | Unset = UNSET
+    context_limit_tokens: int | None | Unset = UNSET
+    endpoint: None | str | Unset = UNSET
+    error: None | str | Unset = UNSET
+    model: None | str | Unset = UNSET
+    model_version: None | str | Unset = UNSET
+    recipe_revision: None | str | Unset = UNSET
+    version: None | str | Unset = UNSET
 
 
 
@@ -88,55 +88,55 @@ class TelemetryRuntime:
 
 
 
-        adapter_reason: Union[None, Unset, str]
+        adapter_reason: None | str | Unset
         if isinstance(self.adapter_reason, Unset):
             adapter_reason = UNSET
         else:
             adapter_reason = self.adapter_reason
 
-        adapter_version: Union[None, Unset, str]
+        adapter_version: None | str | Unset
         if isinstance(self.adapter_version, Unset):
             adapter_version = UNSET
         else:
             adapter_version = self.adapter_version
 
-        context_limit_tokens: Union[None, Unset, int]
+        context_limit_tokens: int | None | Unset
         if isinstance(self.context_limit_tokens, Unset):
             context_limit_tokens = UNSET
         else:
             context_limit_tokens = self.context_limit_tokens
 
-        endpoint: Union[None, Unset, str]
+        endpoint: None | str | Unset
         if isinstance(self.endpoint, Unset):
             endpoint = UNSET
         else:
             endpoint = self.endpoint
 
-        error: Union[None, Unset, str]
+        error: None | str | Unset
         if isinstance(self.error, Unset):
             error = UNSET
         else:
             error = self.error
 
-        model: Union[None, Unset, str]
+        model: None | str | Unset
         if isinstance(self.model, Unset):
             model = UNSET
         else:
             model = self.model
 
-        model_version: Union[None, Unset, str]
+        model_version: None | str | Unset
         if isinstance(self.model_version, Unset):
             model_version = UNSET
         else:
             model_version = self.model_version
 
-        recipe_revision: Union[None, Unset, str]
+        recipe_revision: None | str | Unset
         if isinstance(self.recipe_revision, Unset):
             recipe_revision = UNSET
         else:
             recipe_revision = self.recipe_revision
 
-        version: Union[None, Unset, str]
+        version: None | str | Unset
         if isinstance(self.version, Unset):
             version = UNSET
         else:
@@ -202,92 +202,92 @@ class TelemetryRuntime:
         serving_node_ids = cast(list[str], d.pop("serving_node_ids"))
 
 
-        def _parse_adapter_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_adapter_reason(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         adapter_reason = _parse_adapter_reason(d.pop("adapter_reason", UNSET))
 
 
-        def _parse_adapter_version(data: object) -> Union[None, Unset, str]:
+        def _parse_adapter_version(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         adapter_version = _parse_adapter_version(d.pop("adapter_version", UNSET))
 
 
-        def _parse_context_limit_tokens(data: object) -> Union[None, Unset, int]:
+        def _parse_context_limit_tokens(data: object) -> int | None | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, int], data)
+            return cast(int | None | Unset, data)
 
         context_limit_tokens = _parse_context_limit_tokens(d.pop("context_limit_tokens", UNSET))
 
 
-        def _parse_endpoint(data: object) -> Union[None, Unset, str]:
+        def _parse_endpoint(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         endpoint = _parse_endpoint(d.pop("endpoint", UNSET))
 
 
-        def _parse_error(data: object) -> Union[None, Unset, str]:
+        def _parse_error(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         error = _parse_error(d.pop("error", UNSET))
 
 
-        def _parse_model(data: object) -> Union[None, Unset, str]:
+        def _parse_model(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model = _parse_model(d.pop("model", UNSET))
 
 
-        def _parse_model_version(data: object) -> Union[None, Unset, str]:
+        def _parse_model_version(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         model_version = _parse_model_version(d.pop("model_version", UNSET))
 
 
-        def _parse_recipe_revision(data: object) -> Union[None, Unset, str]:
+        def _parse_recipe_revision(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         recipe_revision = _parse_recipe_revision(d.pop("recipe_revision", UNSET))
 
 
-        def _parse_version(data: object) -> Union[None, Unset, str]:
+        def _parse_version(data: object) -> None | str | Unset:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            return cast(None | str | Unset, data)
 
         version = _parse_version(d.pop("version", UNSET))
 
