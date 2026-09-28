@@ -2239,13 +2239,11 @@ def test_postgres_claims_are_fenced_and_respect_build_capacity(
     build_a = first.start("revision-pg-build", actor="operator", request_id="q" * 36)
     build_b = first.start("revision-pg-build", actor="operator", request_id="r" * 36)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        claims = tuple(
-            executor.map(
-                lambda service: service.claim_pending(limit=1, owner_id="pg-worker"),
-                (first, second),
-            )
-        )
+    # The second worker sees the first worker's live build lease and waits.
+    claims = tuple(
+        service.claim_pending(limit=1, owner_id="pg-worker")
+        for service in (first, second)
+    )
     build_claims = [claim for batch in claims for claim in batch]
     assert len(build_claims) == 1
     assert build_claims[0].operation_id in {build_a.id, build_b.id}
