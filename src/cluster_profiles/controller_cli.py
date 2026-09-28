@@ -1195,6 +1195,34 @@ def _cache_removal_review(
     return review
 
 
+_SECURITY_BLOCKER_MARKERS = (
+    "authentication_required",
+    "unauthorized",
+    "forbidden",
+    "enrollment_denied",
+    "revoked",
+    "identity_invalid",
+    "identity_mismatch",
+)
+
+
+def _security_blocker_codes(blockers: object) -> list[str]:
+    """Return blocker codes that are real security denials, not bookkeeping.
+
+    Every other blocker is submitted anyway: the Controller parks the latest
+    request until it can run, or refuses it with its own typed answer.
+    """
+    codes: list[str] = []
+    if isinstance(blockers, list):
+        for item in blockers:
+            code = item.get("code") if isinstance(item, Mapping) else None
+            if isinstance(code, str) and any(
+                marker in code for marker in _SECURITY_BLOCKER_MARKERS
+            ):
+                codes.append(code)
+    return codes
+
+
 def _review_digest_for_acceptance(
     client: ControllerClient,
     noun: str,
@@ -1209,19 +1237,11 @@ def _review_digest_for_acceptance(
 
     review = _cache_removal_review(client, noun, selector, with_model=with_model)
     current_digest = cast(str, review["review_digest"])
-    blockers = cast(list[Mapping[str, object]], review["blockers"])
-    if blockers:
-        if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
-            with redirect_stdout(sys.stderr):
-                render_payload(review, noun, action="preview")
-        details = "; ".join(
-            f"{cast(str, blocker['code'])}: {cast(str, blocker['detail'])}"
-            for blocker in blockers
-        )
+    security = _security_blocker_codes(review["blockers"])
+    if security:
         raise ControlConflict(
             409,
-            f"{noun} removal is blocked by the Controller review: {details}. "
-            f"Inspect the read-only review with {noun} remove {selector} --review.",
+            f"{noun} removal is refused by the Controller: {', '.join(security)}.",
         )
     if not args.yes:
         with redirect_stdout(sys.stderr):
@@ -2758,19 +2778,13 @@ def _recipe_installation_reconcile(
             "installation reconciliation plan is unavailable",
         )
     reviewed_digest = cast(str, preview["plan_digest"])
-    if preview.get("allowed") is not True:
-        reasons = preview.get("blockers")
-        codes: list[str] = []
-        if isinstance(reasons, list):
-            for item in reasons:
-                if isinstance(item, Mapping):
-                    code = item.get("code")
-                    if isinstance(code, str):
-                        codes.append(code)
-        detail = "installation reconciliation is blocked" + (
-            f": {', '.join(codes[:6])}" if codes else "; review the current plan"
+    security = _security_blocker_codes(preview.get("blockers"))
+    if security:
+        raise ControlConflict(
+            409,
+            "installation reconciliation is refused by the Controller: "
+            + ", ".join(security[:6]),
         )
-        raise ControlConflict(409, detail)
     body = {
         **preview_body,
         "plan_digest": reviewed_digest,
@@ -3584,12 +3598,11 @@ def _run(
     _profile_authoring(edit_args, client)
 
     preview = client.request("POST", f"/api/profile/{number}/preview")
-    if preview.get("allowed") is not True:
-        args.outcome_context = "preview"
-        return preview
-    digest = preview.get("plan_digest")
-    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-        raise ControlMalformedResponse("profile review has no valid plan identity")
+    security = _security_blocker_codes(preview.get("reasons"))
+    if security:
+        raise ControlConflict(
+            409, f"profile load is refused by the Controller: {', '.join(security)}"
+        )
     if not (args.global_json or getattr(args, "json", False)):
         with redirect_stdout(sys.stderr):
             render_payload(preview, "profile", action="preview")
@@ -3602,7 +3615,6 @@ def _run(
         profile_number=number,
         profile_action="load",
         dry_run=False,
-        expected_plan=digest,
         yes=True,
         request_key=args.request_key,
         detach=False,

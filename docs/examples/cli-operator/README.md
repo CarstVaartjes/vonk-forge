@@ -161,64 +161,6 @@ Code: control.api_error
 Detail: action was not confirmed
 ```
 
-### Historical capture: stale decision refusal
-
-Capture record `2`; exit `2`.
-
-```sh
-vonkctl --profile 1 profile load --expected-plan <captured-digest> --request-key 11111111-1111-4111-8111-111111111111 --detach
-```
-
-terminal:
-
-```text
-Ready for review
-Profile: Reviewed idle
-Revision: 1
-Plan digest: 1b0d557ca344249bf36fd29a9747627ea9939962bb8b48d0140b801aa9376163
-All Sparks: spk_11111111111111111111111111111111, spk_22222222222222222222222222222222
-Idle Sparks: spk_11111111111111111111111111111111, spk_22222222222222222222222222222222
-Already Correct: 0
-Placements: 0
-Builds: 0
-Distributions: 0
-Installs: 0
-Starts: 0
-Stops: 0
-Uninstalls: 0
-Blockers: 0
-Load profile 1 with reviewed plan 1b0d557ca344249bf36fd29a9747627ea9939962bb8b48d0140b801aa9376163? [y/N] yes
-Request key: 11111111-1111-4111-8111-111111111111
-Reconnect: vonkctl --profile 1 profile progress --request-key 11111111-1111-4111-8111-111111111111 --follow
-Ready for review
-Profile: Edited after review
-Revision: 2
-Plan digest: 920377f2779a469be93bd863c0e70b582d42b37845b9d17a1b8fae6cf98a485c
-All Sparks: spk_11111111111111111111111111111111, spk_22222222222222222222222222222222
-Idle Sparks: spk_11111111111111111111111111111111, spk_22222222222222222222222222222222
-Already Correct: 0
-Placements: 0
-Builds: 0
-Distributions: 0
-Installs: 0
-Starts: 0
-Stops: 0
-Uninstalls: 0
-Blockers: 0
-The submitted load was refused. Review these current effects, then start a new load with the current plan digest.
-Error: POST /api/profile/1/load profile.stale_plan HTTP 409: Fleet profile preview is stale; review the profile again before loading request_id=bfd2140b-16b8-49ec-9d6a-df9d72b67110 [exit]
-Code: profile.stale_plan
-Detail: Fleet profile preview is stale; review the profile again before loading
-Operation: POST /api/profile/1/load
-Endpoint: /api/profile/1/load
-HTTP status: 409
-Request ID: bfd2140b-16b8-49ec-9d6a-df9d72b67110
-Source: remote_rejection
-Decision: exit
-Request key: 11111111-1111-4111-8111-111111111111
-Next: vonkctl --profile 1 profile load --dry-run
-```
-
 ### Cancellation remains visible in Activity
 
 Capture record `6`; exit `0`.

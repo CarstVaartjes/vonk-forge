@@ -17,6 +17,7 @@ from vonk_forge_contracts import ModelDefinition, content_sha256
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_render import progress_line, render_payload
 from cluster_profiles.control_client import (
+    ControlConflict,
     ControlForbidden,
     ControlHTTPError,
     ControlNotFound,
@@ -496,7 +497,7 @@ def test_recipe_installation_reconcile_review_uses_typed_preview_route(
     ]
 
 
-def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
+def test_recipe_installation_reconcile_rejects_security_or_changed_preview(
     monkeypatch,
 ) -> None:
     installation_id = "22222222-2222-4222-8222-222222222222"
@@ -532,9 +533,11 @@ def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
     assert "unavailable" in str(result["error"]).lower()
     assert all(call[1] != apply for call in client.calls)
 
-    client.responses[("POST", preview)] = _reconciliation_plan(
-        installation_id, allowed=False
-    )
+    refused = _reconciliation_plan(installation_id, allowed=False)
+    refused["blockers"] = [
+        {"code": "run-switch.node_revoked", "detail": "Spark was revoked"}
+    ]
+    client.responses[("POST", preview)] = refused
     status, result = run(
         (
             "recipe",
@@ -549,8 +552,48 @@ def test_recipe_installation_reconcile_rejects_blocked_or_changed_preview(
         client,
     )
     assert status == 2
-    assert "blocked" in str(result["error"]).lower()
+    assert "run-switch.node_revoked" in str(result["error"])
     assert all(call[1] != apply for call in client.calls)
+
+
+def test_recipe_installation_reconcile_submits_despite_ordinary_blockers(
+    monkeypatch,
+) -> None:
+    installation_id = "22222222-2222-4222-8222-222222222222"
+    key = "11111111-1111-4111-8111-111111111111"
+    apply = f"/api/recipe/installations/{installation_id}/reconcile"
+    blocked = _reconciliation_plan(installation_id, allowed=False)
+    blocked["blockers"] = [
+        {"code": "run-switch.capacity_busy", "detail": "capacity is busy"}
+    ]
+    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    client = FakeClient(
+        {
+            ("GET", "/api/operations"): empty,
+            ("POST", f"{apply}/preview"): blocked,
+            ("POST", apply): ControlConflict(409, "installation is busy"),
+        }
+    )
+    _allow_minimal_reconciliation_plan(monkeypatch)
+
+    run(
+        (
+            "recipe",
+            "installation",
+            "reconcile",
+            installation_id,
+            "--request-key",
+            key,
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+    submitted = [call for call in client.calls if call[:2] == ("POST", apply)]
+    assert len(submitted) == 1
+    assert submitted[0][2] is not None
+    assert submitted[0][2]["plan_digest"] == blocked["plan_digest"]
 
 
 def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity_rows(
@@ -4057,9 +4100,11 @@ def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:
     assert args.timeout_seconds == 30
 
 
-@pytest.mark.parametrize("blocked", [True, False])
+@pytest.mark.parametrize(
+    "reason_code", [None, "profile.spark_offline", "profile.node_revoked"]
+)
 def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
-    blocked: bool, capsys
+    reason_code: str | None, capsys
 ) -> None:
     profile = {
         "name": "Default",
@@ -4070,7 +4115,6 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
         "assignments": [],
     }
     paths: list[str] = []
-    decision = {"blocked": blocked}
     application_id = "33333333-3333-4333-8333-333333333333"
 
     class RunClient:
@@ -4137,9 +4181,11 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
                 return {"number": 1, "revision": 1, "definition": profile}
             if path == "/api/profile/1/preview":
                 return {
-                    "allowed": not decision["blocked"],
+                    "allowed": reason_code is None,
                     "plan_digest": "b" * 64,
-                    "reasons": [{"detail": "Spark is offline"}],
+                    "reasons": []
+                    if reason_code is None
+                    else [{"code": reason_code, "detail": "Spark is not ready"}],
                 }
             if method == "POST" and path == "/api/profile/1/load":
                 assert payload is not None
@@ -4172,18 +4218,27 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
     args = cli._parser().parse_args(
         ["--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes", "--json"]
     )
+    if reason_code == "profile.node_revoked":
+        # A real security denial still stops before any load is submitted.
+        with pytest.raises(ControlConflict, match="profile.node_revoked"):
+            controller_cli.run_controller(
+                args,
+                cast(controller_cli.ControllerClient, RunClient()),
+                lambda: "11111111-1111-4111-8111-111111111111",
+            )
+        assert "/api/profile/1/load" not in paths
+        return
     result = controller_cli.run_controller(
         args,
         cast(controller_cli.ControllerClient, RunClient()),
         lambda: "11111111-1111-4111-8111-111111111111",
     )
     capsys.readouterr()
-    if blocked:
-        assert result["allowed"] is False
-    else:
-        assert result["state"] == "succeeded"
-        endpoints = result["endpoints"]
-        assert isinstance(endpoints, Mapping)
-        assert endpoints["application_id"] == application_id
+    # An ordinary blocker is not a client-side stop: the load is submitted and
+    # the Controller parks or refuses it.
+    assert result["state"] == "succeeded"
+    endpoints = result["endpoints"]
+    assert isinstance(endpoints, Mapping)
+    assert endpoints["application_id"] == application_id
     assert profile["assignments"][0]["recipe_selector"] == "vonk-forge/qwen-code"
-    assert ("/api/profile/1/load" not in paths) is blocked
+    assert "/api/profile/1/load" in paths

@@ -394,7 +394,7 @@ def test_review_get_preserves_denial_and_timeout_classification(
     ]
 
 
-def test_blocked_review_refuses_without_prompt_or_post_but_remains_readable(
+def test_blocked_review_is_submitted_so_the_controller_can_park_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rendered = _TTYOutput()
@@ -402,26 +402,49 @@ def test_blocked_review_refuses_without_prompt_or_post_but_remains_readable(
     monkeypatch.setattr(sys, "stdin", _TTYInput("yes\n"))
     monkeypatch.setattr(sys, "stderr", rendered)
     monkeypatch.setattr(sys, "stdout", rendered)
-    args = _parse("model", "remove", "publisher/model")
+    _accept_response_contracts(monkeypatch)
+    args = _parse("model", "remove", "publisher/model", "--detach")
 
-    with pytest.raises(
-        ControlConflict, match="cache.asset.partial: The managed object is incomplete"
-    ):
-        controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
-    assert "[y/N]" not in rendered.getvalue()
+    assert result["review_digest"] == _REVIEW_DIGEST
     assert "Blocker: cache.asset.partial" in rendered.getvalue()
+    assert "[y/N]" in rendered.getvalue()
     assert [(method, path) for method, path, _, _ in client.calls] == [
-        ("GET", "/api/model/publisher%2Fmodel/remove-review")
+        ("GET", "/api/model/publisher%2Fmodel/remove-review"),
+        ("POST", "/api/model/publisher%2Fmodel/remove"),
     ]
 
     inspect_client = _FakeController(_review("model", "publisher/model"))
-    result = cli.main(
-        ("--json", "model", "remove", "publisher/model", "--review"),
-        control_client=inspect_client,
+    assert (
+        cli.main(
+            ("--json", "model", "remove", "publisher/model", "--review"),
+            control_client=inspect_client,
+        )
+        == 0
     )
-    assert result == 0
     assert [method for method, _, _, _ in inspect_client.calls] == ["GET"]
+
+
+def test_security_blocker_refuses_without_prompt_or_post() -> None:
+    review = _review("model", "publisher/model")
+    review["blockers"] = [
+        {
+            "code": "cache.owner.unauthorized",
+            "detail": "The caller may not remove this object.",
+            "retryable": False,
+            "recovery_actions": [],
+        }
+    ]
+    client = _FakeController(review)
+    args = _parse("--json", "model", "remove", "publisher/model", "--yes")
+
+    with pytest.raises(ControlConflict, match="cache.owner.unauthorized"):
+        controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+
+    assert [(method, path) for method, path, _, _ in client.calls] == [
+        ("GET", "/api/model/publisher%2Fmodel/remove-review")
+    ]
 
 
 def test_same_key_replay_precedes_review_lookup_and_uses_stored_digest(
