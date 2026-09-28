@@ -29,11 +29,18 @@ The Controller fetches a package only when its digest is absent from the
 persistent `state/recipe-library-packages` cache, verifies the package digest
 and member identities, and rejects unsafe tar members or oversized archives. A
 package reader's `prepare` hook validates all packages in a candidate release
-before the managed catalog sync writes its first revision or link. Package
-cache files are written with an fsync and atomic rename, and the release
-signature material is kept beside the cached index, so a restart re-verifies
-and imports the previous generation offline. A failed candidate is recorded as
-a failed sync run and never becomes the active catalog. The
+before the managed catalog sync writes its first revision or link. An
+integrity or transport failure rejects the whole candidate. A model or recipe
+document that is intact but does not validate against this Controller's
+contract is skipped on its own and reported as a
+`recipe_package.document_incompatible` problem; the rest of the release still
+applies. Package cache files are written with an fsync and atomic rename, and
+the release signature material is kept beside the cached index, so a restart
+re-verifies and imports the previous generation offline. A failed candidate is
+recorded as a failed sync run and never becomes the active catalog. The
 `/api/catalog/managed-recipes/sync` and
 `/api/catalog/managed-recipes/sync-status` routes are the Controller's
-authenticated sync API.
+authenticated sync API. When the automatic sync cannot read the release at all,
+sync-status still reports the last applied run and adds `last_error` (code,
+detail, `occurred_at`) until a later sync succeeds; the sync retries after 30
+seconds, doubling up to the sync interval.

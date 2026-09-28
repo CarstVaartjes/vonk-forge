@@ -4552,6 +4552,15 @@ export interface components {
             /** Stale Run Count */
             stale_run_count: number;
         };
+        /** ManagedCatalogSyncFailure */
+        ManagedCatalogSyncFailure: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Occurred At */
+            occurred_at: string;
+        };
         /** ManagedCatalogSyncProblem */
         ManagedCatalogSyncProblem: {
             /** Code */
@@ -4580,6 +4589,7 @@ export interface components {
             expected_commit?: string | null;
             /** Imported Count */
             imported_count: number;
+            last_error?: components["schemas"]["ManagedCatalogSyncFailure"] | null;
             /** Problems */
             problems: components["schemas"]["ManagedCatalogSyncProblem"][];
             /** Processed Count */
@@ -4895,8 +4905,6 @@ export interface components {
              * @enum {string}
              */
             capability: "chat" | "text-generation" | "text-understanding" | "reasoning" | "tool-use" | "code-generation" | "ocr" | "image-generation" | "image-understanding" | "image-editing" | "video-generation" | "video-understanding" | "audio-generation" | "audio-understanding" | "embeddings" | "3d-generation";
-            /** Evidence Digest */
-            evidence_digest: string | null;
             /**
              * Evidence Status
              * @enum {string}
@@ -4910,8 +4918,6 @@ export interface components {
         };
         /** ModelCapabilityProvenance */
         ModelCapabilityProvenance: {
-            /** Evidence Digest */
-            evidence_digest: string;
             /** Source Revision */
             source_revision: string;
             /** Source Url */
@@ -5127,8 +5133,6 @@ export interface components {
         ModelProvenance: {
             /** Attribution */
             attribution: string[];
-            /** Evidence Digest */
-            evidence_digest: string;
             /** Source Revision */
             source_revision: string;
             /** Source Url */

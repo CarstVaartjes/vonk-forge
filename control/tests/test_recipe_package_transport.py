@@ -118,19 +118,16 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                         "capability": "text-generation",
                         "support": "supported",
                         "evidence_status": "declared",
-                        "evidence_digest": None,
                     }
                 ],
                 "provenance": {
                     "source_url": "https://example.invalid/fixture",
                     "source_revision": "a" * 40,
-                    "evidence_digest": "c" * 64,
                 },
             },
             "provenance": {
                 "source_url": "https://example.invalid/fixture",
                 "source_revision": "a" * 40,
-                "evidence_digest": "c" * 64,
                 "attribution": [],
             },
         }

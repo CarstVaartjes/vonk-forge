@@ -10201,6 +10201,34 @@
         "title": "ManagedCatalogStaleRecipe",
         "type": "object"
       },
+      "ManagedCatalogSyncFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "occurred_at"
+        ],
+        "title": "ManagedCatalogSyncFailure",
+        "type": "object"
+      },
       "ManagedCatalogSyncProblem": {
         "additionalProperties": false,
         "properties": {
@@ -10306,6 +10334,16 @@
             "minimum": 0.0,
             "title": "Imported Count",
             "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManagedCatalogSyncFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "problems": {
             "items": {
@@ -11177,18 +11215,6 @@
             "title": "Capability",
             "type": "string"
           },
-          "evidence_digest": {
-            "anyOf": [
-              {
-                "pattern": "^[a-f0-9]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Evidence Digest"
-          },
           "evidence_status": {
             "enum": [
               "declared",
@@ -11212,8 +11238,7 @@
         "required": [
           "capability",
           "support",
-          "evidence_status",
-          "evidence_digest"
+          "evidence_status"
         ],
         "title": "ModelCapabilityFact",
         "type": "object"
@@ -11221,11 +11246,6 @@
       "ModelCapabilityProvenance": {
         "additionalProperties": false,
         "properties": {
-          "evidence_digest": {
-            "pattern": "^[a-f0-9]{64}$",
-            "title": "Evidence Digest",
-            "type": "string"
-          },
           "source_revision": {
             "pattern": "^[a-f0-9]{40,64}$",
             "title": "Source Revision",
@@ -11240,8 +11260,7 @@
         },
         "required": [
           "source_url",
-          "source_revision",
-          "evidence_digest"
+          "source_revision"
         ],
         "title": "ModelCapabilityProvenance",
         "type": "object"
@@ -11914,11 +11933,6 @@
             "title": "Attribution",
             "type": "array"
           },
-          "evidence_digest": {
-            "pattern": "^[a-f0-9]{64}$",
-            "title": "Evidence Digest",
-            "type": "string"
-          },
           "source_revision": {
             "pattern": "^[a-f0-9]{40,64}$",
             "title": "Source Revision",
@@ -11934,7 +11948,6 @@
         "required": [
           "source_url",
           "source_revision",
-          "evidence_digest",
           "attribution"
         ],
         "title": "ModelProvenance",

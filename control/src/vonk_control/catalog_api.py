@@ -97,6 +97,12 @@ class ManagedCatalogSyncRequest(StrictModel):
     expected_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
 
 
+class ManagedCatalogSyncFailure(StrictModel):
+    code: str = Field(min_length=1, max_length=128)
+    detail: str = Field(min_length=1, max_length=256)
+    occurred_at: str
+
+
 class ManagedCatalogSyncResponse(StrictModel):
     schema_version: Literal[1] = 1
     sync_id: UuidId
@@ -118,6 +124,7 @@ class ManagedCatalogSyncResponse(StrictModel):
     problems: list[ManagedCatalogSyncProblem]
     created_at: str
     completed_at: str | None
+    last_error: ManagedCatalogSyncFailure | None = None
 
 
 class SourceBundleResponse(StrictModel):
@@ -188,6 +195,15 @@ def _managed_sync(value: CatalogSyncView) -> dict[str, object]:
         "created_at": value.created_at.isoformat(),
         "completed_at": (
             value.completed_at.isoformat() if value.completed_at is not None else None
+        ),
+        "last_error": (
+            {
+                "code": value.last_error.code,
+                "detail": value.last_error.detail,
+                "occurred_at": value.last_error.occurred_at.isoformat(),
+            }
+            if value.last_error is not None
+            else None
         ),
     }
 
