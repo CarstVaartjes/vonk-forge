@@ -20,7 +20,7 @@ from email.message import Message
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, Protocol, Self, TypedDict
+from typing import TYPE_CHECKING, Any, Protocol, Self, TypedDict
 
 import httpx
 from jsonschema import Draft202012Validator, FormatChecker, validators
@@ -38,20 +38,19 @@ from .error_reporting import (
     safe_request_id,
     transport_context,
 )
-from .generated_control.api.default import (
-    get_fleet_status,
-    get_job,
-    get_profile_endpoints,
-    get_published_endpoint,
-)
-from .generated_control.client import AuthenticatedClient
-from .generated_control.models.endpoint_response import EndpointResponse
-from .generated_control.models.fleet_profile_endpoints_view import (
-    FleetProfileEndpointsView,
-)
-from .generated_control.models.fleet_snapshot import FleetSnapshot
-from .generated_control.models.job_detail_response import JobDetailResponse
-from .generated_control.types import Response as GeneratedResponse
+
+if TYPE_CHECKING:
+    # Importing any generated model runs the generated package initializer,
+    # which imports all of its models; that alone was most of every vonkctl
+    # invocation's start-up time. Load them where a request needs them.
+    from .generated_control.client import AuthenticatedClient
+    from .generated_control.models.endpoint_response import EndpointResponse
+    from .generated_control.models.fleet_profile_endpoints_view import (
+        FleetProfileEndpointsView,
+    )
+    from .generated_control.models.fleet_snapshot import FleetSnapshot
+    from .generated_control.models.job_detail_response import JobDetailResponse
+    from .generated_control.types import Response as GeneratedResponse
 
 _MAX_ARTIFACT_INPUT = 512 * 1024**2
 _MAX_ARTIFACT_OUTPUT = 1024**3
@@ -604,6 +603,8 @@ def _safe_job_observation(
 ) -> JobDetailResponse | None:
     if job is None:
         return None
+    from .generated_control.models.job_detail_response import JobDetailResponse
+
     safe_job = JobDetailResponse.from_dict(job.to_dict())
     if safe_job.status_reason is not None:
         safe_job.status_reason = _sanitize_remote_text(
@@ -807,6 +808,8 @@ class ControlClient:
         transport: httpx.BaseTransport,
         headers: Mapping[str, str] | None = None,
     ) -> AuthenticatedClient:
+        from .generated_control.client import AuthenticatedClient
+
         return AuthenticatedClient(
             base_url=self._base,
             token=self._token,
@@ -1490,9 +1493,13 @@ class ControlClient:
         return self.request("GET", path)
 
     def fleet(self) -> FleetSnapshot:
+        from .generated_control.api.default import get_fleet_status
+
         return self._call_generated(get_fleet_status.sync_detailed)  # type: ignore[return-value]
 
     def job(self, job_id: str) -> JobDetailResponse:
+        from .generated_control.api.default import get_job
+
         return self._call_generated(get_job.sync_detailed, job_id)  # type: ignore[return-value]
 
     def wait_job(
@@ -1534,11 +1541,15 @@ class ControlClient:
             time.sleep(interval)
 
     def endpoint(self, alias: str) -> EndpointResponse:
+        from .generated_control.api.default import get_published_endpoint
+
         return self._call_generated(get_published_endpoint.sync_detailed, alias)  # type: ignore[return-value]
 
     def profile_endpoints(
         self, number: int, alias: str | None = None
     ) -> FleetProfileEndpointsView:
+        from .generated_control.api.default import get_profile_endpoints
+
         return self._call_generated(
             get_profile_endpoints.sync_detailed, number, alias=alias
         )  # type: ignore[return-value]
