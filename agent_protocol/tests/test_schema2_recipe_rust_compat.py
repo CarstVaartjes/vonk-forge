@@ -13,13 +13,11 @@ from pydantic import BaseModel
 from vonk_agent_protocol import (
     AgentOperation,
     RecipeInstallPayload,
-    RecipeOperationRequest,
     RecipeStartPayload,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledJob,
     CompiledSecurityMount,
-    CompiledTopology,
 )
 
 PLAN = json.loads(
@@ -44,7 +42,7 @@ def _install(plan: dict[str, Any]) -> dict[str, Any]:
 
 def _start(plan: dict[str, Any] | None = None) -> dict[str, Any]:
     plan = copy.deepcopy(plan or PLAN)
-    if plan["topology"]["world_size"] == 1:
+    if plan["runtime"]["placement"]["world_size"] == 1:
         plan["runtime"]["placement"]["endpoint_address"] = "100.100.20.30"
         plan["security"]["network_mode"] = "bridge"
     return {
@@ -62,9 +60,7 @@ def _distributed_start(
     *, phase: str | None = None, collective: bool = False
 ) -> dict[str, Any]:
     plan = copy.deepcopy(PLAN)
-    plan["topology"].update(
-        world_size=2, node_count=2, rank=1, role="worker", mode="distributed"
-    )
+    plan["topology"].update(node_count=2)
     plan["runtime"]["placement"].update(
         world_size=2,
         rank=1,
@@ -74,7 +70,7 @@ def _distributed_start(
         master_address="100.100.20.31" if collective else "100.100.20.30",
         master_port=29500,
     )
-    plan["security"].update(network_mode="host", host_network=True)
+    plan["security"].update(network_mode="host")
     payload = _start(plan)
     if phase is not None:
         payload.update(
@@ -93,18 +89,8 @@ def _security_mount_plan(source: str) -> dict[str, Any]:
             "target": {"model": "/models", "inputs": "/inputs", "outputs": "/outputs"}[
                 source
             ],
-            "read_only": source != "outputs",
         }
     ]
-    return plan
-
-
-def _published_plan() -> dict[str, Any]:
-    plan = copy.deepcopy(PLAN)
-    image = plan["runtime_image"]
-    image["source"] = "published"
-    image["build_id"] = None
-    image["registry_manifest_digest"] = "sha256:" + "6" * 64
     return plan
 
 
@@ -122,7 +108,6 @@ def _job_plan() -> dict[str, Any]:
     plan["job"] = {
         "interface": "artifact-job",
         "input": {
-            "path": "/inputs",
             "required": True,
             "media_types": ["application/json"],
             "max_bytes": 1024,
@@ -140,7 +125,6 @@ def _job_plan() -> dict[str, Any]:
                 }
             ],
         },
-        "output_path": "/outputs",
         "timeout_seconds": 60,
     }
     return plan
@@ -397,17 +381,6 @@ def _positive_enum_cases() -> Iterator[
     tuple[AgentOperation, type[BaseModel], dict[str, Any]]
 ]:
     yield from _plans_and_models()
-    for mode in CompiledTopology.model_json_schema()["properties"]["mode"]["enum"]:
-        plan = copy.deepcopy(PLAN)
-        plan["topology"]["mode"] = mode
-        for backend in ("local", "tcp", "ucx", "future-engine-Δ"):
-            plan["topology"]["backend"] = backend
-            yield AgentOperation.RECIPE_INSTALL, RecipeInstallPayload, _install(plan)
-    yield (
-        AgentOperation.RECIPE_INSTALL,
-        RecipeInstallPayload,
-        _install(_published_plan()),
-    )
     yield AgentOperation.RECIPE_INSTALL, RecipeInstallPayload, _install(_bridge_plan())
     for source in CompiledSecurityMount.model_json_schema()["properties"]["source"][
         "enum"
@@ -458,7 +431,7 @@ def test_canonical_pydantic_schema_is_exercised_by_rust_serde(
     ) in checked_paths
     assert (
         AgentOperation.RECIPE_INSTALL,
-        ("compiled_execution_plan", "runtime_image", "distribution_object"),
+        ("compiled_execution_plan", "runtime_image"),
     ) in checked_paths
     assert (
         AgentOperation.RECIPE_INSTALL,
@@ -555,7 +528,6 @@ def test_required_and_exact_type_fields_are_rejected_by_both_models(
     ):
         assert accepted == expected, (label, expected)
     assert ("compiled_execution_plan", "runtime", "argv", 0) in checked_array_items
-    assert ("compiled_execution_plan", "security", "devices", 0) in checked_array_items
     assert (
         "compiled_execution_plan",
         "artifacts",
@@ -609,10 +581,8 @@ def test_every_canonical_enum_value_is_accepted_by_both_models(
     wire_probe: Path,
 ) -> None:
     checked: set[tuple[str, tuple[str | int, ...], str]] = set()
-    topology_modes: set[str] = set()
-    topology_backends: set[str] = set()
     cases: list[tuple[AgentOperation, dict[str, Any]]] = []
-    labels: list[tuple[str, tuple[str | int, ...], str, bool]] = []
+    labels: list[tuple[str, tuple[str | int, ...], str]] = []
     for operation, model, payload in _positive_enum_cases():
         schema = model.model_json_schema()
         for path, object_schema in _object_paths(schema, schema, payload):
@@ -622,8 +592,6 @@ def test_every_canonical_enum_value_is_accepted_by_both_models(
                 resolved = _schema_for_value(
                     schema, field_schema, _at(payload, (*path, name))
                 )
-                if name == "backend":
-                    topology_backends.add(str(_at(payload, (*path, name))))
                 candidates = resolved.get("enum")
                 if candidates is None and "const" in resolved:
                     candidates = [resolved["const"]]
@@ -636,20 +604,12 @@ def test_every_canonical_enum_value_is_accepted_by_both_models(
                     except ValueError:
                         continue
                     cases.append((operation, changed))
-                    labels.append(
-                        (operation.value, (*path, name), str(candidate), name == "mode")
-                    )
-    for (operation_name, path, candidate, is_mode), accepted in zip(
+                    labels.append((operation.value, (*path, name), str(candidate)))
+    for (operation_name, path, candidate), accepted in zip(
         labels, _rust_accepts_many(wire_probe, cases)
     ):
         assert accepted, (path, candidate)
         checked.add((operation_name, path, candidate))
-        if is_mode:
-            topology_modes.add(candidate)
-    assert topology_modes == set(
-        CompiledTopology.model_json_schema()["properties"]["mode"]["enum"]
-    )
-    assert topology_backends == {"local", "tcp", "ucx", "future-engine-Δ"}
     assert any(path[-1] == "source" for _, path, _ in checked)
     assert any(path[-1] == "interface" for _, path, _ in checked)
 
@@ -663,33 +623,9 @@ def test_required_nullable_fields_cannot_be_omitted_on_either_wire(
         "master_address",
         "master_port",
         "memory_floor_bytes",
-        "memory_kind",
     ):
         payload = _install(PLAN)
         del payload["compiled_execution_plan"]["runtime"]["placement"][field]
         with pytest.raises(ValueError):
             RecipeInstallPayload.model_validate(payload)
         assert not _rust_accepts(wire_probe, AgentOperation.RECIPE_INSTALL, payload)
-
-
-@pytest.mark.parametrize(
-    ("source", "build_id", "registry_manifest_digest"),
-    [
-        ("controller-build", "00000000-0000-4000-8000-000000000008", None),
-        ("published", None, "sha256:" + "6" * 64),
-    ],
-)
-def test_runtime_image_build_reference_variants_round_trip(
-    wire_probe: Path,
-    source: str,
-    build_id: str | None,
-    registry_manifest_digest: str | None,
-) -> None:
-    plan = copy.deepcopy(PLAN)
-    image = plan["runtime_image"]
-    image["source"] = source
-    image["build_id"] = build_id
-    image["registry_manifest_digest"] = registry_manifest_digest
-    payload = _install(plan)
-    RecipeOperationRequest.parse(AgentOperation.RECIPE_INSTALL, payload)
-    assert _rust_accepts(wire_probe, AgentOperation.RECIPE_INSTALL, payload)
