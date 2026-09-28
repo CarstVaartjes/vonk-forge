@@ -177,13 +177,16 @@ class FailingQueue(RecordingQueue):
         raise RuntimeError("queue write failed")
 
 
-class ConcurrentPublisher:
+class ConcurrentPublisher(AtomicRecipeRoutePublisher):
+    """In-memory route publisher stand-in that never touches a route bundle."""
+
     def __init__(self) -> None:
         self._guard = threading.Lock()
         self._generation = 0
         self.aliases: list[tuple[str, ...]] = []
 
-    def publish(self, state, _policy):
+    def publish_recipe(self, candidate):
+        state = candidate.state
         with self._guard:
             self._generation += 1
             self.aliases.append(tuple(sorted(state.aliases)))
@@ -194,7 +197,8 @@ class ConcurrentPublisher:
                 "memory",
             )
 
-    def publish_empty(self, route_digest):
+    def publish_empty(self, route_digest, *, expires_at):
+        del expires_at
         with self._guard:
             self._generation += 1
             self.aliases.append(())
@@ -5770,8 +5774,8 @@ def test_recovery_publication_crossing_deadline_is_immediately_withdrawn(
     current = {"now": NOW}
 
     class DeadlineCrossingPublisher(ConcurrentPublisher):
-        def publish(self, state, policy):
-            generation = super().publish(state, policy)
+        def publish_recipe(self, candidate):
+            generation = super().publish_recipe(candidate)
             current["now"] = _recovery_deadline(restart)
             return generation
 
@@ -5841,7 +5845,7 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
     )
     atomic = AtomicRecipeRoutePublisher(runtime, clock=lambda: current["now"])
 
-    class DeadlineCrossingWithdrawalFailure:
+    class DeadlineCrossingWithdrawalFailure(AtomicRecipeRoutePublisher):
         def __init__(self) -> None:
             self.withdrawal_attempts = 0
             self.fail_withdrawal = True
@@ -5851,7 +5855,8 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
             current["now"] = _recovery_deadline(restart)
             return generation
 
-        def publish_empty(self, route_digest):
+        def publish_empty(self, route_digest, *, expires_at):
+            del expires_at
             self.withdrawal_attempts += 1
             if self.fail_withdrawal:
                 raise RuntimeError("synthetic route withdrawal failure")
@@ -5974,7 +5979,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
     )
     atomic = AtomicRecipeRoutePublisher(runtime, clock=lambda: current["now"])
 
-    class AcknowledgementCrossingWithdrawalFailure:
+    class AcknowledgementCrossingWithdrawalFailure(AtomicRecipeRoutePublisher):
         def __init__(self) -> None:
             self.withdrawal_attempts = 0
             self.fail_withdrawal = True
@@ -5982,7 +5987,8 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
         def publish_recipe(self, candidate):
             return atomic.publish_recipe(candidate)
 
-        def publish_empty(self, route_digest):
+        def publish_empty(self, route_digest, *, expires_at):
+            del expires_at
             self.withdrawal_attempts += 1
             if self.fail_withdrawal:
                 raise RuntimeError("synthetic route withdrawal failure")

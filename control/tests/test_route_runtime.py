@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from vonk_control.litellm import render_empty_config
 from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
@@ -30,16 +31,37 @@ def _publisher(tmp_path, **kwargs):
     return AtomicRouteBundlePublisher(tmp_path / "runtime", clock=lambda: NOW, **kwargs)
 
 
-def _publish(publisher, **kwargs):
-    inputs = {
-        "authority_id": RECIPE_ROUTE_AUTHORITY_ID,
-        "plan_digest": "a" * 64,
-        "evidence_set_digest": "b" * 64,
-        "routes": _encoded({"schema_version": 2, "routes": {}}),
-        "litellm": AtomicRouteBundlePublisher.empty_litellm(),
-        "expires_at": NOW + timedelta(seconds=150),
-    }
-    return publisher.publish_compiled(**(inputs | kwargs))
+def _publish(
+    publisher,
+    *,
+    expires_at=NOW + timedelta(seconds=150),
+    state="published",
+    authority_id=RECIPE_ROUTE_AUTHORITY_ID,
+    plan_digest="a" * 64,
+    evidence_set_digest="b" * 64,
+    routes=None,
+):
+    """Drive one activation through the steps the recipe route adapter uses."""
+
+    publisher._identity(authority_id, plan_digest, evidence_set_digest)
+    with publisher._locked():
+        issued, expires = publisher._lease(expires_at)
+        current = publisher._read_marker(
+            optional=True, verify_files=True, verify_lease=False
+        )
+        marker = publisher._activate(
+            generation=(current.generation if current is not None else 0) + 1,
+            state=state,
+            authority_id=authority_id,
+            plan_digest=plan_digest,
+            evidence_set_digest=evidence_set_digest,
+            routes=routes or _encoded({"schema_version": 2, "routes": {}}),
+            litellm=render_empty_config(),
+            issued=issued,
+            expires=expires,
+        )
+        publisher._require_supervisor_ack(marker)
+        return marker
 
 
 def _supervisor(monkeypatch, root):
@@ -202,15 +224,6 @@ def test_symlink_lock_and_generation_are_rejected(tmp_path):
     (tmp_path / "runtime/.publication.lock").symlink_to(outside)
     with pytest.raises(RouteRuntimeError, match="lock"):
         _publish(publisher)
-
-
-def test_existing_update_boundary_still_fences_current_publication(tmp_path):
-    publisher = _publisher(tmp_path)
-    publisher.claim_update_boundary("e" * 64)
-    with pytest.raises(RouteRuntimeError, match="fenced"):
-        _publish(publisher)
-    publisher.release_update_boundary("e" * 64)
-    assert _publish(publisher).generation == 1
 
 
 def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) -> None:

@@ -11,8 +11,6 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
@@ -30,7 +28,13 @@ from vonk_forge_contracts import RecipeDefinition, content_sha256
 from .distributed_lifecycle import DistributedLifecycleError
 from .distributed_recovery import enforce_recovery_deadline
 from .interface_adapters import InterfaceAdapterError, interface_adapter
-from .litellm import LiteLlmGeneration, LiteLlmPolicy, LiteLlmPublisher
+from .litellm import (
+    LiteLlmGeneration,
+    LiteLlmPolicy,
+    RouteState,
+    render_config,
+    render_empty_config,
+)
 from .models import (
     CatalogDocumentRevision,
     ClusterMapping,
@@ -51,9 +55,8 @@ from .recipe_execution_contract import (
 from .route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     ActivationMarker,
-    RouteUpdateFenced,
+    AtomicRouteBundlePublisher,
 )
-from .routes import RouteState
 
 _ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
@@ -109,8 +112,7 @@ def publication_is_temporary(error: BaseException) -> bool:
         # The generation is activated but its supervisor acknowledgement was
         # not confirmed, so a later attempt reconciles that same generation.
         return True
-    # A Controller update fence lifts once the update finishes.
-    return isinstance(error, OSError | RouteUpdateFenced)
+    return isinstance(error, OSError)
 
 
 @dataclass(frozen=True)
@@ -171,85 +173,6 @@ class _AtomicRecipeGeneration(LiteLlmGeneration):
 class _RecoveryPublication:
     job: Job
     deadline: datetime
-
-
-@runtime_checkable
-class _CompiledRoutePublisher(Protocol):
-    """The compiled route-bundle surface ``AtomicRecipeRoutePublisher`` drives.
-
-    ``AtomicRecipeRoutePublisher`` adapts a whole-bundle runtime publisher; the
-    runtime check below keeps accepting any conforming implementation while the
-    protocol gives the private staging calls their real signatures.
-    """
-
-    def publish_compiled(
-        self,
-        *,
-        authority_id: str,
-        plan_digest: str,
-        evidence_set_digest: str,
-        routes: bytes,
-        litellm: bytes,
-        expires_at: datetime,
-        state: str = "published",
-    ) -> ActivationMarker: ...
-
-    def _identity(
-        self, authority_id: str, plan_digest: str, evidence_digest: str
-    ) -> None: ...
-
-    def _locked(self) -> AbstractContextManager[None]: ...
-
-    def _require_update_boundary(self, key: str | None) -> None: ...
-
-    def _lease(self, expires_at: datetime) -> tuple[datetime, datetime]: ...
-
-    def _read_marker(
-        self,
-        *,
-        optional: bool,
-        verify_files: bool,
-        verify_lease: bool,
-    ) -> ActivationMarker | None: ...
-
-    def _activate(
-        self,
-        *,
-        generation: int,
-        state: str,
-        authority_id: str,
-        plan_digest: str,
-        evidence_set_digest: str,
-        routes: bytes,
-        litellm: bytes,
-        issued: datetime,
-        expires: datetime,
-    ) -> ActivationMarker: ...
-
-    def _require_supervisor_ack(self, marker: ActivationMarker) -> None: ...
-
-
-@runtime_checkable
-class _CandidatePublisher(Protocol):
-    """A publisher that activates one already-compiled recipe candidate."""
-
-    def publish_recipe(self, candidate: _RecipeCandidate) -> LiteLlmGeneration: ...
-
-
-@runtime_checkable
-class _StatePublisher(Protocol):
-    """A publisher that activates a rendered route state directly."""
-
-    def publish(
-        self, routes: RouteState, policy: LiteLlmPolicy
-    ) -> LiteLlmGeneration: ...
-
-
-@runtime_checkable
-class _EmptyPublisher(Protocol):
-    """A publisher that withdraws every route without a candidate."""
-
-    def publish_empty(self, route_digest: str) -> LiteLlmGeneration: ...
 
 
 def route_publication_owner_lock_statement():
@@ -314,18 +237,16 @@ class AtomicRecipeRoutePublisher:
 
     _AUTHORITY_ID = RECIPE_ROUTE_AUTHORITY_ID
 
-    def __init__(self, publisher: object, *, clock: Callable[[], datetime]) -> None:
-        if not callable(getattr(publisher, "publish_compiled", None)):
-            raise TypeError("atomic recipe route publisher is invalid")
-        if not isinstance(publisher, _CompiledRoutePublisher):
-            raise TypeError("atomic recipe route publisher is invalid")
+    def __init__(
+        self, publisher: AtomicRouteBundlePublisher, *, clock: Callable[[], datetime]
+    ) -> None:
         self._publisher = publisher
         self._clock = clock
 
     def publish_recipe(self, candidate: _RecipeCandidate) -> LiteLlmGeneration:
         generation = self._activate(
             candidate.state.digest,
-            LiteLlmPublisher.render(candidate.state, candidate.policy),
+            render_config(candidate.state, candidate.policy),
             endpoints=candidate.endpoints,
             expires_at=candidate.expires_at,
             state="published",
@@ -338,7 +259,7 @@ class AtomicRecipeRoutePublisher:
     ) -> LiteLlmGeneration:
         generation = self._activate(
             route_digest,
-            LiteLlmPublisher.render_empty(),
+            render_empty_config(),
             endpoints={},
             expires_at=expires_at,
             state="maintenance",
@@ -357,7 +278,7 @@ class AtomicRecipeRoutePublisher:
 
         return self._activate(
             route_digest,
-            LiteLlmPublisher.render_empty(),
+            render_empty_config(),
             endpoints={},
             expires_at=expires_at,
             state="maintenance",
@@ -374,23 +295,9 @@ class AtomicRecipeRoutePublisher:
         state: str,
         expected_activation: ActivationMarker | None = None,
     ) -> LiteLlmGeneration | None:
-        required = (
-            "_activate",
-            "_identity",
-            "_lease",
-            "_locked",
-            "_read_marker",
-            "_require_supervisor_ack",
-            "_require_update_boundary",
-        )
-        if any(not callable(getattr(self._publisher, name, None)) for name in required):
-            raise TypeError(
-                "atomic recipe route publisher lacks compiled route support"
-            )
         self._publisher._identity(self._AUTHORITY_ID, route_digest, route_digest)
         acknowledgement_error: Exception | None = None
         with self._publisher._locked():
-            self._publisher._require_update_boundary(None)
             issued, expires = self._publisher._lease(expires_at)
             current = self._publisher._read_marker(
                 optional=True, verify_files=True, verify_lease=False
@@ -477,11 +384,8 @@ class AtomicRecipeRoutePublisher:
             except Exception as error:  # noqa: BLE001
                 acknowledgement_error = error
         config_sha256 = hashlib.sha256(litellm).hexdigest()
-        root = getattr(self._publisher, "_root", None)
-        path = (
-            str(root / "generations" / marker.directory / "litellm.json")
-            if isinstance(root, Path)
-            else marker.directory
+        path = str(
+            self._publisher._root / "generations" / marker.directory / "litellm.json"
         )
         result = _AtomicRecipeGeneration(
             marker.generation,
@@ -504,7 +408,7 @@ class RecipeRouteService:
         self,
         sessions: sessionmaker[Session],
         *,
-        publisher: object,
+        publisher: AtomicRecipeRoutePublisher,
         management_policy: ManagementAddressPolicy,
         clock: Callable[[], datetime],
         maximum_age_seconds: int = ROUTE_EVIDENCE_MAX_AGE_SECONDS,
@@ -865,18 +769,6 @@ class RecipeRouteService:
                     run.route_error = _HEALTH_RECOVERY_ERROR
                     run.updated_at = self._clock()
                 return True
-            if not isinstance(self._publisher, AtomicRecipeRoutePublisher):
-                if any(run.route_digest != candidate.state.digest for run in published):
-                    generation = self._publish(candidate)
-                    for run_id in sorted(candidate.included):
-                        run = session.get(RecipeRun, run_id)
-                        if run is not None:
-                            run.route_generation = generation.generation
-                            run.route_digest = generation.route_digest
-                            run.route_error = None
-                            run.updated_at = self._clock()
-                    return True
-                return False
             now = _aware(self._clock())
             owner = session.get(RoutePublicationOwner, 1)
             publication = (
@@ -920,8 +812,6 @@ class RecipeRouteService:
     def _maintain_empty_routes(
         self, session: Session, renew_before_seconds: int
     ) -> bool:
-        if not isinstance(self._publisher, AtomicRecipeRoutePublisher):
-            return False
         candidate = self.candidate_in_session(
             session,
             include_run_id=None,
@@ -1024,23 +914,13 @@ class RecipeRouteService:
         return marker, lease_expires_at
 
     def _publish(self, candidate: _RecipeCandidate) -> LiteLlmGeneration:
-        publisher = self._publisher
-        if isinstance(publisher, _CandidatePublisher):
-            return publisher.publish_recipe(candidate)
-        if isinstance(publisher, _StatePublisher):
-            return publisher.publish(candidate.state, candidate.policy)
-        raise TypeError("recipe route publisher is invalid")
+        return self._publisher.publish_recipe(candidate)
 
     def _publish_empty(self, route_digest: str) -> LiteLlmGeneration:
-        publisher = self._publisher
-        if isinstance(publisher, AtomicRecipeRoutePublisher):
-            return publisher.publish_empty(
-                route_digest,
-                expires_at=recipe_route_lease_expiry(_aware(self._clock())),
-            )
-        if isinstance(publisher, _EmptyPublisher):
-            return publisher.publish_empty(route_digest)
-        raise TypeError("recipe route publisher lacks empty withdrawal")
+        return self._publisher.publish_empty(
+            route_digest,
+            expires_at=recipe_route_lease_expiry(_aware(self._clock())),
+        )
 
     def projection_in_session(
         self, session: Session, generation: LiteLlmGeneration, *, state: str
@@ -1110,7 +990,6 @@ class RecipeRouteService:
         upstream_models: dict[str, str] = {}
         endpoints: dict[str, _RecipeEndpoint] = {}
         included: set[str] = set()
-        node_ids: set[str] = set()
         evidence_times: list[datetime] = []
         run_identities: list[dict[str, object]] = []
         run_statement = (
@@ -1242,7 +1121,6 @@ class RecipeRouteService:
                         "recipe rank readiness identity is invalid", run_id=run.id
                     )
                 evidence_times.append(observed)
-                node_ids.add(node.node_id)
             try:
                 endpoint = _endpoint(
                     endpoint_owner,
@@ -1285,20 +1163,7 @@ class RecipeRouteService:
         digest = hashlib.sha256(
             json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-        state = RouteState(
-            generation=0,
-            state="published",
-            authority_revision=None,
-            profile="recipe",
-            workload="recipe",
-            node_ids=tuple(sorted(node_ids)),
-            aliases=aliases,
-            health_timestamp=max(evidence_times).isoformat()
-            if evidence_times
-            else None,
-            reason=None,
-            digest=digest,
-        )
+        state = RouteState(aliases=aliases, digest=digest)
         policy = LiteLlmPolicy(
             models={
                 alias: {

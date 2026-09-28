@@ -20,11 +20,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
 )
-from vonk_control.litellm import (
-    LiteLlmGeneration,
-    LiteLlmPolicyError,
-    LiteLlmPublisher,
-)
+from vonk_control.litellm import LiteLlmGeneration, LiteLlmPolicyError
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -54,7 +50,7 @@ from vonk_control.recipe_routes import (
 from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
-    RouteUpdateFenced,
+    RouteRuntimeError,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -94,8 +90,11 @@ class MutableClock:
         return self.now
 
 
-class OverlapPublisher:
-    """Expose crossed candidates without deadlocking a serialized publisher."""
+class OverlapPublisher(AtomicRecipeRoutePublisher):
+    """Expose crossed candidates without deadlocking a serialized publisher.
+
+    An in-memory stand-in: it never touches a route bundle.
+    """
 
     def __init__(self, generation: int) -> None:
         self._generation = generation
@@ -103,31 +102,26 @@ class OverlapPublisher:
         self._second_publish = threading.Event()
         self.aliases: list[tuple[str, ...]] = []
 
-    def publish(self, state, _policy):
+    def publish_recipe(self, candidate):
+        return self._record(
+            tuple(sorted(candidate.state.aliases)), candidate.state.digest
+        )
+
+    def publish_empty(self, route_digest, *, expires_at):
+        del expires_at
+        return self._record((), route_digest)
+
+    def _record(self, aliases: tuple[str, ...], digest: str) -> LiteLlmGeneration:
         with self._guard:
             self._generation += 1
             generation = self._generation
             publish_index = len(self.aliases)
-            self.aliases.append(tuple(sorted(state.aliases)))
+            self.aliases.append(aliases)
             if publish_index == 1:
                 self._second_publish.set()
         if publish_index == 0:
             self._second_publish.wait(timeout=0.25)
-        return type(
-            "Generation",
-            (),
-            {
-                "generation": generation,
-                "route_digest": state.digest,
-                "config_sha256": state.digest,
-                "path": "memory",
-            },
-        )()
-
-    def publish_empty(self, route_digest):
-        return self.publish(
-            type("State", (), {"aliases": {}, "digest": route_digest})(), None
-        )
+        return LiteLlmGeneration(generation, digest, digest, "memory")
 
 
 def setup(
@@ -444,14 +438,22 @@ def setup(
                 )
             )
     applied: list[bytes] = []
-    publisher = LiteLlmPublisher(
-        tmp_path / "litellm", validate=validate, apply=applied.append
+
+    def apply(content: bytes) -> bool:
+        accepted = validate(content)
+        if accepted is True:
+            applied.append(content)
+        return accepted
+
+    clock = clock or (lambda: NOW)
+    publisher = AtomicRouteBundlePublisher(
+        tmp_path / "litellm", clock=clock, validate_litellm=apply
     )
     service = RecipeRouteService(
         sessions,
-        publisher=publisher,
+        publisher=AtomicRecipeRoutePublisher(publisher, clock=clock),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
-        clock=clock or (lambda: NOW),
+        clock=clock,
         maximum_age_seconds=120,
     )
     return service, publisher, applied, run.id
@@ -790,16 +792,21 @@ def test_invalid_candidate_retains_previous_generation(tmp_path: Path) -> None:
     accepted = service.publish_run(run_id)
     rejecting = RecipeRouteService(
         service.sessions,
-        publisher=LiteLlmPublisher(
-            tmp_path / "litellm", validate=lambda _: False, apply=lambda _: None
+        publisher=AtomicRecipeRoutePublisher(
+            AtomicRouteBundlePublisher(
+                tmp_path / "litellm",
+                clock=lambda: NOW,
+                validate_litellm=lambda _: False,
+            ),
+            clock=lambda: NOW,
         ),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=lambda: NOW,
         maximum_age_seconds=120,
     )
-    with pytest.raises(LiteLlmPolicyError):
-        rejecting.publish_run(run_id)
-    assert publisher.active() == accepted
+    with pytest.raises(RouteRuntimeError, match="LiteLLM validation"):
+        rejecting.withdraw_run(run_id)
+    assert publisher.inspect().generation == accepted.generation
 
 
 def test_withdraw_publishes_empty_generation_before_workload_stop(
@@ -811,7 +818,7 @@ def test_withdraw_publishes_empty_generation_before_workload_stop(
 
     assert empty.generation == 2
     assert json.loads(applied[-1])["model_list"] == []
-    assert publisher.active() == empty
+    assert publisher.inspect().generation == empty.generation
 
 
 def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
@@ -1036,7 +1043,6 @@ def test_acknowledgement_failure_after_activation_is_temporary() -> None:
         routes_module.publication_is_temporary(RecipeRouteNotReady("waiting")) is True
     )
     assert routes_module.publication_is_temporary(OSError("socket")) is True
-    assert routes_module.publication_is_temporary(RouteUpdateFenced("updating")) is True
     assert routes_module.publication_is_temporary(LiteLlmPolicyError("bad")) is False
     assert (
         routes_module.publication_is_temporary(RuntimeError("invalid document"))
@@ -1070,7 +1076,7 @@ def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> N
         assert failed.route_state == "pending"
         assert failed.route_next_attempt_at is not None
         assert failed.route_error is not None
-        assert "LiteLlmPolicyError" in failed.route_error
+        assert "LiteLLM validation" in failed.route_error
 
 
 def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
@@ -1711,12 +1717,14 @@ def test_postgres_empty_route_renewal_preserves_newer_or_foreign_owner(
 
     if owner_change == "foreign-activation":
         foreign_authority = str(uuid4())
-        runtime.publish_compiled(
+        from .test_route_runtime import _publish
+
+        _publish(
+            runtime,
             authority_id=foreign_authority,
             plan_digest="f" * 64,
             evidence_set_digest="f" * 64,
             routes=b"{}\n",
-            litellm=AtomicRouteBundlePublisher.empty_litellm(),
             expires_at=clock.now + timedelta(seconds=ROUTE_LEASE_SECONDS),
             state="maintenance",
         )
