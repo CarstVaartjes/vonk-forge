@@ -70,6 +70,7 @@ from .cache_removal_review import (
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
+from .failure_classification import is_redownload, is_security_failure
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
@@ -159,8 +160,6 @@ _TERMINAL_FAILURE_CODES = frozenset(
         "recipe_image.runtime_invalid",
         "registry.destination_forbidden",
         "registry.redirect_forbidden",
-        "runtime_image.authorization_invalid",
-        "runtime_image.authorization_revoked",
         "runtime_image.image_unpinned",
         "runtime_image.receipt_identity_conflict",
         "runtime_image.source_mismatch",
@@ -560,7 +559,9 @@ def _retryable(error: BaseException) -> bool:
     """Classify by typed code; unknown failures retry with capped backoff."""
 
     code = getattr(error, "code", None)
-    if isinstance(code, str) and code in _TERMINAL_FAILURE_CODES:
+    if isinstance(code, str) and (
+        code in _TERMINAL_FAILURE_CODES or is_security_failure(code)
+    ):
         return False
     if isinstance(error, ModelCacheError):
         return not model_cache_failure_is_terminal(code)
@@ -5193,7 +5194,9 @@ class RecipeImageAvailabilityService:
                 return
             payload.pop("image_reference_intent", None)
             payload |= {"retry": retry, "failure": failure}
-            if bounded and str(code) in _INTEGRITY_FAILURE_CODES:
+            if bounded and (
+                str(code) in _INTEGRITY_FAILURE_CODES or is_redownload(str(code))
+            ):
                 # Never reuse bytes that failed verification: the automatic
                 # retry downloads or builds them again.
                 if payload.get("execution_mode") == "build":

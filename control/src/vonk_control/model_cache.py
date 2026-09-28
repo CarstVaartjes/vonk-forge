@@ -74,6 +74,7 @@ from .cache_removal_review import (
 from .cached_file_verification import verified_files
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
+from .failure_classification import is_security_failure
 from .logging import log_event, redact_text
 from .model_cache_contract import (
     UUID_PATTERN,
@@ -222,13 +223,15 @@ _TERMINAL_FAILURE_CODES = _CREDENTIAL_FAILURE_CODES | frozenset(
 def model_cache_failure_is_terminal(code: object) -> bool:
     """Whether a typed model-cache failure waits for a changed credential or request."""
 
-    return code in _TERMINAL_FAILURE_CODES
+    return code in _TERMINAL_FAILURE_CODES or (
+        isinstance(code, str) and is_security_failure(code)
+    )
 
 
 def _retryable_failure(error: BaseException) -> bool:
     """Classify by typed code: only authorization and source policy are terminal."""
 
-    return getattr(error, "code", None) not in _TERMINAL_FAILURE_CODES
+    return not model_cache_failure_is_terminal(getattr(error, "code", None))
 
 
 def _retry_delay_seconds(attempts: int) -> int:
