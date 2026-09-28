@@ -663,9 +663,7 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         )
         assert claims and all(claim.state == "active" for claim in claims)
 
-    bound_service.record_node_result(
-        stop.id, node_ids[0], succeeded=True, evidence={}
-    )
+    bound_service.record_node_result(stop.id, node_ids[0], succeeded=True, evidence={})
     with sessions() as session:
         completed_stop = session.get(Job, stop.id)
         assert completed_stop is not None and completed_stop.state == "succeeded"

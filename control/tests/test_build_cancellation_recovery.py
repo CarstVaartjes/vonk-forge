@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy import select
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
-    AgentNode,
     AgentOperation,
     Job,
     RecipeBuild,

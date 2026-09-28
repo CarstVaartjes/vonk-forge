@@ -224,6 +224,11 @@ def test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back
     assert len(rank_rows) == 2
     assert {row.payload.get("phase") for row in rank_rows} == {"rank-launch"}
     rank_results = _bridge(install_start_wire_probe, rank_rows)
+    # A rank launch only starts its process; no rank reports an endpoint yet.
+    assert [
+        RecipeStartResult.model_validate(result.result).endpoint
+        for result in rank_results
+    ] == [None, None]
     _project(service, sessions, rank_rows, rank_results)
     assert service.get(start_operation.id).state == "running"
     with sessions() as session:
@@ -238,6 +243,8 @@ def test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back
     assert len(readiness_rows) == 1
     assert readiness_rows[0].payload.get("phase") == "collective-readiness"
     readiness_results = _bridge(install_start_wire_probe, readiness_rows)
+    # Only the serving rank reports the endpoint, once the collective is ready.
+    assert RecipeStartResult.model_validate(readiness_results[0].result).endpoint
     _project(service, sessions, readiness_rows, readiness_results)
     assert service.get(start_operation.id).state == "succeeded"
     with sessions() as session:
@@ -247,44 +254,6 @@ def test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back
             )
         )
         assert {node.state for node in nodes_after_readiness} == {"running"}
-
-
-def test_controller_tensor_parallel_start_reports_only_the_serving_endpoint(
-    tmp_path: Path, install_start_wire_probe: Path
-) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2
-    )
-    installation = installed_recipe(
-        service,
-        mapping_id,
-        build_id,
-        nodes,
-        request_id="wire-bridge-tensor-install",
-    )
-    start_plan = service.preview_run(installation.owner_id, "tensor")
-    start_operation = service.start(
-        start_plan,
-        plan_digest=start_plan.plan_digest,
-        actor="admin",
-        request_id="wire-bridge-tensor-start",
-    )
-    seen_roles: list[str] = []
-    while rows := _queued_children(sessions, start_operation.id):
-        assert len(rows) == 1
-        row = rows[0]
-        role = row.payload["compiled_execution_plan"]["runtime"]["placement"]["role"]
-        assert isinstance(role, str)
-        seen_roles.append(role)
-        assert row.payload.get("phase") is None
-        results = _bridge(install_start_wire_probe, rows)
-        for result in results:
-            envelope = RecipeStartResult.model_validate(result.result)
-            assert (envelope.endpoint is not None) == (role == "entrypoint")
-        _project(service, sessions, rows, results)
-
-    assert seen_roles == ["worker", "entrypoint"]
-    assert service.get(start_operation.id).state == "succeeded"
 
 
 def test_controller_distribution_http_response_round_trips_through_rust(

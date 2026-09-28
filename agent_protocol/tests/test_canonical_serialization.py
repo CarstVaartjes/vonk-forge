@@ -107,7 +107,6 @@ def test_rust_and_python_canonicalize_actual_job_claim_and_build_identically() -
     build = json.loads((VECTORS / "recipe-build-claim-v1.json").read_text())[
         "base_payload"
     ]
-    build["target"] = None
     build["options"].update(ignorefile=None, os_version=None, timestamp=None)
     assert probe("RecipeBuildRequest", canonical_message(build)) == canonical_payload(
         "recipe.build.v1", build
