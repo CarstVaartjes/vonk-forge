@@ -22,12 +22,10 @@ T = TypeVar("T", bound="ModelCapabilityProvenance")
 class ModelCapabilityProvenance:
     """
         Attributes:
-            evidence_digest (str):
             source_revision (str):
             source_url (str):
      """
 
-    evidence_digest: str
     source_revision: str
     source_url: str
 
@@ -36,8 +34,6 @@ class ModelCapabilityProvenance:
 
 
     def to_dict(self) -> dict[str, Any]:
-        evidence_digest = self.evidence_digest
-
         source_revision = self.source_revision
 
         source_url = self.source_url
@@ -46,7 +42,6 @@ class ModelCapabilityProvenance:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "evidence_digest": evidence_digest,
             "source_revision": source_revision,
             "source_url": source_url,
         })
@@ -58,14 +53,11 @@ class ModelCapabilityProvenance:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        evidence_digest = d.pop("evidence_digest")
-
         source_revision = d.pop("source_revision")
 
         source_url = d.pop("source_url")
 
         model_capability_provenance = cls(
-            evidence_digest=evidence_digest,
             source_revision=source_revision,
             source_url=source_url,
         )

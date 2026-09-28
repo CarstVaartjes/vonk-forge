@@ -24,13 +24,11 @@ class ModelProvenance:
     """
         Attributes:
             attribution (list[str]):
-            evidence_digest (str):
             source_revision (str):
             source_url (str):
      """
 
     attribution: list[str]
-    evidence_digest: str
     source_revision: str
     source_url: str
 
@@ -43,8 +41,6 @@ class ModelProvenance:
 
 
 
-        evidence_digest = self.evidence_digest
-
         source_revision = self.source_revision
 
         source_url = self.source_url
@@ -54,7 +50,6 @@ class ModelProvenance:
 
         field_dict.update({
             "attribution": attribution,
-            "evidence_digest": evidence_digest,
             "source_revision": source_revision,
             "source_url": source_url,
         })
@@ -69,15 +64,12 @@ class ModelProvenance:
         attribution = cast(list[str], d.pop("attribution"))
 
 
-        evidence_digest = d.pop("evidence_digest")
-
         source_revision = d.pop("source_revision")
 
         source_url = d.pop("source_url")
 
         model_provenance = cls(
             attribution=attribution,
-            evidence_digest=evidence_digest,
             source_revision=source_revision,
             source_url=source_url,
         )
