@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import select
 from vonk_control import recipe_operations as operations_module
-from vonk_control.models import AgentNode, CatalogDocumentRevision, Job, RecipeBuild
+from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_operations import RunSwitchOperationConflict
@@ -127,10 +127,6 @@ def test_last_consumer_retains_issued_capacity_until_exact_cleanup_receipt(
         child_id = session.scalar(select(Job.id).where(Job.kind == "recipe.build.v1"))
         assert child_id is not None
     executor_id = _issue(sessions, child_id)
-    with sessions.begin() as session:
-        node = session.get(AgentNode, selected.builder_node_id)
-        assert node is not None
-        node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
     claims = _active_claims(sessions, selected.build_id)
     assert (
         planner.cancel(
@@ -187,9 +183,7 @@ def test_new_consumer_cannot_join_across_last_consumer_cleanup(
     with sessions.begin() as session:
         child_id = session.scalar(select(Job.id).where(Job.kind == "recipe.build.v1"))
         revision = session.get(CatalogDocumentRevision, selected.recipe_revision_id)
-        node = session.get(AgentNode, selected.builder_node_id)
-        assert child_id is not None and revision is not None and node is not None
-        node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
+        assert child_id is not None and revision is not None
     executor_id = _issue(sessions, child_id) if issued else None
     planner.cancel(
         parent.operation_id,

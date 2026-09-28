@@ -144,15 +144,9 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                 job.targets[0],
                 succeeded=True,
                 evidence={
-                    "build_input_sha256": build.build_input_sha256,
                     "image_digest": receipt.image_digest,
                     "oci_layout_sha256": receipt.oci_archive_sha256,
                     "image_bytes": receipt.image_bytes,
-                    "policy": {
-                        "passed": True,
-                        "findings": [],
-                        "dockerfile": "Dockerfile",
-                    },
                 },
             )
         elif job.kind == "recipe.install":
@@ -166,9 +160,7 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
                     job.id,
                     node_id,
                     succeeded=True,
-                    evidence={"stopped": True}
-                    if job.kind == "recipe.stop"
-                    else {"removed": True},
+                    evidence={},
                 )
         elif job.kind == "runtime.preflight.v1":
             complete_preflight(

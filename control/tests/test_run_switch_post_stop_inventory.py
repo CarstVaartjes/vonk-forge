@@ -83,7 +83,7 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     assert stop_id is not None
     for node_id in nodes:
         lifecycle.record_node_result(
-            stop_id, node_id, succeeded=True, evidence={"stopped": True}
+            stop_id, node_id, succeeded=True, evidence={}
         )
     with sessions() as session:
         run = session.get(RecipeRun, old.owner_id)

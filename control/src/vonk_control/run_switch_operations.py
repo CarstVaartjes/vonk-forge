@@ -3599,7 +3599,12 @@ class RunSwitchOperationService:
                         expected_image,
                         {
                             name: getattr(compiled.runtime_image, name)
-                            for name in RuntimeImageIdentity.model_fields
+                            for name in (
+                                "image_digest",
+                                "oci_layout_sha256",
+                                "image_bytes",
+                                "build_id",
+                            )
                         },
                     )
             if (

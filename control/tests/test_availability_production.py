@@ -1081,15 +1081,9 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                     "failed_nodes": [],
                     "node_evidence": {
                         plan.builder_node_id: {
-                            "build_input_sha256": plan.build_input_sha256,
                             "image_bytes": 1,
                             "image_digest": "sha256:" + "d" * 64,
                             "oci_layout_sha256": "e" * 64,
-                            "policy": {
-                                "passed": True,
-                                "dockerfile": "Dockerfile",
-                                "findings": [],
-                            },
                         }
                     },
                 },
@@ -1267,15 +1261,9 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                     "failed_nodes": [],
                     "node_evidence": {
                         plan.builder_node_id: {
-                            "build_input_sha256": final_input,
                             "image_digest": image_digest,
                             "oci_layout_sha256": archive_digest,
                             "image_bytes": len(archive),
-                            "policy": {
-                                "passed": True,
-                                "dockerfile": "Dockerfile",
-                                "findings": [],
-                            },
                         }
                     },
                 },

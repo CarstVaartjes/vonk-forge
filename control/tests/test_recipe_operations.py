@@ -3723,7 +3723,7 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         request_id="8" * 36,
     )
     service.record_node_result(
-        uninstall.id, nodes[0], succeeded=True, evidence={"removed": True}
+        uninstall.id, nodes[0], succeeded=True, evidence={}
     )
     with sessions() as session:
         installation = session.get(RecipeInstallation, install.owner_id)
@@ -3894,7 +3894,7 @@ def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
         operation.id,
         nodes[0],
         succeeded=True,
-        evidence={"removed": True},
+        evidence={},
     )
     final_dependent = service.preview_uninstall(second.owner_id)
     assert final_dependent.model_impact.effect == "recipe-and-unused-model"

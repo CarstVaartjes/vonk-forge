@@ -144,7 +144,7 @@ def test_replacement_owns_memory_before_and_after_old_claim_is_released(
         }
     stop_id = _drive_to_job(profiles, planner, sessions, "recipe.stop")
     lifecycle.record_node_result(
-        stop_id, nodes[0], succeeded=True, evidence={"stopped": True}
+        stop_id, nodes[0], succeeded=True, evidence={}
     )
     with sessions() as session:
         released = session.get(ResourceReservation, old_claim_id)
