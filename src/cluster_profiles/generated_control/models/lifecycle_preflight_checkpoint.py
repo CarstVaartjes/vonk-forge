@@ -31,6 +31,8 @@ class LifecyclePreflightCheckpoint:
         Attributes:
             phase_index (int):
             attempts (Union[Unset, LifecyclePreflightCheckpointAttempts]):
+            last_failure_code (Union[None, Unset, str]):
+            last_failure_detail (Union[None, Unset, str]):
             next_check_at (Union[None, Unset, datetime.datetime]):
             pending_job_id (Union[None, Unset, str]):
             pending_node_id (Union[None, Unset, str]):
@@ -39,6 +41,8 @@ class LifecyclePreflightCheckpoint:
 
     phase_index: int
     attempts: Union[Unset, 'LifecyclePreflightCheckpointAttempts'] = UNSET
+    last_failure_code: Union[None, Unset, str] = UNSET
+    last_failure_detail: Union[None, Unset, str] = UNSET
     next_check_at: Union[None, Unset, datetime.datetime] = UNSET
     pending_job_id: Union[None, Unset, str] = UNSET
     pending_node_id: Union[None, Unset, str] = UNSET
@@ -56,6 +60,18 @@ class LifecyclePreflightCheckpoint:
         attempts: Union[Unset, dict[str, Any]] = UNSET
         if not isinstance(self.attempts, Unset):
             attempts = self.attempts.to_dict()
+
+        last_failure_code: Union[None, Unset, str]
+        if isinstance(self.last_failure_code, Unset):
+            last_failure_code = UNSET
+        else:
+            last_failure_code = self.last_failure_code
+
+        last_failure_detail: Union[None, Unset, str]
+        if isinstance(self.last_failure_detail, Unset):
+            last_failure_detail = UNSET
+        else:
+            last_failure_detail = self.last_failure_detail
 
         next_check_at: Union[None, Unset, str]
         if isinstance(self.next_check_at, Unset):
@@ -89,6 +105,10 @@ class LifecyclePreflightCheckpoint:
         })
         if attempts is not UNSET:
             field_dict["attempts"] = attempts
+        if last_failure_code is not UNSET:
+            field_dict["last_failure_code"] = last_failure_code
+        if last_failure_detail is not UNSET:
+            field_dict["last_failure_detail"] = last_failure_detail
         if next_check_at is not UNSET:
             field_dict["next_check_at"] = next_check_at
         if pending_job_id is not UNSET:
@@ -117,6 +137,26 @@ class LifecyclePreflightCheckpoint:
             attempts = LifecyclePreflightCheckpointAttempts.from_dict(_attempts)
 
 
+
+
+        def _parse_last_failure_code(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        last_failure_code = _parse_last_failure_code(d.pop("last_failure_code", UNSET))
+
+
+        def _parse_last_failure_detail(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        last_failure_detail = _parse_last_failure_detail(d.pop("last_failure_detail", UNSET))
 
 
         def _parse_next_check_at(data: object) -> Union[None, Unset, datetime.datetime]:
@@ -172,6 +212,8 @@ class LifecyclePreflightCheckpoint:
         lifecycle_preflight_checkpoint = cls(
             phase_index=phase_index,
             attempts=attempts,
+            last_failure_code=last_failure_code,
+            last_failure_detail=last_failure_detail,
             next_check_at=next_check_at,
             pending_job_id=pending_job_id,
             pending_node_id=pending_node_id,

@@ -2125,16 +2125,36 @@ class SparkLifecycle:
                 },
             )
             sync = require_object(sync_payload, "synthetic canary catalog sync")
+            # The sync counts every catalog document it applies: the one canary
+            # Recipe plus the model documents its catalog index carries.
+            total = sync.get("total_count")
             if (
                 sync.get("state") != "current"
                 or sync.get("commit") != fixture.source_commit
-                or sync.get("total_count") != 1
-                or sync.get("processed_count") != 1
+                or not isinstance(total, int)
+                or isinstance(total, bool)
+                or total < 1
+                or sync.get("processed_count") != total
                 or (sync.get("imported_count"), sync.get("unchanged_count"))
                 not in {(1, 0), (0, 1)}
                 or sync.get("problems") != []
             ):
-                raise LifecycleError("synthetic canary catalog sync is incomplete")
+                summary = {
+                    key: sync.get(key)
+                    for key in (
+                        "state",
+                        "total_count",
+                        "processed_count",
+                        "imported_count",
+                        "updated_count",
+                        "unchanged_count",
+                        "problems",
+                    )
+                }
+                raise LifecycleError(
+                    "synthetic canary catalog sync is incomplete: "
+                    + json.dumps(summary, sort_keys=True)[:1024]
+                )
             _, listed_payload = self.control.request(
                 "GET", "/api/recipe/library", query={"all_models": "true"}
             )

@@ -181,13 +181,34 @@ def run_port_blockers(
 
 
 class RunPlanConflict(RuntimeError):
-    pass
+    code = "run.plan_invalid"
 
 
 class RunAdmissionBusy(RunPlanConflict):
     """A competing capacity writer requires rescheduling this same admission."""
 
     code = "run.capacity_busy"
+
+
+_RETRYABLE_PLAN_BLOCKERS = {
+    "run.inventory_missing",
+    "run.stale_inventory",
+    "run.insufficient_memory",
+    "run.port_occupied",
+    "run.rendezvous_port_occupied",
+    "resource.insufficient",
+}
+
+
+def require_admissible(plan: RunPlan) -> None:
+    if plan.allowed:
+        return
+    codes = {reason.code for item in plan.nodes for reason in item.blockers}
+    if codes and codes <= _RETRYABLE_PLAN_BLOCKERS:
+        raise RunAdmissionBusy("run is waiting for current inventory or capacity")
+    raise RunPlanConflict(
+        "run.plan_invalid: run plan is blocked by current admission evidence"
+    )
 
 
 def _active_recipe_revision(
@@ -675,6 +696,14 @@ class RunAdmissionService:
         workload_intent_ordinal: int | None = None,
     ) -> str:
         try:
+            plan = self.plan_run(
+                plan.installation_id,
+                plan.alias,
+                now=now,
+                _session=session,
+                profile_application_id=profile_application_id,
+            )
+            require_admissible(plan)
             acquire_admission_keys(
                 session,
                 tuple(node_admission_key(node.node_id) for node in plan.nodes),
@@ -763,12 +792,6 @@ class RunAdmissionService:
             ),
         )
         mapping = session.get(ClusterMapping, plan.mapping_id)
-        if (
-            mapping is None
-            or mapping.state != "ready"
-            or mapping.generation != plan.mapping_generation
-        ):
-            raise RunPlanConflict("mapping generation changed while reserving")
         installation = session.get(RecipeInstallation, plan.installation_id)
         revision = _active_recipe_revision(session, plan.recipe_revision_id)
         mapping_nodes = tuple(
@@ -785,12 +808,12 @@ class RunAdmissionService:
             _session=session,
             profile_application_id=profile_application_id,
         )
-        if (
-            not fresh.allowed
-            or fresh.plan_digest != plan.plan_digest
-            or fresh.mapping_generation != plan.mapping_generation
-        ):
-            raise RunPlanConflict("run.plan_stale_or_blocked")
+        require_admissible(fresh)
+        if {node.node_id for node in fresh.nodes} != set(node_ids):
+            raise RunAdmissionBusy("run target membership changed during admission")
+        plan = fresh
+        if mapping is None or mapping.state != "ready":
+            raise RunAdmissionBusy("run mapping is waiting to become ready")
         if (
             installation is None
             or installation.mapping_id != plan.mapping_id
