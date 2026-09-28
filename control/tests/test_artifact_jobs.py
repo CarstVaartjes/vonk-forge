@@ -194,7 +194,6 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
         "knobs": {},
     }
     document["validation"] = {
-        "benchmarks": [],
         "serving": {
             "interface": "image-job",
             "checks": [
@@ -205,9 +204,7 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
                     "request": {
                         "transport": "job",
                         "fixture": "fixtures/input.png",
-                        "input_path": "/inputs",
                         "input_slots": {},
-                        "output_path": "/outputs",
                         "output_slot": "image",
                     },
                 }
@@ -217,15 +214,12 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
     document["interfaces"] = [
         {
             "adapter": "image-job",
-            "path": "/outputs",
             "input": {
-                "path": "/inputs",
                 "required": True,
                 "media_types": ["image/png"],
                 "max_bytes": 32 * 1024**2,
             },
             "output": {
-                "path": "/outputs",
                 "max_total_bytes": 4096,
                 "slots": [
                     {
@@ -625,7 +619,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         entrypoint = _mapping(roles[0])
         resources = _mapping(entrypoint["resources"])
         memory = _mapping(resources["memory"])
-        memory["system_reserve_bytes"] = 107
+        memory["reserve_bytes"] = 107
         interfaces = _sequence(document["interfaces"])
         image_interface = _mapping(interfaces[0])
         output = _mapping(image_interface["output"])
