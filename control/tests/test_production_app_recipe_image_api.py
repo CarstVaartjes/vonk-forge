@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import time
 from datetime import UTC, datetime
@@ -17,6 +18,8 @@ from vonk_control.models import (
     CatalogDocumentRevision,
 )
 from vonk_control.settings import Settings
+from vonk_control.source_bundles import DatabaseSourceBundleStore, generate_source_bundle
+from .test_recipe_image_availability import _recipe_projection
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 
@@ -24,23 +27,24 @@ def test_production_app_recipe_download_auth_and_status(
     tmp_path, monkeypatch, postgres_engine
 ) -> None:
     Base.metadata.create_all(postgres_engine)
-    recipe = RecipeDefinition.model_validate(
-        json.loads(
-            files("vonk_forge_contracts")
-            .joinpath("examples", "recipe-source-build.json")
-            .read_text()
-        )
+    raw_recipe = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text()
     )
+    recipe = RecipeDefinition.model_validate(raw_recipe)
     model = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
         .read_text()
     )
     model_definition = ModelDefinition.model_validate(model)
-    model_digest = document_sha256(model_definition.model_dump(mode="json"))
+    model_digest = document_sha256(model)
     assert recipe.models[0].model.content_sha256 == model_digest
     now = datetime.now(UTC)
     sessions = sessionmaker(bind=postgres_engine)
+    bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\nUSER 10001:10001\n"})
+    DatabaseSourceBundleStore(sessions).put(bundle.sha256, io.BytesIO(bundle.archive))
     with sessions.begin() as session:
         session.add_all(
             [
@@ -77,7 +81,7 @@ def test_production_app_recipe_download_auth_and_status(
                     revision_number=1,
                     schema_version=2,
                     state="active",
-                    document=model_definition.model_dump(mode="json"),
+                    document=model,
                     content_digest=model_digest,
                     artifact_key="b" * 64,
                     projected={},
@@ -93,11 +97,11 @@ def test_production_app_recipe_download_auth_and_status(
                     revision_number=1,
                     schema_version=2,
                     state="active",
-                    document=recipe.model_dump(mode="json"),
-                    content_digest=document_sha256(recipe.model_dump(mode="json")),
+                    document=raw_recipe,
+                    content_digest=document_sha256(raw_recipe),
                     artifact_key="c" * 64,
                     execution_key="a" * 64,
-                    projected={},
+                    projected=_recipe_projection(recipe, bundle.sha256),
                     created_by="test",
                     created_at=now,
                 ),

@@ -285,6 +285,23 @@ def _ensure_builder_node(session: Session) -> None:
         session.add(AgentNode(node_id="spark-builder", state="active"))
 
 
+def _recipe_projection(
+    recipe: RecipeDefinition, source_bundle_sha256: str = "b" * 64
+) -> dict[str, object]:
+    """The stored catalog projection of one recipe, with its source bundle."""
+
+    projected = {
+        "title": recipe.metadata.title,
+        "description": recipe.metadata.description,
+        "tags": list(recipe.metadata.tags),
+        "runtime_engine": recipe.runtime.engine,
+        "topology": recipe.topology.model_dump(mode="json"),
+    }
+    projected.update(_build_projection(recipe))
+    projected["source_bundle_sha256"] = source_bundle_sha256
+    return write_catalog_projection(projected, kind="recipe")
+
+
 def _add_revision(
     session: Session,
     revision_id: str,
@@ -295,15 +312,6 @@ def _add_revision(
 ) -> CatalogDocumentRevision:
     """One active recipe revision and, unless ``built`` is false, its build."""
 
-    projected = {
-        "title": recipe.metadata.title,
-        "description": recipe.metadata.description,
-        "tags": list(recipe.metadata.tags),
-        "runtime_engine": recipe.runtime.engine,
-        "topology": recipe.topology.model_dump(mode="json"),
-    }
-    projected.update(_build_projection(recipe))
-    projected["source_bundle_sha256"] = "b" * 64
     revision = CatalogDocumentRevision(
         id=revision_id,
         document_id="document-" + revision_id,
@@ -317,7 +325,7 @@ def _add_revision(
         content_digest=document_sha256(recipe.model_dump(mode="json")),
         artifact_key="b" * 64,
         execution_key="a" * 64,
-        projected=write_catalog_projection(projected, kind="recipe"),
+        projected=_recipe_projection(recipe),
         created_by="test",
         created_at=datetime.now(UTC),
     )

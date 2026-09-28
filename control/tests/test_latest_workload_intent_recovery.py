@@ -28,7 +28,7 @@ from vonk_control.run_switch_operations import (
     RecipeLifecyclePhaseExecutor,
     RunSwitchOperationService,
 )
-from vonk_control.runtime_preflight import mandatory_capabilities, request_digest
+from vonk_control.runtime_preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
@@ -83,6 +83,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             node_id,
             "serial-0",
             runtime_identity=identity,
+            preflight_fingerprint=fingerprint,
         )
         assert (
             old_claim is not None
@@ -166,6 +167,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             node_id,
             "serial-0",
             runtime_identity=identity,
+            preflight_fingerprint=fingerprint,
         )
         assert (
             stop_claim is not None
@@ -238,6 +240,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
                     node_id,
                     "serial-0",
                     runtime_identity=identity,
+                    preflight_fingerprint=fingerprint,
                 )
                 assert preflight_claim is not None
                 assert (
@@ -249,12 +252,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
                         preflight_claim,
                         state="succeeded",
                         evidence={
-                            "schema_version": 1,
                             "fingerprint": fingerprint,
-                            "request_sha256": request_digest(probe),
                             "observed_at": int(lifecycle._clock().timestamp()),
-                            "duration_ms": 1,
-                            "cached": False,
                             "findings": [
                                 {
                                     "capability": capability,
@@ -274,6 +273,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             node_id,
             "serial-0",
             runtime_identity=identity,
+            preflight_fingerprint=fingerprint,
         )
         assert (
             new_claim is not None
