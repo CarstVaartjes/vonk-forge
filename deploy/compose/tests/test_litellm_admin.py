@@ -167,3 +167,17 @@ def test_every_runtime_config_enables_ui_but_keeps_database_models_disabled() ->
     static = (ROOT / "deploy/compose/litellm/config.yaml").read_text()
     assert "  disable_admin_ui: false\n" in static
     assert "  store_model_in_db: false\n" in static
+
+
+def test_controller_key_relay_forwards_only_litellm_key_routes() -> None:
+    relay = _server_on_port(_adapted_caddy(_environment()), 8087)
+
+    assert relay["listen"] == [":8087"]
+    assert [route.get("match") for route in relay["routes"]] == [
+        [{"path": ["/key/generate", "/key/list", "/key/info", "/key/delete"]}],
+        None,
+    ]
+    assert _reverse_proxy_dials(relay["routes"][0]) == ["litellm:4000"]
+    assert relay["routes"][1]["handle"] == [
+        {"handler": "static_response", "status_code": 404}
+    ]

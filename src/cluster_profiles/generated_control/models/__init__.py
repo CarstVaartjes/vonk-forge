@@ -219,6 +219,11 @@ from .float_parameter import FloatParameter
 from .freshness_evidence import FreshnessEvidence
 from .freshness_evidence_state import FreshnessEvidenceState
 from .freshness_policy import FreshnessPolicy
+from .gateway_key_create_request import GatewayKeyCreateRequest
+from .gateway_key_created import GatewayKeyCreated
+from .gateway_key_list import GatewayKeyList
+from .gateway_key_revoked import GatewayKeyRevoked
+from .gateway_key_view import GatewayKeyView
 from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from .get_fleet_metrics_history_resolution import GetFleetMetricsHistoryResolution
 from .git_hub_release_asset import GitHubReleaseAsset
@@ -846,6 +851,11 @@ __all__ = (
     "FreshnessEvidence",
     "FreshnessEvidenceState",
     "FreshnessPolicy",
+    "GatewayKeyCreated",
+    "GatewayKeyCreateRequest",
+    "GatewayKeyList",
+    "GatewayKeyRevoked",
+    "GatewayKeyView",
     "GetFleetLogInfoSourceType0",
     "GetFleetMetricsHistoryResolution",
     "GitHubReleaseAsset",

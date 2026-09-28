@@ -359,7 +359,7 @@ def _uuid_argument(value: str) -> str:
 def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     commands: argparse._SubParsersAction[ControllerParserT],
 ) -> None:
-    """Register only Fleet, Model, Recipe and Profile command namespaces."""
+    """Register the Fleet, Model, Recipe, Profile and Key command namespaces."""
     fleet = commands.add_parser("fleet", help="Show and operate enrolled Sparks")
     fleet.add_argument("--watch", action="store_true")
     _watch_controls(fleet)
@@ -724,6 +724,36 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "alias", nargs="?", help="Only show this endpoint alias from the profile"
     )
     _add_output(profile_endpoint)
+
+    key = commands.add_parser(
+        "key", help="Create, list and revoke inference gateway client keys"
+    )
+    _add_output(key)
+    key_actions = key.add_subparsers(dest="key_action", parser_class=type(key))
+    key_create = key_actions.add_parser(
+        "create", help="Create a client key; it is shown only once"
+    )
+    key_create.add_argument("name")
+    key_create.add_argument(
+        "--model",
+        dest="models",
+        action="append",
+        default=[],
+        metavar="ALIAS",
+        help="Restrict the key to this model (repeatable; default: every model)",
+    )
+    key_create.add_argument(
+        "--expires", metavar="DURATION", help="Expire after e.g. 30d or 12h"
+    )
+    key_create.add_argument(
+        "--output", type=Path, help="Write the key to this new private file"
+    )
+    _add_output(key_create)
+    key_list = key_actions.add_parser("list", help="List client keys, never secrets")
+    _add_output(key_list)
+    key_revoke = key_actions.add_parser("revoke", help="Revoke a client key by name")
+    key_revoke.add_argument("name")
+    _add_output(key_revoke)
 
     run = commands.add_parser(
         "run", help="Prepare a catalog recipe, review it, and start it"
@@ -3723,4 +3753,25 @@ def run_controller(
         return _recipe(args, client, request_id_factory)
     if command == "profile":
         return _profile(args, client, request_id_factory)
+    if command == "key":
+        return _key(args, client)
     raise ValueError(f"unsupported controller command: {command}")
+
+
+def _key(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
+    action = getattr(args, "key_action", None)
+    if action in (None, "list"):
+        return client.request("GET", "/api/key")
+    if action == "revoke":
+        return client.request("POST", f"/api/key/{_quoted(args.name)}/revoke", {})
+    payload: dict[str, object] = {"name": args.name, "models": args.models}
+    if args.expires is not None:
+        payload["expires"] = args.expires
+    if args.output is None:
+        return client.request("POST", "/api/key", payload)
+    # Reserve the private file before the key exists so it cannot be lost.
+    with PrivateOutput(args.output) as destination:
+        result = client.request("POST", "/api/key", payload)
+        destination.write_bytes(f"{result.pop('key')}\n".encode())
+    result["output"] = str(args.output.absolute())
+    return result
