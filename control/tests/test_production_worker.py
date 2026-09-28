@@ -92,7 +92,7 @@ def test_recipe_worker_services_routes_while_coordinators_are_active(
         def __init__(self) -> None:
             pass
 
-        def maintain(self, *, renew_before_seconds: int = 60) -> bool:
+        def maintain(self) -> bool:
             calls.append("routes")
             return False
 
@@ -124,7 +124,6 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     route_root = tmp_path / "routes"
     publisher = AtomicRouteBundlePublisher(
         route_root,
-        clock=clock,
     )
 
     class SignerBackedAgentJobs:
@@ -223,7 +222,7 @@ def test_production_worker_binds_build_reuse_to_the_image_cache_root(tmp_path) -
     current = datetime(2026, 8, 6, tzinfo=UTC)
     clock = lambda: current
     jobs = JobService(sessions, clock=clock)
-    publisher = AtomicRouteBundlePublisher(tmp_path / "routes", clock=clock)
+    publisher = AtomicRouteBundlePublisher(tmp_path / "routes")
 
     class AgentJobs:
         def enqueue_in_session(self, *_args, **_kwargs):

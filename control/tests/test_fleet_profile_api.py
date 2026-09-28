@@ -129,7 +129,6 @@ def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None
                             "alias": "studio-chat",
                             "api_base": gateway_api_base,
                             "backend_api_base": "http://10.0.0.10:8000/v1",
-                            "expires_at": "2026-09-10T00:03:00Z",
                             "generation": 8,
                             "node_id": "spk_" + "a" * 32,
                             "observed_at": "2026-09-10T00:00:00Z",

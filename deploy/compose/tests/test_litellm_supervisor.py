@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 import types
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -330,8 +330,6 @@ def _bundle(
     module,
     tmp_path: Path,
     *,
-    now: datetime,
-    expires_at: datetime,
     generation: int = 1,
 ):
     root = tmp_path / "routes"
@@ -346,8 +344,6 @@ def _bundle(
         "evidence_set_digest": "b" * 64,
         "routes_sha256": hashlib.sha256(routes).hexdigest(),
         "litellm_sha256": hashlib.sha256(config).hexdigest(),
-        "issued_at": now.isoformat(),
-        "expires_at": expires_at.isoformat(),
     }
     manifest_bytes = (
         json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
@@ -376,40 +372,23 @@ def _bundle(
     return directory / "litellm.json", bootstrap, directory
 
 
-def test_supervisor_selects_only_an_exact_fresh_activation_bundle(
+def test_supervisor_selects_only_an_exact_activation_bundle(
     tmp_path: Path,
 ) -> None:
     module = _module()
-    now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
     generated, _bootstrap, _directory = _bundle(
         module,
         tmp_path,
-        now=now - timedelta(seconds=30),
-        expires_at=now + timedelta(seconds=120),
     )
 
     assert module._selected() == generated
 
 
-def test_supervisor_keeps_an_expired_bundle_but_rejects_a_hash_mismatch(
-    tmp_path: Path,
-) -> None:
+def test_supervisor_rejects_a_hash_mismatch(tmp_path: Path) -> None:
     module = _module()
-    now = datetime(2026, 8, 5, 12, 3, tzinfo=UTC)
-    # A stalled Controller stops renewing; the last published routes stay.
     generated, bootstrap, _directory = _bundle(
         module,
         tmp_path,
-        now=now - timedelta(days=1),
-        expires_at=now - timedelta(days=1) + timedelta(seconds=180),
-    )
-    assert module._selected() == generated
-
-    generated, bootstrap, _directory = _bundle(
-        module,
-        tmp_path,
-        now=now,
-        expires_at=now + timedelta(seconds=150),
     )
     generated.write_bytes(b'{"model_list":[{"unsafe":true}]}\n')
     assert module._selected() == bootstrap
@@ -419,12 +398,9 @@ def test_supervisor_falls_back_when_manifest_or_marker_is_not_exact(
     tmp_path: Path,
 ) -> None:
     module = _module()
-    now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
     _generated, bootstrap, directory = _bundle(
         module,
         tmp_path,
-        now=now,
-        expires_at=now + timedelta(seconds=150),
     )
     manifest = json.loads((directory / "manifest.json").read_bytes())
     manifest["plan_digest"] = "f" * 64
@@ -434,8 +410,6 @@ def test_supervisor_falls_back_when_manifest_or_marker_is_not_exact(
     _generated, bootstrap, _directory = _bundle(
         module,
         tmp_path,
-        now=now,
-        expires_at=now + timedelta(seconds=150),
     )
     activation = json.loads(module.ACTIVATION.read_bytes())
     module.ACTIVATION.write_text(json.dumps(activation, indent=2))
@@ -444,8 +418,6 @@ def test_supervisor_falls_back_when_manifest_or_marker_is_not_exact(
     _generated, bootstrap, _directory = _bundle(
         module,
         tmp_path,
-        now=now,
-        expires_at=now + timedelta(seconds=150),
     )
     activation = json.loads(module.ACTIVATION.read_bytes())
     activation["unknown"] = True
@@ -461,8 +433,6 @@ def test_supervisor_ack_binds_a_live_child_to_the_exact_activation_request(
     _generated, _bootstrap, _directory = _bundle(
         module,
         tmp_path,
-        now=now - timedelta(seconds=1),
-        expires_at=now + timedelta(seconds=120),
     )
     module.ACK_ROOT = tmp_path / "supervisor"
     module.ACK = module.ACK_ROOT / "ack.json"
@@ -483,7 +453,6 @@ def test_supervisor_ack_binds_a_live_child_to_the_exact_activation_request(
         "acknowledged_at": now.isoformat(),
         "activation_sha256": hashlib.sha256(module.ACTIVATION.read_bytes()).hexdigest(),
         "child_pid": 123,
-        "expires_at": (now + timedelta(seconds=120)).isoformat(),
         "generation": 1,
         "litellm_sha256": hashlib.sha256(request.config.read_bytes()).hexdigest(),
         "schema_version": 1,
@@ -500,13 +469,7 @@ def test_live_supervisor_removes_ack_when_the_acknowledged_child_crashes(
     monkeypatch,
 ) -> None:
     module = _module()
-    now = datetime.now(UTC)
-    _bundle(
-        module,
-        tmp_path,
-        now=now - timedelta(seconds=1),
-        expires_at=now + timedelta(seconds=120),
-    )
+    _bundle(module, tmp_path)
     module.ACK_ROOT = tmp_path / "supervisor"
     module.ACK = module.ACK_ROOT / "ack.json"
     request = module._active_request()
@@ -554,60 +517,16 @@ def _live_child(pid: int):
     return child
 
 
-def test_live_supervisor_keeps_serving_when_the_controller_stops_renewing(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    module = _module()
-    issued_at = datetime.now(UTC) - timedelta(hours=1)
-    generated, _bootstrap, _directory = _bundle(
-        module,
-        tmp_path,
-        now=issued_at,
-        expires_at=issued_at + timedelta(seconds=180),
-    )
-    module.ACK_ROOT = tmp_path / "supervisor"
-    module.ACK = module.ACK_ROOT / "ack.json"
-    child = _live_child(654)
-    spawns: list[list[str]] = []
-    polls = 0
-
-    def spawn(command, **_kwargs):
-        spawns.append(command)
-        return child
-
-    def sleep(_seconds: float) -> None:
-        nonlocal polls
-        polls += 1
-        if polls == 5:
-            child.returncode = 29
-
-    monkeypatch.setattr(module, "_await_healthy", lambda _child, **_kwargs: True)
-    monkeypatch.setattr(module, "_healthy", lambda _child: True)
-    monkeypatch.setattr(module.subprocess, "Popen", spawn)
-    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
-    monkeypatch.setattr(module.time, "sleep", sleep)
-
-    assert module.main() == 29
-    assert [command[2] for command in spawns] == [str(generated)]
-    assert child.terminated is False
-
-
 def test_live_supervisor_reloads_only_when_a_new_generation_changes_routes(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     module = _module()
-    issued_at = datetime.now(UTC)
-    _bundle(
-        module, tmp_path, now=issued_at, expires_at=issued_at + timedelta(seconds=180)
-    )
+    _bundle(module, tmp_path)
     first = module._active_request()
     _bundle(
         module,
         tmp_path,
-        now=issued_at,
-        expires_at=issued_at + timedelta(seconds=180),
         generation=2,
     )
     renewed = module._active_request()
