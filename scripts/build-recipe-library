@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Generate a recipe checkout's catalog-index.json, qualification index and
+# package archives in place. They are build outputs of the recipe sources, not
+# committed files; signed GitHub releases publish the same bytes.
+set -euo pipefail
+
+root=${1:-${VONK_RECIPE_LIBRARY_ROOT:-}}
+if [[ -z "$root" ]]; then
+    echo "usage: scripts/build-recipe-library [RECIPE_CHECKOUT] (or set VONK_RECIPE_LIBRARY_ROOT)" >&2
+    exit 2
+fi
+root=$(cd "$root" && pwd -P)
+test -f "$root/tools/build-catalog-index" || {
+    echo "not a recipe checkout: $root" >&2
+    exit 2
+}
+exec uv run --python 3.14 --no-project --with-editable "$root/contracts" \
+    python "$root/tools/build-catalog-index"

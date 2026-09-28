@@ -162,7 +162,12 @@ class Settings:
     package_helper_receipt_private_key_path: Path | None = None
     host_runtime_grant_private_key_path: Path | None = None
     recipe_library_api_url: str = "https://api.github.com"
-    recipe_library_raw_url: str = "https://raw.githubusercontent.com"
+    # None downloads release assets directly from GitHub; the Compose
+    # deployment routes them through Caddy's repository-scoped relay.
+    recipe_library_asset_url: str | None = None
+    # "latest" follows the newest signed release; an exact vMAJOR.MINOR.PATCH
+    # tag holds the Controller on that release.
+    recipe_library_release: str = "latest"
     # Optional immutable package channel.  An empty value keeps development
     # and existing installations on the GitHub reader until publication is
     # configured.
@@ -493,15 +498,21 @@ class Settings:
             raise SettingsError(
                 "recipe library API URL must be GitHub or the fixed internal relay"
             )
-        recipe_library_raw_url = os.environ.get(
-            "VONK_RECIPE_LIBRARY_RAW_URL", "https://raw.githubusercontent.com"
-        ).rstrip("/")
-        if recipe_library_raw_url not in {
-            "https://raw.githubusercontent.com",
-            "http://caddy:8085",
-        }:
+        recipe_library_asset_url = (
+            os.environ.get("VONK_RECIPE_LIBRARY_ASSET_URL", "").rstrip("/") or None
+        )
+        if recipe_library_asset_url not in {None, "http://caddy:8085"}:
             raise SettingsError(
-                "recipe library raw URL must be GitHub or the fixed internal relay"
+                "recipe library asset URL must be empty or the fixed internal relay"
+            )
+        recipe_library_release = (
+            os.environ.get("VONK_RECIPE_LIBRARY_RELEASE", "latest").strip() or "latest"
+        )
+        if recipe_library_release != "latest" and not re.fullmatch(
+            r"v[0-9]+\.[0-9]+\.[0-9]+", recipe_library_release
+        ):
+            raise SettingsError(
+                "recipe library release must be latest or an exact vMAJOR.MINOR.PATCH tag"
             )
         recipe_library_package_url = (
             os.environ.get("VONK_RECIPE_LIBRARY_PACKAGE_URL", "").rstrip("/") or None
@@ -571,7 +582,8 @@ class Settings:
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
             recipe_library_api_url=recipe_library_api_url,
-            recipe_library_raw_url=recipe_library_raw_url,
+            recipe_library_asset_url=recipe_library_asset_url,
+            recipe_library_release=recipe_library_release,
             recipe_library_package_url=recipe_library_package_url,
             recipe_library_sync_interval_seconds=recipe_library_sync_interval_seconds,
             distributed_start_timeout_seconds=distributed_start_timeout_seconds,

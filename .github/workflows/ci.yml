@@ -300,6 +300,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
+      - name: Build recipe library index and packages
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Build and verify the Controller protocol wheel
         uses: ./.github/actions/prepare-control-wheel
       - name: Install pinned Rust toolchain
@@ -649,6 +651,14 @@ jobs:
           resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
           test "$resolved" = "$EXPECTED_REVISION"
           printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.14"
+          enable-cache: true
+      - name: Build recipe library index and packages
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Fetch catalog and authority validation sources
         shell: bash
         run: |
@@ -687,12 +697,6 @@ jobs:
                   timeout=30,
               )
           PY
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.14"
-          enable-cache: true
       - name: Build and verify the Controller protocol wheel
         uses: ./.github/actions/prepare-control-wheel
       - name: Install supported completion shells
@@ -804,6 +808,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
+      - name: Build recipe library index and packages
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Build and verify the Controller protocol wheel
         uses: ./.github/actions/prepare-control-wheel
       - name: Prepare locked Controller dependencies
@@ -901,6 +907,8 @@ jobs:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
+      - name: Build recipe library index and packages
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Build and verify the Controller protocol wheel
         uses: ./.github/actions/prepare-control-wheel
       - name: Set up Docker Buildx

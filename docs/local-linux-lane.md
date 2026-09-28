@@ -65,6 +65,8 @@ Useful flags:
   read-only at `/recipe-library`, and the lane refuses to run unless the
   checkout is at the revision in `tests/acceptance/recipe-library-revision.txt`
   (override with `--any-recipe-revision`). A dirty recipe checkout is reported.
+  Build its ignored catalog index and packages first with
+  `scripts/build-recipe-library`; the lane refuses a checkout without them.
 - **No root-owned files in the repository.** The container runs as
   `--user $(id -u):$(id -g)`, the project virtualenv is redirected to the cache
   (`UV_PROJECT_ENVIRONMENT`), and the cargo target directory, registry, uv

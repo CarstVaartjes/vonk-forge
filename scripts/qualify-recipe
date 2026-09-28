@@ -182,6 +182,11 @@ def _read_package(path: Path, recipe: object, content_sha256: object) -> Package
 
 
 def _catalog_package(library_root: Path, recipe: object, content_sha256: object) -> Path:
+    if not (library_root / "catalog-index.json").is_file():
+        raise QualificationError(
+            "recipe library index is not built; run "
+            f"scripts/build-recipe-library {library_root}"
+        )
     index = _load_json(library_root / "catalog-index.json")
     rows = index.get("recipes") if isinstance(index, Mapping) else None
     if not isinstance(rows, list):

@@ -1,5 +1,11 @@
 # Recipe library package channel
 
+Production Controllers read signed GitHub releases of the recipe repository
+(see [the recipe library](../operators/recipe-library.md#development-versus-production)).
+`VONK_RECIPE_LIBRARY_PACKAGE_URL` instead selects an operator-configured
+package channel for reviewed internal fixtures; the operator who configures it
+owns its integrity, because it carries no release signature.
+
 The platform publisher emits `index.json` and one immutable package for each
 recipe. The package channel is served at the configured origin with these
 routes:
