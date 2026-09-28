@@ -37,9 +37,6 @@ impl ProcessRunner for NoProcess {
 #[serde(deny_unknown_fields)]
 struct PersistBindingInput {
     request: RecipeStartRequest,
-    // Still sent by the observation bridge; the start result no longer echoes it.
-    #[allow(dead_code)]
-    artifact_set_digest: String,
     data_root: std::path::PathBuf,
 }
 

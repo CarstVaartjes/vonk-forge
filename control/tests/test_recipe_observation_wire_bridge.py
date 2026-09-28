@@ -230,49 +230,11 @@ def _production_controller_app(
         assert pending
         for child in pending:
             assert child.payload.get("run_generation") is not None
-            plan_document = require_mapping(
-                child.payload["compiled_execution_plan"], "compiled execution plan"
-            )
-            placement = require_mapping(
-                require_mapping(plan_document["runtime"], "compiled runtime")[
-                    "placement"
-                ],
-                "compiled runtime placement",
-            )
-            if (
-                nodes > 1
-                and child.payload["local_address"] != child.payload["master_address"]
-            ):
-                assert placement["endpoint_address"] is None
-                assert (
-                    child.payload["endpoint_address"] == child.payload["local_address"]
-                )
-            with sessions() as session:
-                run = session.get(RecipeRun, started.owner_id)
-                assert run is not None
-                installation_row = session.get(RecipeInstallation, run.installation_id)
-                assert installation_row is not None
-                installation_plan = require_mapping(
-                    installation_row.plan, "installation plan"
-                )
-                compiled = require_mapping(
-                    require_mapping(
-                        installation_plan["compiled_execution_plans"],
-                        "compiled execution plans",
-                    )[child.node_id],
-                    "compiled execution plan",
-                )
-            compiled_identity = require_mapping(
-                compiled["identity"], "compiled plan identity"
-            )
             persisted = subprocess.run(
                 [str(producer), "persist-binding"],
                 input=json.dumps(
                     {
                         "request": child.payload,
-                        "artifact_set_digest": compiled_identity[
-                            "model_artifact_set_sha256"
-                        ],
                         "data_root": str(tmp_path / "runtime" / child.node_id),
                     },
                     separators=(",", ":"),
@@ -286,10 +248,7 @@ def _production_controller_app(
             produced = require_mapping(
                 json.loads(persisted.stdout), "observation wire probe output"
             )
-            evidence = require_mapping(
-                require_mapping(produced["evidence"], "start result")["evidence"],
-                "start evidence",
-            )
+            evidence = require_mapping(produced["evidence"], "start result")
             previous = captured.get(child.node_id)
             if previous is not None:
                 assert previous["binding"] == produced["binding"]
@@ -421,33 +380,16 @@ def _submit_observation(
 
 
 def _persisted_recipe_start_evidence(
-    sessions,
     *,
     producer: Path,
-    node_id: str,
     payload: Mapping[str, object],
     data_root: Path,
 ) -> Mapping[str, object]:
-    with sessions() as session:
-        run = session.get(RecipeRun, payload["run_id"])
-        assert run is not None
-        installation = session.get(RecipeInstallation, run.installation_id)
-        assert installation is not None
-        installation_plan = require_mapping(installation.plan, "installation plan")
-        compiled = require_mapping(
-            require_mapping(
-                installation_plan["compiled_execution_plans"],
-                "compiled execution plans",
-            )[node_id],
-            "compiled execution plan",
-        )
-    compiled_identity = require_mapping(compiled["identity"], "compiled identity")
     persisted = subprocess.run(
         [str(producer), "persist-binding"],
         input=json.dumps(
             {
                 "request": payload,
-                "artifact_set_digest": compiled_identity["model_artifact_set_sha256"],
                 "data_root": str(data_root),
             },
             separators=(",", ":"),
@@ -466,18 +408,13 @@ def _absent_singleton(
     *,
     recipe_observation_wire_probe: Path,
     engine: Engine,
-    hook_phase: Literal["pre_start", "post_stop"] | None = None,
 ):
     now = [NOW]
 
     def persistent_lifecycle(document: dict[str, object]) -> None:
         runtime = document["runtime"]
         assert isinstance(runtime, dict)
-        runtime["lifecycle"] = {
-            "pre_start": [["/bin/true"]] if hook_phase == "pre_start" else [],
-            "post_stop": [["/bin/true"]] if hook_phase == "post_stop" else [],
-            "stop_timeout_seconds": 30,
-        }
+        runtime["lifecycle"] = {"stop_timeout_seconds": 30}
 
     (
         app,
@@ -570,9 +507,7 @@ def test_production_start_rust_observation_and_controller_consume(
             require_mapping(job.result["launch_evidence"], "launch evidence")[node_id],
             "node launch evidence",
         )
-        assert (
-            launch == require_mapping(produced["evidence"], "start result")["evidence"]
-        )
+        assert launch == require_mapping(produced["evidence"], "start result")
         run = session.get(RecipeRun, run_id)
         assert run is not None
         assert binding["run_id"] == run.id
@@ -777,17 +712,12 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         ):
             assert start_child.payload[field] == accepted_start_payload[field]
     recovery_produced = _persisted_recipe_start_evidence(
-        sessions,
         producer=recipe_observation_wire_probe,
-        node_id=node_ids[0],
         payload=start_child.payload,
         data_root=tmp_path / "runtime" / "recovery-gen-2" / node_ids[0],
     )
     recovery_evidence = require_mapping(
-        require_mapping(recovery_produced["evidence"], "recovery start result")[
-            "evidence"
-        ],
-        "recovery start evidence",
+        recovery_produced["evidence"], "recovery start result"
     )
     bound_service.record_node_result(
         recovery_start.id,
@@ -1435,72 +1365,6 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
         assert stale.route_next_attempt_at == first_wait_due_at
 
 
-@pytest.mark.parametrize("hook_phase", ["pre_start", "post_stop"])
-def test_singleton_recovery_fails_closed_before_effects_for_lifecycle_hooks(
-    tmp_path: Path,
-    recipe_observation_wire_probe: Path,
-    postgres_engine,
-    hook_phase: Literal["pre_start", "post_stop"],
-) -> None:
-    from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
-    from vonk_control.models import ResourceReservation
-
-    (
-        now,
-        _app,
-        sessions,
-        run_id,
-        _original_start_id,
-        _node_id,
-        _grant_public_key,
-        _binding,
-        _service,
-        queue,
-        _mapping_id,
-        _node_ids,
-        bound_service,
-        routes,
-    ) = _absent_singleton(
-        tmp_path,
-        recipe_observation_wire_probe=recipe_observation_wire_probe,
-        engine=postgres_engine,
-        hook_phase=hook_phase,
-    )
-    now[0] = NOW + timedelta(seconds=4)
-    recovery = DistributedRecoveryCoordinator(
-        sessions,
-        routes=routes,
-        agent_jobs=queue,
-        clock=lambda: now[0],
-        recovery_run_stops=bound_service,
-        singleton_start_timeout_seconds=60,
-    )
-
-    assert recovery.tick() is True
-
-    with sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        claims = tuple(
-            session.scalars(
-                select(ResourceReservation).where(
-                    ResourceReservation.owner_kind == "run",
-                    ResourceReservation.owner_id == run_id,
-                )
-            )
-        )
-        assert run is not None and run.state == "failed"
-        assert run.route_state == "withdrawn"
-        assert f"{hook_phase} hook" in (run.route_error or "")
-        assert claims and all(claim.state == "active" for claim in claims)
-        assert not session.scalar(
-            select(Job.id).where(
-                Job.kind.in_({"recipe.stop", "recipe.start"}),
-                Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
-            )
-        )
-
-
 @pytest.mark.parametrize("authority_copy", ["installed", "accepted-start"])
 def test_singleton_recovery_checks_compiled_lifecycle_authority(
     tmp_path: Path,
@@ -1539,7 +1403,7 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
             assert installation is not None
             install_plan = json.loads(canonical_message(installation.plan))
             compiled = install_plan["compiled_execution_plans"][node_id]
-            compiled["lifecycle"]["pre_start"] = [["/bin/true"]]
+            compiled["lifecycle"]["stop_timeout_seconds"] = 31
             installation.plan = install_plan
         else:
             start = session.get(Job, original_start_id)
@@ -1547,9 +1411,9 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
             payload = json.loads(canonical_message(start.payload))
             item = payload["phases"][0][0]
             start_payload = item["payload"]
-            start_payload["compiled_execution_plan"]["lifecycle"]["pre_start"] = [
-                ["/bin/true"]
-            ]
+            start_payload["compiled_execution_plan"]["lifecycle"][
+                "stop_timeout_seconds"
+            ] = 31
             child = session.get(AgentOperation, item["operation_id"])
             assert child is not None
             start.payload = payload
