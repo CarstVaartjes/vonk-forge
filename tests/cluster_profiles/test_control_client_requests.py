@@ -246,7 +246,6 @@ def test_cli_profile_endpoint_uses_generated_scoped_endpoint_client(
                     "node_id": "spk_" + "a" * 32,
                     "observed_at": "2026-09-23T12:59:30Z",
                     "plan_digest": "a" * 64,
-                    "state": "published",
                 },
             }
         ],

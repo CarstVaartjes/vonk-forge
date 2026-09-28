@@ -131,7 +131,6 @@ def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None
                             "node_id": "spk_" + "a" * 32,
                             "observed_at": "2026-09-10T00:00:00Z",
                             "plan_digest": "a" * 64,
-                            "state": "published",
                         },
                     }
                 ],

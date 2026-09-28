@@ -1760,7 +1760,6 @@ class _DurableOperationProjection:
             node_id=node_id,
             observed_at=observed_at,
             plan_digest=plan_digest,
-            state="published",
         )
 
     @staticmethod

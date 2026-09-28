@@ -107,10 +107,7 @@ def test_create_list_and_revoke_client_keys():
     assert [key["name"] for key in listed.json()["keys"]] == ["ci", "laptop"]
     assert secret not in listed.text
 
-    assert client.post("/api/key/ci/revoke").json() == {
-        "name": "ci",
-        "revoked": True,
-    }
+    assert client.post("/api/key/ci/revoke").json() == {"name": "ci"}
     assert set(litellm.keys) == {"laptop"}
     assert client.post("/api/key/ci/revoke").status_code == 404
 

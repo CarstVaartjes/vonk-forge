@@ -55,4 +55,3 @@ class EndpointResponse(StrictJSONModel):
     node_id: str = Field(pattern=_NODE_PATTERN)
     observed_at: str = Field(min_length=1, max_length=64)
     plan_digest: str = Field(pattern=_DIGEST_PATTERN)
-    state: str = Field(pattern=r"^published$")
