@@ -35,7 +35,6 @@ def _recipe_document(settings: dict[str, object]) -> dict[str, object]:
         "topology": {
             "node_count": 2,
             "parallelism": {
-                "world_size": 2,
                 "tensor": 2,
                 "pipeline": 1,
                 "data": 1,
@@ -80,7 +79,6 @@ def test_non_text_settings_may_omit_context_concurrency_and_batch() -> None:
             "topology": {
                 "node_count": 1,
                 "parallelism": {
-                    "world_size": 1,
                     "tensor": 1,
                     "pipeline": 1,
                     "data": 1,
@@ -115,15 +113,14 @@ def test_parallelism_has_one_topology_authority_and_duplicate_is_blocked() -> No
     )
 
 
-def test_declared_world_size_must_match_node_count_and_dimension_product() -> None:
+def test_dimension_product_must_match_node_count() -> None:
     result = resolve_effective_settings(
         {
             "settings": {"kind": "job", "knobs": {}},
             "topology": {
                 "node_count": 2,
                 "parallelism": {
-                    "world_size": 4,
-                    "tensor": 2,
+                    "tensor": 1,
                     "pipeline": 1,
                     "data": 1,
                     "backend": "local",

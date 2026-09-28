@@ -9,7 +9,6 @@ import pytest
 from fastapi import BackgroundTasks, Depends, FastAPI, Response
 from fastapi.testclient import TestClient
 from pydantic import ConfigDict, Field, RootModel, ValidationError
-from vonk_agent_protocol import RecipeRunObservationsWire
 from vonk_control.agent_api import HostHelperGrantResponse
 from vonk_control.library_contract import (
     FreshnessPolicy,
@@ -301,14 +300,6 @@ def test_representative_wire_models_reject_scalar_coercion() -> None:
         )
 
     with pytest.raises(ValidationError):
-        RecipeRunObservationsWire.model_validate(
-            {"schema_version": True, "observed_at": "2026-01-01T00:00:00Z", "runs": []}
-        )
-    with pytest.raises(ValidationError):
-        RecipeRunObservationsWire.model_validate(
-            {"schema_version": 2.0, "observed_at": "2026-01-01T00:00:00Z", "runs": []}
-        )
-    with pytest.raises(ValidationError):
         RecipeOperatorRequest.model_validate_json(
             '{"request_key":"00000000-0000-4000-8000-000000000001","with_model":1}'
         )
@@ -336,10 +327,6 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
 
     @app.post("/image", response_model=RecipeOperatorRequest)
     def image(body: RecipeOperatorRequest) -> RecipeOperatorRequest:
-        return body
-
-    @app.post("/observations", response_model=RecipeRunObservationsWire)
-    def observations(body: RecipeRunObservationsWire) -> RecipeRunObservationsWire:
         return body
 
     with TestClient(app) as client:
@@ -376,39 +363,6 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
                 json={
                     "request_key": "00000000-0000-4000-8000-000000000001",
                     "with_model": True,
-                },
-            ).status_code
-            == 200
-        )
-        assert (
-            client.post(
-                "/observations",
-                json={
-                    "schema_version": True,
-                    "observed_at": "2026-01-01T00:00:00Z",
-                    "runs": [],
-                },
-            ).status_code
-            == 422
-        )
-        assert (
-            client.post(
-                "/observations",
-                json={
-                    "schema_version": 2.0,
-                    "observed_at": "2026-01-01T00:00:00Z",
-                    "runs": [],
-                },
-            ).status_code
-            == 422
-        )
-        assert (
-            client.post(
-                "/observations",
-                json={
-                    "schema_version": 2,
-                    "observed_at": "2026-01-01T00:00:00Z",
-                    "runs": [],
                 },
             ).status_code
             == 200

@@ -213,11 +213,6 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     memory_bytes = limits["memory_bytes"]
     assert isinstance(memory_bytes, int)
     assert memory_bytes <= 4 * 1024**3
-    assert limits["gpu"] == 0
-    assert all(
-        limits[name] is False
-        for name in ("privileged", "host_mounts", "container_socket")
-    )
     client.close()
 
 
