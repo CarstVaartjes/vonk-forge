@@ -12,13 +12,16 @@ use vonk_agent_helper::operations::{
 };
 use vonk_agent_helper::protocol::{
     ContainerRuntimeAction, GrantClaims, GrantSignature, GrantVerifier, HostOperation,
-    PeerIdentity, RestartUnit, SignedGrant, canonical_signing_bytes, parse_request,
+    PeerIdentity, RestartUnit, SignedGrant, canonical_signing_bytes, parse_inspection_request,
+    parse_request,
 };
 use vonk_agent_protocol::generated::{
     ExecuteContainerRuntimeRequestOperation, InstallVonkDebOperation, RestartVonkUnitOperation,
     ScheduleRebootOperation,
 };
-use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest, canonical_json, hex_sha256};
+use vonk_agent_protocol::{
+    HostRuntimeAction, HostRuntimeRequest, RecipeRunInspectionRequest, canonical_json, hex_sha256,
+};
 
 const NOW: i64 = 2_100_000_000;
 const NODE_ID: &str = "spk_11111111111111111111111111111111";
@@ -928,6 +931,49 @@ fn helper_rejects_argv_only_start_and_stop_before_container_mutation() {
         runner.calls.lock().unwrap().is_empty(),
         "untyped argv must never authorize Docker"
     );
+}
+
+#[test]
+fn ungranted_inspection_frame_can_only_inspect() {
+    let (_temp, roots, runner, release) = fixture();
+    let executor = OperationExecutor::new(
+        roots.clone(),
+        release.public_key().as_ref(),
+        runner.clone(),
+        None,
+    )
+    .unwrap();
+    let mut cleanup = runtime_request(HostRuntimeAction::InstallationCleanup, Vec::new());
+    cleanup.installation_id =
+        Some(Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap());
+    let mut granted_only = Vec::new();
+    for request in [
+        runtime_request(HostRuntimeAction::Start, vec!["run".to_owned()]),
+        runtime_request(HostRuntimeAction::Stop, Vec::new()),
+        runtime_request(HostRuntimeAction::ImageImport, vec!["archive".to_owned()]),
+        cleanup,
+    ] {
+        let digest = write_runtime_request(&roots, &request);
+        assert!(executor.inspect_recipe_run(&digest).is_err());
+        granted_only.push(runtime_operation(&request, digest));
+    }
+    assert!(
+        runner.calls.lock().unwrap().is_empty(),
+        "an ungranted frame must never reach the container runtime for another action"
+    );
+
+    let frame = canonical_json(&RecipeRunInspectionRequest {
+        request_id: Uuid::new_v4(),
+        request_sha256: "a".repeat(64),
+    })
+    .unwrap();
+    assert!(parse_inspection_request(&frame).is_ok());
+    assert!(parse_request(&frame).is_err());
+    let mut widened: serde_json::Value = serde_json::from_slice(&frame).unwrap();
+    widened["action"] = serde_json::json!("stop");
+    assert!(parse_inspection_request(&canonical_json(&widened).unwrap()).is_err());
+    let grant = signed(granted_only.remove(0), &signer(1));
+    assert!(parse_inspection_request(&canonical_json(&grant).unwrap()).is_err());
 }
 
 #[test]
