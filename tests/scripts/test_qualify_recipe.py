@@ -94,32 +94,26 @@ def test_structural_qualification_uses_dynamic_published_catalog() -> None:
 # Each structural run revalidates the whole published library (~4 s), once per
 # contract shape.
 @pytest.mark.slow(40)
-def test_structural_examples_cover_source_job_and_dual_contracts() -> None:
+def test_structural_examples_cover_service_job_and_dual_contracts() -> None:
     root = _library_root()
     selected: dict[str, Path] = {}
     for path in _recipes(root):
         document = json.loads(path.read_text(encoding="utf-8"))
-        mode = document["execution"]["mode"]
         adapter = document["interfaces"][0]["adapter"]
         topology = document["topology"]["node_count"] > 1
-        selected.setdefault("source", path) if mode == "build" else None
+        selected.setdefault("service", path) if adapter == "openai" else None
         selected.setdefault("job", path) if adapter != "openai" else None
         selected.setdefault("dual", path) if topology else None
-        selected.setdefault("image", path) if mode == "image" else None
-    assert {"source", "job", "dual"} <= selected.keys()
+    assert {"service", "job", "dual"} <= selected.keys()
     for path in selected.values():
         payload = _run(path, root)
         assert payload["passed"] is True
         assert payload["physical_claim"] is False
         if path == selected.get("dual"):
             assert payload["compiled_roles"] > 1
-    if "image" in selected:
-        assert _run(selected["image"], root)["source_build"] is False
 
 
-def test_qualifier_local_http_persists_and_reloads_evidence_ledger(
-    tmp_path: Path,
-) -> None:
+def test_qualifier_runs_declared_local_http_serving_checks() -> None:
     root = _library_root()
     recipe = root / "recipes" / "qwen3-8-27b-nvfp4-dspark-sglang-single.json"
     if not recipe.is_file():
@@ -153,7 +147,6 @@ def test_qualifier_local_http_persists_and_reloads_evidence_ledger(
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     worker = Thread(target=server.serve_forever, daemon=True)
     worker.start()
-    ledger_path = tmp_path / "qualification.jsonl"
     try:
         result = subprocess.run(
             [
@@ -169,8 +162,6 @@ def test_qualifier_local_http_persists_and_reloads_evidence_ledger(
                 "structural",
                 "--serving-url",
                 f"http://127.0.0.1:{server.server_port}",
-                "--evidence-ledger",
-                str(ledger_path),
             ],
             cwd=ROOT,
             capture_output=True,
@@ -183,21 +174,10 @@ def test_qualifier_local_http_persists_and_reloads_evidence_ledger(
     assert result.returncode == 0, result.stderr or result.stdout
     payload = json.loads(result.stdout)
     assert payload["serving"]["scope"] == "local-http"
-    sys.path.insert(0, str(ROOT / "src"))
-    from cluster_profiles.fleet_qualification import EvidenceLedger
-
-    ledger = EvidenceLedger(ledger_path)
-    assert [row["event"] for row in ledger.records] == [
-        "step.started",
-        "step.completed",
-        "step.started",
-        "step.completed",
-    ]
-    records: list[dict[str, Any]] = ledger.records
-    assert all(row["payload"]["step"].startswith("serving.") for row in records)
+    assert len(payload["serving"]["checks"]) == 2
 
 
-def test_qualifier_local_http_failure_persists_failed_step(tmp_path: Path) -> None:
+def test_qualifier_reports_a_failed_local_http_serving_check() -> None:
     root = _library_root()
     recipe = root / "recipes" / "qwen3-8-27b-nvfp4-dspark-sglang-single.json"
     if not recipe.is_file():
@@ -226,7 +206,6 @@ def test_qualifier_local_http_failure_persists_failed_step(tmp_path: Path) -> No
     server = ThreadingHTTPServer(("127.0.0.1", 0), FailureHandler)
     worker = Thread(target=server.serve_forever, daemon=True)
     worker.start()
-    ledger_path = tmp_path / "qualification-failed.jsonl"
     try:
         result = subprocess.run(
             [
@@ -242,8 +221,6 @@ def test_qualifier_local_http_failure_persists_failed_step(tmp_path: Path) -> No
                 "structural",
                 "--serving-url",
                 f"http://127.0.0.1:{server.server_port}",
-                "--evidence-ledger",
-                str(ledger_path),
             ],
             cwd=ROOT,
             capture_output=True,
@@ -254,16 +231,7 @@ def test_qualifier_local_http_failure_persists_failed_step(tmp_path: Path) -> No
         server.shutdown()
         worker.join(timeout=2)
     assert result.returncode == 1
-    sys.path.insert(0, str(ROOT / "src"))
-    from cluster_profiles.fleet_qualification import EvidenceLedger
-
-    ledger = EvidenceLedger(ledger_path)
-    assert [row["event"] for row in ledger.records] == [
-        "step.started",
-        "step.completed",
-        "step.started",
-        "step.failed",
-    ]
+    assert json.loads(result.stdout)["status"] == "failed"
 
 
 def test_container_gate_reports_environment_without_spark_claim(tmp_path: Path) -> None:

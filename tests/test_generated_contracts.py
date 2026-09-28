@@ -69,7 +69,6 @@ def test_control_openapi_documents_are_current() -> None:
     expected = {
         module.OPENAPI: document(include_browser_auth=True),
         module.CLI_OPENAPI_OUTPUT: admin,
-        module.CLI_OPENAPI_MIRROR: admin,
     }
     stale = [
         str(path.relative_to(ROOT))
