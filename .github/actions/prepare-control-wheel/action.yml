@@ -1,0 +1,14 @@
+name: Prepare Controller protocol wheel
+description: Build the locked local agent protocol wheel and verify its digest
+inputs:
+  repository-root:
+    description: Repository checkout that owns the Controller lockfile
+    required: false
+    default: .
+runs:
+  using: composite
+  steps:
+    - name: Build protocol wheel and verify the Controller lock hash
+      shell: bash
+      working-directory: ${{ inputs.repository-root }}
+      run: scripts/build-control-wheel

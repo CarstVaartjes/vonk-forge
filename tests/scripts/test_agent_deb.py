@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
+
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "scripts/build-agent-deb"
 VERIFY = ROOT / "scripts/verify-agent-deb"

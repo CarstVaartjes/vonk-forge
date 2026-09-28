@@ -4,6 +4,10 @@
 .dev/
 /secrets/
 /target/
+# Protocol wheels and SPDX inventories are generated in CI or release work.
+/inventory/wheels/vonk_agent_protocol-*.whl
+/inventory/sbom/*.spdx.json
+/inventory/sbom/manifest.json
 .env
 .env.*
 !.env.example

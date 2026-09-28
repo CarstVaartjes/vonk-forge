@@ -9816,6 +9816,28 @@
             "title": "Attempts",
             "type": "object"
           },
+          "last_failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure Code"
+          },
+          "last_failure_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure Detail"
+          },
           "next_check_at": {
             "anyOf": [
               {

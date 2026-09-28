@@ -245,8 +245,8 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
   async function load() {
     if (selectedNumber === undefined || (!pendingLoad && !preview?.allowed) || loadingProfile) return;
     setLoadingProfile(true); setError("");
+    let pending = pendingLoad;
     try {
-      let pending = pendingLoad;
       if (pending) {
         try {
           const existing = await api.profileApplicationByRequest(selectedNumber, pending.requestKey);
@@ -263,9 +263,25 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     }
     catch (value) {
       if (value instanceof ApiError && value.status === 409) {
-        setPendingLoad(undefined);
-        try { setPreview(await api.previewProfile(selectedNumber)); }
-        catch (refreshError) { setError(refreshError instanceof Error ? refreshError.message : "The profile preview could not be refreshed."); }
+        try {
+          const current = await api.previewProfile(selectedNumber);
+          setPreview(current);
+          if (current.allowed && pending) {
+            const resumed = await submitProfileLoad(api, selectedNumber, {
+              requestKey: pending.requestKey,
+              planDigest: current.plan_digest,
+            });
+            setApplication(resumed);
+            setPendingLoad(undefined);
+            return;
+          }
+          setPendingLoad(undefined);
+          setError(current.reasons[0]?.detail ?? "The current profile plan is waiting for an available dependency.");
+          return;
+        } catch (refreshError) {
+          setError(refreshError instanceof Error ? refreshError.message : "The latest profile plan could not be applied.");
+          return;
+        }
       }
       setError(value instanceof Error ? value.message : "The profile could not be loaded.");
     }

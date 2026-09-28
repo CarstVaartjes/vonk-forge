@@ -12,32 +12,58 @@ from __future__ import annotations
 
 import re
 
+# Codes a producer actually emits for a real security refusal, including the
+# agent's `helper_<code>` preflight codes, the helper's un-prefixed wire
+# rejection codes, the agent's `runtime_helper_<cause>` receipt causes, and the
+# controller/agent identity, enrollment and certificate codes.
 _SECURITY_CODES = frozenset(
     {
         "401",
         "403",
-        "unauthorized",
-        "forbidden",
-        "permission_denied",
+        "agent.certificate.rotation.conflict",
         "agent.enrollment.submit.rejected",
         "agent.identity_mismatch",
         "agent.tombstone_fenced",
         "catalog.authentication_required",
         "controller.authentication_required",
         "controller.fleet.enrollment_denied",
+        "controller.request_rejected",
         "distribution.revoked",
+        "forbidden",
+        "grant_invalid",
+        "grant_node_mismatch",
+        "grant_unauthorized",
         "helper.authorization_invalid",
+        "helper_grant_invalid",
+        "helper_grant_node_mismatch",
+        "helper_grant_unauthorized",
+        "helper_inspection_receipt_invalid",
+        "helper_observation_receipt_invalid",
+        "helper_operation_invalid_artifact",
+        "helper_peer_identity_invalid",
+        "helper_request_installation_identity_invalid",
+        "helper_request_plan_binding_invalid",
+        "helper_request_replayed",
+        "helper_runtime_image_identity_invalid",
         "host_helper.authority_denied",
         "local.identity_expired",
         "local.identity_failed",
         "model_cache.credentials_denied",
         "model_cache.credentials_invalid",
         "model_cache.source_access_denied",
+        "operation_invalid_artifact",
+        "peer_identity_invalid",
+        "permission_denied",
         "recipe_update.authority_denied",
+        "request_replayed",
+        "runtime_helper_inspection_receipt_invalid",
+        "runtime_helper_observation_receipt_invalid",
         "runtime_image.authorization_invalid",
         "runtime_image.authorization_revoked",
+        "runtime_image_identity_invalid",
         "tuf.metadata_invalid",
         "tuf.signature_invalid",
+        "unauthorized",
     }
 )
 # Suffixes of the same families, so a new producer of an existing boundary is

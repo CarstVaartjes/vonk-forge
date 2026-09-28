@@ -242,11 +242,15 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
     workspace.mkdir(parents=True, exist_ok=True)
     wheel_directory = workspace / "wheel"
     wheel_directory.mkdir()
-    environment = {
-        **os.environ,
-        "VONK_BUILD_SOURCE_SHA": "d" * 40,
-        "VONK_BUILD_RELEASE_VERSION": "0.1.1",
-    }
+    from tests.subprocess_environment import isolated_environment
+
+    environment = isolated_environment(
+        workspace / "build-home",
+        extra={
+            "VONK_BUILD_SOURCE_SHA": "d" * 40,
+            "VONK_BUILD_RELEASE_VERSION": "0.1.1",
+        },
+    )
     built = subprocess.run(
         [uv, "build", "--wheel", "--offline", "--out-dir", str(wheel_directory)],
         cwd=root,
@@ -286,6 +290,15 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
         timeout=180,
         check=False,
     )
+    if installed.returncode != 0 and (
+        "not found in the cache" in installed.stderr
+        or "network was disabled" in installed.stderr
+    ):
+        from tests.subprocess_environment import prerequisite_unavailable
+
+        prerequisite_unavailable(
+            "needs_uv_cache: offline installed-CLI setup requires dependency wheels in the uv cache"
+        )
     assert installed.returncode == 0, installed.stderr
     executable = venv / "bin" / "vonkctl"
     assert executable.is_file()
@@ -320,21 +333,25 @@ def _process_environment(
     token.write_text(headers["Authorization"].removeprefix("Bearer "), encoding="utf-8")
     token.chmod(0o600)
     default_recipe_root = "/opt/vonk-forge-recipes"
-    return {
-        **os.environ,
-        "PYTHONPATH": "",
-        "VONK_CONTROL_URL": url,
-        "VONK_CONTROL_TOKEN_FILE": str(token),
-        "VONK_CLI_UPDATE_NOTICES": "0",
-        "VONK_RECIPE_LIBRARY_ROOT": os.environ.get(
-            "VONK_RECIPE_LIBRARY_ROOT", default_recipe_root
-        ),
-        "SSL_CERT_FILE": str(certificate),
-        "NO_PROXY": "127.0.0.1,localhost",
-        "no_proxy": "127.0.0.1,localhost",
-        "HTTPS_PROXY": "",
-        "https_proxy": "",
-    }
+    from tests.subprocess_environment import isolated_environment
+
+    return isolated_environment(
+        Path(tmp_path) / "cli-home",
+        extra={
+            "PYTHONPATH": "",
+            "VONK_CONTROL_URL": url,
+            "VONK_CONTROL_TOKEN_FILE": str(token),
+            "VONK_CLI_UPDATE_NOTICES": "0",
+            "VONK_RECIPE_LIBRARY_ROOT": os.environ.get(
+                "VONK_RECIPE_LIBRARY_ROOT", default_recipe_root
+            ),
+            "SSL_CERT_FILE": str(certificate),
+            "NO_PROXY": "127.0.0.1,localhost",
+            "no_proxy": "127.0.0.1,localhost",
+            "HTTPS_PROXY": "",
+            "https_proxy": "",
+        },
+    )
 
 
 def test_process_environment_preserves_recipe_library_root_override(
@@ -361,6 +378,7 @@ def _run_pty(
     *,
     answer: str | None = "yes",
     interrupt: bool = False,
+    review_content: str,
 ) -> tuple[int, str, str]:
     master, slave = pty.openpty()
     process = subprocess.Popen(
@@ -389,7 +407,7 @@ def _run_pty(
                 if not chunk and process.poll() is not None:
                     break
                 transcript.extend(chunk)
-                if not answer_sent and b"[y/N]" in transcript:
+                if not answer_sent and review_content.encode() in transcript:
                     if interrupt:
                         process.send_signal(signal.SIGINT)
                     elif answer is None:
@@ -430,8 +448,6 @@ def test_installed_interactive_review_recovers_the_original_load_after_edit(
             "1",
             "profile",
             "load",
-            "--expected-plan",
-            digest,
             "--request-key",
             KEY,
             "--detach",
@@ -442,11 +458,11 @@ def test_installed_interactive_review_recovers_the_original_load_after_edit(
             environment,
             tmp_path,
             answer="no",
+            review_content=digest,
         )
         assert rejected_status == 2
         assert not rejected_stdout
-        assert "Ready for review" in rejected_stderr
-        assert rejected_stderr.count("[y/N]") == 1
+        assert digest in rejected_stderr
         assert state.calls == [("POST", "/api/profile/1/preview", None)], (
             rejected_stderr
         )
@@ -459,12 +475,12 @@ def test_installed_interactive_review_recovers_the_original_load_after_edit(
             arguments,
             environment,
             tmp_path,
+            review_content=digest,
         )
 
     assert status == 0
-    assert "Ready for review" in stderr
-    assert digest in stderr and stderr.count("[y/N]") == 1
-    assert "Ready for review" not in stdout
+    assert digest in stderr
+    assert digest not in stdout
     assert state.profile_edit_status == 200
     assert state.accepted is not None
     assert state.accepted["request_key"] == KEY
@@ -495,7 +511,7 @@ def test_installed_interactive_review_recovers_the_original_load_after_edit(
 
 
 @pytest.mark.lane
-def test_installed_json_no_input_load_requires_reviewed_digest_and_emits_one_result(
+def test_installed_json_no_input_load_uses_latest_plan_and_emits_one_result(
     installed_vonkctl: Path,
     postgres_engine,
     tmp_path: Path,
@@ -509,30 +525,6 @@ def test_installed_json_no_input_load_requires_reviewed_digest_and_emits_one_res
         state,
     ):
         environment = _process_environment(tmp_path, url, certificate, headers)
-        missing_review = subprocess.run(
-            [
-                str(installed_vonkctl),
-                "--no-input",
-                "--json",
-                "--profile",
-                "1",
-                "profile",
-                "load",
-                "--yes",
-                "--detach",
-            ],
-            env=environment,
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-        assert missing_review.returncode == 2
-        refusal = json.loads(missing_review.stdout)
-        assert "--expected-plan DIGEST" in refusal["error"]
-        assert not state.calls
-
         completed = subprocess.run(
             [
                 str(installed_vonkctl),
@@ -542,8 +534,6 @@ def test_installed_json_no_input_load_requires_reviewed_digest_and_emits_one_res
                 "1",
                 "profile",
                 "load",
-                "--expected-plan",
-                digest,
                 "--yes",
                 "--request-key",
                 KEY,
@@ -569,10 +559,11 @@ def test_installed_json_no_input_load_requires_reviewed_digest_and_emits_one_res
     token_value = headers["Authorization"].removeprefix("Bearer ")
     assert token_value not in completed.stdout + completed.stderr
     assert [(method, path) for method, path, _ in state.calls] == [
+        ("POST", "/api/profile/1/preview"),
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/1/requests/{KEY}"),
     ]
-    assert state.calls[0][2] == {
+    assert state.calls[1][2] == {
         "request_key": KEY,
         "plan_digest": digest,
     }

@@ -1051,6 +1051,7 @@ class _ExistingEndpoint:
         return {"api_base": "http://127.0.0.1:8000/v1"}
 
 
+@pytest.mark.needs_recipe_library
 def test_manifest_loads_confined_parent_references_and_binds_all_local_inputs(
     tmp_path: Path,
 ) -> None:
@@ -1069,6 +1070,7 @@ def test_manifest_loads_confined_parent_references_and_binds_all_local_inputs(
     )
 
 
+@pytest.mark.needs_recipe_library
 def test_manifest_uses_canonical_default_for_omitted_operation_timeout(
     tmp_path: Path,
 ) -> None:
@@ -1082,6 +1084,7 @@ def test_manifest_uses_canonical_default_for_omitted_operation_timeout(
 @pytest.mark.parametrize(
     "field", ["operation_timeout_seconds", "poll_interval_seconds"]
 )
+@pytest.mark.needs_recipe_library
 def test_manifest_rejects_integral_float_for_strict_integer_option(
     field: str, tmp_path: Path
 ) -> None:
@@ -1094,6 +1097,7 @@ def test_manifest_rejects_integral_float_for_strict_integer_option(
         campaign_cli.load_manifest(campaign_path, tmp_path)
 
 
+@pytest.mark.needs_recipe_library
 def test_shared_recovery_group_requires_one_runtime_topology_identity(
     tmp_path: Path,
 ) -> None:
@@ -1177,6 +1181,7 @@ def test_shared_recovery_group_requires_one_runtime_topology_identity(
         campaign_cli._load_authority(mutated_authority)
 
 
+@pytest.mark.needs_recipe_library
 def test_repository_binding_rejects_a_swapped_valid_recipe_package(
     tmp_path: Path,
 ) -> None:
@@ -1204,6 +1209,7 @@ def test_repository_binding_rejects_a_swapped_valid_recipe_package(
         campaign_cli._bind_repository_inputs(manifest, tmp_path, fixtures)
 
 
+@pytest.mark.needs_recipe_library
 def test_repository_binding_rejects_valid_archive_for_another_recipe(
     tmp_path: Path,
 ) -> None:
@@ -1237,6 +1243,7 @@ def test_repository_binding_rejects_valid_archive_for_another_recipe(
         ("extra-member", "member is outside declared namespaces"),
     ],
 )
+@pytest.mark.needs_recipe_library
 def test_repository_binding_rejects_rehashed_packages_outside_recipe_closure(
     tmp_path: Path, mutation: str, message: str
 ) -> None:
@@ -1281,6 +1288,7 @@ def test_canonical_recipe_git_reads_are_bounded_and_fail_actionably(
     assert environment["GIT_NO_LAZY_FETCH"] == "1"
 
 
+@pytest.mark.needs_recipe_library
 def test_repository_binding_does_not_execute_tampered_working_tree_tools(
     tmp_path: Path,
 ) -> None:
@@ -1366,6 +1374,7 @@ def test_repository_binding_does_not_execute_tampered_working_tree_tools(
     assert not replacement_contracts_marker.exists()
 
 
+@pytest.mark.needs_recipe_library
 def test_manifest_rejects_parent_references_that_escape_or_follow_symlinks(
     tmp_path: Path,
 ) -> None:
@@ -2693,6 +2702,7 @@ def _paired_application_identity(
     }
 
 
+@pytest.mark.needs_recipe_library
 def test_generated_family_authority_is_consumable_with_complete_scope_accounting() -> (
     None
 ):
@@ -2724,6 +2734,7 @@ def test_generated_family_authority_is_consumable_with_complete_scope_accounting
     assert [item.node_count for item in paired_batch.assignments] == [1, 1]
 
 
+@pytest.mark.needs_recipe_library
 def test_generated_family_authority_rejects_unreferenced_recovery_definition(
     tmp_path: Path,
 ) -> None:

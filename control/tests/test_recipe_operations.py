@@ -7,6 +7,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, wait
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -56,6 +57,7 @@ from vonk_control.host_helper_authority import (
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 from vonk_control.install_admission import (
     AdmissionReason,
+    InstallAdmissionBusy,
     InstallAdmissionService,
     InstallNodePlan,
     InstallPlan,
@@ -90,7 +92,6 @@ from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import (
-    RecipeInstallPreflightExpired,
     RecipeOperationConflict,
     RecipeOperationService,
     _recipe_model_identities,
@@ -1580,6 +1581,40 @@ def _wait_for_postgres_block(engine, *, blocked_pid: int, blocker_pid: int) -> N
     pytest.fail("recipe operation never became database-lock blocked")
 
 
+def test_install_replay_is_bound_to_mapping_and_build_identity(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(tmp_path)
+    plan = service.preview_install(mapping_id, build_id)
+    operation = service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="7" * 36
+    )
+    assert (
+        service.install(
+            plan, plan_digest=plan.plan_digest, actor="admin", request_id="7" * 36
+        )
+        == operation
+    )
+    for other in (
+        replace(plan, mapping_id=str(uuid.uuid4())),
+        replace(plan, recipe_build_id=str(uuid.uuid4())),
+    ):
+        with pytest.raises(
+            RecipeOperationConflict, match="request key was already used differently"
+        ):
+            service.install(
+                other,
+                plan_digest=plan.plan_digest,
+                actor="admin",
+                request_id="7" * 36,
+            )
+    with sessions() as session:
+        assert (
+            len(list(session.scalars(select(Job).where(Job.kind == "recipe.install"))))
+            == 1
+        )
+
+
 def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) -> None:
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -2617,7 +2652,7 @@ def test_run_admission_and_start_queue_roll_back_together(tmp_path: Path) -> Non
         assert session.scalar(select(Job).where(Job.request_id == "c" * 36)) is None
 
 
-def test_start_rejects_alias_mismatched_digest_before_side_effects_and_replays_exactly(
+def test_start_uses_current_alias_and_replays_by_request_identity(
     tmp_path: Path,
 ) -> None:
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -2627,86 +2662,23 @@ def test_start_rejects_alias_mismatched_digest_before_side_effects_and_replays_e
     qwen = service.preview_run(installation.owner_id, "qwen")
     alternate = service.preview_run(installation.owner_id, "qwen-alt")
 
-    assert qwen.plan_digest != alternate.plan_digest
-    with pytest.raises(RecipeOperationConflict, match="does not match preview"):
-        service.start(
-            alternate,
-            plan_digest=qwen.plan_digest,
-            actor="admin",
-            request_id="0" * 35 + "2",
-        )
-
-    with sessions() as session:
-        assert tuple(session.scalars(select(RecipeRun))) == ()
-        assert (
-            tuple(
-                session.scalars(
-                    select(ResourceReservation).where(
-                        ResourceReservation.owner_kind == "run"
-                    )
-                )
-            )
-            == ()
-        )
-        assert (
-            tuple(session.scalars(select(Job).where(Job.kind == "recipe.start"))) == ()
-        )
-        assert (
-            tuple(
-                session.scalars(
-                    select(AgentOperation).where(AgentOperation.kind == "recipe.start")
-                )
-            )
-            == ()
-        )
-    assert queue.available == 1
-
     started = service.start(
-        qwen,
+        alternate,
         plan_digest=qwen.plan_digest,
         actor="admin",
-        request_id="0" * 35 + "3",
+        request_id="0" * 35 + "2",
     )
-    post_admission = service.preview_run(installation.owner_id, "qwen")
-    assert post_admission.allowed is False
-    assert post_admission.plan_digest != qwen.plan_digest
-
-    replayed = service.replay_start(
-        installation.owner_id,
-        "qwen",
+    replayed = service.start(
+        alternate,
         plan_digest=qwen.plan_digest,
-        request_id="0" * 35 + "3",
+        actor="admin",
+        request_id="0" * 35 + "2",
     )
-
     assert replayed == started
     assert queue.available == 2
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
-        job = session.get(Job, started.id)
-        child = session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
-        )
-        assert run is not None and job is not None and child is not None
-        assert run.alias == qwen.alias == run.plan["alias"] == child.payload["alias"]
-        assert job.payload["plan_digest"] == qwen.plan_digest == started.plan_digest
-
-    assert (
-        service.replay_start(
-            installation.owner_id,
-            "qwen-alt",
-            plan_digest=qwen.plan_digest,
-            request_id="0" * 35 + "3",
-        )
-        is None
-    )
-    mismatched = service.preview_run(installation.owner_id, "qwen-alt")
-    with pytest.raises(RecipeOperationConflict, match="does not match preview"):
-        service.start(
-            mismatched,
-            plan_digest=qwen.plan_digest,
-            actor="admin",
-            request_id="0" * 35 + "3",
-        )
+        assert run is not None and run.alias == alternate.alias
 
     with sessions() as session:
         runs = tuple(session.scalars(select(RecipeRun)))
@@ -2726,6 +2698,70 @@ def test_start_rejects_alias_mismatched_digest_before_side_effects_and_replays_e
     assert len(runs) == len(jobs) == len(operations) == 1
     assert len(reservations) == 2
     assert queue.available == 2
+
+
+def test_start_and_activate_replay_require_the_same_installation(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="0" * 35 + "3"
+    )
+    plan = service.preview_run(installation.owner_id, "qwen")
+    started = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="0" * 35 + "4",
+    )
+    activation_request_id = "0" * 35 + "5"
+    activation_payload = {
+        "schema_version": 1,
+        "owner_kind": "run",
+        "owner_id": started.owner_id,
+        "plan_digest": plan.plan_digest,
+        "execution_mode": "one-shot-jobs",
+    }
+    with sessions.begin() as session:
+        session.add(
+            Job(
+                id=str(uuid.uuid4()),
+                request_id=activation_request_id,
+                kind="recipe.job.activate.v1",
+                state="succeeded",
+                actor="admin",
+                authority_revision="",
+                targets=list(nodes),
+                payload_digest=hashlib.sha256(
+                    canonical_message(activation_payload)
+                ).hexdigest(),
+                payload=activation_payload,
+                result={"activated": True},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+
+    other_installation_id = str(uuid.uuid4())
+    other_plan = replace(plan, installation_id=other_installation_id)
+    with pytest.raises(
+        RecipeOperationConflict, match="request key was already used differently"
+    ):
+        service.start(
+            other_plan,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="0" * 35 + "4",
+        )
+    with pytest.raises(
+        RecipeOperationConflict, match="request key was already used differently"
+    ):
+        service.activate_job_run(
+            other_plan,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=activation_request_id,
+        )
 
 
 def test_adopt_start_binds_the_durable_child_without_reproducing_its_digest(
@@ -3141,10 +3177,7 @@ def test_stop_preview_is_stable_exact_and_defers_capacity_release(
     assert len(first.plan_digest) == 64
 
 
-@pytest.mark.parametrize("changed_fact", ("state", "rank", "route", "reservation"))
-def test_stop_apply_rejects_stale_plan_before_route_or_queue_side_effects(
-    tmp_path: Path, changed_fact: str
-) -> None:
+def test_stop_replans_when_the_submitted_digest_is_old(tmp_path: Path) -> None:
     withdrawn: list[str] = []
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, route_withdrawer=withdrawn.append
@@ -3159,42 +3192,18 @@ def test_stop_apply_rejects_stale_plan_before_route_or_queue_side_effects(
         nodes,
         request_id="3" * 35 + "b",
     )
-    plan = service.preview_stop(run.owner_id)
-    with sessions.begin() as session:
-        stored_run = session.get(RecipeRun, run.owner_id)
-        rank = session.scalar(select(RunNode).where(RunNode.run_id == run.owner_id))
-        reservation = session.scalar(
-            select(ResourceReservation).where(
-                ResourceReservation.owner_kind == "run",
-                ResourceReservation.owner_id == run.owner_id,
-                ResourceReservation.kind == "unified-memory",
-            )
-        )
-        assert stored_run is not None and rank is not None and reservation is not None
-        if changed_fact == "state":
-            stored_run.state = "lost"
-        elif changed_fact == "rank":
-            rank.role = "changed"
-        elif changed_fact == "route":
-            stored_run.route_state = "failed"
-        else:
-            reservation.amount_bytes += 1
+    result = service.stop(
+        run.owner_id,
+        plan_digest="0" * 64,
+        actor="admin",
+        request_id="3" * 35 + "c",
+    )
 
-    changed = service.preview_stop(run.owner_id)
-    assert changed.plan_digest != plan.plan_digest
-    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
-        service.stop(
-            run.owner_id,
-            plan_digest=plan.plan_digest,
-            actor="admin",
-            request_id="3" * 35 + "c",
-        )
-
-    assert withdrawn == []
+    assert result.state == "running"
+    assert withdrawn == [run.owner_id]
     with sessions() as session:
-        assert (
-            session.scalar(select(Job).where(Job.request_id == "3" * 35 + "c")) is None
-        )
+        queued = session.scalar(select(Job).where(Job.request_id == "3" * 35 + "c"))
+        assert queued is not None
 
 
 def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
@@ -4469,7 +4478,7 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
         ) == {"uninstalled"}
 
 
-def test_uninstall_rejects_stale_bytes_before_transactional_full_group_queue(
+def test_uninstall_replans_after_installation_observation_changes(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -4493,30 +4502,17 @@ def test_uninstall_rejects_stale_bytes_before_transactional_full_group_queue(
         != stale.plan_digest
     )
 
-    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
-        service.uninstall(
-            installation.owner_id,
-            plan_digest=stale.plan_digest,
-            actor="admin",
-            request_id="8" * 35 + "f",
-        )
-    with sessions() as session:
-        assert (
-            session.scalar(select(Job).where(Job.request_id == "8" * 35 + "f")) is None
-        )
-
-    fresh = service.preview_uninstall(installation.owner_id)
     operation = service.uninstall(
         installation.owner_id,
-        plan_digest=fresh.plan_digest,
+        plan_digest=stale.plan_digest,
         actor="admin",
-        request_id="8" * 35 + "0",
+        request_id="8" * 35 + "f",
     )
     replay = service.uninstall(
         installation.owner_id,
-        plan_digest=fresh.plan_digest,
+        plan_digest="0" * 64,
         actor="admin",
-        request_id="8" * 35 + "0",
+        request_id="8" * 35 + "f",
     )
     assert replay == operation
     with sessions() as session:
@@ -6855,20 +6851,18 @@ def test_postgres_start_bounds_uncommitted_job_request_unique_wait(
         )
 
 
-def test_changed_plan_or_reused_request_key_is_rejected(tmp_path: Path) -> None:
+def test_install_ignores_old_digest_but_request_keys_remain_scoped(
+    tmp_path: Path,
+) -> None:
     _sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(tmp_path)
     plan = service.preview_install(mapping_id, build_id)
-    with pytest.raises(RecipeOperationConflict, match="plan digest"):
-        service.install(plan, plan_digest="0" * 64, actor="admin", request_id="9" * 36)
-    service.install(
-        plan, plan_digest=plan.plan_digest, actor="admin", request_id="a" * 36
-    )
+    service.install(plan, plan_digest="0" * 64, actor="admin", request_id="9" * 36)
     with pytest.raises(RecipeOperationConflict, match="request key"):
         service.stop(
             "f" * 36,
             plan_digest="0" * 64,
             actor="admin",
-            request_id="a" * 36,
+            request_id="9" * 36,
         )
 
 
@@ -6916,15 +6910,9 @@ def _blocked_install_plan(
     )
 
 
-def test_prepare_installation_hands_a_refreshable_preflight_refusal_to_the_probe() -> (
-    None
-):
-    # The run-switch compile phase re-plans and then prepares the plan it just
-    # received.  A plan whose only objection is preflight evidence must reach
-    # the caller's bounded re-probe; rejecting it here dead-ended the whole
-    # application on an observation the controller can simply refresh.
+def test_prepare_installation_classifies_preflight_as_retryable_wait() -> None:
     service = object.__new__(RecipeOperationService)
-    with pytest.raises(RecipeInstallPreflightExpired):
+    with pytest.raises(InstallAdmissionBusy):
         service.prepare_installation(
             _blocked_install_plan(("runtime_preflight.host_changed",)), actor="admin"
         )
@@ -6941,7 +6929,6 @@ def test_prepare_installation_keeps_a_real_blocker_terminal() -> None:
             ),
             actor="admin",
         )
-    assert not isinstance(error.value, RecipeInstallPreflightExpired)
     assert "install plan is blocked" in str(error.value)
 
 

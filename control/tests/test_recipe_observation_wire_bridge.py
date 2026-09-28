@@ -5,6 +5,7 @@ import json
 import multiprocessing
 import os
 import subprocess
+import tempfile
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -492,21 +493,28 @@ def _submit_signed_observation(
         )
         assert grant_response.status_code == 200, grant_response.text
         grant = SignedHostHelperGrant.parse(grant_response.json()["grant"])
-        helper = subprocess.run(
-            [str(host_helper_wire_probe)],
-            input=canonical_message(grant.to_mapping()).decode() + "\n",
-            text=True,
-            capture_output=True,
-            env={
-                **os.environ,
-                "VONK_HOST_HELPER_GRANT_PUBLIC_KEY": grant_public_key.hex(),
-                "VONK_HOST_HELPER_WIRE_NOW": str(int(observed_at.timestamp()) - 1),
-                "VONK_HOST_HELPER_WIRE_OUTCOME": (
-                    "running" if process_running else "not-running"
+        from tests.subprocess_environment import isolated_environment
+
+        with tempfile.TemporaryDirectory(prefix="vonk-host-helper-") as child_home:
+            helper = subprocess.run(
+                [str(host_helper_wire_probe)],
+                input=canonical_message(grant.to_mapping()).decode() + "\n",
+                text=True,
+                capture_output=True,
+                env=isolated_environment(
+                    Path(child_home),
+                    extra={
+                        "VONK_HOST_HELPER_GRANT_PUBLIC_KEY": grant_public_key.hex(),
+                        "VONK_HOST_HELPER_WIRE_NOW": str(
+                            int(observed_at.timestamp()) - 1
+                        ),
+                        "VONK_HOST_HELPER_WIRE_OUTCOME": (
+                            "running" if process_running else "not-running"
+                        ),
+                    },
                 ),
-            },
-            check=False,
-        )
+                check=False,
+            )
         assert helper.returncode == 0, helper.stderr
         receipt = json.loads(helper.stdout)
         payload = {

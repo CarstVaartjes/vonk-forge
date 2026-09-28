@@ -19,10 +19,17 @@ def run_acceptance(
     if collect_only:
         command.append("--collect-only")
     command.append(str(test_file))
-    environment = os.environ.copy()
-    environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
-    environment.pop("PYTEST_ADDOPTS", None)
-    environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    environment = {
+        "HOME": str(tmp_path),
+        "PATH": os.defpath,
+        "TMPDIR": str(tmp_path),
+        "XDG_CONFIG_HOME": str(tmp_path / "xdg-config"),
+        "XDG_CACHE_HOME": str(tmp_path / "xdg-cache"),
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+    }
     return subprocess.run(
         command,
         cwd=tmp_path,

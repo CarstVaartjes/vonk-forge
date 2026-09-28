@@ -81,6 +81,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchRetention,
+    RunSwitchRuntimePlanResult,
     RunSwitchStartResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchUninstallResult,
@@ -2042,6 +2043,14 @@ def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
     assert installations[0].plan_digest == admitted.plan_digest
     assert installations[0].mapping_generation == admitted.mapping_generation
     assert installations[0].plan["compiled_execution_plans"]
+    completed = service.get(switch.operation.operation_id)
+    assert completed.result is not None
+    prepared = next(
+        result
+        for result in completed.result.phase_results
+        if isinstance(result, RunSwitchRuntimePlanResult)
+    )
+    assert prepared.install_plan_digest == installations[0].plan_digest
 
 
 def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
@@ -2072,7 +2081,34 @@ def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
         if switch.executor.events.count("runtime-install") >= 2:
             break
     assert switch.executor.events.count("runtime-install") == 2
-    assert switch.service.get(switch.operation.operation_id).state != "failed"
+    recovered = switch.service.get(switch.operation.operation_id)
+    assert recovered.state != "failed"
+    assert recovered.result is not None and recovered.result.retry_attempt is None
+
+
+def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
+    tmp_path: Path,
+) -> None:
+    switch = _cold_compile_switch(tmp_path)
+    expected_delays = [5, 10, 20, 40, 80, 160, 300, 300, 300]
+    observed_delays: list[int] = []
+    for delay in expected_delays:
+        current = switch.service.get(switch.operation.operation_id)
+        assert current.result is not None
+        assert switch.service._hold_capacity_writer(
+            switch.operation.operation_id,
+            current.result.phase_index,
+            current.result.item_index,
+            reason="install.capacity_busy",
+        )
+        view = switch.service.get(switch.operation.operation_id)
+        assert view.state == "running"
+        assert view.result is not None and view.result.observation_due_at is not None
+        due = view.result.observation_due_at
+        observed_delays.append(int((due - switch.clock.now).total_seconds()))
+        assert observed_delays[-1] == delay
+        assert view.result.retry_attempt == len(observed_delays) + 1
+        switch.clock.now = due
 
 
 def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(
@@ -5206,11 +5242,99 @@ def test_scoped_cleanup_retries_when_uninstall_capacity_writer_is_busy(
     parked = service.get(operation.operation_id)
     assert parked.state == "running"
     assert parked.status_reason is not None
-    assert "admission will retry" in parked.status_reason
+    assert "admission retry 1 in 5s" in parked.status_reason
     assert parked.result is not None
     assert parked.result.retry_reason == RunAdmissionBusy.code
     assert parked.result.phase_index == 0
     assert parked.result.item_index == 0
+
+
+def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
+    tmp_path: Path,
+) -> None:
+    """Capacity waits and checkpoint retries interleave on ``retry_attempt``.
+
+    Each owner backs off from the shared counter, a capacity wait for a new
+    reason starts its own backoff again, and phase progress clears it.
+    """
+
+    from vonk_control.run_switch_operations import _read_progress
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    now = [lifecycle._clock()]
+    service = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
+    service._clock = lambda: now[0]
+    operation = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation.owner_id,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    original_uninstall = lifecycle.uninstall
+
+    def busy(*args, **kwargs):
+        del args, kwargs
+        raise RunAdmissionBusy("run capacity writer is busy")
+
+    def result():
+        view = service.get(operation.operation_id)
+        assert view.result is not None
+        return view, view.result
+
+    def advance_to_due() -> None:
+        _view, current = result()
+        assert current.observation_due_at is not None
+        now[0] = current.observation_due_at + timedelta(seconds=1)
+
+    lifecycle.uninstall = busy  # type: ignore[method-assign]
+    try:
+        assert service.tick() is True
+        view, current = result()
+        assert "admission retry 1 in 5s" in (view.status_reason or "")
+        advance_to_due()
+        assert service.tick() is True
+        view, current = result()
+        assert "admission retry 2 in 10s" in (view.status_reason or "")
+        assert current.retry_attempt == 3
+
+        # A checkpoint retry continues the same counter, bounded by its cap.
+        with sessions.begin() as session:
+            job = session.get(Job, operation.operation_id, with_for_update=True)
+            assert job is not None
+            progress = _read_progress(job.result)
+            RunSwitchOperationService._schedule_checkpoint_retry(
+                job, progress, "artifact.temporarily-unavailable", now[0]
+            )
+        view, current = result()
+        assert view.state == "running"
+        assert current.retry_attempt == 4
+        assert current.retry_reason == "artifact.temporarily-unavailable"
+        assert current.observation_due_at is not None
+        assert (
+            timedelta(0) < current.observation_due_at - now[0] <= timedelta(seconds=75)
+        )
+
+        # A capacity wait after a different reason starts its own backoff.
+        advance_to_due()
+        assert service.tick() is True
+        view, current = result()
+        assert "admission retry 1 in 5s" in (view.status_reason or "")
+        assert current.retry_attempt == 2
+        assert current.retry_reason == RunAdmissionBusy.code
+    finally:
+        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+
+    # Phase progress clears the shared counter.
+    advance_to_due()
+    assert service.tick() is True
+    view, current = result()
+    assert view.state == "running", view.status_reason
+    assert current.retry_attempt is None
+    assert current.phase_index == 0
 
 
 def _planned_installation(tmp_path: Path, *, nodes: int = 2):
@@ -5565,7 +5689,7 @@ def test_shared_admission_contention_preserves_operation_for_retry(
             assert job is not None
             if job.status_reason and "capacity writer" in job.status_reason:
                 assert job.state == "running"
-                assert "retry at" in job.status_reason
+                assert "retry " in job.status_reason and " at " in job.status_reason
                 break
     else:
         pytest.fail("shared admission contention did not schedule a durable retry")

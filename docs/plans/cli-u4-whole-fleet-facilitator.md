@@ -64,12 +64,12 @@ digest from the refreshed review and pass explicit consent. Its shape is:
 
 ```bash
 vonkctl --no-input --json --profile 1 profile load \
-  --expected-plan <current-lowercase-plan-digest> \
   --yes --request-key <new-request-uuid> --detach
 ```
 
-The old digest must fail. The accepted receipt must retain the new digest and
-request UUID. `--yes` alone is not consent to an unknown or changed plan.
+The CLI fetches the latest plan before submission. Waitable blockers park the
+request until they clear; current authorization and identity checks remain
+enforced. The accepted receipt retains the request UUID.
 
 ## Evidence and limits
 

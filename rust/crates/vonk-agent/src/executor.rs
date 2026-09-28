@@ -187,6 +187,8 @@ pub struct RecipeExecutor<'a, R> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RecipeObservationError {
+    #[error("retained recipe run was skipped because its metadata is invalid")]
+    SkippedRun,
     #[error("managed recipe run observation failed ({})", .0.safe_category())]
     Runtime(#[from] crate::oci::OciError),
     #[error("exact recipe run inspection failed ({})", .0.preflight_code())]
@@ -269,9 +271,11 @@ async fn report_complete_recipe_run_observations(
 ) -> Result<usize, RecipeObservationError> {
     let mut observations = Vec::with_capacity(results.len());
     let mut failure = None;
+    let mut skipped_run = false;
     for result in results {
         match result {
             Ok(observation) => observations.push(observation),
+            Err(RecipeObservationError::SkippedRun) => skipped_run = true,
             Err(error) => {
                 if failure
                     .as_ref()
@@ -302,7 +306,7 @@ async fn report_complete_recipe_run_observations(
         }
         false
     });
-    if !observations.is_empty() || failure.is_none() {
+    if !observations.is_empty() || (failure.is_none() && !skipped_run) {
         client
             .report_exact_recipe_run_observations(&observations)
             .await?;
@@ -327,7 +331,7 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
-        Ok(self.runtime.recipe_run_inspection_plans()?.len())
+        Ok(self.runtime.recipe_run_inspection_results()?.len())
     }
 
     pub async fn report_exact_recipe_run_observations(
@@ -336,9 +340,23 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
-        let plans = self.runtime.recipe_run_inspection_plans()?;
+        let plans = self.runtime.recipe_run_inspection_results()?;
         let results = stream::iter(plans)
+            .filter_map(|plan| async move {
+                match plan {
+                    Ok(Some(plan)) => Some(Ok(plan)),
+                    Ok(None) => None,
+                    Err((run_id, error)) => {
+                        eprintln!(
+                            "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({})",
+                            error.safe_category()
+                        );
+                        Some(Err(RecipeObservationError::SkippedRun))
+                    }
+                }
+            })
             .map(|plan| async move {
+                let plan = plan?;
                 let request_root = self.runtime_root.join("runtime-requests");
                 let boundary = HostRuntimeBoundary {
                     client: self.client,
@@ -4414,6 +4432,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skipped_malformed_run_does_not_hide_or_empty_valid_run_reports() {
+        let server = ObservationServer::new(Some(204));
+        let valid_run = Uuid::new_v4();
+        let result = report_complete_recipe_run_observations(
+            &server.client,
+            vec![
+                Ok(exact_observation(valid_run)),
+                Err(RecipeObservationError::SkippedRun),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, 1);
+        let reports = server.finish();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0]["runs"].as_array().unwrap().len(), 1);
+        assert_eq!(reports[0]["runs"][0]["run_id"], valid_run.to_string());
+
+        let server = ObservationServer::new(Some(204));
+        assert_eq!(
+            report_complete_recipe_run_observations(
+                &server.client,
+                vec![Err(RecipeObservationError::SkippedRun)],
+            )
+            .await
+            .unwrap(),
+            0
+        );
+        assert!(server.finish().is_empty());
+    }
+
+    #[tokio::test]
     async fn exact_snapshot_failed_inspection_is_not_proof_of_an_empty_node() {
         let server = ObservationServer::new(Some(204));
         let result = report_complete_recipe_run_observations(
@@ -4491,7 +4541,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn corrupt_exact_lifecycle_does_not_report_false_absence() {
+    async fn corrupt_exact_lifecycle_is_skipped_without_reporting_false_absence() {
         let data = tempdir().unwrap();
         let runtime = tempdir().unwrap();
         let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
@@ -4511,10 +4561,13 @@ mod tests {
             runtime_root: runtime.path(),
             observation_receipt_public_key: [0; 32],
         };
-        assert!(matches!(
-            executor.report_exact_recipe_run_observations().await,
-            Err(RecipeObservationError::Runtime(_))
-        ));
+        assert_eq!(
+            executor
+                .report_exact_recipe_run_observations()
+                .await
+                .unwrap(),
+            0
+        );
         assert!(server.finish().is_empty());
     }
 

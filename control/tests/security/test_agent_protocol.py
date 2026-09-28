@@ -431,6 +431,8 @@ def test_control_environment_preserves_the_canonical_zero_byte_model_contract() 
 
 
 @pytest.mark.lane  # Builds the root-context control image.
+@pytest.mark.linux_only
+@pytest.mark.needs_buildx
 def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
     control_image_build_args: list[str],
 ) -> None:

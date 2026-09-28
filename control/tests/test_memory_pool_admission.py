@@ -14,7 +14,6 @@ from vonk_control.models import (
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
 from vonk_control.recipe_operations import (
-    RecipeOperationConflict,
     RecipeOperationService,
 )
 from vonk_control.resource_planning import (
@@ -24,7 +23,11 @@ from vonk_control.resource_planning import (
     memory_capacity_snapshot,
     plan_capacity,
 )
-from vonk_control.run_admission import RunAdmissionService, RunPlanConflict
+from vonk_control.run_admission import (
+    RunAdmissionBusy,
+    RunAdmissionService,
+    RunPlanConflict,
+)
 
 from .test_profile_capacity_admission import _capacity_profile
 from .test_recipe_builds import RecordingQueue
@@ -86,7 +89,7 @@ def test_host_builder_claim_is_visible_to_unified_review_and_runtime(
     node = review.json()["assessments"][0]["assessment"]["fit_current"]["nodes"][0]
     assert node["memory_free_after_bytes"] == runtime.nodes[0].free_after_bytes
     if headroom < 0:
-        with pytest.raises(RecipeOperationConflict, match="stale_or_blocked"):
+        with pytest.raises(RunAdmissionBusy):  # waits for memory; no over-commit
             lifecycle.start(
                 original,
                 plan_digest=original.plan_digest,

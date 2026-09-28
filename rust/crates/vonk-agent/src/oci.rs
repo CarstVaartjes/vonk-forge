@@ -305,6 +305,9 @@ fn runtime_policy() -> Result<RuntimePolicy, OciError> {
     .map_err(OciError::Json)
 }
 
+/// One run directory's inspection outcome; a failure names the run it belongs to.
+type RunInspectionResult = Result<Option<RecipeRunInspectionPlan>, (String, OciError)>;
+
 impl<R: ProcessRunner> OciRuntime<'_, R> {
     pub fn job_input_destination(&self, run_id: &str, name: &str) -> Result<PathBuf, OciError> {
         if name.is_empty()
@@ -1404,6 +1407,34 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     }
 
     pub fn recipe_run_inspection_plans(&self) -> Result<Vec<RecipeRunInspectionPlan>, OciError> {
+        let mut plans = Vec::new();
+        let mut failure = None;
+        for result in self.recipe_run_inspection_results()? {
+            match result {
+                Ok(Some(plan)) => plans.push(plan),
+                Ok(None) => {}
+                Err((run_id, error)) => {
+                    eprintln!(
+                        "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({})",
+                        error.safe_category()
+                    );
+                    if failure.is_none() {
+                        failure = Some(error);
+                    }
+                }
+            }
+        }
+        if plans.is_empty()
+            && let Some(error) = failure
+        {
+            return Err(error);
+        }
+        Ok(plans)
+    }
+
+    pub(crate) fn recipe_run_inspection_results(
+        &self,
+    ) -> Result<Vec<RunInspectionResult>, OciError> {
         let runs = self.data_root.join("runs");
         let metadata = match fs::symlink_metadata(&runs) {
             Ok(metadata) => metadata,
@@ -1457,101 +1488,115 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
         let mut plans = Vec::new();
         for run_id in run_ids {
-            // Run directories intentionally outlive their lifecycle after a
-            // successful stop and older agents retained the same residue. A
-            // missing lifecycle is therefore historical, while a present but
-            // malformed lifecycle remains an active-assignment integrity error.
-            let Some((spec, installation_id, placement, observation)) =
-                self.load_run_lifecycle(&run_id)?
-            else {
-                continue;
-            };
-            let Some(binding) = observation else {
-                continue;
-            };
-            binding.validate().map_err(|_| OciError::Artifact)?;
-            if binding.run_id.to_string() != run_id
-                || binding.installation_id.to_string() != installation_id
-                || u64::from(binding.rank) != placement.rank
-                || binding.role != placement.role
-                || u64::from(binding.world_size) != placement.world_size
-                || binding.local_address
-                    != if placement.world_size == 1 {
-                        None
-                    } else {
-                        placement.local_address
-                    }
-                || binding.master_address
-                    != if placement.world_size == 1 {
-                        None
-                    } else {
-                        placement.master_address
-                    }
-                || binding.master_port
-                    != if placement.world_size == 1 {
-                        None
-                    } else {
-                        placement.master_port
-                    }
-                || Some(binding.port) != placement.port
-                || binding.recipe_content_sha256 != self.recipe_digest(&installation_id)?
-                || binding.artifact_set_digest != self.artifact_set_digest(&installation_id)?
-                || binding.image_digest != spec.runtime_image.image_digest[7..]
-                || binding.model_identity
-                    != spec
-                        .artifacts
-                        .first()
-                        .map(|artifact| {
-                            format!(
-                                "{}/{}@{}",
-                                artifact.model.publisher,
-                                artifact.model.slug,
-                                artifact.model.content_sha256
-                            )
-                        })
-                        .ok_or(OciError::Artifact)?
+            if plans
+                .iter()
+                .filter(|plan| matches!(plan, Ok(Some(_))))
+                .count()
+                == MAX_MANAGED_RECIPE_RUNS
             {
-                return Err(OciError::Artifact);
+                plans.push(Err((run_id, OciError::Artifact)));
+                continue;
             }
-            let retained =
-                self.prepare_retained_start(&spec, &installation_id, &run_id, &placement)?;
-            let mut arguments = vec![
-                retained.archive_sha256.clone(),
-                retained.registry_index_digest.clone(),
-                retained.platform_manifest_digest.clone(),
-                retained.image_reference.clone(),
-            ];
-            arguments.extend(retained.main);
-            if binding.runtime_arguments_sha256
-                != protocol_sha256(
-                    &canonical_protocol_json(&arguments).map_err(|_| OciError::Artifact)?,
-                )
-            {
-                return Err(OciError::Artifact);
-            }
-            if plans.len() == MAX_MANAGED_RECIPE_RUNS {
-                return Err(OciError::Artifact);
-            }
-            let endpoint_owner = binding.local_address == binding.master_address;
-            let health_path = spec
-                .endpoint
-                .as_ref()
-                .ok_or(OciError::Artifact)?
-                .health_path
-                .clone();
-            plans.push(RecipeRunInspectionPlan {
-                binding,
-                arguments,
-                endpoint_address: if endpoint_owner {
-                    Some(placement.endpoint_address.ok_or(OciError::Artifact)?)
-                } else {
-                    None
-                },
-                endpoint_port: placement.port.ok_or(OciError::Artifact)?,
-                health_path,
-            });
+            plans.push(
+                self.recipe_run_inspection_plan(&run_id)
+                    .map_err(|error| (run_id, error)),
+            );
         }
         Ok(plans)
+    }
+
+    fn recipe_run_inspection_plan(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<RecipeRunInspectionPlan>, OciError> {
+        // Stopped run directories intentionally outlive their lifecycle. A
+        // missing lifecycle or inspection binding is historical; malformed
+        // metadata is returned to the caller as this run's isolated failure.
+        let Some((spec, installation_id, placement, observation)) =
+            self.load_run_lifecycle(run_id)?
+        else {
+            return Ok(None);
+        };
+        let Some(binding) = observation else {
+            return Ok(None);
+        };
+        binding.validate().map_err(|_| OciError::Artifact)?;
+        if binding.run_id.to_string() != run_id
+            || binding.installation_id.to_string() != installation_id
+            || u64::from(binding.rank) != placement.rank
+            || binding.role != placement.role
+            || u64::from(binding.world_size) != placement.world_size
+            || binding.local_address
+                != if placement.world_size == 1 {
+                    None
+                } else {
+                    placement.local_address
+                }
+            || binding.master_address
+                != if placement.world_size == 1 {
+                    None
+                } else {
+                    placement.master_address
+                }
+            || binding.master_port
+                != if placement.world_size == 1 {
+                    None
+                } else {
+                    placement.master_port
+                }
+            || Some(binding.port) != placement.port
+            || binding.recipe_content_sha256 != self.recipe_digest(&installation_id)?
+            || binding.artifact_set_digest != self.artifact_set_digest(&installation_id)?
+            || binding.image_digest != spec.runtime_image.image_digest[7..]
+            || binding.model_identity
+                != spec
+                    .artifacts
+                    .first()
+                    .map(|artifact| {
+                        format!(
+                            "{}/{}@{}",
+                            artifact.model.publisher,
+                            artifact.model.slug,
+                            artifact.model.content_sha256
+                        )
+                    })
+                    .ok_or(OciError::Artifact)?
+        {
+            return Err(OciError::Artifact);
+        }
+        let retained = self.prepare_retained_start(&spec, &installation_id, run_id, &placement)?;
+        let mut arguments = vec![
+            retained.archive_sha256.clone(),
+            retained.registry_index_digest.clone(),
+            retained.platform_manifest_digest.clone(),
+            retained.image_reference.clone(),
+        ];
+        arguments.extend(retained.main);
+        if binding.runtime_arguments_sha256
+            != protocol_sha256(
+                &canonical_protocol_json(&arguments).map_err(|_| OciError::Artifact)?,
+            )
+        {
+            return Err(OciError::Artifact);
+        }
+        let endpoint_owner = binding.local_address == binding.master_address;
+        let health_path = spec
+            .endpoint
+            .as_ref()
+            .ok_or(OciError::Artifact)?
+            .health_path
+            .clone();
+        Ok(Some(RecipeRunInspectionPlan {
+            binding,
+            arguments,
+            endpoint_address: if endpoint_owner {
+                Some(placement.endpoint_address.ok_or(OciError::Artifact)?)
+            } else {
+                None
+            },
+            endpoint_port: placement.port.ok_or(OciError::Artifact)?,
+            health_path,
+        }))
     }
 
     pub(crate) fn readiness_request(&self, address: IpAddr, port: u16, health_path: &str) -> bool {

@@ -13,6 +13,8 @@ import pytest
     os.environ.get("VONK_RUN_BACKUP_CONTAINER_TEST") != "1",
     reason="requires Docker; set VONK_RUN_BACKUP_CONTAINER_TEST=1",
 )
+@pytest.mark.needs_docker
+@pytest.mark.needs_backup_container
 def test_postgres_backup_restore():
     root = pathlib.Path(__file__).resolve().parents[3]
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="vonk-backup-test-"))
@@ -201,3 +203,88 @@ def test_postgres_backup_restore():
                 stderr=s.DEVNULL,
                 check=False,
             )
+
+
+@pytest.mark.skipif(
+    os.environ.get("VONK_RUN_BACKUP_CONTAINER_TEST") != "1",
+    reason="requires Docker; set VONK_RUN_BACKUP_CONTAINER_TEST=1",
+)
+def test_postgres_backup_worker_resumes_when_directory_appears():
+    root = pathlib.Path(__file__).resolve().parents[3]
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="vonk-backup-retry-test-"))
+    (tmp / "state").mkdir()
+    (tmp / "secret").write_text("a" * 64)
+
+    def run(*args):
+        return s.check_output(["docker", *args], stderr=s.STDOUT)
+
+    name = "vonk-backup-retry-" + uuid.uuid4().hex[:12]
+    try:
+        run(
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--network",
+            "none",
+            "-e",
+            "POSTGRES_USER=control",
+            "-e",
+            "POSTGRES_DB=control",
+            "-e",
+            "POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password",
+            "-e",
+            "VONK_BACKUP_INTERVAL_SECONDS=86400",
+            "-v",
+            f"{tmp}/secret:/run/secrets/postgres-password:ro",
+            "-v",
+            f"{tmp}/secret:/run/secrets/litellm-database-password:ro",
+            "-v",
+            f"{tmp}/state:/state",
+            "-v",
+            f"{root}/deploy/compose/postgres/entrypoint.sh:/entrypoint:ro",
+            "-v",
+            f"{root}/deploy/compose/postgres/init-databases.sh:/run/vonk-source-assets/postgres/init-databases.sh:ro",
+            "--entrypoint",
+            "/entrypoint",
+            "postgres:18",
+            "postgres",
+        )
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            running = run("inspect", "--format", "{{.State.Running}}", name).strip()
+            if running == b"true":
+                break
+            time.sleep(0.5)
+        else:
+            raise RuntimeError(run("logs", name).decode(errors="replace"))
+
+        time.sleep(6)
+        run("exec", name, "mkdir", "-p", "/backups")
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            result = s.run(
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "test",
+                    "-f",
+                    "/state/last-successful-backup.epoch",
+                ],
+                stdout=s.DEVNULL,
+                stderr=s.DEVNULL,
+                check=False,
+            )
+            if result.returncode == 0:
+                break
+            time.sleep(0.5)
+        else:
+            raise RuntimeError(run("logs", name).decode(errors="replace"))
+    finally:
+        s.run(
+            ["docker", "rm", "-fv", name],
+            stdout=s.DEVNULL,
+            stderr=s.DEVNULL,
+            check=False,
+        )

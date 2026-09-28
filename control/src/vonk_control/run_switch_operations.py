@@ -54,7 +54,7 @@ from .cluster_mappings import (
 )
 from .disk_reservations import outstanding_disk_reservation_bytes
 from .failure_classification import error_code, is_redownload, is_security_failure
-from .install_admission import InstallAdmissionBusy
+from .install_admission import InstallAdmissionBusy, InstallPreflightExpired
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .logging import log_event, redact_text
@@ -1665,7 +1665,7 @@ class RecipeLifecyclePhaseExecutor:
                     ),
                     workload_intent_ordinal=_bound_workload_intent(progress),
                 )
-            except RecipeInstallPreflightExpired as error:
+            except (RecipeInstallPreflightExpired, InstallPreflightExpired) as error:
                 # Compiling the launch document above can outlast the runtime
                 # preflight window this phase was admitted on.  Nothing else
                 # about the install changed, so ask the caller to rerun the
@@ -1685,11 +1685,27 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     f"run-switch.install-preparation-failed: {error}"
                 ) from error
+            prepared_id = _required_string(installation_id)
+            with self._sessions() as session:
+                installation = session.get(RecipeInstallation, prepared_id)
+                if installation is None:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.install-preparation-unavailable"
+                    )
+                try:
+                    stored_plan = parse_stored_installation_plan(installation.plan)
+                except RecipeExecutionContractError as error:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.installation-identity-unavailable"
+                    ) from error
             return self._prepared_installation_result(
-                _required_string(installation_id),
+                prepared_id,
                 mapping_id,
-                install_plan.plan_digest,
-                install_plan.compiled_plan_by_node,
+                stored_plan.plan_digest,
+                {
+                    node_id: compiled.model_dump(mode="json")
+                    for node_id, compiled in stored_plan.compiled_execution_plans.items()
+                },
             )
         if phase.kind == "prepare" and phase.subphase == "runtime-install":
             ordinal = _bound_workload_intent(progress)
@@ -7695,14 +7711,18 @@ class RunSwitchOperationService:
                 progress["observation_due_at"] = None
                 progress["observation_deadline_at"] = None
                 job.status_reason = None
-            if progress.get("retry_reason") in (
+            retry_reason = progress.get("retry_reason")
+            if retry_reason in (
                 AdmissionLockBusy.code,
                 InstallAdmissionBusy.code,
                 RunAdmissionBusy.code,
                 RecipeBuildAdmissionBusy.code,
                 RunSwitchPostStopEvidencePending.code,
+            ) or (
+                isinstance(retry_reason, str) and retry_reason.startswith("artifact.")
             ):
                 progress["retry_reason"] = None
+                progress["retry_attempt"] = None
             deadline_expired = False
             _merge_progress_evidence(
                 progress,
@@ -8084,14 +8104,13 @@ class RunSwitchOperationService:
         reason: str,
         detail: str | None = None,
     ) -> bool:
-        """Retry an unchanged capacity handoff at most once per five seconds.
+        """Retry an unchanged capacity handoff with bounded exponential backoff.
 
         The admission transaction has rolled back and released its locks.
         The wait belongs to the existing operation, holds no worker slot, and
         expires at the next admission attempt; busy SQL is not a failed effect.
         """
         now = _now(self._clock)
-        due = now + timedelta(seconds=5)
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None:
@@ -8102,13 +8121,25 @@ class RunSwitchOperationService:
             if progress.get("cancellation"):
                 _complete_cancellation(job, progress, now)
             else:
+                attempt = (
+                    require_integer(progress.get("retry_attempt"), "retry attempt")
+                    if progress.get("retry_reason") == reason
+                    and progress.get("retry_attempt") is not None
+                    else 1
+                )
+                delay_seconds = min(300, 5 * (2 ** min(attempt - 1, 6)))
+                due = now + timedelta(seconds=delay_seconds)
+                progress["retry_attempt"] = attempt + 1
                 progress["retry_reason"] = reason
                 progress["observation_due_at"] = due.isoformat()
                 progress["observation_deadline_at"] = due.isoformat()
                 job.state = "running"
                 job.status_reason = (
                     detail or "Admission is waiting for the Controller capacity writer"
-                ) + f"; admission will retry at {due.isoformat()}."
+                ) + (
+                    f"; admission retry {attempt} in {delay_seconds}s "
+                    f"at {due.isoformat()}."
+                )
                 job.result = _persisted_result(progress)
                 job.updated_at = now
         return True

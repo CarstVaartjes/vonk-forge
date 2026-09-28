@@ -21,6 +21,13 @@ from vonk_control.failure_classification import (
         "distribution.revoked",
         "tuf.signature_invalid",
         "model_cache.credentials_denied",
+        # Helper and preflight codes emitted un-dotted.
+        "helper_grant_invalid",
+        "helper_request_replayed",
+        "request_replayed",
+        "runtime_helper_observation_receipt_invalid",
+        "controller.request_rejected",
+        "agent.certificate.rotation.conflict",
     ],
 )
 def test_security_boundaries_are_terminal(code: str) -> None:
