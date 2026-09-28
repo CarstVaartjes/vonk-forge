@@ -61,9 +61,10 @@ class CliUpdateError(ValueError):
 def configured_update_channel() -> str:
     """Return the configured accepted release channel for CLI updates."""
 
-    channel = os.environ.get("VONK_CLI_UPDATE_CHANNEL", "stable")
+    channel = os.environ.get("VONK_CLI_UPDATE_CHANNEL", "stable").strip().lower()
+    # An unrecognized value follows the stable channel rather than blocking.
     if channel not in ("stable", "dev"):
-        raise CliUpdateError("VONK_CLI_UPDATE_CHANNEL must be stable or dev")
+        channel = "stable"
     return channel
 
 

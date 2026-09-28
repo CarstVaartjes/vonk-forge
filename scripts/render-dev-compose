@@ -267,7 +267,7 @@ def _resolve_runtime_images(
             service["image"] = image
         if channel in {"dev", "stable"}:
             service["image"] = channel_image(image, channel)
-            if service["image"] != image:
+            if service["image"].startswith(VONK_REPOSITORY_PREFIX):
                 service["pull_policy"] = "always"
             continue
         bare = image.split("@", 1)[0]
@@ -285,7 +285,7 @@ def _resolve_extension_images(value: object, channel: str) -> None:
             default = DEFAULT_IMAGE.fullmatch(image)
             image = default.group(1) if default else image
             value["image"] = channel_image(image, channel)
-            if value["image"] != image:
+            if value["image"].startswith(VONK_REPOSITORY_PREFIX):
                 value["pull_policy"] = "always"
         for child in value.values():
             _resolve_extension_images(child, channel)

@@ -21,15 +21,15 @@ reference and will fail if only the lock changes.
 
 | Lock key | Upstream | Files that carry the reference |
 | --- | --- | --- |
-| `images.caddy` | `caddy` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `deploy/compose/.env.example` |
-| `images.grafana` | `grafana/grafana` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `deploy/compose/.env.example` |
-| `images.postgres` | `postgres` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `deploy/compose/.env.example`, `.github/workflows/ci.yml` (integration `docker pull`) |
-| `images.prometheus` | `prom/prometheus` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `deploy/compose/.env.example` |
-| `images.registry` | `registry` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `deploy/compose/.env.example` |
-| `images.step-ca` | `smallstep/step-ca` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `deploy/compose/.env.example`, `control/tests/test_step_ca.py` |
-| `images.tailscale` | `tailscale/tailscale` | `deploy/compose/images.lock.json`, `deploy/compose/tailscale/compose.yaml`, `deploy/compose/.env.example`, `deploy/compose/tests/test_agent_ingress.py`, `deploy/compose/tests/test_networking.py` |
+| `images.caddy` | `caddy` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
+| `images.grafana` | `grafana/grafana` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
+| `images.postgres` | `postgres` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `.github/workflows/ci.yml` (integration `docker pull`) |
+| `images.prometheus` | `prom/prometheus` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
+| `images.registry` | `registry` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
+| `images.step-ca` | `smallstep/step-ca` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `control/tests/test_step_ca.py` |
+| `images.tailscale` | `tailscale/tailscale` | `deploy/compose/images.lock.json`, `deploy/compose/tailscale/compose.yaml`, `deploy/compose/tests/test_agent_ingress.py`, `deploy/compose/tests/test_networking.py` |
 | `build_bases.hermes` | `nousresearch/hermes-agent` | `deploy/compose/images.lock.json`, `deploy/compose/hermes-agent/Dockerfile`, `tests/scripts/test_verify_supply_chain.py` |
-| `build_bases.litellm` | `ghcr.io/berriai/litellm` | `deploy/compose/images.lock.json`, `deploy/compose/litellm/Dockerfile` (both `FROM` lines), `deploy/compose/.env.example` |
+| `build_bases.litellm` | `ghcr.io/berriai/litellm` | `deploy/compose/images.lock.json`, `deploy/compose/litellm/Dockerfile` (both `FROM` lines) |
 | `build_bases.node` | `node` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`ARG NODE_IMAGE`) |
 | `build_bases.python` | `python` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`ARG PYTHON_IMAGE`) |
 | `build_bases.skopeo` | `quay.io/skopeo/stable` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`SKOPEO_IMAGE` plus the three `*_DIGEST` args and labels), `scripts/verify-controller-skopeo`, `control/tests/test_controller_image_packaging.py`, `tests/scripts/test_verify_controller_skopeo.py` |
@@ -71,9 +71,8 @@ them, but a refresh that touches their upstream must update them too:
 - `docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0`
   — the QEMU emulation image in `.github/workflows/ci.yml`; a CI tool input,
   not a deployment or build base.
-- `deploy/compose/tests/test.env` is a test fixture. Most of its image values
-  are obvious fakes (`@sha256:aaaa…`); only its `TAILSCALE_IMAGE` mirrors the
-  real pin, and no test compares it to the lock.
+- `deploy/compose/tests/test.env` is a test fixture; its Vonk image values are
+  obvious fakes.
 
 ## The rule: an explicit version, digest optional
 
@@ -190,7 +189,7 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
 `scripts/check-image-pins` is read-only. It resolves every lock entry
 (`name:tag` and `name:tag@digest`), compares the tag's current digest with the
 record and verifies the recorded digest still resolves, then scans
-`control/Dockerfile`, `deploy/compose/.env.example`, the Compose files,
+`control/Dockerfile`, the Compose files,
 `deploy/compose/hermes-agent/Dockerfile`, `deploy/compose/litellm/Dockerfile`,
 and `scripts/verify-controller-skopeo` for digest-pinned references that are
 absent from the lock. It reads registries and nothing else and needs

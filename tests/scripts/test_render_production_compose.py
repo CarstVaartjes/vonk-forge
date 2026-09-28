@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -151,19 +152,18 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
         document["services"]["litellm"]["image"]
         == "ghcr.io/carstvaartjes/vonk-forge-litellm:latest"
     )
-    assert all(
-        isinstance(service, dict)
-        and isinstance(service.get("image"), str)
-        and service["image"].endswith(":latest")
-        and "@" not in service["image"]
-        and service["pull_policy"] == "always"
-        and "${" not in service["image"]
-        for service in document["services"].values()
-    )
+    lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
+    for service in document["services"].values():
+        image = service["image"]
+        if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
+            assert image.endswith(":latest")
+            assert service["pull_policy"] == "always"
+        else:
+            assert image in lock["images"].values()
     assert "CONTROL_API_IMAGE" not in text
     assert "CONTROL_WORKER_IMAGE" not in text
     assert "${NAS_LAN_IP:?set reserved NAS LAN IP}" in text
-    assert "VONK_DEPLOYMENT_MODE: production" in text
+    assert "${VONK_CONTROL_HOSTNAME:?" in text
     assert {path.name for path in tmp_path.iterdir()} == {
         "docker-compose.production.yml"
     }
