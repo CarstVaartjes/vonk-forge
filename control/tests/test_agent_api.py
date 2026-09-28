@@ -1783,7 +1783,9 @@ def asgi_post(
             "root_path": "",
             "state": {},
         }
-        await asyncio.wait_for(app(scope, receive, send), timeout=1)
+        # A hang guard, not a latency assertion: a loaded four-worker CI shard
+        # can take over a second for the synchronous grant consumption.
+        await asyncio.wait_for(app(scope, receive, send), timeout=5)
         start = next(
             message for message in sent if message["type"] == "http.response.start"
         )
