@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def test_canary_load_and_cleanup_submit_their_own_reviewed_plan() -> None:
     repository = Path(__file__).resolve().parents[2]
@@ -44,6 +46,7 @@ for digest, key in (
     )
 
 
+@pytest.mark.needs_recipe_library
 def test_acceptance_recipe_closure_uses_the_authoritative_model() -> None:
     repository = Path(__file__).resolve().parents[2]
     subprocess.run(

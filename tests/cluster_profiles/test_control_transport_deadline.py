@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import os
 import signal
 import socket
 import ssl
@@ -16,6 +17,7 @@ from contextlib import redirect_stdout
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
+from pathlib import Path
 
 import pytest
 from cryptography import x509
@@ -406,9 +408,18 @@ raise SystemExit(cli.main(sys.argv[2:], control_client=client))
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env={
+            "HOME": str(Path(state["token"]).parent),
+            "PATH": os.defpath,
+            "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+        },
     )
     try:
-        output, error = process.communicate(timeout=3)
+        # Keep well below the 30-second blocked DNS shim while allowing a busy
+        # xdist worker to start the isolated CLI process.
+        output, error = process.communicate(timeout=8)
     finally:
         if process.poll() is None:
             process.kill()

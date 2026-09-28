@@ -45,7 +45,10 @@ def _package(tmp_path: Path, platform: str) -> Path:
     return package
 
 
-@pytest.mark.parametrize("kind", ("nas", "spark"))
+@pytest.mark.parametrize(
+    "kind",
+    ("nas", pytest.param("spark", marks=pytest.mark.linux_only)),
+)
 def test_renderer_pins_every_supported_native_installer(
     tmp_path: Path, kind: str
 ) -> None:

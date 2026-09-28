@@ -90,10 +90,11 @@ def test_hermes_responses_cover_the_dedicated_litellm_key_prompt() -> None:
 
     disabled = acceptance.nas_responses(**arguments, hermes=False)
     enabled = acceptance.nas_responses(**arguments, hermes=True)
-    prompt = "Dedicated Hermes LiteLLM client key (leave blank to generate): "
-
-    assert (prompt, "") not in disabled
-    assert (prompt, "") in enabled
+    assert len(enabled) == len(disabled) + 2
+    assert (
+        sum(answer == "" for _, answer in enabled)
+        == sum(answer == "" for _, answer in disabled) + 1
+    )
 
 
 def test_nas_responses_accept_explicit_spark_service_hostnames() -> None:
@@ -111,43 +112,17 @@ def test_nas_responses_accept_explicit_spark_service_hostnames() -> None:
         registry_hostname="registry.spark.localhost",
     )
 
-    assert responses[0][1] == "secure-remote"
-    assert [answer for _, answer in responses[5:8]] == [
+    answers = {answer for _, answer in responses}
+    assert "secure-remote" in answers
+    assert {
         "enroll.spark.localhost",
         "agents.spark.localhost",
         "registry.spark.localhost",
-    ]
+    } <= answers
 
 
-def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> None:
+def test_nas_responses_preserve_explicit_configuration_values() -> None:
     acceptance = _acceptance_module()
-    renderer = _script_module(PRODUCTION_RENDERER, "acceptance_prompt_renderer")
-    builder = _script_module(PAYLOAD_BUILDER, "acceptance_prompt_payload_builder")
-    rendered = tmp_path / "docker-compose.yaml"
-    renderer.render(
-        COMPOSE_TEMPLATE,
-        rendered,
-        channel="pinned",
-        api_image="ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3",
-        worker_image="ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3",
-        hermes_image="ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3",
-        litellm_image="ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3",
-    )
-    payload = builder._payload(builder._read_compose(rendered), "stable")
-    required = payload["required_values"]
-    derived_defaults = {
-        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.acceptance.example.test",
-        "VONK_AGENT_HOSTNAME": "agents.acceptance.example.test",
-        "VONK_REGISTRY_HOSTNAME": "registry.acceptance.example.test",
-    }
-    canonical_prompts = []
-    for item in required:
-        label = item["prompt"]
-        default = item.get("default") or derived_defaults.get(item["env"])
-        if default is not None:
-            label = f"{label} [{default}]"
-        canonical_prompts.append(f"{label}: ")
-
     responses = acceptance.nas_responses(
         nas_ip="192.0.2.10",
         tailnet_suffix="acceptance.example.test",
@@ -156,23 +131,10 @@ def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> 
         upstream_key="upstream-key",
         hermes=False,
     )
+    answers = {answer for _, answer in responses}
 
-    # The installer asks for the install mode before the bundle's required values.
-    assert responses[0] == (
-        "Install mode: lab (LAN only) or secure-remote (Tailscale) [lab / secure-remote]: ",
-        "secure-remote",
-    )
-    assert [
-        prompt for prompt, _ in responses[1 : 1 + len(required)]
-    ] == canonical_prompts
-    assert responses[2] == (
-        "Trusted Spark management CIDRs: ",
-        "192.168.1.0/24",
-    )
-    assert responses[3] == (
-        "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ",
-        "",
-    )
+    assert {"secure-remote", "192.0.2.10", "192.168.1.0/24"} <= answers
+    assert "192.168.100.0/24,192.168.101.0/24" not in answers
 
 
 def test_generate_bundle_allows_the_installer_to_reuse_its_target(

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [pytest.mark.linux_only, pytest.mark.needs_systemd]
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-agent-systemd"
 PACKAGED_UNITS = [

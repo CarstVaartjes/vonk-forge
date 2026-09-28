@@ -37,6 +37,11 @@ jobs:
           python-version: "3.14"
           enable-cache: true
 
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.vonk-forge/.github/actions/prepare-control-wheel
+        with:
+          repository-root: .vonk-forge
+
       - name: Require candidate contract source
         run: |
           test -f "$GITHUB_WORKSPACE/contracts/src/vonk_forge_contracts/__init__.py"

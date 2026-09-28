@@ -291,6 +291,7 @@ def _graph_command(objects: Path, candidate: Path, baseline: Path) -> list[str |
     ]
 
 
+@pytest.mark.linux_only
 def test_publication_graph_binds_arm64_candidate_and_baseline_packages(
     tmp_path: Path,
 ) -> None:
@@ -351,6 +352,7 @@ def test_publication_graph_rejects_symlinked_parent_component(tmp_path: Path) ->
     assert "unsafe" in result.stderr or "unavailable" in result.stderr
 
 
+@pytest.mark.linux_only
 def test_publication_graph_rejects_symlinked_artifact_file(tmp_path: Path) -> None:
     objects, candidate, baseline, _ = _graph_inputs(tmp_path)
     artifact = (
@@ -372,6 +374,7 @@ def test_publication_graph_rejects_symlinked_artifact_file(tmp_path: Path) -> No
     assert "unsafe" in result.stderr or "unavailable" in result.stderr
 
 
+@pytest.mark.linux_only
 def test_publication_graph_rejects_hardlinked_artifact_file(tmp_path: Path) -> None:
     objects, candidate, baseline, _ = _graph_inputs(tmp_path)
     artifact = (
@@ -413,6 +416,7 @@ def test_publication_graph_rejects_any_missing_native_package_record(
     assert "release object is invalid" in result.stderr
 
 
+@pytest.mark.linux_only
 def test_verified_artifact_hashes_open_descriptor_during_path_substitution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -541,6 +545,7 @@ def _run_arguments(
     )
 
 
+@pytest.mark.linux_only
 def test_run_owns_observation_validation_cleanup_and_report_emission(
     tmp_path: Path,
 ) -> None:
@@ -591,6 +596,7 @@ def test_run_owns_observation_validation_cleanup_and_report_emission(
     )
 
 
+@pytest.mark.linux_only
 def test_run_failure_removes_controller_volumes_without_emitting_report(
     tmp_path: Path,
 ) -> None:

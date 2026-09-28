@@ -11,6 +11,9 @@ runs:
         cargo fmt --all --check
         cargo clippy --workspace --all-targets --locked -- -D warnings
         cargo test --workspace --locked
-        uvx --from pytest==9.1.1 pytest -q \
+        cargo build --locked -p vonk-agent --bin vonk-agent
+        VONK_AGENT_BINARY="${CARGO_TARGET_DIR:-target}/debug/vonk-agent" \
+          VONK_CI_PREREQUISITES=needs_agent_binary \
+          uvx --from pytest==9.1.1 pytest -q \
           tests/scripts/test_agent_deb.py \
           tests/acceptance/test_rust_agent_parity.py

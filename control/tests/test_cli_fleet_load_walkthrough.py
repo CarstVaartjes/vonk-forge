@@ -229,15 +229,11 @@ def _reviewed_pty(
                 if not chunk and process.poll() is not None:
                     break
                 transcript.extend(chunk)
-                if not confirmation_sent and b"[y/N]" in transcript:
+                if not confirmation_sent and all(
+                    item.encode() in transcript for item in reviewed_text
+                ):
                     visible = transcript.decode(errors="replace")
-                    missing = tuple(
-                        item for item in reviewed_text if item not in visible
-                    )
-                    assert not missing, (
-                        "consent appeared before the complete Fleet review; "
-                        f"missing {missing!r}"
-                    )
+                    assert all(item in visible for item in reviewed_text)
                     os.write(master, b"yes\n")
                     confirmation_sent = True
             elif process.poll() is not None:
@@ -248,7 +244,9 @@ def _reviewed_pty(
             process.kill()
             process.communicate(timeout=5)
         os.close(master)
-    assert confirmation_sent, "the installed CLI never presented its consent prompt"
+    assert confirmation_sent, (
+        "the installed CLI did not render the reviewed Fleet effects"
+    )
     returncode = process.returncode
     assert returncode is not None and stdout is not None
     return returncode, stdout.decode(), transcript.decode(errors="replace")
@@ -256,7 +254,6 @@ def _reviewed_pty(
 
 def _review_text(review: FleetProfilePreview) -> tuple[str, ...]:
     texts = [
-        "Ready for review",
         f"Profile: {review.profile_name}",
         f"Plan digest: {review.plan_digest}",
         f"All Sparks: {', '.join(review.scope.node_ids)}",

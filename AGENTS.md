@@ -188,6 +188,11 @@ active task worktree. On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
 
+For the local repository and Controller pytest suites, use
+`scripts/test-local`; it splits Linux-marked tests into the `vonk-ci` OrbStack
+VM on macOS and reports unavailable local prerequisites explicitly. CI must
+run the required Linux lane and must fail when its prerequisites are absent.
+
 Every test must name a wrong implementation it catches. Prefer behavioral
 boundaries and real producer/store/consumer seams; do not duplicate constants,
 field lists, workflow text, or schema shapes already owned elsewhere. A bug

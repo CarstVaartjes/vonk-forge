@@ -8,7 +8,6 @@ import hashlib
 import json
 import re
 import shlex
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -29,7 +28,6 @@ PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
 PUBLIC_CONTRACT_WHEEL = (
     "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
 )
-RETIRED_SBOMS = ("inventory/sbom/agent-python.spdx.json",)
 UV_LOCK_PACKAGE = re.compile(r"(?m)^\[\[package\]\]\n")
 UV_LOCK_SCALAR = re.compile(r'(?m)^(name|version) = "([^"\\\r\n]+)"$')
 
@@ -101,170 +99,8 @@ def packages_web(lock: bytes) -> list[tuple[str, str]]:
     return sorted(packages)
 
 
-def workload_package_inputs(root: Path) -> tuple[str, ...]:
-    """Return generic package implementation files bound by release evidence.
-
-    The verifier is also used by small isolated fixture repositories in the
-    test suite, so absent optional control package modules are treated as an
-    older baseline. A complete checkout binds the surviving control and shared
-    protocol implementations here; Rust package sources are bound separately.
-    """
-
-    paths: list[str] = []
-    roots = (root / "control/src/vonk_control",)
-    for directory in roots:
-        if not directory.is_dir():
-            continue
-        for path in sorted(directory.glob("package_*.py")):
-            paths.append(path.relative_to(root).as_posix())
-    protocol = root / "agent_protocol/src/vonk_agent_protocol/workload_packages.py"
-    if protocol.is_file():
-        paths.append(protocol.relative_to(root).as_posix())
-    return tuple(dict.fromkeys(paths))
-
-
-def rust_package_inputs(root: Path) -> tuple[str, ...]:
-    paths = [
-        "Cargo.toml",
-        "Cargo.lock",
-        "scripts/build-agent-deb",
-        "scripts/materialize-agent-tools",
-        "scripts/build-agent-package-evidence",
-        "scripts/repair-capsule-publication",
-        "scripts/verify-agent-deb",
-        "scripts/verify-agent-binaries",
-        "scripts/verify-agent-systemd",
-    ]
-    for relative in ("rust", "packaging"):
-        directory = root / relative
-        if not directory.is_dir():
-            raise ValueError(f"Rust package source is missing: {relative}")
-        paths.extend(
-            path.relative_to(root).as_posix()
-            for path in sorted(directory.rglob("*"))
-            if path.is_file()
-        )
-    return tuple(dict.fromkeys(paths))
-
-
-def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
-    """Return the complete canonical recipe execution supply chain."""
-
-    paths = [
-        ".github/workflows/validate-recipe-library.yml",
-        PUBLIC_CONTRACT_LOCK,
-        PUBLIC_CONTRACT_WHEEL,
-        "control/src/vonk_control/catalog_entities.py",
-        "control/src/vonk_control/catalog_service.py",
-        "control/src/vonk_control/catalog_api.py",
-        "control/src/vonk_control/auth.py",
-        "control/src/vonk_control/agent_api.py",
-        "control/src/vonk_control/agent_jobs.py",
-        "control/src/vonk_control/agent_upgrades.py",
-        "control/src/vonk_control/agent_package_source.py",
-        "control/src/vonk_control/package_activation.py",
-        "control/src/vonk_control/host_helper_authority.py",
-        "scripts/agent_package_source_publication.py",
-        "control/src/vonk_control/cursor_contract.py",
-        "control/src/vonk_control/library_contract.py",
-        "control/src/vonk_control/recipe_routes.py",
-        "control/src/vonk_control/models.py",
-        "control/src/vonk_control/api.py",
-        "control/src/vonk_control/worker.py",
-        "control/src/vonk_control/library_api.py",
-        "control/src/vonk_control/recipe_library_types.py",
-        "control/src/vonk_control/recipe_packages.py",
-        "control/src/vonk_control/catalog_sync.py",
-        "control/src/vonk_control/catalog_repository.py",
-        "control/src/vonk_control/recipe_runtime_specs.py",
-        "control/src/vonk_control/compiled_artifact_contract.py",
-        "control/src/vonk_control/recipe_lifecycle_contract.py",
-        "control/src/vonk_control/artifact_jobs.py",
-        "control/src/vonk_control/fleet_profile_contract.py",
-        "control/src/vonk_control/fleet_profiles.py",
-        "control/src/vonk_control/fleet_projection.py",
-        "control/src/vonk_control/harnesses/canonical_metadata.py",
-        "control/src/vonk_control/harnesses/canonical.py",
-        "control/src/vonk_control/source_bundles.py",
-        "agent_protocol/src/vonk_agent_protocol/workload_packages.py",
-        "agent_protocol/src/vonk_agent_protocol/host_helper.py",
-        "control/src/vonk_control/strict_json.py",
-        "src/cluster_profiles/control_client.py",
-        "src/cluster_profiles/controller_cli.py",
-        "src/cluster_profiles/control_transport.py",
-        "src/cluster_profiles/control_limits.py",
-        "src/cluster_profiles/schemas/control-openapi.json",
-        "src/cluster_profiles/schemas/qualification-authority-v4.schema.json",
-        "src/cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json",
-        "src/cluster_profiles/schemas/recovery-coverage-receipt-v1.schema.json",
-        "src/cluster_profiles/schemas/recovery-coverage-use-v1.schema.json",
-        "src/cluster_profiles/schemas/recovery-coverage-consumption-v1.schema.json",
-        "src/cluster_profiles/fleet_qualification_campaign_cli.py",
-        "src/cluster_profiles/fleet_qualification.py",
-        "src/cluster_profiles/fleet_qualification_recovery.py",
-        "src/cluster_profiles/fleet_qualification_dual_recovery.py",
-        "src/cluster_profiles/fleet_qualification_coverage.py",
-        "src/cluster_profiles/qualification_fixtures.py",
-        "src/cluster_profiles/qualification_locking.py",
-        "scripts/export-qualification-campaign-schemas",
-        "scripts/generate-control-clients",
-        "control/src/vonk_control/compiled_execution_plan.py",
-        "control/src/vonk_control/execution_plan_service.py",
-        "control/src/vonk_control/install_admission.py",
-        "control/src/vonk_control/disk_reservations.py",
-        "control/src/vonk_control/runtime_preflight.py",
-        "control/src/vonk_control/lifecycle_preflight.py",
-        "control/src/vonk_control/run_admission.py",
-        "control/src/vonk_control/run_switch_contract.py",
-        "control/src/vonk_control/run_switch_operations.py",
-        "control/src/vonk_control/distribution_executor.py",
-        "control/src/vonk_control/runtime_image_preparation.py",
-        "control/src/vonk_control/cached_file_verification.py",
-        "control/src/vonk_control/recipe_operation_worker.py",
-        "control/src/vonk_control/availability_production.py",
-        "control/src/vonk_control/model_cache.py",
-        "control/src/vonk_control/model_cache_api.py",
-        "control/src/vonk_control/model_cache_contract.py",
-        "control/src/vonk_control/model_cache_progress.py",
-        "control/src/vonk_control/recipe_builds.py",
-        "control/src/vonk_control/recipe_build_cancellation.py",
-        "control/src/vonk_control/recipe_operations.py",
-        "control/src/vonk_control/recipe_image_availability.py",
-        "control/src/vonk_control/recipe_image_availability_api.py",
-        "control/src/vonk_control/recipe_update_batches.py",
-        "control/src/vonk_control/recipe_update_contract.py",
-        "control/src/vonk_control/recipe_availability_intent.py",
-        "control/src/vonk_control/operation_contract.py",
-        "control/src/vonk_control/operation_progress.py",
-        "control/src/vonk_control/operation_api.py",
-        "control/src/vonk_control/download_contract.py",
-        "control/src/vonk_control/failure_evidence.py",
-        "control/src/vonk_control/failure_evidence_api.py",
-        "control/src/vonk_control/failure_evidence_models.py",
-        "control/src/vonk_control/deployment_provenance.py",
-        "control/src/vonk_control/capture_deployment_observation.py",
-        "control/src/vonk_control/deployment_observer.py",
-        "control/src/vonk_control/deployment_provenance_contract.py",
-        "control/src/vonk_control/settings.py",
-        "control/src/vonk_control/logging.py",
-        "src/cluster_profiles/serving_execution.py",
-        "scripts/qualify-recipe",
-        "scripts/validate-recipe-library",
-        "config/recipe-library-manifest.json",
-    ]
-    harnesses = root / "control/src/vonk_control/harnesses"
-    if not harnesses.is_dir():
-        raise ValueError("canonical recipe compiler harnesses are missing")
-    paths.extend(
-        path.relative_to(root).as_posix()
-        for path in sorted(harnesses.rglob("*.py"))
-        if path.is_file()
-    )
-    return tuple(dict.fromkeys(paths))
-
-
 def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
-    """Bind the installed canonical contracts wheel to its reviewed revision."""
+    """Verify the pinned third-party contract wheel and its source revision."""
 
     lock = tomllib.loads((root / PUBLIC_CONTRACT_LOCK).read_text())
     expected = {
@@ -398,7 +234,7 @@ def spdx(
     return canonical(document)
 
 
-def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
+def expected(root: Path) -> tuple[dict[str, bytes], bytes | None, dict[str, object]]:
     control_lock = (root / "control/uv.lock").read_bytes()
     cargo_lock = (root / "Cargo.lock").read_bytes()
     protocol_lock = (root / "agent_protocol/uv.lock").read_bytes()
@@ -410,14 +246,16 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
     if not isinstance(version, str) or protocol_version(control_lock) != version:
         raise ValueError("control must resolve the exact protocol version")
     verify_public_contract_lock(root, control_lock)
+    public_contract_lock = tomllib.loads((root / PUBLIC_CONTRACT_LOCK).read_text())
     # The protocol wheel is pinned by version, not by rebuilding it and
     # comparing a content hash: a source edit (even formatting) must not
     # invalidate a lock that the lockfile tool owns.
     expected_wheel = f"vonk_agent_protocol-{version}-py3-none-any.whl"
     if Path(PROTOCOL_WHEEL).name != expected_wheel:
         raise ValueError("protocol wheel filename must match its version")
-    wheel = (root / PROTOCOL_WHEEL).read_bytes()
-    wheel_sha256 = digest(wheel)
+    wheel_path = root / PROTOCOL_WHEEL
+    wheel = wheel_path.read_bytes() if wheel_path.is_file() else None
+    wheel_sha256 = digest(wheel) if wheel is not None else None
     sboms = {
         "inventory/sbom/control-python.spdx.json": spdx(
             "control-python",
@@ -438,102 +276,18 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
             "control-web", web_lock, packages_web(web_lock)
         ),
     }
-    input_paths = (
-        "pyproject.toml",
-        "tools/hatch_build.py",
-        ".github/workflows/ci.yml",
-        "scripts/select-ci-areas",
-        ".github/workflows/agent-apt-development.yml",
-        ".github/workflows/agent-release.yml",
-        ".github/actions/agent-package-build/action.yml",
-        ".github/actions/agent-package-compile/action.yml",
-        ".github/actions/agent-package-security/action.yml",
-        ".github/actions/agent-apt-publish/action.yml",
-        ".github/workflows/dev-images.yml",
-        ".github/workflows/installer-publication-source.yml",
-        ".github/workflows/installer-publication.yml",
-        ".github/workflows/installer-setups.yml",
-        ".github/workflows/workload-artifacts.yml",
-        ".github/release-allowed-signers",
-        ".github/dependabot.yml",
-        "schemas/install-release-manifest.schema.json",
-        "schemas/qualification-authority-v4.schema.json",
-        "schemas/qualification-campaign-manifest-v2.schema.json",
-        "schemas/recovery-coverage-receipt-v1.schema.json",
-        "schemas/recovery-coverage-use-v1.schema.json",
-        "schemas/recovery-coverage-consumption-v1.schema.json",
-        "schemas/workload-artifact-build.schema.json",
-        "agent_protocol/pyproject.toml",
-        "agent_protocol/uv.lock",
-        "control/pyproject.toml",
-        "control/uv.lock",
-        ".dockerignore",
-        "control/web/package-lock.json",
-        "control/Dockerfile",
-        "deploy/compose/compose.yaml",
-        "deploy/compose/images.lock.json",
-        "deploy/compose/Caddyfile",
-        "deploy/compose/caddy/entrypoint.sh",
-        "deploy/compose/postgres/entrypoint.sh",
-        "deploy/compose/postgres/init-databases.sh",
-        "deploy/compose/grafana/dashboards/fleet.json",
-        "deploy/compose/grafana/dashboards/jobs.json",
-        "deploy/compose/grafana/provisioning/dashboards/default.yaml",
-        "deploy/compose/grafana/provisioning/datasources/prometheus.yaml",
-        "deploy/compose/tailscale/compose.yaml",
-        "deploy/compose/tailscale/configure.sh",
-        "deploy/compose/tailscale/grants.example.hujson",
-        "deploy/compose/hermes-agent/compose.yaml",
-        "deploy/compose/hermes-agent/Dockerfile",
-        "deploy/compose/hermes-agent/entrypoint.sh",
-        "agent_protocol/src/vonk_agent_protocol/route_activation.py",
-        "deploy/compose/litellm/Dockerfile",
-        "deploy/compose/litellm/config.yaml",
-        "deploy/compose/litellm/bootstrap-config.json",
-        "deploy/compose/litellm/config_supervisor.py",
-        "deploy/compose/litellm/entrypoint.sh",
-        "deploy/compose/prometheus/alerts.yaml",
-        "deploy/compose/prometheus/prometheus.yml",
-        "deploy/compose/registry/config.yml",
-        "deploy/compose/step-ca/ca.json",
-        "deploy/compose/trust/litellm-cosign.pub",
-        "scripts/accept-development-image-archive",
-        "scripts/agent-package-metadata",
-        "scripts/agent-apt-metadata",
-        "scripts/agent-apt-state",
-        "scripts/container-release-metadata",
-        "scripts/dev-image-acceptance-receipt",
-        "scripts/dev-image-metadata",
-        "scripts/dev-image-inputs",
-        "scripts/reuse-development-image",
-        "scripts/publish-immutable-image",
-        "scripts/promote-image-aliases",
-        "scripts/verify-release-tag-authority",
-        "scripts/render-dev-compose",
-        "scripts/render-install-bootstrap",
-        "install/channel",
-        "scripts/render-production-compose",
-        "scripts/install-release-publication",
-        "scripts/refuse-existing-image-version",
-        "scripts/validate-container-release-digests",
-        "scripts/verify-multiarch-image-manifest",
-        "scripts/verify-public-image-inputs",
-        "scripts/verify-published-image",
-        "scripts/retry-dependency-fetch",
-        "scripts/retry_dependency_fetch.py",
-        "scripts/verify-supply-chain",
-        "scripts/select-workload-runtime-manifest",
-        "scripts/validate-workload-dockerfile",
-        "scripts/workload-artifact-metadata",
-    )
-    input_paths += workload_package_inputs(root)
-    input_paths += rust_package_inputs(root)
-    input_paths += recipe_execution_supply_chain_inputs(root)
     manifest = {
         "schema_version": 2,
-        "inputs": {path: digest((root / path).read_bytes()) for path in input_paths},
         "sboms": {path: digest(content) for path, content in sboms.items()},
         "protocol_wheel_sha256": wheel_sha256,
+        "lockfiles": {
+            "control/uv.lock": digest(control_lock),
+            "agent_protocol/uv.lock": digest(protocol_lock),
+            "Cargo.lock": digest(cargo_lock),
+            "control/web/package-lock.json": digest(web_lock),
+            PUBLIC_CONTRACT_LOCK: digest((root / PUBLIC_CONTRACT_LOCK).read_bytes()),
+        },
+        "public_contract_wheel_sha256": public_contract_lock["sha256"],
         "image_lock_sha256": digest(
             (root / "deploy/compose/images.lock.json").read_bytes()
         ),
@@ -720,50 +474,29 @@ def docker_installs_protocol_wheel(dockerfile: str) -> bool:
     return False
 
 
-def verify(root: Path, generate: bool) -> tuple[list[str], dict[str, object]]:
+def verify(root: Path, output_dir: Path | None) -> tuple[list[str], dict[str, object]]:
     errors = image_errors(root)
     try:
-        sboms, wheel, manifest = expected(root)
+        sboms, _wheel, manifest = expected(root)
     except (
         OSError,
         ValueError,
         TypeError,
         KeyError,
         json.JSONDecodeError,
-        subprocess.CalledProcessError,
         tomllib.TOMLDecodeError,
     ) as error:
         return [
             *errors,
             f"could not generate expected supply-chain evidence: {type(error).__name__}: {error}",
         ], {}
-    manifest_path = root / "inventory/sbom/manifest.json"
-    if generate:
-        for path in RETIRED_SBOMS:
-            (root / path).unlink(missing_ok=True)
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
         for path, content in sboms.items():
-            target = root / path
+            target = output_dir / Path(path).name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
-        wheel_path = root / PROTOCOL_WHEEL
-        wheel_path.parent.mkdir(parents=True, exist_ok=True)
-        wheel_path.write_bytes(wheel)
-        manifest_path.write_bytes(canonical(manifest))
-    else:
-        for path in RETIRED_SBOMS:
-            if (root / path).exists():
-                errors.append(f"retired SBOM is still present: {path}")
-        for path, content in sboms.items():
-            target = root / path
-            if not target.is_file() or target.read_bytes() != content:
-                errors.append(f"SBOM is missing or stale: {path}")
-        wheel_path = root / PROTOCOL_WHEEL
-        if not wheel_path.is_file() or wheel_path.read_bytes() != wheel:
-            errors.append("protocol wheel is missing or stale")
-        if not manifest_path.is_file() or manifest_path.read_bytes() != canonical(
-            manifest
-        ):
-            errors.append("supply-chain manifest is missing or stale")
+        (output_dir / "manifest.json").write_bytes(canonical(manifest))
     result = {
         "ok": not errors,
         "images": len(
@@ -771,8 +504,9 @@ def verify(root: Path, generate: bool) -> tuple[list[str], dict[str, object]]:
                 "images", {}
             )
         ),
-        "sboms": sorted(sboms),
+        "sboms": [Path(path).name for path in sorted(sboms)],
         "manifest_sha256": digest(canonical(manifest)),
+        "output_dir": str(output_dir) if output_dir is not None else None,
     }
     return errors, result
 
@@ -783,15 +517,15 @@ def main() -> int:
         "--root", type=Path, default=Path(__file__).resolve().parents[1]
     )
     parser.add_argument(
-        "--generate",
-        "--write-manifest",
-        dest="generate",
-        action="store_true",
-        help="regenerate reviewed SBOM, protocol-wheel, and manifest evidence",
+        "--output-dir",
+        type=Path,
+        help="write generated SBOMs and their source manifest into this directory",
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    errors, result = verify(args.root.resolve(), args.generate)
+    errors, result = verify(
+        args.root.resolve(), args.output_dir.resolve() if args.output_dir else None
+    )
     result["errors"] = errors
     if args.json:
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))

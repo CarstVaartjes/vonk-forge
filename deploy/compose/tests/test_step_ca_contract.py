@@ -91,6 +91,7 @@ def test_public_provisioner_config_bootstrap_uses_separate_private_jwk(
     assert stored_private["y"] == configured["y"] and "d" in stored_private
 
 
+@pytest.mark.needs_docker
 def test_pinned_step_image_supports_jwk_thumbprint_command() -> None:
     if shutil.which("docker") is None:
         pytest.skip("Docker CLI is unavailable")
