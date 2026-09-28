@@ -9,7 +9,12 @@ from sqlalchemy.exc import OperationalError
 def test_default_alembic_config_is_packaged_with_the_control_library() -> None:
     from vonk_control import db
 
-    assert db._ALEMBIC_CONFIG == Path(db.__file__).resolve().parent / "alembic.ini"
+    module_config = Path(db.__file__).resolve().parent / "alembic.ini"
+    source_config = Path(db.__file__).resolve().parents[2] / "alembic.ini"
+    assert db._ALEMBIC_CONFIG == (
+        module_config if module_config.is_file() else source_config
+    )
+    assert db._ALEMBIC_CONFIG.is_file()
 
 
 def test_built_wheel_contains_alembic_config_next_to_installed_module(

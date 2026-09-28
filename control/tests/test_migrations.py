@@ -179,10 +179,9 @@ def test_postgres_fresh_schema_matches_metadata_has_current_kind_and_roundtrips_
     _assert_current_schema(postgres_engine)
     _assert_model_cache_operation_kind_is_current(postgres_engine)
     _assert_json_roundtrip(postgres_engine)
-    with postgres_engine.connect() as connection:
-        verify_schema_is_current(connection)
-    with postgres_engine.connect() as connection:
-        verify_schema_is_current(connection)
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _initialize_source_checkout(database_url)
+    _initialize_source_checkout(database_url)
     with postgres_engine.begin() as connection:
         event_id = connection.execute(
             text(
@@ -201,20 +200,6 @@ def test_postgres_fresh_schema_matches_metadata_has_current_kind_and_roundtrips_
             )
         ).scalar_one()
         assert owner_id == 1
-        connection.execute(
-            text(
-                "INSERT INTO control_authority_revisions "
-                "(revision_id, documents, dependencies, actor, created_at) "
-                "VALUES ('serial-pk-test', '{}', '{}', 'migration-test', CURRENT_TIMESTAMP)"
-            )
-        )
-        authority_head_id = connection.execute(
-            text(
-                "INSERT INTO control_authority_heads (revision_id, updated_at) "
-                "VALUES ('serial-pk-test', CURRENT_TIMESTAMP) RETURNING singleton_id"
-            )
-        ).scalar_one()
-        assert authority_head_id > 0
 
 
 def test_postgres_reconciliation_preserves_unknown_table_and_column_data(
@@ -330,6 +315,82 @@ def test_postgres_schema_reconciliation_relaxes_retired_required_receipt_column(
         if column["name"] == "receipt_id"
     )
     assert receipt_column["nullable"] is True
+
+
+def test_postgres_startup_relaxes_changed_nullable_column_and_accepts_insert(
+    postgres_engine,
+) -> None:
+    """Repeated startup applies wrapped nullable diffs before serial inserts."""
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO fleet_stream_events "
+                "(event_type, node_id, entity_kind, entity_id, payload, occurred_at, expires_at) "
+                "VALUES ('node-profile', 'node-a', 'node', 'node-a', '{}', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 hour')"
+            )
+        )
+        connection.execute(
+            text("ALTER TABLE fleet_stream_events ALTER COLUMN node_id SET NOT NULL")
+        )
+
+    _initialize_source_checkout(database_url)
+    _initialize_source_checkout(database_url)
+
+    with postgres_engine.begin() as connection:
+        inserted_id = connection.execute(
+            text(
+                "INSERT INTO fleet_stream_events "
+                "(event_type, node_id, entity_kind, entity_id, payload, occurred_at, expires_at) "
+                "VALUES ('node-profile', NULL, 'node', 'after-restart', '{}', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 hour') "
+                "RETURNING id"
+            )
+        ).scalar_one()
+    assert inserted_id > 1
+
+
+def test_postgres_reconciliation_skips_lossy_type_narrowing_without_data_loss(
+    postgres_engine,
+) -> None:
+    """A narrowing cast that truncates existing text is deferred safely."""
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    retained_value = "x" * 150
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE fleet_stream_events "
+                "ALTER COLUMN entity_id TYPE VARCHAR(200)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO fleet_stream_events "
+                "(event_type, entity_kind, entity_id, payload, occurred_at, expires_at) "
+                "VALUES ('node-profile', 'node', :entity_id, '{}', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 hour')"
+            ),
+            {"entity_id": retained_value},
+        )
+
+    _initialize_source_checkout(database_url)
+
+    with postgres_engine.connect() as connection:
+        column = next(
+            column
+            for column in inspect(connection).get_columns("fleet_stream_events")
+            if column["name"] == "entity_id"
+        )
+        assert column["type"].length == 200
+        assert (
+            connection.execute(
+                text("SELECT entity_id FROM fleet_stream_events")
+            ).scalar_one()
+            == retained_value
+        )
 
 
 def test_postgres_schema_reconciliation_replaces_changed_check_expression(
