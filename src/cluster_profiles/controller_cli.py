@@ -1228,7 +1228,6 @@ def _validate_cache_removal_receipt(
     result: Mapping[str, object],
     *,
     expected_with_model: bool | None,
-    expected_model_content_sha256: str | None = None,
 ) -> str:
     """Bind a removal receipt to its submitted target and durable identity."""
 
@@ -1254,25 +1253,14 @@ def _validate_cache_removal_receipt(
     if noun == "recipe":
         identity_matches = (
             identity_matches
-            and expected_model_content_sha256 is None
             and expected_with_model is not None
             and receipt.get("with_model") is expected_with_model
         )
     else:
-        digest = receipt.get("model_content_sha256")
-        identity_matches = (
-            identity_matches
-            and expected_with_model is None
-            and isinstance(digest, str)
-            and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
-            and (
-                expected_model_content_sha256 is None
-                or digest == expected_model_content_sha256
-            )
-        )
+        identity_matches = identity_matches and expected_with_model is None
     if not identity_matches:
         raise ControlMalformedResponse(
-            f"{noun} removal receipt identifies another request, selector, digest, or retention choice"
+            f"{noun} removal receipt identifies another request, selector, or retention choice"
         )
     return _cache_operation_id(noun, receipt)
 
@@ -1361,20 +1349,19 @@ def _security_blocker_codes(blockers: object) -> list[str]:
     return codes
 
 
-def _review_digest_for_acceptance(
+def _confirm_removal(
     client: ControllerClient,
     noun: str,
     selector: str,
     args: argparse.Namespace,
     *,
     with_model: bool | None,
-) -> tuple[str, str | None]:
+) -> None:
     interactive = _removal_is_interactive(args)
     if not args.yes and not interactive:
         raise ValueError(f"{noun} remove requires --yes in noninteractive mode")
 
     review = _cache_removal_review(client, noun, selector, with_model=with_model)
-    current_digest = cast(str, review["review_digest"])
     security = _security_blocker_codes(review["blockers"])
     if security:
         raise ControlConflict(
@@ -1384,11 +1371,7 @@ def _review_digest_for_acceptance(
     if not args.yes:
         with redirect_stdout(sys.stderr):
             render_payload(review, noun, action="preview")
-        _confirm_action(
-            args,
-            f"Remove {noun} selector {selector} with reviewed impact {current_digest}?",
-        )
-    return current_digest, cast(str, review["target_identity"])
+        _confirm_action(args, f"Remove {noun} selector {selector}?")
 
 
 def _existing_cache_removal(
@@ -1437,11 +1420,8 @@ def _submit_model_removal(
     client: ControllerClient,
     args: argparse.Namespace,
     factory: Callable[[], str],
-    *,
-    review_digest: str,
-    model_content_sha256: str,
 ) -> dict[str, object]:
-    """Submit one removal bound to the Controller's displayed review."""
+    """Submit one removal of the model's current state."""
     selector = cast(str, args.selector)
     key = _request_key(args, factory)
     path = f"/api/model/{_quoted(selector)}/remove"
@@ -1454,7 +1434,6 @@ def _submit_model_removal(
             key,
             result,
             expected_with_model=None,
-            expected_model_content_sha256=model_content_sha256,
         )
 
     return _submit_idempotent_request(
@@ -1463,12 +1442,7 @@ def _submit_model_removal(
         key=key,
         path=path,
         lookup=lookup,
-        body={
-            "schema_version": 2,
-            "request_key": key,
-            "model_content_sha256": model_content_sha256,
-            "review_digest": review_digest,
-        },
+        body={"schema_version": 2, "request_key": key},
         noun="model",
         action="remove",
         validate=validate,
@@ -1492,10 +1466,9 @@ def _submit_recipe_removal(
     args: argparse.Namespace,
     factory: Callable[[], str],
     *,
-    review_digest: str,
     with_model: bool,
 ) -> dict[str, object]:
-    """Submit one recipe removal bound to its reviewed retention choice."""
+    """Submit one recipe removal bound to its retention choice."""
     selector = cast(str, args.selector)
     key = _request_key(args, factory)
     path = f"/api/recipe/{_quoted(selector)}/remove"
@@ -1521,7 +1494,6 @@ def _submit_recipe_removal(
             "schema_version": 2,
             "request_key": key,
             "with_model": with_model,
-            "review_digest": review_digest,
         },
         noun="recipe",
         action="remove",
@@ -1572,18 +1544,8 @@ def _remove_model(
     )
     if existing is not None:
         return existing
-    digest, target_identity = _review_digest_for_acceptance(
-        client, "model", selector, args, with_model=None
-    )
-    if target_identity is None:
-        raise ControlMalformedResponse("model removal review has no target identity")
-    return _submit_model_removal(
-        client,
-        args,
-        factory,
-        review_digest=digest,
-        model_content_sha256=target_identity,
-    )
+    _confirm_removal(client, "model", selector, args, with_model=None)
+    return _submit_model_removal(client, args, factory)
 
 
 def _remove_recipe(
@@ -1619,16 +1581,8 @@ def _remove_recipe(
     )
     if existing is not None:
         return existing
-    digest, _target_identity = _review_digest_for_acceptance(
-        client, "recipe", selector, args, with_model=with_model
-    )
-    return _submit_recipe_removal(
-        client,
-        args,
-        factory,
-        review_digest=digest,
-        with_model=with_model,
-    )
+    _confirm_removal(client, "recipe", selector, args, with_model=with_model)
+    return _submit_recipe_removal(client, args, factory, with_model=with_model)
 
 
 def _submit_cache_request(

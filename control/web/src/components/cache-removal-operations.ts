@@ -77,12 +77,9 @@ export function validateRemovalReceipt(
     && value.request_key === intent.requestKey
     && typeof value.operation_id === "string"
     && value.operation_id.length > 0;
-  const targetMatches = intent.kind === "model"
-    ? value.model_content_sha256 === intent.review.target_identity
-    : value.recipe_revision_id === intent.review.target_identity
-      && value.with_model === intent.review.with_model;
+  const targetMatches = intent.kind === "model" || value.with_model === intent.review.with_model;
   if (!commonMatches || !targetMatches) {
-    throw new Error("Controller returned a removal receipt for a different reviewed intent.");
+    throw new Error("Controller returned a removal receipt for a different request.");
   }
   return value as unknown as CacheRemovalReceipt;
 }
@@ -121,18 +118,7 @@ export async function submitReviewedRemoval(
     if (error instanceof ApiError && error.status === 409) {
       const accepted = await findRemovalRequest(api, intent, signal);
       if (accepted) return accepted;
-      const current = intent.kind === "model"
-        ? await api.modelRemovalReview(intent.selector, signal)
-        : await api.recipeRemovalReview(
-            intent.selector,
-            intent.review.with_model as boolean,
-            signal,
-          );
-      validateRemovalReview(current, intent.kind === "model"
-        ? {kind: "model", selector: intent.selector, modelContentSha256: intent.review.target_identity}
-        : {kind: "recipe", selector: intent.selector, withModel: intent.review.with_model as boolean});
-      const resumed = {...intent, review: current};
-      return validateRemovalReceipt(resumed, await postRemoval(api, resumed, signal));
+      throw error;
     }
     if (signal?.aborted || isDefiniteRemovalRefusal(error)) throw error;
     try {
@@ -153,18 +139,11 @@ function postRemoval(
   signal?: AbortSignal,
 ): Promise<CacheRemovalReceipt> {
   return intent.kind === "model"
-    ? api.removeModelCache(
-        intent.selector,
-        intent.review.target_identity,
-        intent.requestKey,
-        intent.review.review_digest,
-        signal,
-      )
+    ? api.removeModelCache(intent.selector, intent.requestKey, signal)
     : api.removeRecipe(
         intent.selector,
         intent.requestKey,
         intent.review.with_model as boolean,
-        intent.review.review_digest,
         signal,
       );
 }

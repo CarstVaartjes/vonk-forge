@@ -271,23 +271,11 @@ class FakeClient:
         }:
             assert isinstance(payload, dict)
             if selector_path.group(1) == "model" and selector_path.group(2) == "remove":
-                assert set(payload) == {
-                    "schema_version",
-                    "request_key",
-                    "model_content_sha256",
-                    "review_digest",
-                }
+                assert set(payload) == {"schema_version", "request_key"}
                 assert payload["schema_version"] == 2
                 uuid.UUID(payload["request_key"])
-                assert re.fullmatch(r"[0-9a-f]{64}", payload["model_content_sha256"])
-                assert re.fullmatch(r"[0-9a-f]{64}", payload["review_digest"])
             else:
-                assert set(payload) <= {
-                    "schema_version",
-                    "request_key",
-                    "with_model",
-                    "review_digest",
-                }
+                assert set(payload) <= {"schema_version", "request_key", "with_model"}
                 assert payload["schema_version"] == 2
                 uuid.UUID(payload["request_key"])
                 if selector_path.group(2) == "remove":
@@ -295,9 +283,7 @@ class FakeClient:
                         "schema_version",
                         "request_key",
                         "with_model",
-                        "review_digest",
                     }
-                    assert re.fullmatch(r"[0-9a-f]{64}", payload["review_digest"])
             if selector_path.group(1) == "model":
                 assert "with_model" not in payload
             if selector_path.group(2) == "download":
@@ -815,7 +801,6 @@ def _recipe_removal_receipt(
         "operation_id": "11111111-1111-4111-8111-111111111121",
         "recipe_revision_id": "revision-1",
         "with_model": with_model,
-        "review_digest": "b" * 64,
         "progress": {"phase": "queued"},
         "reclaimed_bytes": 0,
         "state": "queued",
@@ -1235,7 +1220,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "selector": "qwen",
                 "request_key": request_key,
                 "model_content_sha256": model_digest,
-                "review_digest": _REVIEW_DIGEST,
                 "state": "cancelled",
                 "operation_id": model_operation_id,
                 "phase": "completed",
@@ -1254,7 +1238,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "operation_id": recipe_operation_id,
                 "recipe_revision_id": "revision-1",
                 "with_model": True,
-                "review_digest": _REVIEW_DIGEST,
                 "progress": {"phase": "completed"},
                 "reclaimed_bytes": 0,
             },
@@ -1291,8 +1274,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
     assert client.calls[1][2] == {
         "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
-        "model_content_sha256": model_digest,
-        "review_digest": _REVIEW_DIGEST,
     }
     assert (
         run(
@@ -1315,7 +1296,7 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
     assert recipe_remove["with_model"] is True
 
 
-def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> None:
+def test_model_remove_reconciles_after_lost_acceptance() -> None:
     selector = "qwen"
     request_key = "11111111-1111-4111-8111-111111111111"
     operation_id = "11111111-1111-4111-8111-111111111121"
@@ -1326,7 +1307,6 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
         "selector": selector,
         "request_key": request_key,
         "model_content_sha256": digest,
-        "review_digest": _REVIEW_DIGEST,
         "operation_id": operation_id,
         "state": "queued",
         "phase": "queued",
@@ -1374,8 +1354,6 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
     assert body == {
         "schema_version": 2,
         "request_key": request_key,
-        "model_content_sha256": digest,
-        "review_digest": _REVIEW_DIGEST,
     }
 
 
@@ -1390,7 +1368,6 @@ def test_model_remove_reconnects_to_existing_key_before_resolving_current_head()
         "selector": selector,
         "request_key": request_key,
         "model_content_sha256": "a" * 64,
-        "review_digest": _REVIEW_DIGEST,
         "operation_id": "11111111-1111-4111-8111-111111111121",
         "state": "succeeded",
         "phase": "completed",
@@ -1464,7 +1441,6 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
         "schema_version": 2,
         "request_key": request_key,
         "with_model": False,
-        "review_digest": _REVIEW_DIGEST,
     }
 
 
@@ -1540,7 +1516,6 @@ def test_recipe_remove_reconnect_rejects_foreign_selector_or_retention(
             "request_key",
             "22222222-2222-4222-8222-222222222222",
         ),
-        ("model", "qwen", "model_content_sha256", "b" * 64),
         ("recipe", "vision", "selector", "other-recipe"),
         (
             "recipe",
@@ -1564,7 +1539,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             "selector": selector,
             "request_key": request_key,
             "model_content_sha256": model_digest,
-            "review_digest": _REVIEW_DIGEST,
             "operation_id": operation_id,
             "state": "succeeded",
             "phase": "completed",
@@ -1580,7 +1554,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             "operation_id": operation_id,
             "recipe_revision_id": "revision-1",
             "with_model": False,
-            "review_digest": _REVIEW_DIGEST,
             "state": "succeeded",
             "progress": {"phase": "completed"},
             "reclaimed_bytes": 0,

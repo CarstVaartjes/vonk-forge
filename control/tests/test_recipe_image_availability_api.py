@@ -181,7 +181,6 @@ def test_openapi_uses_typed_recipe_models_and_conflict_schema() -> None:
     assert RecipeOperatorRequest.model_fields.keys() >= {
         "request_key",
         "with_model",
-        "review_digest",
     }
     assert RecipeUpdateRequest.model_fields.keys() >= {
         "request_key",
@@ -348,7 +347,6 @@ def test_remove_names_a_terminal_availability_refusal() -> None:
             "schema_version": 2,
             "request_key": _REQUEST_KEY,
             "with_model": False,
-            "review_digest": "a" * 64,
         },
     )
 
@@ -367,7 +365,6 @@ def test_remove_response_projects_the_stored_model_choice_not_the_request() -> N
         "request_key": _REQUEST_KEY,
         "operation_id": "00000000-0000-4000-8000-000000000002",
         "recipe_revision_id": "revision-example",
-        "review_digest": "a" * 64,
         "with_model": False,
         "state": "succeeded",
         "progress": {
@@ -392,19 +389,17 @@ def test_remove_response_projects_the_stored_model_choice_not_the_request() -> N
             "schema_version": 2,
             "request_key": _REQUEST_KEY,
             "with_model": True,
-            "review_digest": "b" * 64,
         },
     )
 
     assert response.status_code == 202, response.text
     assert response.json()["with_model"] is False
-    assert response.json()["review_digest"] == "a" * 64
+    assert "review_digest" not in response.json()
     service.remove_selector.assert_called_once_with(
         "example",
         actor="operator",
         request_id=_REQUEST_KEY,
         with_model=True,
-        review_digest="b" * 64,
     )
 
 
@@ -417,7 +412,6 @@ def test_remove_response_preserves_partial_progress_and_failure() -> None:
         "request_key": _REQUEST_KEY,
         "operation_id": "00000000-0000-4000-8000-000000000002",
         "recipe_revision_id": "revision-example",
-        "review_digest": "c" * 64,
         "with_model": False,
         "state": "partial",
         "progress": {
@@ -450,7 +444,6 @@ def test_remove_response_preserves_partial_progress_and_failure() -> None:
             "schema_version": 2,
             "request_key": _REQUEST_KEY,
             "with_model": False,
-            "review_digest": "c" * 64,
         },
     )
 

@@ -1412,7 +1412,6 @@ def test_recipe_removal_request_key_rejects_changed_intent(
             actor=replay_actor,
             request_id=request_id,
             with_model=replay_with_model,
-            review_digest=str(original["review_digest"]),
         )
     assert refused.value.code == "recipe_image.request_key_reused"
 
@@ -1445,7 +1444,6 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
         actor="operator",
         request_id=request_id,
         with_model=False,
-        review_digest=str(original["review_digest"]),
     )
 
     assert replay == original
@@ -1502,7 +1500,6 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
         actor="operator",
         request_id=request_key,
         with_model=False,
-        review_digest=before.review_digest,
     )
     assert accepted["state"] == "queued"
 
@@ -1513,7 +1510,6 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
             actor="operator",
             request_id=changed_key,
             with_model=False,
-            review_digest=before.review_digest,
         )
     # The in-flight removal owns the assets; a second request waits for it.
     assert stale.value.code == "artifact.deletion_in_progress"
@@ -1541,7 +1537,6 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
         actor="operator",
         request_id=request_key,
         with_model=False,
-        review_digest=str(accepted["review_digest"]),
     )
     assert replay["operation_id"] == accepted["operation_id"]
     assert replay["review_digest"] == before.review_digest
@@ -1818,7 +1813,7 @@ def test_recipe_removal_replay_rejects_malformed_stored_intent(
 ) -> None:
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
     request_id = "00000000-0000-4000-8000-000000000018"
-    accepted = remove_after_review(
+    remove_after_review(
         service, selector, actor="operator", request_id=request_id, with_model=False
     )
     assert service.advance_removals(limit=1) == 1
@@ -1840,7 +1835,6 @@ def test_recipe_removal_replay_rejects_malformed_stored_intent(
             actor="operator",
             request_id=request_id,
             with_model=False,
-            review_digest=str(accepted["review_digest"]),
         )
 
     assert refused.value.code == "recipe_image.operation_invalid"
@@ -1851,7 +1845,7 @@ def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
 ) -> None:
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
     request_id = "00000000-0000-4000-8000-000000000019"
-    accepted = remove_after_review(
+    remove_after_review(
         service, selector, actor="operator", request_id=request_id, with_model=False
     )
     assert service.advance_removals(limit=1) == 1
@@ -1867,7 +1861,6 @@ def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
             actor="operator",
             request_id=request_id,
             with_model=False,
-            review_digest=str(accepted["review_digest"]),
         )
 
     assert refused.value.code == "recipe_image.operation_invalid"
@@ -1878,7 +1871,7 @@ def test_recipe_removal_replay_rejects_integer_stored_model_choice(
 ) -> None:
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
     request_id = "00000000-0000-4000-8000-000000000020"
-    accepted = remove_after_review(
+    remove_after_review(
         service, selector, actor="operator", request_id=request_id, with_model=False
     )
     assert service.advance_removals(limit=1) == 1
@@ -1904,7 +1897,6 @@ def test_recipe_removal_replay_rejects_integer_stored_model_choice(
             actor="operator",
             request_id=request_id,
             with_model=False,
-            review_digest=str(accepted["review_digest"]),
         )
 
     assert refused.value.code == "recipe_image.operation_invalid"

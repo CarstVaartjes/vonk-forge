@@ -205,7 +205,6 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         assert first_receipt["operation_id"] == operation_id
         assert first_receipt["selector"] == selector
         assert first_receipt["with_model"] is False
-        assert first_receipt["review_digest"] == review["review_digest"]
         assert first_receipt["state"] == "queued"
         assert first_receipt["reclaimed_bytes"] == 0
         assert peer.discard_held_response

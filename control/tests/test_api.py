@@ -228,8 +228,6 @@ def test_central_api_forbidden_error_has_distinct_safe_code() -> None:
         headers=headers,
         json={
             "request_key": "00000000-0000-4000-8000-000000000001",
-            "model_content_sha256": "a" * 64,
-            "review_digest": "b" * 64,
         },
     )
 
