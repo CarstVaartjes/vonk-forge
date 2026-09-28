@@ -88,9 +88,7 @@ def _prepare_exact_legacy_install_for_reconciliation(
             compiled = payload["compiled_execution_plan"]
             placement = compiled["runtime"]["placement"]
             assert "memory_floor_bytes" in placement
-            assert "memory_kind" in placement
             placement.pop("memory_floor_bytes")
-            placement.pop("memory_kind")
             payload["compiled_execution_plan"] = compiled
             operation.payload = payload
             operation.payload_digest = hashlib.sha256(

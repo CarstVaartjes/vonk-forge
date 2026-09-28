@@ -65,7 +65,6 @@ from vonk_control.recipe_start_payloads import (
     build_recipe_start_payload,
 )
 from vonk_control.recipe_stop_payloads import (
-    stop_payload_from_job_run,
     stop_payload_from_start,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256

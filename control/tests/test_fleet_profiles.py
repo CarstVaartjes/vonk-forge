@@ -92,33 +92,15 @@ def _installed_pair_plan(
         nodes.append({**node_template, "node_id": node_id, "rank": rank, "role": role})
         payload = deepcopy(template)
         _nested_object(payload, "identity")["recipe_revision_sha256"] = recipe_digest
-        _nested_object(payload, "runtime")["image_digest"] = "sha256:" + "d" * 64
         _nested_object(payload, "runtime", "placement").update(
             rank=rank, role=role, world_size=2
         )
-        _nested_object(payload, "topology").update(
-            name="pair",
-            mode="distributed",
-            node_count=2,
-            world_size=2,
-            rank=rank,
-            role=role,
-        )
+        _nested_object(payload, "topology").update(name="pair", node_count=2)
         _nested_object(payload, "runtime_image").update(
             image_digest="sha256:" + "d" * 64,
-            platform_manifest_digest="sha256:" + "d" * 64,
-            registry_manifest_digest=None,
             oci_layout_sha256="e" * 64,
             image_bytes=1024,
-            source="controller-build",
             build_id=build_id,
-            local_image_reference="localhost/vonk/compiled-runtime-"
-            + "e" * 64
-            + "@sha256:"
-            + "d" * 64,
-        )
-        _nested_object(payload, "runtime_image", "distribution_object").update(
-            sha256="e" * 64, bytes=1024
         )
         compiled[node_id] = payload
     plan.update(
@@ -393,7 +375,7 @@ def _exact_preparation(
         "missing_bytes": 0,
         "verified_sha256": image_layout_digest,
         "verified_at": observed_at,
-        "source": "published",
+        "source": "controller-build",
     }
     return RolloutPreparation.model_validate(
         {
@@ -585,13 +567,12 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
     revision_id = _uuid(2)
     document = _recipe_document()
     recipe = RecipeDefinition.model_validate(document)
-    model = ModelDefinition.model_validate(
-        json.loads(
-            files("vonk_forge_contracts")
-            .joinpath("examples", "model-definition.json")
-            .read_text(encoding="utf-8")
-        )
+    model_document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
     )
+    model = ModelDefinition.model_validate(model_document)
     model_id = _uuid(3)
     model_revision_id = _uuid(4)
     with sessions.begin() as session:
@@ -644,7 +625,7 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                     state="active",
                     schema_version=2,
                     document=document,
-                    content_digest=document_sha256(recipe.model_dump(mode="json")),
+                    content_digest=document_sha256(document),
                     execution_key="b" * 64,
                     created_by="admin",
                     created_at=NOW,
@@ -658,8 +639,8 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                     revision_number=1,
                     state="active",
                     schema_version=2,
-                    document=model.model_dump(mode="json"),
-                    content_digest=document_sha256(model.model_dump(mode="json")),
+                    document=model_document,
+                    content_digest=document_sha256(model_document),
                     artifact_key="a" * 64,
                     created_by="admin",
                     created_at=NOW,
@@ -701,22 +682,18 @@ def _seed_dual_solo_without_runtime_state(
     dual_topology.update(
         {
             "name": "pair",
-            "mode": "distributed",
             "node_count": 2,
             "roles": [
                 {"name": "entrypoint", "count": 1, "endpoint_owner": True},
                 {"name": "worker", "count": 1, "endpoint_owner": False},
             ],
             "parallelism": {
-                "world_size": 2,
                 "tensor": 2,
                 "pipeline": 1,
                 "data": 1,
                 "backend": "nccl",
             },
-            "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
             "start_order": ["worker", "entrypoint"],
-            "stop_order": ["entrypoint", "worker"],
         }
     )
     dual_topology["roles"] = [
@@ -745,11 +722,7 @@ def _seed_dual_solo_without_runtime_state(
             .where(CatalogDocumentRevision.id == dual_revision_id)
             .values(
                 document=dual_document,
-                content_digest=document_sha256(
-                    RecipeDefinition.model_validate(dual_document).model_dump(
-                        mode="json"
-                    )
-                ),
+                content_digest=document_sha256(dual_document),
             )
         )
         _nested_object(solo_document, "identity")["slug"] = "synthetic-tiny-solo"
@@ -779,7 +752,7 @@ def _seed_dual_solo_without_runtime_state(
                 state="active",
                 schema_version=2,
                 document=solo_document,
-                content_digest=document_sha256(solo.model_dump(mode="json")),
+                content_digest=document_sha256(solo_document),
                 execution_key="c" * 64,
                 created_by="admin",
                 created_at=NOW,
@@ -2890,30 +2863,26 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
     topology.update(
         {
             "name": "pair",
-            "mode": "distributed",
             "node_count": 2,
             "roles": [leader, worker],
             "parallelism": {
-                "world_size": 2,
                 "tensor": 2,
                 "pipeline": 1,
                 "data": 1,
                 "backend": "nccl",
             },
-            "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
             "start_order": ["worker", "leader"],
-            "stop_order": ["leader", "worker"],
         }
     )
     _nested_object(document, "models", 0, "files", 0)["roles"] = ["leader", "worker"]
-    parsed_document = RecipeDefinition.model_validate(document)
+    RecipeDefinition.model_validate(document)
     with sessions.begin() as session:
         session.execute(
             revisions.update()
             .where(CatalogDocumentRevision.id == revision_id)
             .values(
                 document=document,
-                content_digest=document_sha256(parsed_document.model_dump(mode="json")),
+                content_digest=document_sha256(document),
             )
         )
         session.add(
@@ -3005,22 +2974,18 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
     dual_topology.update(
         {
             "name": "pair",
-            "mode": "distributed",
             "node_count": 2,
             "roles": [
                 {"name": "entrypoint", "count": 1, "endpoint_owner": True},
                 {"name": "worker", "count": 1, "endpoint_owner": False},
             ],
             "parallelism": {
-                "world_size": 2,
                 "tensor": 2,
                 "pipeline": 1,
                 "data": 1,
                 "backend": "nccl",
             },
-            "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
             "start_order": ["worker", "entrypoint"],
-            "stop_order": ["entrypoint", "worker"],
         }
     )
     dual_topology["roles"] = [
@@ -3031,7 +2996,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
         "entrypoint",
         "worker",
     ]
-    dual_recipe = RecipeDefinition.model_validate(dual_document)
+    RecipeDefinition.model_validate(dual_document)
     solo_revision_id = _uuid(5)
     with sessions.begin() as session:
         session.add(
@@ -3048,7 +3013,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
             .where(CatalogDocumentRevision.id == dual_revision_id)
             .values(
                 document=dual_document,
-                content_digest=document_sha256(dual_recipe.model_dump(mode="json")),
+                content_digest=document_sha256(dual_document),
             )
         )
         solo_document = _recipe_document()
@@ -3079,7 +3044,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                 state="active",
                 schema_version=2,
                 document=solo_document,
-                content_digest=document_sha256(solo_recipe.model_dump(mode="json")),
+                content_digest=document_sha256(solo_document),
                 execution_key="c" * 64,
                 created_by="admin",
                 created_at=NOW,
@@ -3153,7 +3118,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                     mapping_id=_uuid(10),
                     build_id=_uuid(13),
                     recipe_revision_id=dual_revision_id,
-                    recipe_digest=document_sha256(dual_recipe.model_dump(mode="json")),
+                    recipe_digest=document_sha256(dual_document),
                 ),
                 state="installed",
                 actor="admin",

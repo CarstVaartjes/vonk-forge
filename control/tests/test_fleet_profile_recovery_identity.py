@@ -62,15 +62,9 @@ def _complete_rebuild(sessions, storage, *, archive: bytes, image_digest: str) -
             session,
             build,
             {
-                "build_input_sha256": build.build_input_sha256,
                 "image_bytes": len(archive),
                 "image_digest": image_digest,
                 "oci_layout_sha256": archive_digest,
-                "policy": {
-                    "dockerfile": "Dockerfile",
-                    "findings": [],
-                    "passed": True,
-                },
             },
             now=NOW,
         )

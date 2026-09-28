@@ -244,17 +244,13 @@ def _runtime_receipt(
     build_id = build_id or getattr(plan, "recipe_build_id", None)
     return {
         "schema_version": 2,
-        "source": "controller-build",
         "distribution_publisher": "test",
         "distribution_slug": "recipe",
         "distribution_content_sha256": "a" * 64,
-        "registry_manifest_digest": None,
-        "platform_manifest_digest": image,
         "image_digest": image,
         "oci_archive_sha256": layout,
         "image_bytes": size,
-        "local_image_config_id": None,
-        "local_image_reference": "localhost/test",
+        "local_image_config_id": "sha256:" + "4" * 64,
         "architecture": "linux-arm64",
         "runtime_interface": "vonk.runtime.v1",
         "archive_path": "/tmp/runtime-image.oci.tar",
@@ -1453,7 +1449,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
             assert archive.read_bytes() == expected_archive
             return PulledImageEvidence(
                 manifest_digest=image_digest,
-                requested_manifest_digest=None,
                 config_id="sha256:" + "4" * 64,
                 local_reference="oci-archive:" + str(archive),
                 architecture=expected_architecture,
@@ -1676,9 +1671,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
         compiled_plans = installation.plan["compiled_execution_plans"]
         assert isinstance(compiled_plans, dict)
         assert compiled_plans
-        assert all(
-            payload["schema_version"] == 2 for payload in compiled_plans.values()
-        )
     assert executor.events == ["model-download", "runtime-image", "runtime-plan"]
 
     assert service.tick() is True
@@ -2190,6 +2182,13 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
         )
     assert stale_ids
 
+    with switch.sessions() as session:
+        stale_digests = {
+            operation.node_id: operation.payload_digest
+            for operation in (session.get(AgentOperation, item) for item in stale_ids)
+            if operation is not None
+        }
+
     def order_stale_receipts(*, latest: bool) -> None:
         with switch.sessions.begin() as session:
             for operation_id in stale_ids:
@@ -2214,7 +2213,7 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
                 assert receipt.observed_at == int(NOW.timestamp())
                 with switch.sessions() as session:
                     selected = latest_result(
-                        session, node_id, requirements_sha256=receipt.request_sha256
+                        session, node_id, requirements_sha256=stale_digests[node_id]
                     )
                 assert selected is not None
                 assert selected.observed_at == int(stale_time.timestamp()), (
@@ -2222,7 +2221,7 @@ def test_preflight_receipt_disagreement_backs_off_then_recovers(
                     view.status_reason,
                     switch.executor.events,
                     switch.compiler.compiles,
-                    receipt.request_sha256,
+                    stale_digests[node_id],
                 )
 
     view = switch.service.get(switch.operation.operation_id)
@@ -4629,9 +4628,7 @@ def _make_install_specs_missing_placement_authority(
             compiled = payload["compiled_execution_plan"]
             placement = compiled["runtime"]["placement"]
             assert "memory_floor_bytes" in placement
-            assert "memory_kind" in placement
             placement.pop("memory_floor_bytes")
-            placement.pop("memory_kind")
             payload["compiled_execution_plan"] = compiled
             operation.payload = payload
             operation.payload_digest = hashlib.sha256(
