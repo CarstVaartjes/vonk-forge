@@ -610,7 +610,7 @@ def _verify_control(
 def _verify_standard_preinst(preinst: str) -> None:
     for required in (
         "dpkg --compare-versions",
-        "refusing downgrade",
+        "installing requested downgrade",
         "inside_package_helper",
         "helper_namespace_has_package_paths",
         "keyrings=/usr/share/keyrings",

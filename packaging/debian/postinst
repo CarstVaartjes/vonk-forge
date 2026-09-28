@@ -13,6 +13,22 @@ upgrade_intent=/var/lib/vonk-forge/package-upgrade/intent
 observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8
 observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub
 
+# Package-owned state is self-describing and regenerable. Callers validate
+# the root-controlled parent first; a malformed regular file or symlink at the
+# exact path is then discarded (rm never follows a symlink) so the install
+# converges instead of wedging dpkg. Anything else (a directory, a device)
+# still fails closed.
+discard_own_state() {
+    state_path=$1
+    state_label=$2
+    if [ -L "$state_path" ] || [ -f "$state_path" ]; then
+        /usr/bin/rm -f -- "$state_path" || return 1
+        /usr/bin/sync -f "$(/usr/bin/dirname "$state_path")" || true
+        echo "vonk-forge-agent: discarded malformed $state_label" >&2
+    fi
+    [ ! -e "$state_path" ] && [ ! -L "$state_path" ]
+}
+
 ensure_observation_receipt_key() {
     [ -d /var/lib/vonk-forge/helper ] \
         && [ ! -L /var/lib/vonk-forge/helper ] \
@@ -30,10 +46,17 @@ ensure_observation_receipt_key() {
             && [ "$(/usr/bin/wc -c < "$observation_receipt_private")" -le 128 ] \
             && /usr/bin/openssl pkey -inform DER \
                 -in "$observation_receipt_private" -check -noout >/dev/null 2>&1 \
-            || return 1
-    else
-        [ ! -e "$observation_receipt_public" ] \
-            && [ ! -L "$observation_receipt_public" ] || return 1
+            || {
+                discard_own_state "$observation_receipt_private" \
+                    'observation receipt private key' \
+                    && discard_own_state "$observation_receipt_public" \
+                        'observation receipt public key' \
+                    || return 1
+            }
+    fi
+    if [ ! -e "$observation_receipt_private" ]; then
+        discard_own_state "$observation_receipt_public" \
+            'orphaned observation receipt public key' || return 1
         private_new=$(/usr/bin/mktemp \
             /var/lib/vonk-forge/helper/.observation-receipt.XXXXXX)
         /usr/bin/openssl genpkey -algorithm ED25519 -outform DER \
@@ -64,7 +87,7 @@ ensure_observation_receipt_key() {
     /usr/bin/chmod 0640 "$public_new"
     if [ -e "$observation_receipt_public" ] \
         || [ -L "$observation_receipt_public" ]; then
-        if ! {
+        if {
             [ -f "$observation_receipt_public" ] \
                 && [ ! -L "$observation_receipt_public" ] \
                 && [ "$(/usr/bin/stat -c %U:%G:%a:%h \
@@ -75,21 +98,31 @@ ensure_observation_receipt_key() {
                     "$public_new" "$observation_receipt_public"
         }; then
             /usr/bin/rm -f -- "$public_new"
-            return 1
+            return 0
         fi
-        /usr/bin/rm -f -- "$public_new"
-    else
+        # The root-only private key is authoritative; rederive its public half.
+        discard_own_state "$observation_receipt_public" \
+            'observation receipt public key' || {
+            /usr/bin/rm -f -- "$public_new"
+            return 1
+        }
+    fi
+    if [ ! -e "$observation_receipt_public" ]; then
         /usr/bin/sync -f "$public_new"
         /usr/bin/mv -- "$public_new" "$observation_receipt_public"
         /usr/bin/sync -f /etc/vonk-forge-agent
     fi
 }
 
-durable_intent_is_safe() {
+upgrade_state_dir_is_safe() {
     [ -d /var/lib/vonk-forge/package-upgrade ] \
         && [ ! -L /var/lib/vonk-forge/package-upgrade ] \
         && [ "$(/usr/bin/stat -c %u:%g:%a \
-            /var/lib/vonk-forge/package-upgrade)" = 0:0:700 ] \
+            /var/lib/vonk-forge/package-upgrade)" = 0:0:700 ]
+}
+
+durable_intent_is_safe() {
+    upgrade_state_dir_is_safe \
         && [ -f "$upgrade_intent" ] && [ ! -L "$upgrade_intent" ] \
         && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$upgrade_intent")" \
             = 0:0:600:1 ] \
@@ -134,17 +167,9 @@ write_helper_pending() {
         *[!0-9a-f]*|'') return 1 ;;
     esac
     [ "${#agent_digest}" -eq 64 ] || return 1
-    if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]; then
-        [ -f "$helper_pending" ] && [ ! -L "$helper_pending" ] \
-            && [ "$(/usr/bin/stat -c %u:%a "$helper_pending")" = 0:600 ] \
-            && /usr/bin/sed -n '1p' "$helper_pending" \
-                | grep -Eq '^version=[0-9A-Za-z.+~:-]+$' || return 1
-        [ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ] \
-            && /usr/bin/sed -n '2p' "$helper_pending" \
-                | grep -Eq '^helper_sha256=[0-9a-f]{64}$' \
-            && /usr/bin/sed -n '3p' "$helper_pending" \
-                | grep -Eq '^agent_sha256=[0-9a-f]{64}$' || return 1
-    fi
+    # A present pending file was validated or discarded above; this rewrite
+    # replaces it atomically with the current package's exact identity.
+    [ ! -d "$helper_pending" ] || return 1
     pending_new=$(/usr/bin/mktemp /var/lib/vonk-forge/.helper-upgrade.XXXXXX)
     trap '/usr/bin/rm -f -- "$pending_new"' EXIT HUP INT TERM
     printf '%s\n' \
@@ -161,9 +186,13 @@ write_helper_pending() {
     printf '%s %s\n' "$helper_digest" "$agent_digest"
 }
 
-pending_is_safe() {
+state_parent_is_safe() {
     [ -d /var/lib/vonk-forge ] && [ ! -L /var/lib/vonk-forge ] \
-        && [ "$(/usr/bin/stat -c %u:%a /var/lib/vonk-forge)" = 0:755 ] \
+        && [ "$(/usr/bin/stat -c %u:%a /var/lib/vonk-forge)" = 0:755 ]
+}
+
+pending_is_safe() {
+    state_parent_is_safe \
         && [ -f "$helper_pending" ] && [ ! -L "$helper_pending" ] \
         && [ "$(/usr/bin/stat -c %u:%a "$helper_pending")" = 0:600 ] \
         && /usr/bin/sed -n '1p' "$helper_pending" \
@@ -186,13 +215,13 @@ retire_stale_helper_receipt() {
     fi
     [ "$pending_present" -eq 0 ] && [ "$durable_recovery" -eq 0 ] \
         || return 0
+    state_parent_is_safe || return 1
     [ -f "$helper_receipt" ] && [ ! -L "$helper_receipt" ] \
         && [ "$(/usr/bin/stat -c %u:%a:%h "$helper_receipt" 2>/dev/null \
-            || true)" = 0:600:1 ] || return 1
-    [ "$(/usr/bin/wc -l < "$helper_receipt" 2>/dev/null || true)" -eq 10 ] \
+            || true)" = 0:600:1 ] \
+        && [ "$(/usr/bin/wc -l < "$helper_receipt" 2>/dev/null || true)" -eq 10 ] \
         && return 0
-    /usr/bin/rm -f -- "$helper_receipt" || return 1
-    /usr/bin/sync -f /var/lib/vonk-forge
+    discard_own_state "$helper_receipt" 'stale helper upgrade receipt'
 }
 
 activate_permanent_helper_unit() {
@@ -464,10 +493,14 @@ if [ -e "$machine_evidence" ] || [ -L "$machine_evidence" ]; then
         || [ "$(stat -c '%U:%G:%a' "$machine_evidence")" != root:vonk-agent:640 ] \
         || [ "$(wc -l < "$machine_evidence")" -ne 1 ] \
         || ! grep -Eq '^[0-9a-f]{64}$' "$machine_evidence"; then
-        echo "vonk-forge-agent: native machine evidence is unsafe" >&2
-        exit 1
+        # Untrusted evidence is never reused: discard and regenerate it.
+        discard_own_state "$machine_evidence" 'native machine evidence' || {
+            echo "vonk-forge-agent: native machine evidence is unsafe" >&2
+            exit 1
+        }
     fi
-else
+fi
+if [ ! -e "$machine_evidence" ]; then
     machine_evidence_new=$(mktemp /var/lib/vonk-forge-agent/.machine-evidence.XXXXXX)
     trap 'rm -f -- "$machine_evidence_new"' EXIT HUP INT TERM
     openssl rand -hex 32 > "$machine_evidence_new"
@@ -500,27 +533,52 @@ fi
 [ "$(/usr/lib/vonk-forge/vonk-agent --version)" = "vonk-agent $agent_semver" ]
 pending_present=0
 if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]; then
-    pending_is_safe || {
+    state_parent_is_safe || {
         echo 'vonk-forge-agent: pending helper upgrade state is unsafe' >&2
         exit 1
     }
-    pending_present=1
-fi
-durable_recovery=0
-if [ -e "$upgrade_intent" ] || [ -L "$upgrade_intent" ]; then
-    durable_intent_is_safe || {
-        echo 'vonk-forge-agent: durable package upgrade intent is unsafe' >&2
-        exit 1
-    }
-    if [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
-        grep -Fxq \
-            "recovery_nonce=$VONK_FORGE_UPGRADE_RECOVERY_NONCE" \
-            "$upgrade_intent" || {
-            echo 'vonk-forge-agent: package recovery nonce does not match intent' >&2
+    if pending_is_safe; then
+        pending_present=1
+    else
+        # This configure rewrites the pending gate for its own exact payload.
+        discard_own_state "$helper_pending" 'pending helper upgrade state' || {
+            echo 'vonk-forge-agent: pending helper upgrade state is unsafe' >&2
             exit 1
         }
     fi
-    durable_recovery=1
+fi
+durable_recovery=0
+if [ -e "$upgrade_intent" ] || [ -L "$upgrade_intent" ]; then
+    upgrade_state_dir_is_safe || {
+        echo 'vonk-forge-agent: durable package upgrade state is unsafe' >&2
+        exit 1
+    }
+    if durable_intent_is_safe; then
+        if [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
+            grep -Fxq \
+                "recovery_nonce=$VONK_FORGE_UPGRADE_RECOVERY_NONCE" \
+                "$upgrade_intent" || {
+                echo 'vonk-forge-agent: package recovery nonce does not match intent' >&2
+                exit 1
+            }
+        fi
+        durable_recovery=1
+    elif [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
+        echo 'vonk-forge-agent: package recovery intent does not bind this package' >&2
+        exit 1
+    else
+        # A malformed intent, or one for another version, is superseded by
+        # this configure: the latest installed package leads, and the
+        # Controller re-drives any upgrade it still wants.
+        discard_own_state "$upgrade_intent" \
+            'superseded durable package upgrade intent' \
+            && discard_own_state \
+                /var/lib/vonk-forge/package-upgrade/agent-blocked \
+                'superseded agent start blocker' || {
+            echo 'vonk-forge-agent: durable package upgrade intent is unsafe' >&2
+            exit 1
+        }
+    fi
 elif [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
     echo 'vonk-forge-agent: package recovery intent is missing' >&2
     exit 1
@@ -537,8 +595,9 @@ if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ] \
 fi
 if [ "$pending_present" -eq 1 ] && [ "$needs_finisher" -ne 1 ] \
     && [ "$durable_recovery" -ne 1 ]; then
-    echo 'vonk-forge-agent: interrupted helper activation requires a live systemd configure retry' >&2
-    exit 1
+    # Without a live systemd the helper cannot be restarted here. Keep the
+    # pending gate so the next live configure or recovery finishes it.
+    echo 'vonk-forge-agent: interrupted helper activation requires a live systemd configure retry; pending state kept' >&2
 fi
 if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
