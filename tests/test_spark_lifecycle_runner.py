@@ -228,8 +228,9 @@ def test_synthetic_canary_lists_the_complete_recipe_catalog() -> None:
                 return 200, {
                     "state": "current",
                     "commit": fixture.source_commit,
-                    "total_count": 1,
-                    "processed_count": 1,
+                    # The canary Recipe plus its catalog model document.
+                    "total_count": 2,
+                    "processed_count": 2,
                     "imported_count": 1,
                     "unchanged_count": 0,
                     "problems": [],

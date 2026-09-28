@@ -104,7 +104,8 @@ struct InstallModes {
 }
 
 fn default_install_mode() -> String {
-    "lab".to_owned()
+    // Secure remote (Tailscale) is the default; lab (LAN only) is an explicit choice.
+    "secure-remote".to_owned()
 }
 
 #[derive(Debug, Deserialize)]
@@ -862,10 +863,13 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
 
     fn install_mode(&mut self, modes: &InstallModes) -> Result<bool, SetupError> {
         loop {
-            let value = self.line(&format!(
-                "{} [{} / {}]",
-                modes.prompt, modes.default, modes.secure_remote_value
-            ))?;
+            // The default is listed first; an empty answer selects it.
+            let other = if modes.default == modes.lab_value {
+                &modes.secure_remote_value
+            } else {
+                &modes.lab_value
+            };
+            let value = self.line(&format!("{} [{} / {}]", modes.prompt, modes.default, other))?;
             let selected = if value.trim().is_empty() {
                 modes.default.as_str()
             } else {
@@ -1188,21 +1192,11 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
                 None if lab_mode => false,
                 None => prompt.confirm(&hermes.prompt)?,
             };
-            let current_profiles = environment_value(&environment, &hermes.env)
-                .unwrap_or_default()
-                .split(',')
-                .filter(|profile| !profile.is_empty() && *profile != hermes.enabled_value)
-                .map(str::to_owned)
-                .collect::<Vec<_>>();
-            let mut profiles = current_profiles;
-            if enabled {
-                profiles.push(hermes.enabled_value.clone());
-            }
-            let profile_value = if profiles.is_empty() {
-                hermes.disabled_value.clone()
-            } else {
-                profiles.join(",")
-            };
+            let profile_value = with_compose_profile(
+                environment_value(&environment, &hermes.env).unwrap_or_default(),
+                hermes,
+                enabled,
+            );
             set_environment_value(&mut environment, &hermes.env, profile_value);
             if enabled {
                 for value in &hermes.required_values {
@@ -2038,30 +2032,23 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     }
 
     let hermes_enabled = if let Some(hermes) = &payload.hermes {
+        // The Hermes switch shares its variable with other Compose profiles
+        // (for example the secure-remote install mode), so it is one member
+        // of a comma-separated list rather than the whole value.
         let current = match environment_value(&environment, &hermes.env) {
-            Some(value) if value == hermes.enabled_value => true,
-            Some(value) if value == hermes.disabled_value => false,
-            Some(_) => {
-                return Err(SetupError::InvalidPayload(format!(
-                    "existing {} value is not true or false",
-                    hermes.env
-                )));
-            }
+            Some(value) => compose_profile_enabled(value, &hermes.enabled_value),
             None => match requested_hermes_enabled {
                 Some(enabled) => enabled,
                 None => prompt.confirm(&hermes.prompt)?,
             },
         };
         let enabled = requested_hermes_enabled.unwrap_or(current);
-        set_environment_value(
-            &mut environment,
-            &hermes.env,
-            if enabled {
-                hermes.enabled_value.clone()
-            } else {
-                hermes.disabled_value.clone()
-            },
+        let profile_value = with_compose_profile(
+            environment_value(&environment, &hermes.env).unwrap_or_default(),
+            hermes,
+            enabled,
         );
+        set_environment_value(&mut environment, &hermes.env, profile_value);
         if enabled {
             for required in &hermes.required_values {
                 if environment_value(&environment, &required.env).is_none() {
@@ -2271,6 +2258,34 @@ fn required_value_default(
         let tailnet = control.strip_prefix("vonk-forge.")?;
         Some(format!("{prefix}.{tailnet}"))
     })
+}
+
+fn compose_profile_enabled(value: &str, profile: &str) -> bool {
+    value
+        .split(',')
+        .map(str::trim)
+        .any(|member| member == profile)
+}
+
+fn with_compose_profile(current: &str, hermes: &HermesPrompt, enabled: bool) -> String {
+    let mut profiles = current
+        .split(',')
+        .map(str::trim)
+        .filter(|profile| {
+            !profile.is_empty()
+                && *profile != hermes.enabled_value
+                && *profile != hermes.disabled_value
+        })
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if enabled {
+        profiles.push(hermes.enabled_value.clone());
+    }
+    if profiles.is_empty() {
+        hermes.disabled_value.clone()
+    } else {
+        profiles.join(",")
+    }
 }
 
 fn set_environment_value(values: &mut Vec<(String, String)>, name: &str, value: String) {
