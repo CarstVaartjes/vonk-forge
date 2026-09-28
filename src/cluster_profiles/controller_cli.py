@@ -2407,12 +2407,13 @@ def _fleet(
                 )
             operations = observed.get("operations")
             if isinstance(operations, list):
+                # A Spark whose install failed retries behind its safety
+                # fence while the rollout moves on; only dispatched work counts.
                 active = [
                     item
                     for item in operations
                     if isinstance(item, Mapping)
-                    and item.get("state")
-                    in {"queued", "running", "waiting-for-operator"}
+                    and item.get("state") in {"queued", "running"}
                 ]
                 if len(active) > 1:
                     raise ControlMalformedResponse(

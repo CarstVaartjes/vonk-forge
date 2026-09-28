@@ -463,6 +463,7 @@ def _submit_signed_observation(
     observed_at,
     process_running: bool = True,
     endpoint_ready: bool | None = None,
+    unassigned_run_ids: tuple[str, ...] = (),
 ):
     from fastapi.testclient import TestClient
 
@@ -559,6 +560,31 @@ def _submit_signed_observation(
         envelope = json.loads(rust.stdout)
         parsed = RecipeRunObservationsWire.parse(envelope)
         assert parsed.runs[0].world_size == identity["world_size"]
+        # A snapshot can race a run leaving this node; such an item is not
+        # evidence for any current run and must not discard its siblings.
+        from vonk_agent_protocol.recipe_observations import (
+            RecipeRunObservationIdentity,
+        )
+
+        for other in unassigned_run_ids:
+            stale = json.loads(json.dumps(envelope["runs"][0]))
+            stale["run_id"] = other
+            digest = hashlib.sha256(
+                canonical_message(
+                    RecipeRunObservationIdentity.model_validate(
+                        {
+                            name: stale[name]
+                            for name in RecipeRunObservationIdentity.model_fields
+                        }
+                    ).model_dump(mode="json")
+                )
+            ).hexdigest()
+            stale["observation_identity_sha256"] = digest
+            operation = stale["grant"]["claims"]["operation"]
+            operation["job_id"] = other
+            operation["observation_identity_sha256"] = digest
+            stale["helper_receipt"]["claims"]["observation_identity_sha256"] = digest
+            envelope["runs"].append(stale)
         consumed = client.post(
             "/agent/recipe-runs/observations", headers=headers, json=envelope
         )
@@ -765,6 +791,7 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         recipe_observation_wire_probe=recipe_observation_wire_probe,
         host_helper_wire_probe=host_helper_wire_probe,
         observed_at=observed_at,
+        unassigned_run_ids=(str(uuid.uuid4()),),
     )
     with sessions() as session:
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
