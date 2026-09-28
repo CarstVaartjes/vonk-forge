@@ -7,6 +7,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, select, update
@@ -39,6 +40,7 @@ from .test_recipe_image_availability import (
     _add_head,
     _add_revision,
     _build_id,
+    _builder,
     _recipe,
     _runtime,
     _service,
@@ -627,6 +629,7 @@ def postgres_multi_update_env(postgres_engine, tmp_path):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
     recipes: dict[str, RecipeDefinition] = {}
+    archives: dict[str, bytes] = {}
     with sessions.begin() as session:
         for index in range(2):
             base = _recipe("recipe-source-build.json")
@@ -638,7 +641,11 @@ def postgres_multi_update_env(postgres_engine, tmp_path):
                 }
             )
             revision_id = str(uuid.uuid4())
-            revision = _add_revision(session, revision_id, recipe)
+            # Every revision owns the archive its own build produced.
+            archives[revision_id] = ARCHIVE[:-1] + str(index).encode()
+            revision = _add_revision(
+                session, revision_id, recipe, archive=archives[revision_id]
+            )
             revision.document_id = str(uuid.uuid4())
             _add_head(session, revision)
             recipes[revision_id] = recipe
@@ -646,17 +653,26 @@ def postgres_multi_update_env(postgres_engine, tmp_path):
     now = [datetime.now(UTC)]
     storage = FilesystemRuntimeImageStorage(tmp_path / "images")
 
-    def fresh():
+    def build_own_image(*args: object, claim: Any, **kwargs: Any):
+        return _builder(storage, payload=archives[str(claim.recipe_revision_id)])(
+            *args, claim=claim, **kwargs
+        )
+
+    def fresh(**overrides: Any):
         return _service(
             sessions,
-            storage=storage,
-            authority=lambda recipe_revision_id, **_: (
-                recipes[recipe_revision_id],
-                _runtime(),
-            ),
-            transport=Transport(),
-            clock=lambda: now[0],
-            claim_lease_seconds=10,
+            **{
+                "storage": storage,
+                "authority": lambda recipe_revision_id, **_: (
+                    recipes[recipe_revision_id],
+                    _runtime(),
+                ),
+                "builder": build_own_image,
+                "transport": Transport(),
+                "clock": lambda: now[0],
+                "claim_lease_seconds": 10,
+                **overrides,
+            },
         )
 
     return sessions, list(recipes), now, fresh
@@ -747,9 +763,7 @@ def test_postgres_update_cancel_after_first_child_prevents_later_admission_after
 def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer(
     postgres_multi_update_env, tmp_path: Path, request: pytest.FixtureRequest
 ):
-    from typing import Any
-
-    sessions, revisions, now, _fresh = postgres_multi_update_env
+    sessions, revisions, now, fresh = postgres_multi_update_env
     base_recipe = _recipe("recipe-source-build.json")
     recipes = {
         revision_id: base_recipe.model_copy(
@@ -819,21 +833,7 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
         def signal_cancelled_operation(self, operation_id: str):
             return cache.signal_cancelled_operation(operation_id)
 
-    def authority(
-        recipe_revision_id: str, *, force: bool = False
-    ) -> tuple[RecipeDefinition, dict[str, object]]:
-        del force
-        return recipes[recipe_revision_id], _runtime()
-
-    service = _service(
-        sessions,
-        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
-        authority=authority,
-        transport=Transport(),
-        model_cache=CacheAdapter(),
-        clock=lambda: now[0],
-        claim_lease_seconds=10,
-    )
+    service = fresh(model_cache=CacheAdapter())
     batch = _start(service, revisions)
     first_claim = service.claim_update(owner="shared-update-first")
     assert first_claim is not None

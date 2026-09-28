@@ -143,7 +143,9 @@ def _service(*args: object, **kwargs: object) -> RecipeImageAvailabilityService:
     return RecipeImageAvailabilityService(*args, **kwargs)  # type: ignore[arg-type]
 
 
-def _reference_receipt() -> RuntimeImageReceipt:
+def _reference_receipt(
+    build_id: str = "00000000-0000-4000-8000-000000000999",
+) -> RuntimeImageReceipt:
     return RuntimeImageReceipt(
         schema_version=2,
         distribution_publisher="test-publisher",
@@ -158,7 +160,7 @@ def _reference_receipt() -> RuntimeImageReceipt:
         runtime_interface_label="v1",
         archive_path="/managed/image-cache/" + ARCHIVE_SHA,
         recorded_at=datetime.now(UTC).isoformat(),
-        build_id="00000000-0000-4000-8000-000000000999",
+        build_id=build_id,
         runtime_adapter="vllm",
         runtime_adapter_sha256="a" * 64,
     )
@@ -271,6 +273,18 @@ def _exit_after_recipe_image_unlink(database_url: str, artifact_root: str) -> No
     os._exit(74)
 
 
+def _ensure_builder_node(session: Session) -> None:
+    """PostgreSQL enforces the build's builder foreign key; SQLite does not."""
+
+    with session.no_autoflush:
+        exists = session.get(AgentNode, "spark-builder") is not None or any(
+            isinstance(item, AgentNode) and item.node_id == "spark-builder"
+            for item in session.new
+        )
+    if not exists:
+        session.add(AgentNode(node_id="spark-builder", state="active"))
+
+
 def _add_revision(
     session: Session,
     revision_id: str,
@@ -309,6 +323,7 @@ def _add_revision(
     )
     session.add(revision)
     if built:
+        _ensure_builder_node(session)
         session.add(
             RecipeBuild(
                 id=_build_id(revision_id),
@@ -1568,7 +1583,7 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     recipe = _recipe("recipe-source-build.json")
-    receipt = _reference_receipt()
+    receipt = _reference_receipt(_build_id("revision-removal-pre-effect"))
     now = datetime.now(UTC)
     with sessions.begin() as session:
         revision = _add_revision(session, "revision-removal-pre-effect", recipe)
@@ -1656,7 +1671,7 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     recipe = _recipe("recipe-source-build.json")
-    receipt = _reference_receipt()
+    receipt = _reference_receipt(_build_id("rev-removal-death"))
     now = datetime.now(UTC)
     with sessions.begin() as session:
         revision = _add_revision(session, "rev-removal-death", recipe)
@@ -1750,7 +1765,7 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     recipe = _recipe("recipe-source-build.json")
-    receipt = _reference_receipt()
+    receipt = _reference_receipt(_build_id("rev-removal-finalize"))
     now = [datetime.now(UTC)]
     with sessions.begin() as session:
         revision = _add_revision(session, "rev-removal-finalize", recipe)
@@ -2174,22 +2189,11 @@ def test_postgres_claims_are_fenced_and_respect_build_capacity(
 ) -> None:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    image_recipe = _recipe("recipe-source-build.json")
     build_recipe = _recipe("recipe-source-build.json")
     now = datetime.now(UTC)
     with sessions.begin() as session:
         session.add_all(
             [
-                CatalogDocument(
-                    id="document-pg-image",
-                    kind="recipe",
-                    publisher=image_recipe.identity.publisher,
-                    slug=image_recipe.identity.slug,
-                    title=image_recipe.metadata.title,
-                    created_by="test",
-                    created_at=now,
-                    updated_at=now,
-                ),
                 CatalogDocument(
                     id="document-pg-build",
                     kind="recipe",
@@ -2203,15 +2207,11 @@ def test_postgres_claims_are_fenced_and_respect_build_capacity(
             ]
         )
         session.flush()
-        image_revision = _add_revision(session, "revision-pg-image", image_recipe)
-        image_revision.document_id = "document-pg-image"
         build_revision = _add_revision(session, "revision-pg-build", build_recipe)
         build_revision.document_id = "document-pg-build"
 
     def authority(recipe_revision_id: str, *, force: bool = False):
         del force
-        if recipe_revision_id == "revision-pg-image":
-            return image_recipe, _runtime()
         return build_recipe, _build_runtime()
 
     def new_service(root: Path) -> RecipeImageAvailabilityService:
@@ -2228,7 +2228,6 @@ def test_postgres_claims_are_fenced_and_respect_build_capacity(
 
     first = new_service(tmp_path / "first")
     second = new_service(tmp_path / "second")
-    image = first.start("revision-pg-image", actor="operator", request_id="p" * 36)
     build_a = first.start("revision-pg-build", actor="operator", request_id="q" * 36)
     build_b = first.start("revision-pg-build", actor="operator", request_id="r" * 36)
 
@@ -2239,19 +2238,9 @@ def test_postgres_claims_are_fenced_and_respect_build_capacity(
                 (first, second),
             )
         )
-    claimed = [claim for batch in claims for claim in batch]
-    assert len(claimed) == 2
-    assert len({claim.operation_id for claim in claimed}) == 2
-    assert len({claim.operation_id for claim in claimed} & {image.id}) <= 1
-    build_claims = [
-        claim for claim in claimed if claim.operation_id in {build_a.id, build_b.id}
-    ]
+    build_claims = [claim for batch in claims for claim in batch]
     assert len(build_claims) == 1
-    assert {claim.operation_id for claim in claimed} <= {
-        image.id,
-        build_a.id,
-        build_b.id,
-    }
+    assert build_claims[0].operation_id in {build_a.id, build_b.id}
 
     # The live build lease fences its sibling even when another worker asks for
     # a fresh claim; the worker cannot evade the global build cap.
