@@ -81,16 +81,6 @@ def build_recipe_start_payload(
         RecipeStartPayload.model_validate(payload)
     except (KeyError, TypeError, ValueError) as error:
         raise RecipeStartPayloadError("recipe start payload is invalid") from error
-    security = payload.get("security")
-    if isinstance(security, dict):
-        native_fabric = world_size > 1 and master_port is not None
-        security["network_mode"] = (
-            "host"
-            if native_fabric
-            else "bridge"
-            if endpoint_address is not None
-            else "none"
-        )
     return payload
 
 
