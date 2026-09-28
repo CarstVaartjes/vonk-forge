@@ -719,12 +719,15 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
             _field("Route expires at", _time(endpoint.get("expires_at")))
             _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
             if isinstance(api_base, str) and isinstance(alias, str):
-                print("Credential-free configuration example:")
+                print("Client configuration:")
                 print(
-                    "  API_BASE="
-                    + terminal_text(shlex.quote(api_base))
-                    + " MODEL="
-                    + terminal_text(shlex.quote(alias))
+                    "  export OPENAI_BASE_URL=" + terminal_text(shlex.quote(api_base))
+                )
+                print('  export OPENAI_API_KEY="$(cat CLIENT_KEY_FILE)"')
+                print("  model: " + terminal_text(alias))
+                print(
+                    "Create a client key with: "
+                    "vonkctl key create NAME --output CLIENT_KEY_FILE"
                 )
             continue
         if alias is not None:
@@ -738,6 +741,38 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         }
         print(
             messages.get(str(assignment.get("state")), "Endpoint state is unavailable.")
+        )
+
+
+def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
+    if action == "create":
+        _field("Key", payload.get("name"))
+        _field("Models", _words(payload.get("models") or ["all"]))
+        _field("Expires", payload.get("expires_at") or "never")
+        if payload.get("output") is not None:
+            _field("Written to", payload.get("output"))
+        else:
+            print(_text(payload.get("key")))
+            print("Store this key now; it is not shown again.")
+    elif action == "revoke":
+        print(f"Revoked key {_text(payload.get('name'))}.")
+    else:
+        rows = _records(payload, "keys")
+        if not rows:
+            print("No gateway client keys. Create one with: vonkctl key create NAME")
+            return
+        _table(
+            ("NAME", "MODELS", "CREATED", "EXPIRES", "LAST USED"),
+            [
+                (
+                    row.get("name"),
+                    _words(row.get("models") or ["all"]),
+                    _time(row.get("created_at")),
+                    _time(row.get("expires_at")) if row.get("expires_at") else "never",
+                    _time(row.get("last_used_at")),
+                )
+                for row in rows
+            ],
         )
 
 
@@ -1472,6 +1507,8 @@ def render_payload(
             _library(payload, noun, detail=action == "detail", wide=wide)
         else:
             _operation(payload, noun)
+    elif noun == "key":
+        _gateway_keys(payload, action)
     elif noun == "profile":
         if action == "endpoint":
             _profile_endpoints(payload)

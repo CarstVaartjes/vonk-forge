@@ -18,12 +18,20 @@ START_HERE = (
     ("vonkctl fleet", "What every Spark runs and what needs attention"),
     ("vonkctl run <recipe>", "Prepare a recipe and start it"),
     ("vonkctl profile endpoint", "API base and model name for clients"),
+    ("vonkctl key create <name>", "A key for an app to call the models"),
     ("vonkctl recipe library", "Recipes you can run"),
 )
 
 # The root and the groups whose bare invocation shows their current state.
 GROUP_VIEWS = frozenset(
-    {"vonkctl", "vonkctl fleet", "vonkctl model", "vonkctl recipe", "vonkctl profile"}
+    {
+        "vonkctl",
+        "vonkctl fleet",
+        "vonkctl model",
+        "vonkctl recipe",
+        "vonkctl profile",
+        "vonkctl key",
+    }
 )
 
 
