@@ -1124,7 +1124,10 @@ class RunSwitchFleetProfileAdapter:
                 child = self._run_switch.get(active)
             except KeyError as error:
                 raise RuntimeError("Run/Switch child is unavailable") from error
-            if child.state in {"queued", "running"}:
+            # ``waiting`` is an automatically observed Run/Switch state (for
+            # example background runtime-image preparation or an overdue start
+            # observation); the child resumes on its own, so it is in progress.
+            if child.state in {"queued", "running", "waiting"}:
                 view = self._view_from_child(application_id, state, child)
                 new_progress = (
                     view.progress.model_dump(mode="json")
@@ -1907,7 +1910,10 @@ class RunSwitchFleetProfileAdapter:
             bytes=child.progress.completed_bytes,
             total_bytes=child.progress.total_bytes,
         )
-        child_state = _operation_state(child.state, default="running")
+        child_state = _operation_state(
+            "running" if child.state == "waiting" else child.state,
+            default="running",
+        )
         result = self._child_receipt(child)
         return FleetProfileChildOperation(
             id=application_id,

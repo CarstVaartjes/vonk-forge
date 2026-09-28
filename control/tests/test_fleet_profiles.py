@@ -2312,6 +2312,107 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     )
 
 
+def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
+    """A Run/Switch child that is waiting on its own observation is in progress.
+
+    Background runtime-image preparation and overdue start observations park
+    the child in ``waiting`` and resume it automatically. The profile used to
+    fail the whole load with "Run/Switch child returned waiting".
+    """
+
+    from vonk_control.run_switch_operations import (
+        RunSwitchOperationService,
+        _persisted_result,
+    )
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Waiting switch child",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "waiting-switch-child",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(648),
+        actor="admin",
+    )
+    assert service.tick() is True
+    started = service.application(application.id)
+    assert started.progress.switch_adapter is not None
+    child_id = started.progress.switch_adapter.active_operation_id
+    assert isinstance(child_id, str)
+
+    with sessions.begin() as session:
+        job = session.get(Job, child_id)
+        assert job is not None
+        job.state = "waiting"
+        job.status_reason = "Runtime image preparation is running in the background"
+        job.updated_at = lifecycle._clock()
+
+    service.tick()
+    waiting = service.application(application.id)
+    assert waiting.state in {"queued", "running"}, waiting.status_reason
+    assert waiting.progress.switch_adapter is not None
+    assert waiting.progress.switch_adapter.active_operation_id == child_id
+
+    with sessions.begin() as session:
+        job = session.get(Job, child_id)
+        assert job is not None
+        job.state = "succeeded"
+        job.status_reason = None
+        job.result = _persisted_result(_transfer_result(nodes))
+        job.updated_at = lifecycle._clock()
+
+    assert service.tick() is True
+    completed = service.application(application.id)
+    assert completed.state == "succeeded", completed.status_reason
+
+
 def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> None:
     """Advancing a child must reuse the tick's transaction, not race its row lock.
 
