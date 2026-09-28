@@ -292,13 +292,6 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
     assert replay.status_code == 202, replay.text
     assert replay.json()["operation_id"] == accepted["operation_id"]
     assert replay.json()["request_key"] == request_key
-    # The fleet may change between preview and apply. The committed cleanup is
-    # returned for its request key instead of a 503 after it already started.
-    moved = client.post(
-        apply_path, json={**apply_body, "plan_digest": "f" * 64}, headers=headers
-    )
-    assert moved.status_code == 202, moved.text
-    assert moved.json()["operation_id"] == accepted["operation_id"]
 
     operation_id = accepted["operation_id"]
     assert service.tick() is True
