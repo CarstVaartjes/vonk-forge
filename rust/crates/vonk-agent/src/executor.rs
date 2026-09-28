@@ -189,6 +189,10 @@ pub struct RecipeExecutor<'a, R> {
 pub enum RecipeObservationError {
     #[error("retained recipe run was skipped because its metadata is invalid")]
     SkippedRun,
+    /// The Controller has no record of this run, so it is never reported.
+    /// A run proved stopped is retired locally; a running one is left alone.
+    #[error("retained recipe run is unknown to the Controller")]
+    UnownedRun,
     #[error("managed recipe run observation failed ({})", .0.safe_category())]
     Runtime(#[from] crate::oci::OciError),
     #[error("exact recipe run inspection failed ({})", .0.preflight_code())]
@@ -276,6 +280,10 @@ async fn report_complete_recipe_run_observations(
         match result {
             Ok(observation) => observations.push(observation),
             Err(RecipeObservationError::SkippedRun) => skipped_run = true,
+            // Not a failure of this sweep: the Controller named the run as
+            // one it never owned, so there is nothing to report for it and
+            // it must never hide the observations of owned runs.
+            Err(RecipeObservationError::UnownedRun) => {}
             Err(error) => {
                 if failure
                     .as_ref()
@@ -382,6 +390,32 @@ impl<R> RecipeExecutor<'_, R> {
                             );
                         }
                     })?;
+                if outcome.unowned {
+                    let run_id = plan.binding.run_id.to_string();
+                    if outcome.process_running {
+                        // Only an owned stop may end a process; an unowned one
+                        // is left untouched and never reported as owned.
+                        eprintln!(
+                            "vonk-agent: exact recipe run {run_id} is unknown to the Controller and still running; left untouched"
+                        );
+                    } else {
+                        // The helper's signed receipt proves the process is
+                        // gone and the Controller has no record of the run, so
+                        // retiring the local lifecycle loses nothing: it only
+                        // stops asking for an observation that can never be
+                        // accepted.  The run directory stays as history.
+                        match self.runtime.complete_stop(&run_id) {
+                            Ok(()) => eprintln!(
+                                "vonk-agent: retired exact recipe run {run_id}: unknown to the Controller and not running"
+                            ),
+                            Err(error) => eprintln!(
+                                "vonk-agent: exact recipe run {run_id} is unknown to the Controller; retirement failed ({})",
+                                error.safe_category()
+                            ),
+                        }
+                    }
+                    return Err(RecipeObservationError::UnownedRun);
+                }
                 // This timestamp is part of the signed-grant freshness proof.
                 // Capture it immediately after the local privileged inspection;
                 // an owner-only HTTP probe follows and remains independently
@@ -4461,6 +4495,43 @@ mod tests {
             0
         );
         assert!(server.finish().is_empty());
+    }
+
+    #[tokio::test]
+    async fn unowned_run_never_fails_or_hides_owned_run_reports() {
+        // Live regression: a run from before a Controller database rebuild
+        // turned every sweep into a failed collection.
+        let server = ObservationServer::new(Some(204));
+        let valid_run = Uuid::new_v4();
+        let result = report_complete_recipe_run_observations(
+            &server.client,
+            vec![
+                Err(RecipeObservationError::UnownedRun),
+                Ok(exact_observation(valid_run)),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, 1);
+        let reports = server.finish();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0]["runs"].as_array().unwrap().len(), 1);
+        assert_eq!(reports[0]["runs"][0]["run_id"], valid_run.to_string());
+
+        // With nothing owned left, the node truthfully reports no owned runs.
+        let server = ObservationServer::new(Some(204));
+        assert_eq!(
+            report_complete_recipe_run_observations(
+                &server.client,
+                vec![Err(RecipeObservationError::UnownedRun)],
+            )
+            .await
+            .unwrap(),
+            0
+        );
+        let reports = server.finish();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0]["runs"], json!([]));
     }
 
     #[tokio::test]

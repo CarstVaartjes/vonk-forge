@@ -2646,7 +2646,16 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     class ExactObservationAuthority:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
+            self.probes: list[dict[str, object]] = []
             self.pending = False
+            self.unowned = False
+
+        def issue_unowned_recipe_run_probe_grant(self, **values):
+            self.probes.append(values)
+            if not self.unowned:
+                return None
+            self.unowned = False
+            return self.issue_recipe_run_observation_grant(**values)
 
         def issue_recipe_run_observation_grant(self, **values):
             self.calls.append(values)
@@ -2777,6 +2786,21 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     assert oversized_identity.status_code == 422
     assert len(maximum_model_identity) == 1024
     assert len(authority.calls) == 2
+    assert len(authority.probes) == 2
+    assert "x-vonk-recipe-run-disposition" not in accepted.headers
+
+    # A run this Controller has no record of gets a read-only probe, named so
+    # the agent can retire its local lifecycle instead of asking forever.
+    authority.unowned = True
+    unowned = client.post(
+        "/agent/recipe-runs/observation-grants",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=request,
+    )
+    assert unowned.status_code == 200
+    assert unowned.headers["x-vonk-recipe-run-disposition"] == "unowned"
+    assert unowned.json() == accepted.json()
+    assert len(authority.calls) == 3
 
     identity_fields = {
         key: value
@@ -2857,7 +2881,7 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     )
     assert too_early.status_code == 425
     assert too_early.json() == {"detail": "recipe run observation is not ready"}
-    assert len(authority.calls) == 2
+    assert len(authority.calls) == 3
 
     # An unconsumed grant for the same run is the authority's bounded "not
     # yet".  It must stay distinguishable from a rejected request, or the
