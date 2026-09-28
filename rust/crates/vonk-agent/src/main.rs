@@ -141,6 +141,11 @@ async fn pair_agent(
 }
 
 async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
+    // Report readiness as soon as the process is running. Identity, Controller
+    // and host prerequisites are retried inside the agent; holding READY back
+    // would let systemd's start timeout kill a healthy retry loop and stall
+    // package upgrades that wait for the restarted unit.
+    systemd_notify::notify("READY=1\nSTATUS=Agent starting");
     let runtime_identity = self_test::run(
         config,
         &std::env::current_exe()?,
@@ -163,7 +168,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
     state.recover_interrupted()?;
     systemd_notify::notify(
-        "READY=1\nSTATUS=Agent initialized; waiting for Controller and host prerequisites",
+        "STATUS=Agent initialized; waiting for Controller and host prerequisites",
     );
     let control = run_control_lane(config, runtime_identity, client.clone(), state);
     let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
