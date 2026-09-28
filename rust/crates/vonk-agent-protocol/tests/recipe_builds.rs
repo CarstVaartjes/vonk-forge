@@ -11,17 +11,10 @@ fn parse_operation(
     let payload: vonk_agent_protocol::generated::AgentClaimPayload =
         serde_json::from_value(payload)?;
     let claim = AgentClaim {
-        attempt: 1,
-        authority_revision: "c".repeat(64),
         deadline: DateTime::parse_from_rfc3339("2026-08-07T12:05:00+00:00").unwrap(),
         fence: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
-        job_id: Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap(),
-        node_id: format!("spk_{}", "0".repeat(32)),
         operation: operation.parse().unwrap(),
-        operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
-        payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
         payload,
-        schema_version: 1,
     };
     RecipeOperationRequest::parse(&claim)
 }

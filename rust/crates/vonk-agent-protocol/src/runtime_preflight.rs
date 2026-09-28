@@ -78,11 +78,7 @@ mod tests {
     #[test]
     fn fixed_helper_preflight_cannot_carry_a_command_or_mount_argument() {
         let mut request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::RuntimePreflight,
-            job_id: uuid::Uuid::new_v4(),
-            operation_id: uuid::Uuid::new_v4(),
-            attempt: 1,
             fence: uuid::Uuid::new_v4(),
             arguments: vec![],
             job_plan: None,

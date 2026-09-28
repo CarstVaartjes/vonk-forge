@@ -71,9 +71,7 @@ fn main() {
                 reconciliation_identity: Some(identity),
                 ..
             },
-        ) if identity.node_id == grant.claims.node_id
-            && identity.installation_id == *installation_id =>
-        {
+        ) if identity.installation_id == *installation_id => {
             println!(
                 "{}",
                 String::from_utf8(canonical_json(&grant).unwrap()).unwrap()

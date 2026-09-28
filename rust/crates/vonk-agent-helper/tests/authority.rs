@@ -179,9 +179,6 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
             ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
                 action: ContainerRuntimeAction::Start,
-                job_id: Uuid::parse_str("20000000-0000-4000-8000-000000000002").unwrap(),
-                operation_id: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
-                attempt: 2,
                 fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
@@ -681,9 +678,6 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
                     ContainerRuntimeAction::InstallationCleanup
                 }
             },
-            job_id: request.job_id,
-            operation_id: request.operation_id,
-            attempt: request.attempt,
             fence: request.fence,
             request_sha256: digest,
             observation_identity_sha256: request.observation.as_ref().map(|_| "e".repeat(64)),
@@ -701,11 +695,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
 
 fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRuntimeRequest {
     HostRuntimeRequest {
-        schema_version: 1,
         action,
-        job_id: Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap(),
-        operation_id: Uuid::parse_str("20000000-0000-4000-8000-000000000002").unwrap(),
-        attempt: 1,
         fence: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
         arguments,
         observation: None,

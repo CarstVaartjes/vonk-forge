@@ -16,7 +16,7 @@ use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
 };
 
-const STATE_SCHEMA_VERSION: &str = "2";
+const STATE_SCHEMA_VERSION: &str = "3";
 
 #[derive(Debug, Error)]
 pub enum StateError {
@@ -26,20 +26,16 @@ pub enum StateError {
     Protocol(#[from] vonk_agent_protocol::ProtocolError),
     #[error("state file is unsafe")]
     Io(#[from] std::io::Error),
-    #[error("claim is bound to another node")]
+    #[error("claim operation does not match its recorded fence")]
     Identity,
     #[error("claim deadline has elapsed")]
     Expired,
-    #[error("claim attempt or fence is stale")]
+    #[error("claim fence is stale")]
     Stale,
     #[error("claim is already executing")]
     Busy,
     #[error("result state is invalid")]
     ResultState,
-    #[error(
-        "durable agent state schema is incompatible; stop the agent, verify no operation is active or pending, then remove only state.sqlite"
-    )]
-    IncompatibleSchema,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,8 +51,6 @@ pub struct StateStore {
 }
 
 struct StoredOperation {
-    attempt: u32,
-    fence: String,
     operation: String,
     state: String,
     result: Option<Vec<u8>>,
@@ -105,13 +99,33 @@ impl StateStore {
              CREATE TABLE IF NOT EXISTS metadata (
                key TEXT PRIMARY KEY NOT NULL,
                value TEXT NOT NULL
-             ) STRICT;
-             CREATE TABLE IF NOT EXISTS operations (
-               operation_id TEXT PRIMARY KEY NOT NULL,
-               job_id TEXT NOT NULL,
-               node_id TEXT NOT NULL,
-               attempt INTEGER NOT NULL CHECK (attempt > 0),
-               fence TEXT NOT NULL,
+             ) STRICT;",
+        )?;
+        let state_schema: Option<String> = connection
+            .query_row(
+                "SELECT value FROM metadata WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if state_schema.as_deref() != Some(STATE_SCHEMA_VERSION) {
+            // Operation receipts of another agent protocol cannot be replayed
+            // to this Controller; it re-issues any unfinished work, so start
+            // from an empty operation log instead of refusing to run.
+            connection.execute_batch(
+                "DROP TABLE IF EXISTS operations;
+                 DROP TABLE IF EXISTS result_reconciliation;
+                 DROP TABLE IF EXISTS result_rejections;",
+            )?;
+            connection.execute(
+                "INSERT INTO metadata(key, value) VALUES ('schema_version', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [STATE_SCHEMA_VERSION],
+            )?;
+        }
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS operations (
+               fence TEXT PRIMARY KEY NOT NULL,
                operation TEXT NOT NULL,
                deadline TEXT NOT NULL,
                state TEXT NOT NULL CHECK (state IN ('running','completed')),
@@ -120,14 +134,10 @@ impl StateStore {
                CHECK ((state = 'running' AND result_json IS NULL) OR (state = 'completed' AND result_json IS NOT NULL))
              ) STRICT;
              CREATE TABLE IF NOT EXISTS result_reconciliation (
-               operation_id TEXT PRIMARY KEY NOT NULL,
-               attempt INTEGER NOT NULL,
-               fence TEXT NOT NULL
+               fence TEXT PRIMARY KEY NOT NULL
              ) STRICT;
              CREATE TABLE IF NOT EXISTS result_rejections (
-               operation_id TEXT PRIMARY KEY NOT NULL,
-               attempt INTEGER NOT NULL CHECK (attempt > 0),
-               fence TEXT NOT NULL,
+               fence TEXT PRIMARY KEY NOT NULL,
                http_status INTEGER NOT NULL,
                code TEXT NOT NULL,
                decision TEXT NOT NULL,
@@ -138,34 +148,6 @@ impl StateStore {
                rejections INTEGER NOT NULL DEFAULT 1 CHECK (rejections > 0)
              ) STRICT;",
         )?;
-        let operation_column = {
-            let mut statement = connection.prepare("PRAGMA table_info(operations)")?;
-            statement
-                .query_map([], |row| row.get::<_, String>(1))?
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .any(|name| name == "operation")
-        };
-        if !operation_column {
-            return Err(StateError::IncompatibleSchema);
-        }
-        let state_schema: Option<String> = connection
-            .query_row(
-                "SELECT value FROM metadata WHERE key='schema_version'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        match state_schema.as_deref() {
-            Some(STATE_SCHEMA_VERSION) => {}
-            None => {
-                connection.execute(
-                    "INSERT INTO metadata(key, value) VALUES ('schema_version', ?1)",
-                    [STATE_SCHEMA_VERSION],
-                )?;
-            }
-            Some(_) => return Err(StateError::IncompatibleSchema),
-        }
         let stored: Option<String> = connection
             .query_row(
                 "SELECT value FROM metadata WHERE key='node_id'",
@@ -200,9 +182,6 @@ impl StateStore {
         now: DateTime<Utc>,
     ) -> Result<BeginDecision, StateError> {
         claim.validate()?;
-        if claim.node_id != self.node_id {
-            return Err(StateError::Identity);
-        }
         if claim.deadline.with_timezone(&Utc) <= now {
             return Err(StateError::Expired);
         }
@@ -211,15 +190,13 @@ impl StateStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let existing = transaction
             .query_row(
-                "SELECT attempt, fence, operation, state, result_json FROM operations WHERE operation_id=?1",
-                [claim.operation_id.to_string()],
+                "SELECT operation, state, result_json FROM operations WHERE fence=?1",
+                [claim.fence.to_string()],
                 |row| {
                     Ok(StoredOperation {
-                        attempt: row.get(0)?,
-                        fence: row.get(1)?,
-                        operation: row.get(2)?,
-                        state: row.get(3)?,
-                        result: row.get(4)?,
+                        operation: row.get(0)?,
+                        state: row.get(1)?,
+                        result: row.get(2)?,
                     })
                 },
             )
@@ -227,13 +204,9 @@ impl StateStore {
         let decision = match existing {
             None => {
                 transaction.execute(
-                    "INSERT INTO operations(operation_id,job_id,node_id,attempt,fence,operation,deadline,state)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,'running')",
+                    "INSERT INTO operations(fence,operation,deadline,state)
+                     VALUES (?1,?2,?3,'running')",
                     params![
-                        claim.operation_id.to_string(),
-                        claim.job_id.to_string(),
-                        claim.node_id,
-                        claim.attempt,
                         claim.fence.to_string(),
                         claim.operation.to_string(),
                         claim.deadline.to_rfc3339(),
@@ -244,40 +217,12 @@ impl StateStore {
             Some(stored) if stored.operation != claim.operation.as_str() => {
                 return Err(StateError::Identity);
             }
-            Some(stored) if claim.attempt < stored.attempt => return Err(StateError::Stale),
-            Some(stored) if claim.attempt == stored.attempt => {
-                if stored.fence != claim.fence.to_string() {
-                    return Err(StateError::Stale);
-                }
-                if stored.state == "running" {
-                    return Err(StateError::Busy);
-                }
+            Some(stored) if stored.state == "running" => return Err(StateError::Busy),
+            Some(stored) => {
                 let bytes = stored.result.ok_or(StateError::ResultState)?;
                 let result: AgentResult = parse_strict(&bytes)?;
                 result.validate_for_operation(&claim.operation)?;
                 BeginDecision::Replay(Box::new(result))
-            }
-            Some(_) => {
-                transaction.execute(
-                    "UPDATE operations SET job_id=?2,node_id=?3,attempt=?4,fence=?5,operation=?6,deadline=?7,
-                     state='running',result_json=NULL,result_acknowledged=0 WHERE operation_id=?1",
-                    params![
-                        claim.operation_id.to_string(),
-                        claim.job_id.to_string(),
-                        claim.node_id,
-                        claim.attempt,
-                        claim.fence.to_string(),
-                        claim.operation.to_string(),
-                        claim.deadline.to_rfc3339(),
-                    ],
-                )?;
-                // A newer authorised attempt replaces the old evidence, so the
-                // old attempt's refusal no longer suppresses anything.
-                transaction.execute(
-                    "DELETE FROM result_rejections WHERE operation_id=?1",
-                    [claim.operation_id.to_string()],
-                )?;
-                BeginDecision::Execute
             }
         };
         transaction.commit()?;
@@ -299,16 +244,12 @@ impl StateStore {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (operation, deadline): (String, String) = transaction
+        let operation: String = transaction
             .query_row(
-                "SELECT operation, deadline FROM operations
-                 WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND state='running'",
-                params![
-                    claim.operation_id.to_string(),
-                    claim.attempt,
-                    claim.fence.to_string()
-                ],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                "SELECT operation FROM operations
+                 WHERE fence=?1 AND state='running'",
+                [claim.fence.to_string()],
+                |row| row.get(0),
             )
             .optional()?
             .ok_or(StateError::Stale)?;
@@ -316,28 +257,16 @@ impl StateStore {
             return Err(StateError::Identity);
         }
         let result = AgentResult {
-            attempt: claim.attempt,
-            deadline: DateTime::parse_from_rfc3339(&deadline)
-                .map_err(|_| StateError::ResultState)?,
             fence: claim.fence,
-            job_id: claim.job_id,
-            node_id: claim.node_id.clone(),
-            operation_id: claim.operation_id,
             result: serde_json::from_value(result).map_err(|_| StateError::ResultState)?,
-            schema_version: claim.schema_version,
             state: state.parse().map_err(|_| StateError::ResultState)?,
         };
         result.validate_for_operation(&claim.operation)?;
         let body = canonical_json(&result)?;
         let changed = transaction.execute(
-            "UPDATE operations SET state='completed',result_json=?4,result_acknowledged=0
-             WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND state='running'",
-            params![
-                claim.operation_id.to_string(),
-                claim.attempt,
-                claim.fence.to_string(),
-                body
-            ],
+            "UPDATE operations SET state='completed',result_json=?2,result_acknowledged=0
+             WHERE fence=?1 AND state='running'",
+            params![claim.fence.to_string(), body],
         )?;
         if changed != 1 {
             return Err(StateError::Stale);
@@ -352,16 +281,7 @@ impl StateStore {
         directive: &AgentDirective,
     ) -> Result<(), StateError> {
         request.validate()?;
-        directive.validate()?;
-        if request.schema_version != directive.schema_version
-            || request.job_id != directive.job_id
-            || request.operation_id != directive.operation_id
-            || request.attempt != directive.attempt
-            || request.fence != directive.fence
-            || request.node_id != directive.node_id
-            || request.node_id != self.node_id
-            || directive.deadline < request.deadline
-        {
+        if request.fence != directive.fence {
             return Err(StateError::Stale);
         }
         let transaction = self
@@ -369,37 +289,20 @@ impl StateStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current: String = transaction
             .query_row(
-                "SELECT deadline FROM operations
-                 WHERE operation_id=?1 AND job_id=?2 AND node_id=?3
-                   AND attempt=?4 AND fence=?5 AND state='running'",
-                params![
-                    request.operation_id.to_string(),
-                    request.job_id.to_string(),
-                    request.node_id,
-                    request.attempt,
-                    request.fence.to_string(),
-                ],
+                "SELECT deadline FROM operations WHERE fence=?1 AND state='running'",
+                [request.fence.to_string()],
                 |row| row.get(0),
             )
             .optional()?
             .ok_or(StateError::Stale)?;
         let current =
             DateTime::parse_from_rfc3339(&current).map_err(|_| StateError::ResultState)?;
-        if current != request.deadline {
+        if directive.deadline < current {
             return Err(StateError::Stale);
         }
         let changed = transaction.execute(
-            "UPDATE operations SET deadline=?6
-             WHERE operation_id=?1 AND job_id=?2 AND node_id=?3
-               AND attempt=?4 AND fence=?5 AND state='running'",
-            params![
-                request.operation_id.to_string(),
-                request.job_id.to_string(),
-                request.node_id,
-                request.attempt,
-                request.fence.to_string(),
-                directive.deadline.to_rfc3339(),
-            ],
+            "UPDATE operations SET deadline=?2 WHERE fence=?1 AND state='running'",
+            params![request.fence.to_string(), directive.deadline.to_rfc3339()],
         )?;
         if changed != 1 {
             return Err(StateError::Stale);
@@ -420,13 +323,8 @@ impl StateStore {
             .query_row(
                 "SELECT http_status,code,decision,request_id,reason,observed_at,retry_due_at,rejections
                  FROM result_rejections
-                 WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND retry_due_at > ?4",
-                params![
-                    result.operation_id.to_string(),
-                    result.attempt,
-                    result.fence.to_string(),
-                    now.to_rfc3339(),
-                ],
+                 WHERE fence=?1 AND retry_due_at > ?2",
+                params![result.fence.to_string(), now.to_rfc3339()],
                 |row| {
                     Ok((
                         row.get::<_, u16>(0)?,
@@ -487,8 +385,8 @@ impl StateStore {
         let previous: u32 = self
             .connection
             .query_row(
-                "SELECT rejections FROM result_rejections WHERE operation_id=?1",
-                [result.operation_id.to_string()],
+                "SELECT rejections FROM result_rejections WHERE fence=?1",
+                [result.fence.to_string()],
                 |row| row.get(0),
             )
             .optional()?
@@ -506,12 +404,10 @@ impl StateStore {
         let reason: String = error.rejection_context();
         self.connection.execute(
             "INSERT INTO result_rejections(
-               operation_id,attempt,fence,http_status,code,decision,request_id,reason,
+               fence,http_status,code,decision,request_id,reason,
                observed_at,retry_due_at,rejections)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
-             ON CONFLICT(operation_id) DO UPDATE SET
-               attempt=excluded.attempt,
-               fence=excluded.fence,
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+             ON CONFLICT(fence) DO UPDATE SET
                http_status=excluded.http_status,
                code=excluded.code,
                decision=excluded.decision,
@@ -521,8 +417,6 @@ impl StateStore {
                retry_due_at=excluded.retry_due_at,
                rejections=excluded.rejections",
             params![
-                result.operation_id.to_string(),
-                result.attempt,
                 result.fence.to_string(),
                 error.status,
                 error.code,
@@ -547,11 +441,11 @@ impl StateStore {
     }
 
     /// Drop a refusal once the Controller has accepted or superseded the
-    /// result, or once a newer attempt replaces this one.
+    /// result.
     fn clear_result_rejection(&mut self, result: &AgentResult) -> Result<(), StateError> {
         self.connection.execute(
-            "DELETE FROM result_rejections WHERE operation_id=?1",
-            [result.operation_id.to_string()],
+            "DELETE FROM result_rejections WHERE fence=?1",
+            [result.fence.to_string()],
         )?;
         Ok(())
     }
@@ -584,9 +478,9 @@ impl StateStore {
     pub fn unreconciled_results(&self) -> Result<Vec<(AgentOperation, AgentResult)>, StateError> {
         let mut statement = self.connection.prepare(
             "SELECT o.operation,o.result_json FROM operations o
-             LEFT JOIN result_reconciliation r ON r.operation_id=o.operation_id
+             LEFT JOIN result_reconciliation r ON r.fence=o.fence
              WHERE o.state='completed' AND o.result_acknowledged=1
-               AND r.operation_id IS NULL ORDER BY o.rowid LIMIT 16",
+               AND r.fence IS NULL ORDER BY o.rowid LIMIT 16",
         )?;
         let values = statement
             .query_map([], |row| {
@@ -607,15 +501,10 @@ impl StateStore {
     pub fn mark_reconciled(&mut self, result: &AgentResult) -> Result<(), StateError> {
         result.validate()?;
         self.connection.execute(
-            "INSERT OR IGNORE INTO result_reconciliation(operation_id,attempt,fence)
-             SELECT operation_id,attempt,fence FROM operations
-             WHERE operation_id=?1 AND attempt=?2 AND fence=?3
-               AND state='completed' AND result_acknowledged=1",
-            params![
-                result.operation_id.to_string(),
-                result.attempt,
-                result.fence.to_string()
-            ],
+            "INSERT OR IGNORE INTO result_reconciliation(fence)
+             SELECT fence FROM operations
+             WHERE fence=?1 AND state='completed' AND result_acknowledged=1",
+            [result.fence.to_string()],
         )?;
         Ok(())
     }
@@ -624,12 +513,8 @@ impl StateStore {
         result.validate()?;
         let changed = self.connection.execute(
             "UPDATE operations SET result_acknowledged=1
-             WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND state='completed'",
-            params![
-                result.operation_id.to_string(),
-                result.attempt,
-                result.fence.to_string()
-            ],
+             WHERE fence=?1 AND state='completed'",
+            [result.fence.to_string()],
         )?;
         if changed != 1 {
             return Err(StateError::Stale);
@@ -648,12 +533,8 @@ impl StateStore {
         result.validate()?;
         let changed = self.connection.execute(
             "UPDATE operations SET result_acknowledged=1
-             WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND state='completed'",
-            params![
-                result.operation_id.to_string(),
-                result.attempt,
-                result.fence.to_string()
-            ],
+             WHERE fence=?1 AND state='completed'",
+            [result.fence.to_string()],
         )?;
         if changed != 1 {
             return Err(StateError::Stale);
@@ -664,37 +545,23 @@ impl StateStore {
 
     pub fn recover_interrupted(&mut self) -> Result<(), StateError> {
         let claims = {
-            let mut statement = self.connection.prepare(
-                "SELECT job_id,operation_id,attempt,fence,node_id,operation,deadline FROM operations WHERE state='running'",
-            )?;
+            let mut statement = self
+                .connection
+                .prepare("SELECT fence,operation FROM operations WHERE state='running'")?;
             statement
                 .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, u32>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                    ))
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?
                 .collect::<Result<Vec<_>, _>>()?
         };
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for (job_id, operation_id, attempt, fence, node_id, operation, deadline) in claims {
+        for (fence, operation) in claims {
             let operation: AgentOperation =
                 operation.parse().map_err(|_| StateError::ResultState)?;
             let result = AgentResult {
-                attempt,
-                deadline: DateTime::parse_from_rfc3339(&deadline)
-                    .map_err(|_| StateError::ResultState)?,
                 fence: fence.parse().map_err(|_| StateError::ResultState)?,
-                job_id: job_id.parse().map_err(|_| StateError::ResultState)?,
-                node_id,
-                operation_id: operation_id.parse().map_err(|_| StateError::ResultState)?,
                 // Startup cannot establish whether the host action finished.
                 // Preserve that uncertainty as typed evidence: the Controller
                 // owns any new attempt and its current intent/authority checks.
@@ -706,14 +573,13 @@ impl StateStore {
                     uncertain: Some(true),
                     ..Default::default()
                 }),
-                schema_version: 1,
                 state: AgentResultState::WaitingForOperator,
             };
             result.validate_for_operation(&operation)?;
             transaction.execute(
                 "UPDATE operations SET state='completed',result_json=?2,result_acknowledged=0
-                 WHERE operation_id=?1 AND state='running'",
-                params![operation_id, canonical_json(&result)?],
+                 WHERE fence=?1 AND state='running'",
+                params![fence, canonical_json(&result)?],
             )?;
         }
         transaction.commit()?;

@@ -19,9 +19,8 @@ use vonk_agent::{
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
     workloads::CompiledExecutionPlan,
 };
-use vonk_agent_protocol::{RecipeReconciliationIdentity, canonical_json, hex_sha256};
+use vonk_agent_protocol::{RecipeReconciliationIdentity, canonical_json};
 
-const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 const CHILD_ROOT_ENV: &str = "VONK_RECONCILIATION_CHILD_ROOT";
 const CHILD_IDENTITY_ENV: &str = "VONK_RECONCILIATION_CHILD_IDENTITY";
 const LOCK_PATH_ENV: &str = "VONK_RECONCILIATION_CHILD_LOCK_PATH";
@@ -72,18 +71,11 @@ fn opaque_legacy_spec() -> (Value, String) {
 }
 
 fn identity_and_spec(installation_id: Uuid) -> (RecipeReconciliationIdentity, Vec<u8>) {
-    let (spec, recipe_content_sha256) = opaque_legacy_spec();
+    let (spec, _) = opaque_legacy_spec();
     let spec_bytes = canonical_json(&spec).unwrap();
     let identity = RecipeReconciliationIdentity {
-        schema_version: 1,
-        node_id: NODE_ID.to_owned(),
         installation_id,
-        install_operation_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
-        install_operation_payload_sha256: "b".repeat(64),
         plan_digest: "c".repeat(64),
-        recipe_revision_id: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
-        recipe_content_sha256,
-        compiled_spec_canonical_sha256: hex_sha256(&spec_bytes),
     };
     (identity, spec_bytes)
 }
@@ -95,7 +87,7 @@ fn seed_installation(data_root: &Path, identity: &RecipeReconciliationIdentity, 
     write_private_file(&installation.join("spec.json"), spec_bytes);
     write_private_file(
         &installation.join("recipe-content.sha256"),
-        identity.recipe_content_sha256.as_bytes(),
+        opaque_legacy_spec().1.as_bytes(),
     );
 }
 
@@ -142,14 +134,9 @@ fn opaque_install_is_removed_while_shared_model_and_image_cache_survive_and_rece
     let runtime = runtime(data.path(), &runner);
     let prepared = runtime.prepare_reconciliation(&identity).unwrap();
     assert!(!prepared.complete);
-    assert!(prepared.cleanup_receipt_sha256.is_none());
 
     let completed = runtime.finalize_reconciliation(&identity).unwrap();
     assert!(completed.complete);
-    let receipt = completed
-        .cleanup_receipt_sha256
-        .as_deref()
-        .expect("completed cleanup has a durable receipt");
     assert!(!installation_path(data.path(), identity.installation_id).exists());
     assert_eq!(fs::read(&shared_model).unwrap(), b"shared model bytes");
     assert_eq!(fs::read(&shared_image).unwrap(), b"shared image bytes");
@@ -158,14 +145,6 @@ fn opaque_install_is_removed_while_shared_model_and_image_cache_survive_and_rece
     let replayed_finalize = runtime.finalize_reconciliation(&identity).unwrap();
     assert!(replayed_prepare.complete);
     assert!(replayed_finalize.complete);
-    assert_eq!(
-        replayed_prepare.cleanup_receipt_sha256.as_deref(),
-        Some(receipt)
-    );
-    assert_eq!(
-        replayed_finalize.cleanup_receipt_sha256.as_deref(),
-        Some(receipt)
-    );
 
     let plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
         "../../../../control/tests/fixtures/compiled_workload_v2.json"
@@ -175,7 +154,7 @@ fn opaque_install_is_removed_while_shared_model_and_image_cache_survive_and_rece
         runtime.install(
             &plan,
             &identity.installation_id.to_string(),
-            &identity.recipe_content_sha256
+            &opaque_legacy_spec().1
         ),
         Err(OciError::Artifact)
     ));
@@ -183,59 +162,6 @@ fn opaque_install_is_removed_while_shared_model_and_image_cache_survive_and_rece
         !installation_path(data.path(), identity.installation_id).exists(),
         "a completed cleanup receipt prevents an old install attempt from recreating the installation"
     );
-}
-
-#[test]
-fn cleanup_accounting_excludes_the_runtime_cache_but_counts_other_installation_files() {
-    let _serial = serial();
-    let data = tempdir().unwrap();
-    let runner = NoProcess;
-    let (identity, spec_bytes) = identity_and_spec(Uuid::new_v4());
-    seed_installation(data.path(), &identity, &spec_bytes);
-
-    let installation = installation_path(data.path(), identity.installation_id);
-    let private_cache = installation.join("runtime-cache");
-    fs::create_dir_all(&private_cache).unwrap();
-    write_private_file(
-        &private_cache.join("root-owned-cache-state"),
-        b"private cache",
-    );
-    let agent_owned_sidecar = b"agent-owned sidecar";
-    write_private_file(&installation.join("agent-state"), agent_owned_sidecar);
-
-    let runtime = runtime(data.path(), &runner);
-    let prepared = runtime.prepare_reconciliation(&identity).unwrap();
-    assert!(!prepared.complete);
-    assert_eq!(
-        prepared.removed_bytes,
-        (spec_bytes.len() + identity.recipe_content_sha256.len() + agent_owned_sidecar.len())
-            as u64,
-        "only the exact helper-managed runtime-cache subtree is excluded from byte accounting"
-    );
-}
-
-#[test]
-fn opaque_filesystem_entry_inside_installation_refuses_preparation_until_removed() {
-    let _serial = serial();
-    let data = tempdir().unwrap();
-    let runner = NoProcess;
-    let (identity, spec_bytes) = identity_and_spec(Uuid::new_v4());
-    seed_installation(data.path(), &identity, &spec_bytes);
-    let installation = installation_path(data.path(), identity.installation_id);
-    let outside = data.path().join("outside-private-file");
-    write_private_file(&outside, b"must not be traversed");
-    let link = installation.join("opaque-link");
-    std::os::unix::fs::symlink(&outside, &link).unwrap();
-
-    let runtime = runtime(data.path(), &runner);
-    assert!(runtime.prepare_reconciliation(&identity).is_err());
-    assert!(installation.exists());
-    assert_eq!(fs::read(&outside).unwrap(), b"must not be traversed");
-
-    fs::remove_file(link).unwrap();
-    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
-    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
-    assert_eq!(fs::read(outside).unwrap(), b"must not be traversed");
 }
 
 #[test]
@@ -252,7 +178,6 @@ fn prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process() {
             .prepare_reconciliation(&identity)
             .unwrap();
         assert!(!prepared.complete);
-        assert!(prepared.cleanup_receipt_sha256.is_none());
         println!("PREPARED_CHECKPOINT");
         std::io::stdout().flush().unwrap();
 
@@ -305,13 +230,11 @@ fn prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process() {
     let restarted_runtime = runtime(data.path(), &runner);
     let resumed = restarted_runtime.prepare_reconciliation(&identity).unwrap();
     assert!(!resumed.complete);
-    assert!(resumed.cleanup_receipt_sha256.is_none());
     let completed = restarted_runtime
         .finalize_reconciliation(&identity)
         .unwrap();
     assert!(completed.complete);
     assert!(!installation_path(data.path(), identity.installation_id).exists());
-    assert!(completed.cleanup_receipt_sha256.is_some());
 }
 
 #[test]

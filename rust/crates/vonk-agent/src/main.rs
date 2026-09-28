@@ -32,8 +32,6 @@ use vonk_agent::{
     systemd_notify,
 };
 
-use vonk_agent::CLAIM_CAPABILITIES;
-
 #[derive(Parser)]
 #[command(
     name = "vonk-agent",
@@ -49,7 +47,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    Capabilities,
     Run,
     SelfTest,
     VerifyReadiness {
@@ -74,9 +71,6 @@ enum Command {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Capabilities => {
-            println!("{}", serde_json::to_string(CLAIM_CAPABILITIES)?);
-        }
         Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
         Command::SelfTest => {
             let config = AgentConfig::load(&cli.config)?;
@@ -349,18 +343,13 @@ async fn run_control_lane(
             &config.data_dir,
             Path::new("/run/vonk-forge-agent"),
         )
-        .ok()
-        .map(|value| format!("runtime.preflight.fingerprint.{value}"));
-        let mut claim_capabilities = CLAIM_CAPABILITIES.to_vec();
-        if let Some(value) = &fingerprint {
-            claim_capabilities.push(value.as_str());
-        }
+        .ok();
         let operation = async {
             run_once_with_claim_hook(
                 &client,
                 &mut state,
                 &executor,
-                &claim_capabilities,
+                fingerprint.as_deref(),
                 wait_seconds,
                 Some(&runtime_identity),
                 || {

@@ -1024,11 +1024,7 @@ mod tests {
 
         let start_plan = crate::recipe_start_tests::valid_start_plan();
         let request = HostRuntimeRequest {
-            schema_version: 1,
             action: HostRuntimeAction::Start,
-            job_id: Uuid::new_v4(),
-            operation_id: Uuid::new_v4(),
-            attempt: 1,
             fence: Uuid::new_v4(),
             arguments,
             job_plan: None,

@@ -739,9 +739,6 @@ mod tests {
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
                 action: ContainerRuntimeAction::RunInspect,
-                job_id: uuid::Uuid::nil(),
-                operation_id: uuid::Uuid::nil(),
-                attempt: 1,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,
@@ -909,9 +906,6 @@ mod tests {
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
                 action: ContainerRuntimeAction::ImageImport,
-                job_id: uuid::Uuid::nil(),
-                operation_id: uuid::Uuid::nil(),
-                attempt: 1,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),
                 observation_identity_sha256: None,

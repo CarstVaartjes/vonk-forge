@@ -10,7 +10,7 @@ use std::io::{self, BufRead};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use vonk_agent::client::{ExactRecipeRunObservation, build_exact_recipe_run_observations};
-use vonk_agent::executor::{recipe_start_success_body, runtime_arguments_for_plan};
+use vonk_agent::executor::recipe_start_success_body;
 use vonk_agent::oci::{OciRuntime, RecipeRunStartIdentity};
 use vonk_agent::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
 use vonk_agent::workloads::CompiledExecutionPlan;
@@ -37,6 +37,8 @@ impl ProcessRunner for NoProcess {
 #[serde(deny_unknown_fields)]
 struct PersistBindingInput {
     request: RecipeStartRequest,
+    // Still sent by the observation bridge; the start result no longer echoes it.
+    #[allow(dead_code)]
     artifact_set_digest: String,
     data_root: std::path::PathBuf,
 }
@@ -64,12 +66,11 @@ fn persist_binding(
     fs::write(installation.join("spec.json"), serde_json::to_vec(&spec)?)?;
     fs::write(
         installation.join("recipe-content.sha256"),
-        &input.request.recipe_content_sha256,
+        input.request.recipe_content_sha256(),
     )?;
     let identity = RecipeRunStartIdentity {
-        mapping_generation: input.request.mapping_generation,
         mapping_id: input.request.mapping_id,
-        recipe_content_sha256: input.request.recipe_content_sha256.clone(),
+        recipe_content_sha256: input.request.recipe_content_sha256().to_owned(),
         recipe_revision_id: input.request.recipe_revision_id,
         run_generation,
     };
@@ -98,13 +99,8 @@ fn persist_binding(
             &identity,
         )?
     };
-    let runtime_arguments = runtime_arguments_for_plan(&start_plan, &start_plan.main);
-    let evidence = recipe_start_success_body(
-        &input.request,
-        &spec,
-        &input.artifact_set_digest,
-        &runtime_arguments,
-    )?;
+    let _ = start_plan;
+    let evidence = recipe_start_success_body(&input.request);
     let binding = runtime
         .recipe_run_inspection_plans()?
         .into_iter()

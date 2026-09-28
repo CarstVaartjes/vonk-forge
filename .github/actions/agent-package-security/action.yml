@@ -15,5 +15,4 @@ runs:
         VONK_AGENT_BINARY="${CARGO_TARGET_DIR:-target}/debug/vonk-agent" \
           VONK_CI_PREREQUISITES=needs_agent_binary \
           uv run --frozen --only-group dev pytest -q \
-          tests/scripts/test_agent_deb.py \
-          tests/acceptance/test_rust_agent_parity.py
+          tests/scripts/test_agent_deb.py

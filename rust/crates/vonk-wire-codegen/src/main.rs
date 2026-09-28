@@ -145,6 +145,21 @@ fn prepare(value: &mut Value) {
                     }
                 }
             }
+            // A union of named models is a closed choice. typify only emits an
+            // enum for anyOf when it can prove the variants exclusive, which an
+            // empty success model (`{}`) defeats; oneOf keeps the enum.
+            if let Some(Value::Array(variants)) = object.get("anyOf")
+                && !variants.is_empty()
+                && variants.iter().all(|variant| {
+                    variant
+                        .as_object()
+                        .is_some_and(|variant| variant.len() == 1 && variant.contains_key("$ref"))
+                })
+                && !object.contains_key("oneOf")
+            {
+                let variants = object.remove("anyOf").unwrap();
+                object.insert("oneOf".into(), variants);
+            }
             for key in ["anyOf", "oneOf", "allOf", "prefixItems"] {
                 if let Some(Value::Array(children)) = object.get_mut(key) {
                     for child in children {
@@ -460,6 +475,8 @@ fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
                 crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
                     .map_err(::serde::de::Error::custom)?;
                 #raw
+                // An empty success model has no field to move out of `raw`.
+                #[allow(unused_variables)]
                 let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
                 Ok(#construction)
             }

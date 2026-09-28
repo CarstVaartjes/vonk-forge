@@ -43,7 +43,7 @@ fn cleanup_does_not_turn_failed_inspection_or_stop_into_free_capacity() {
     let request = request();
     let listed = format!(
         "vonk-recipe-build-{}.service loaded active running fixture\n",
-        request.operation_id
+        request.build_id
     );
     for replies in [
         vec![output(false, "")],
@@ -87,7 +87,7 @@ fn cleanup_stops_only_its_real_transient_service() {
     }
     let mut units = Units(vec![]);
     for request in [&selected, &unrelated] {
-        let unit = format!("vonk-recipe-build-{}.service", request.operation_id);
+        let unit = format!("vonk-recipe-build-{}.service", request.build_id);
         units.0.push(unit.clone());
         let result = runner
             .run(
