@@ -36,7 +36,7 @@ from vonk_control.recipe_library_types import (
 )
 from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from tests.recipe_library_source import recipe_library_root
 
@@ -120,8 +120,25 @@ def _fixture(
     )
     snapshot = client.list()
     item = client.fetch(snapshot.items[0].uri)
+    # The snapshot carries one recipe, so it only needs that recipe's Models;
+    # importing the whole published Model set on every sync made each case slow.
+    recipe = RecipeDefinition.model_validate(item.document)
+    selected = {
+        (selection.model.publisher, selection.model.slug) for selection in recipe.models
+    }
     snapshot = RecipeLibrarySnapshot(
-        snapshot.commit, (item,), snapshot.repository, snapshot.catalog_entities
+        snapshot.commit,
+        (item,),
+        snapshot.repository,
+        tuple(
+            entity
+            for entity in snapshot.catalog_entities
+            if (
+                (model := ModelDefinition.model_validate(entity)).identity.publisher,
+                model.identity.slug,
+            )
+            in selected
+        ),
     )
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)

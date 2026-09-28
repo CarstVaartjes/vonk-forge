@@ -18,12 +18,15 @@ x-api-environment: &api-environment
   # The API remains on internal networks. Caddy relays only read-only requests
   # to the explicitly scoped public recipe and agent-release authorities.
   VONK_RECIPE_LIBRARY_API_URL: http://caddy:8083
-  # Empty selects the immutable raw GitHub package reader, which resolves
-  # main once through the API and pins every request to that commit.
+  # Empty selects signed GitHub releases of the recipe repository: the release
+  # is accepted only after its SHA256SUMS Sigstore attestation verifies against
+  # the pinned publisher, and every asset matches its listed digest.
   VONK_RECIPE_LIBRARY_PACKAGE_URL: ${VONK_RECIPE_LIBRARY_PACKAGE_URL:-}
-  # The raw reader uses Caddy's repository-scoped egress relay; the API keeps
-  # no direct network path to raw.githubusercontent.com.
-  VONK_RECIPE_LIBRARY_RAW_URL: http://caddy:8085
+  # "latest" follows the newest signed release; an exact tag holds a release.
+  VONK_RECIPE_LIBRARY_RELEASE: ${VONK_RECIPE_LIBRARY_RELEASE:-latest}
+  # Release asset downloads use Caddy's repository-scoped egress relay; the API
+  # keeps no direct network path to GitHub's release asset origin.
+  VONK_RECIPE_LIBRARY_ASSET_URL: http://caddy:8085
   VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS: ${VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS:-900}
   VONK_DISTRIBUTED_START_TIMEOUT_SECONDS: ${VONK_DISTRIBUTED_START_TIMEOUT_SECONDS:-3600}
   VONK_AGENT_RELEASE_API_URL: http://caddy:8084

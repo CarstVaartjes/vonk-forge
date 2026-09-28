@@ -13,7 +13,6 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import Literal
 from urllib.parse import urljoin, urlsplit
 
 import httpx2
@@ -29,14 +28,29 @@ from .recipe_library_types import (
     RecipeLibraryRelease,
     RecipeLibrarySnapshot,
 )
+from .recipe_release import (
+    MAX_BUNDLE_BYTES,
+    MAX_CHECKSUMS_BYTES,
+    RELEASE_BUNDLE,
+    RELEASE_CHECKSUMS,
+    RELEASE_INDEX,
+    parse_release_checksums,
+    verify_release_checksums,
+)
 from .source_bundles import SourceBundleError, generate_source_bundle
 
 PACKAGE_SCHEMA_VERSION = 2
 PACKAGE_INDEX_PATH = "/v1/recipe-library/index.json"
 PACKAGE_MEDIA_TYPE = "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
 PACKAGE_REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
-PACKAGE_RAW_ORIGIN = "https://raw.githubusercontent.com"
 PACKAGE_API_ORIGIN = "https://api.github.com"
+# Release assets download from github.com (not the rate-limited REST API),
+# which redirects to this origin with a short-lived signed query. A deployment
+# may route both through one fixed internal relay.
+RELEASE_DOWNLOAD_ORIGIN = "https://github.com"
+RELEASE_ASSET_HOST = "release-assets.githubusercontent.com"
+RELEASE_ASSET_ORIGIN = f"https://{RELEASE_ASSET_HOST}"
+MAX_RELEASE_BYTES = 2 * 1024 * 1024
 MAX_INDEX_BYTES = 12 * 1024 * 1024
 MAX_PACKAGE_BYTES = 256 * 1024 * 1024
 MAX_PACKAGE_FILES = 2048
@@ -45,21 +59,38 @@ MAX_PACKAGE_TOTAL_BYTES = 256 * 1024 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
+_RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+_REDIRECTS = {301, 302, 303, 307, 308}
+_ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _INDEX_MEDIA_TYPES = {"application/json", "text/plain"}
 _PACKAGE_MEDIA_TYPES = {"application/octet-stream", PACKAGE_MEDIA_TYPE}
 
 
-class _GitRefObject(BaseModel):
+class _ReleaseAsset(BaseModel):
     model_config = ConfigDict(strict=True, extra="ignore")
 
-    sha: str
-    type: Literal["commit"]
+    name: str
+    state: str
 
 
-class _GitRefResponse(BaseModel):
+class _ReleaseResponse(BaseModel):
     model_config = ConfigDict(strict=True, extra="ignore")
 
-    object: _GitRefObject
+    tag_name: str
+    draft: bool
+    assets: list[_ReleaseAsset]
+
+
+@dataclass(frozen=True, slots=True)
+class _VerifiedRelease:
+    """A release whose SHA256SUMS verified against the pinned publisher."""
+
+    tag: str
+    commit: str
+    assets: frozenset[str]
+    checksums: Mapping[str, str]
+    checksums_raw: bytes
+    bundle_raw: bytes
 
 
 class RecipePackageError(RecipeLibraryError):
@@ -177,7 +208,15 @@ def _validate_package_paths(
 
 
 class RecipePackageClient:
-    """Fetch complete recipe packages and persist verified bytes by digest."""
+    """Fetch complete recipe packages and persist verified bytes by digest.
+
+    Without ``base_url`` the reader consumes signed GitHub releases of the
+    recipe repository: the configured release (``latest`` or an exact tag) is
+    trusted only after its ``SHA256SUMS`` verifies against the pinned Sigstore
+    publisher identity, and every index and package byte is then checked
+    against the digest ``SHA256SUMS`` lists. ``base_url`` selects an
+    operator-configured package channel serving the same index and packages.
+    """
 
     def __init__(
         self,
@@ -188,14 +227,13 @@ class RecipePackageClient:
         timeout_seconds: float = 8.0,
         publication_commit: str | None = None,
         api_url: str = PACKAGE_API_ORIGIN,
-        raw_url: str | None = None,
+        asset_url: str | None = None,
+        release: str = "latest",
     ) -> None:
         production = base_url is None
         origin = (
-            (raw_url or PACKAGE_RAW_ORIGIN).rstrip("/")
-            if production
-            else base_url.rstrip("/")
-        )
+            (asset_url or RELEASE_DOWNLOAD_ORIGIN) if production else str(base_url)
+        ).rstrip("/")
         parsed = urlsplit(origin)
         if not parsed.hostname or (
             parsed.scheme != "https"
@@ -231,15 +269,25 @@ class RecipePackageClient:
             raise RecipePackageError(
                 "recipe_package.url_invalid", "recipe package API URL is invalid"
             )
-        self._production = production
-        self._api_url = api_url.rstrip("/")
-        self._base_url = origin
-        self._cache_root = cache_root.resolve()
-        self._cache_root.mkdir(parents=True, exist_ok=True)
-        if publication_commit is not None and not _SHA1.fullmatch(publication_commit):
+        if release != "latest" and not _RELEASE_TAG.fullmatch(release):
+            raise RecipePackageError(
+                "recipe_package.release_invalid",
+                "recipe release must be latest or an exact vMAJOR.MINOR.PATCH tag",
+            )
+        if publication_commit is not None and (
+            production or not _SHA1.fullmatch(publication_commit)
+        ):
             raise RecipePackageError(
                 "recipe_package.commit_invalid", "publication commit is invalid"
             )
+        self._production = production
+        self._api_url = api_url.rstrip("/")
+        self._base_url = origin
+        self._redirect_origin = origin if asset_url else RELEASE_ASSET_ORIGIN
+        self._release_selector = release
+        self._release: _VerifiedRelease | None = None
+        self._cache_root = cache_root.resolve()
+        self._cache_root.mkdir(parents=True, exist_ok=True)
         self._publication_commit = publication_commit
         self._client = httpx2.Client(
             base_url=self._base_url,
@@ -263,17 +311,9 @@ class RecipePackageClient:
 
     def list(self) -> RecipeLibrarySnapshot:
         try:
-            publication = (
-                self._publication_commit or self._resolve_publication_commit()
-                if self._production
-                else None
+            raw, publication, release = (
+                self._fetch_release() if self._production else self._fetch_channel()
             )
-            index_path = (
-                self._raw_path(publication, "catalog-index.json")
-                if publication
-                else PACKAGE_INDEX_PATH
-            )
-            response = self._client.get(index_path)
         except (httpx2.HTTPError, OSError) as error:
             persisted = self._read_persisted_snapshot()
             if persisted is not None:
@@ -281,21 +321,34 @@ class RecipePackageClient:
             raise RecipePackageError(
                 "recipe_package.unavailable", "recipe package index is unavailable"
             ) from error
-        except RecipePackageError:
-            persisted = self._read_persisted_snapshot()
-            if persisted is not None:
-                return persisted
+        except RecipePackageError as error:
+            # Only an unreachable publication falls back to the previous
+            # verified generation; an integrity failure is always surfaced.
+            if error.code == "recipe_package.unavailable":
+                persisted = self._read_persisted_snapshot()
+                if persisted is not None:
+                    return persisted
             raise
-        media_type = (
-            response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-        )
+        snapshot, packages = self._parse_index(raw, publication_commit=publication)
+        if release is not None:
+            _bind_release(snapshot, packages, release)
+        self._persist_index(raw, publication_commit=publication, release=release)
+        self._candidate_active = True
+        self._release = release
+        self._packages = packages
+        self._snapshot = snapshot
+        self._prepared = {}
+        return snapshot
+
+    def _fetch_channel(self) -> tuple[bytes, str | None, None]:
+        response = self._client.get(PACKAGE_INDEX_PATH)
         if response.status_code != 200 or response.is_redirect:
-            persisted = self._read_persisted_snapshot()
-            if persisted is not None:
-                return persisted
             raise RecipePackageError(
                 "recipe_package.unavailable", "recipe package index is unavailable"
             )
+        media_type = (
+            response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        )
         if (
             media_type not in _INDEX_MEDIA_TYPES
             or len(response.content) > MAX_INDEX_BYTES
@@ -304,71 +357,145 @@ class RecipePackageClient:
                 "recipe_package.response_invalid",
                 "recipe package index response is invalid",
             )
-        publication = (
-            publication
-            or response.headers.get("x-vonk-publication-commit")
-            or response.headers.get("x-recipe-library-publication-commit")
-        )
+        publication = response.headers.get(
+            "x-vonk-publication-commit"
+        ) or response.headers.get("x-recipe-library-publication-commit")
         if publication is not None and not _SHA1.fullmatch(publication):
             raise RecipePackageError(
                 "recipe_package.response_invalid",
                 "recipe publication identity is invalid",
             )
-        snapshot, packages = self._parse_index(
-            response.content, publication_commit=publication
+        return response.content, publication, None
+
+    def _fetch_release(self) -> tuple[bytes, str, _VerifiedRelease]:
+        tag, assets = self._resolve_release()
+        checksums_raw = self._download_asset(
+            tag, assets, RELEASE_CHECKSUMS, MAX_CHECKSUMS_BYTES
         )
-        self._persist_index(response.content, publication_commit=publication)
-        self._candidate_active = True
-        self._packages = packages
-        self._snapshot = snapshot
-        self._prepared = {}
-        return snapshot
+        bundle_raw = self._download_asset(tag, assets, RELEASE_BUNDLE, MAX_BUNDLE_BYTES)
+        commit = verify_release_checksums(checksums_raw, bundle_raw)
+        checksums = parse_release_checksums(checksums_raw)
+        raw = self._download_asset(
+            tag,
+            assets,
+            RELEASE_INDEX,
+            MAX_INDEX_BYTES,
+            sha256=checksums[RELEASE_INDEX],
+        )
+        return (
+            raw,
+            commit,
+            _VerifiedRelease(
+                tag=tag,
+                commit=commit,
+                assets=assets,
+                checksums=checksums,
+                checksums_raw=checksums_raw,
+                bundle_raw=bundle_raw,
+            ),
+        )
 
-    def _raw_path(self, publication_commit: str, path: str) -> str:
-        if not _SHA1.fullmatch(publication_commit) or not _safe_path(path):
+    def _resolve_release(self) -> tuple[str, frozenset[str]]:
+        path = (
+            "releases/latest"
+            if self._release_selector == "latest"
+            else f"releases/tags/{self._release_selector}"
+        )
+        response = self._client.get(
+            f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/{path}",
+            headers={"Accept": "application/vnd.github+json"},
+        )
+        if response.status_code != 200 or response.is_redirect:
             raise RecipePackageError(
-                "recipe_package.url_invalid", "recipe publication path is invalid"
+                "recipe_package.unavailable", "recipe release is unavailable"
             )
-        return f"/{PACKAGE_REPOSITORY}/{publication_commit}/{path}"
-
-    def _resolve_publication_commit(self) -> str:
+        if len(response.content) > MAX_RELEASE_BYTES:
+            raise RecipePackageError(
+                "recipe_package.response_invalid", "recipe release response is invalid"
+            )
         try:
-            response = self._client.get(
-                f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/git/ref/heads/main",
-                headers={"Accept": "application/vnd.github+json"},
-            )
-        except (httpx2.HTTPError, OSError) as error:
+            release = _ReleaseResponse.model_validate(_json(response.content))
+        except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as error:
             raise RecipePackageError(
-                "recipe_package.unavailable", "recipe publication is unavailable"
+                "recipe_package.response_invalid", "recipe release response is invalid"
             ) from error
         if (
-            response.status_code != 200
-            or response.is_redirect
-            or len(response.content) > 128 * 1024
+            release.draft
+            or not _RELEASE_TAG.fullmatch(release.tag_name)
+            or (
+                self._release_selector != "latest"
+                and release.tag_name != self._release_selector
+            )
         ):
             raise RecipePackageError(
-                "recipe_package.unavailable", "recipe publication is unavailable"
+                "recipe_package.response_invalid",
+                "recipe release identity is invalid",
             )
-        try:
-            payload = _json(response.content)
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        assets: set[str] = set()
+        for asset in release.assets:
+            if asset.state != "uploaded":
+                continue
+            if asset.name in assets or not _ASSET_NAME.fullmatch(asset.name):
+                raise RecipePackageError(
+                    "recipe_package.response_invalid",
+                    "recipe release asset identity is invalid",
+                )
+            assets.add(asset.name)
+        return release.tag_name, frozenset(assets)
+
+    def _download_asset(
+        self,
+        tag: str,
+        assets: frozenset[str],
+        name: str,
+        maximum_bytes: int,
+        *,
+        sha256: str | None = None,
+    ) -> bytes:
+        if name not in assets:
             raise RecipePackageError(
-                "recipe_package.response_invalid",
-                "recipe publication response is invalid",
-            ) from error
-        try:
-            ref = _GitRefResponse.model_validate(payload)
-        except ValidationError as error:
-            raise RecipePackageError(
-                "recipe_package.response_invalid",
-                "recipe publication identity is invalid",
-            ) from error
-        if not _SHA1.fullmatch(ref.object.sha):
-            raise RecipePackageError(
-                "recipe_package.response_invalid",
-                "recipe publication identity is invalid",
+                "recipe_package.release_incomplete",
+                f"recipe release does not contain {name}",
             )
-        return ref.object.sha
+        response = self._client.get(
+            f"{self._base_url}/{PACKAGE_REPOSITORY}/releases/download/{tag}/{name}",
+            headers={"Accept": "application/octet-stream"},
+        )
+        if response.status_code in _REDIRECTS:
+            target = urlsplit(response.headers.get("location", ""))
+            if (
+                target.scheme != "https"
+                or target.hostname != RELEASE_ASSET_HOST
+                or target.port is not None
+                or target.username
+                or target.password
+                or target.fragment
+                or not target.path.startswith("/")
+            ):
+                raise RecipePackageError(
+                    "recipe_package.response_invalid",
+                    "recipe release asset redirect leaves the GitHub asset origin",
+                )
+            # The signed query is opaque; the relay forwards it unchanged.
+            query = f"?{target.query}" if target.query else ""
+            response = self._client.get(f"{self._redirect_origin}{target.path}{query}")
+        if response.status_code != 200 or response.is_redirect:
+            raise RecipePackageError(
+                "recipe_package.unavailable",
+                f"recipe release asset {name} is unavailable",
+            )
+        content = response.content
+        if len(content) > maximum_bytes:
+            raise RecipePackageError(
+                "recipe_package.response_invalid",
+                f"recipe release asset {name} exceeds its size bound",
+            )
+        if sha256 is not None and _sha256(content) != sha256:
+            raise RecipePackageError(
+                "recipe_package.digest_mismatch",
+                f"recipe release asset {name} does not match SHA256SUMS",
+            )
+        return content
 
     def _parse_index(
         self, raw: bytes, *, publication_commit: str | None = None
@@ -591,11 +718,26 @@ class RecipePackageClient:
             catalog_entities=tuple(catalog_entities),
         ), packages
 
-    def _persist_index(self, raw: bytes, *, publication_commit: str | None) -> None:
-        payload = {
+    def _persist_index(
+        self,
+        raw: bytes,
+        *,
+        publication_commit: str | None,
+        release: _VerifiedRelease | None,
+    ) -> None:
+        payload: dict[str, object] = {
             "index": raw.decode("utf-8"),
             "publication_commit": publication_commit,
         }
+        if release is not None:
+            # Keep the signature material so a restart re-verifies the
+            # previous generation instead of trusting local state.
+            payload["release"] = {
+                "tag": release.tag,
+                "assets": sorted(release.assets),
+                "checksums": release.checksums_raw.decode("ascii"),
+                "bundle": release.bundle_raw.decode("utf-8"),
+            }
         temporary = self._candidate_path.with_suffix(".tmp")
         try:
             temporary.write_text(
@@ -653,18 +795,29 @@ class RecipePackageClient:
             publication = payload.get("publication_commit")
             if publication is not None and not isinstance(publication, str):
                 return None
-            snapshot, packages = self._parse_index(
-                payload["index"].encode("utf-8"), publication_commit=publication
+            raw = payload["index"].encode("utf-8")
+            release = (
+                _persisted_release(payload.get("release"), raw)
+                if self._production
+                else None
             )
+            if self._production and (release is None or release.commit != publication):
+                # A generation without verifiable release signatures (for
+                # example one cached by an older reader) is never served.
+                return None
+            snapshot, packages = self._parse_index(raw, publication_commit=publication)
+            if release is not None:
+                _bind_release(snapshot, packages, release)
         except (
             OSError,
             TypeError,
             ValueError,
             UnicodeDecodeError,
             json.JSONDecodeError,
-            RecipePackageError,
+            RecipeLibraryError,
         ):
             return None
+        self._release = release
         self._packages = packages
         self._snapshot = snapshot
         self._previous_snapshot = snapshot
@@ -754,13 +907,62 @@ class RecipePackageClient:
                 return cached, target
         except OSError:
             pass
-        try:
-            download_url = (
-                self._raw_path(expected_publication, location)
-                if self._production and expected_publication is not None
-                else urljoin(self._base_url + "/", location)
+        if self._production:
+            content = self._download_release_package(digest, location, expected_size)
+        else:
+            content = self._download_channel_package(
+                digest, location, expected_size, expected_publication
             )
-            response = self._client.get(download_url)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{digest}.", suffix=".tmp", dir=target.parent
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+        return content, target
+
+    def _download_release_package(
+        self, digest: str, location: str, expected_size: int
+    ) -> bytes:
+        release = self._release
+        name = PurePosixPath(location).name
+        if release is None or release.checksums.get(name) != digest:
+            raise RecipePackageError(
+                "recipe_package.snapshot_changed",
+                "recipe package is not in the verified release",
+            )
+        try:
+            content = self._download_asset(
+                release.tag, release.assets, name, MAX_PACKAGE_BYTES, sha256=digest
+            )
+        except (httpx2.HTTPError, OSError) as error:
+            raise RecipePackageError(
+                "recipe_package.unavailable", "recipe package is unavailable"
+            ) from error
+        if len(content) != expected_size:
+            raise RecipePackageError(
+                "recipe_package.digest_mismatch",
+                "recipe package bytes do not match the trusted index",
+            )
+        return content
+
+    def _download_channel_package(
+        self,
+        digest: str,
+        location: str,
+        expected_size: int,
+        expected_publication: str | None,
+    ) -> bytes:
+        try:
+            response = self._client.get(urljoin(self._base_url + "/", location))
         except (httpx2.HTTPError, OSError) as error:
             raise RecipePackageError(
                 "recipe_package.unavailable", "recipe package is unavailable"
@@ -793,21 +995,7 @@ class RecipePackageClient:
                 "recipe_package.digest_mismatch",
                 "recipe package bytes do not match the trusted index",
             )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary_name = tempfile.mkstemp(
-            prefix=f".{digest}.", suffix=".tmp", dir=target.parent
-        )
-        temporary = Path(temporary_name)
-        try:
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(response.content)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, target)
-        finally:
-            if temporary.exists():
-                temporary.unlink()
-        return response.content, target
+        return response.content
 
     def _decode_package(
         self,
@@ -1031,6 +1219,63 @@ class RecipePackageClient:
                         path.rmdir()
                 temporary.rmdir()
         return target
+
+
+def _bind_release(
+    snapshot: RecipeLibrarySnapshot,
+    packages: Mapping[str, Mapping[str, object]],
+    release: _VerifiedRelease,
+) -> None:
+    """Require the index and every package it names to be the signed ones."""
+    if snapshot.commit != release.commit:
+        raise RecipePackageError(
+            "recipe_package.response_invalid",
+            "recipe index was not built from the signed release commit",
+        )
+    for package in packages.values():
+        location = str(package.get("location"))
+        name = PurePosixPath(location).name
+        if (
+            location != f"packages/{name}"
+            or name not in release.assets
+            or release.checksums.get(name) != package.get("package_sha256")
+        ):
+            raise RecipePackageError(
+                "recipe_package.response_invalid",
+                "recipe package is not in the signed release",
+            )
+
+
+def _persisted_release(value: object, index: bytes) -> _VerifiedRelease | None:
+    if not isinstance(value, Mapping):
+        return None
+    tag, assets = value.get("tag"), value.get("assets")
+    checksums_text, bundle_text = value.get("checksums"), value.get("bundle")
+    if (
+        not isinstance(tag, str)
+        or not _RELEASE_TAG.fullmatch(tag)
+        or not isinstance(assets, list)
+        or not all(
+            isinstance(name, str) and _ASSET_NAME.fullmatch(name) for name in assets
+        )
+        or not isinstance(checksums_text, str)
+        or not isinstance(bundle_text, str)
+    ):
+        return None
+    checksums_raw = checksums_text.encode("ascii")
+    bundle_raw = bundle_text.encode("utf-8")
+    commit = verify_release_checksums(checksums_raw, bundle_raw)
+    checksums = parse_release_checksums(checksums_raw)
+    if _sha256(index) != checksums[RELEASE_INDEX]:
+        return None
+    return _VerifiedRelease(
+        tag=tag,
+        commit=commit,
+        assets=frozenset(assets),
+        checksums=checksums,
+        checksums_raw=checksums_raw,
+        bundle_raw=bundle_raw,
+    )
 
 
 def load_recipe_package(
