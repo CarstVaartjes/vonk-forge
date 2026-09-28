@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --python 3.14 --frozen --with pyright==1.1.408 python
+#!/usr/bin/env -S uv run --project control --frozen python
 """Fail when a Python type error appears outside the reviewed exception list.
 
 The repository does not type-check cleanly yet, but every surviving error is a
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -32,9 +33,13 @@ BASELINE = ROOT / "tools/pyright-baseline.json"
 
 
 def _diagnostics() -> list[dict[str, object]]:
+    # pyright is locked in the control dev group and resolves imports from
+    # this same interpreter; its version check is the only network access it
+    # would otherwise attempt.
     completed = subprocess.run(
-        ["pyright", "--outputjson"],
+        [sys.executable, "-m", "pyright", "--outputjson", "--pythonpath", sys.executable],
         cwd=ROOT,
+        env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
         capture_output=True,
         text=True,
         check=False,

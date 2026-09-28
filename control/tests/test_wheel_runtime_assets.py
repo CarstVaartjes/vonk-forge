@@ -11,17 +11,19 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_control_wheel_packages_current_runtime_assets(tmp_path: Path) -> None:
     subprocess.run(
+        # The locked build backend in the test environment: no isolated build
+        # environment, no network.
         [
-            "uv",
+            sys.executable,
+            "-m",
+            "hatchling",
             "build",
-            "--offline",
-            "--wheel",
-            "--project",
-            str(ROOT / "control"),
-            "--out-dir",
+            "--target",
+            "wheel",
+            "--directory",
             str(tmp_path),
         ],
-        cwd=ROOT,
+        cwd=ROOT / "control",
         check=True,
         capture_output=True,
         text=True,

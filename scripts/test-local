@@ -79,19 +79,15 @@ recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
 linux_markers='linux_only or needs_systemd or postgres'
 portable_markers='not linux_only and not needs_systemd and not needs_rust_probe and not postgres'
 
-run_python_suites() {
-    local marker_expression
-    marker_expression=$(with_image_build_selection "$1")
-    local uv_project_environment=${UV_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-root-venv"}
-    local uv_control_environment=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"}
-    local uv_cache_dir=${UV_CACHE_DIR:-"/private/tmp/vonk-test-local-uv-cache"}
-    local recipe_args=()
-    local marker_args=()
-    if [[ -n "$marker_expression" ]]; then
-        marker_args=(-m "$marker_expression")
-    fi
+# Every suite runs in the one locked control environment, as in CI.
+uv_control() {
+    UV_CACHE_DIR=${UV_CACHE_DIR:-"/private/tmp/vonk-test-local-uv-cache"} \
+        UV_PROJECT_ENVIRONMENT=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"} \
+        uv run --project "$root/control" --frozen "$@"
+}
+
+use_recipe_library() {
     if [[ -d "$recipe_root/contracts" ]]; then
-        recipe_args=(--with-editable "$recipe_root/contracts")
         export VONK_RECIPE_LIBRARY_ROOT="$recipe_root"
     elif [[ ${CI:-false} == true ]]; then
         echo "VONK_RECIPE_LIBRARY_ROOT is required in CI: $recipe_root/contracts" >&2
@@ -100,60 +96,41 @@ run_python_suites() {
         echo "[SKIP-PREREQUISITE] recipe library unavailable; recipe-library tests must skip locally" >&2
         unset VONK_RECIPE_LIBRARY_ROOT || true
     fi
+}
 
-    UV_CACHE_DIR="$uv_cache_dir" UV_PROJECT_ENVIRONMENT="$uv_project_environment" \
-        uv run --python 3.14 --frozen "${recipe_args[@]}" \
-        pytest -q -n auto --dist loadfile --durations=40 "${marker_args[@]}"
+run_python_suites() {
+    local marker_expression
+    marker_expression=$(with_image_build_selection "$1")
+    local marker_args=()
+    if [[ -n "$marker_expression" ]]; then
+        marker_args=(-m "$marker_expression")
+    fi
+    use_recipe_library
+    scripts/sync-cli-dependencies
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+        scripts/pull-test-images postgres caddy step-ca tailscale python
+    fi
 
-    UV_CACHE_DIR="$uv_cache_dir" UV_PROJECT_ENVIRONMENT="$uv_control_environment" \
-        uv run --project control --frozen --with-editable . \
-        pytest -q -n auto --dist loadfile --durations=40 \
+    uv_control pytest -q -n auto --dist loadfile --durations=40 "${marker_args[@]}" tests
+    uv_control pytest -q -n auto --dist loadfile --durations=40 \
         --ignore-glob='*_wire_bridge.py' "${marker_args[@]}" control/tests
+    uv_control pytest -q -n auto --durations=40 "${marker_args[@]}" deploy/compose/tests
 }
 
 run_ci_wire_boundary() {
-    if [[ -d "$recipe_root/contracts" ]]; then
-        export VONK_RECIPE_LIBRARY_ROOT="$recipe_root"
-        UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
-            UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
-            uv run --project control --frozen --with-editable . \
-            python scripts/tests/check_recipe_launch_contracts.py "$recipe_root"
-    elif [[ ${CI:-false} == true ]]; then
-        echo "VONK_RECIPE_LIBRARY_ROOT is required in CI: $recipe_root/contracts" >&2
-        return 1
-    else
-        echo "[SKIP-PREREQUISITE] recipe launch projection check needs the recipe checkout" >&2
-    fi
-
-    UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
-        UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
-        uv run --project control --frozen --with-editable . \
-        python scripts/tests/check_api_contract_completeness.py
-    UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
-        UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
-        uv run --project control --frozen --with-editable . \
-        pytest -q control/tests/test_api_contract_completeness.py \
-        control/tests/test_api_contract_graph.py \
-        control/tests/test_api_response_witness.py \
+    use_recipe_library
+    uv_control pytest -q control/tests/test_api_response_witness.py \
         control/tests/test_source_bundle_client_handoff.py \
         control/tests/test_artifact_job_api.py \
         control/tests/test_fleet_profile_api.py::test_profile_operator_routes_are_singular_and_unversioned \
         control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
         control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
         --api-response-witness="${TMPDIR:-/tmp}/vonk-test-local-api-response-witnesses.json"
-    UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
-        UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
-        uv run --project control --frozen --with-editable . \
-        python scripts/generate-agent-wire --check
-    UV_CACHE_DIR="${UV_CACHE_DIR:-/private/tmp/vonk-test-local-uv-cache}" \
-        UV_PROJECT_ENVIRONMENT="${UV_CONTROL_PROJECT_ENVIRONMENT:-/private/tmp/vonk-ci-infra-test-control-venv}" \
-        uv run --project control --frozen --with-editable . \
-        python scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile
+    uv_control python scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile
 }
 
 run_changed_tests() {
     local base=${changed_base:-$(git merge-base HEAD origin/main)}
-    local uv_cache_dir=${UV_CACHE_DIR:-"/private/tmp/vonk-test-local-uv-cache"}
     local selection
     selection=$(
         {
@@ -186,28 +163,16 @@ run_changed_tests() {
     fi
     if ((${#repository_files[@]})); then
         echo "Repository suite: ${#repository_files[@]} changed-path test files"
-        UV_CACHE_DIR="$uv_cache_dir" \
-            UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-root-venv"} \
-            uv run --python 3.14 --frozen \
-            ${VONK_RECIPE_LIBRARY_ROOT:+--with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts"} \
-            pytest -q -n auto --dist loadfile "${marker_args[@]}" "${repository_files[@]}" || status=1
+        uv_control pytest -q -n auto --dist loadfile "${marker_args[@]}" "${repository_files[@]}" || status=1
     fi
     if ((${#control_files[@]})); then
         echo "Controller suite: ${#control_files[@]} changed-path test files"
-        (
-            cd control
-            UV_CACHE_DIR="$uv_cache_dir" \
-                UV_PROJECT_ENVIRONMENT=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"} \
-                uv run --frozen --with-editable .. \
-                pytest -q -n auto --dist loadfile "${marker_args[@]}" "${control_files[@]}"
-        ) || status=1
+        uv_control pytest -q -n auto --dist loadfile "${marker_args[@]}" \
+            "${control_files[@]/#/control/}" || status=1
     fi
     if ((${#compose_files[@]})); then
         echo "Compose suite: ${#compose_files[@]} changed-path test files"
-        UV_CACHE_DIR="$uv_cache_dir" \
-            UV_PROJECT_ENVIRONMENT=${UV_CONTROL_PROJECT_ENVIRONMENT:-"/private/tmp/vonk-ci-infra-test-control-venv"} \
-            uv run --project control --frozen --with-editable . \
-            pytest -q "${marker_args[@]}" "${compose_files[@]}" || status=1
+        uv_control pytest -q "${marker_args[@]}" "${compose_files[@]}" || status=1
     fi
     return "$status"
 }
@@ -247,4 +212,4 @@ fi
 echo "Running Linux-marked repository and Controller tests in OrbStack VM vonk-ci"
 printf -v guest_root '%q' "$root"
 orb -m vonk-ci bash -lc \
-    "cd $guest_root && export UV_PROJECT_ENVIRONMENT=\"\$HOME/venv-vonk-ci-infra-root\" CARGO_TARGET_DIR=\"\$HOME/target-vonk-ci-infra\" UV_CACHE_DIR=\"\$HOME/.cache/vonk-ci-infra-uv\" UV_CONTROL_PROJECT_ENVIRONMENT=\"\$HOME/venv-vonk-ci-infra-control\" VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") VONK_TEST_LOCAL_MARKERS=$(printf %q "$linux_markers") && scripts/test-local"
+    "cd $guest_root && export CARGO_TARGET_DIR=\"\$HOME/target-vonk-ci-infra\" UV_CACHE_DIR=\"\$HOME/.cache/vonk-ci-infra-uv\" UV_CONTROL_PROJECT_ENVIRONMENT=\"\$HOME/venv-vonk-ci-infra-control\" VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") VONK_TEST_LOCAL_MARKERS=$(printf %q "$linux_markers") && scripts/test-local"

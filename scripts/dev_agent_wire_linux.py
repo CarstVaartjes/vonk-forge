@@ -53,7 +53,7 @@ RECIPE_REVISION_FILE = Path("tests/acceptance/recipe-library-revision.txt")
 # Whitespace-normalized form of the CI step "Exercise Controller requests and
 # Spark results together". This exact string is executed by the lane.
 TIER_COMMAND = (
-    "uv run --project control --frozen --with-editable . "
+    "uv run --project control --frozen "
     "python scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile"
 )
 
@@ -112,9 +112,18 @@ def run_commands(job: str) -> list[str]:
     return commands
 
 
-def lane_contract(workflow_text: str) -> dict[str, object]:
-    """Extract the facts the local lane must agree with from the CI job."""
+def lane_contract(workflow_text: str, root: Path | None = None) -> dict[str, object]:
+    """Extract the facts the local lane must agree with from the CI job.
+
+    With ``root``, the repository's own composite actions the job uses (the
+    locked Python environment, the recipe library) count as part of the job.
+    """
     job = workflow_job(workflow_text, CI_JOB)
+    if root is not None:
+        for action in re.findall(
+            r"uses:\s*\./(\.github/actions/[\w-]+)\s*$", job, re.MULTILINE
+        ):
+            job += "\n" + (root / action / "action.yml").read_text(encoding="utf-8")
     # CI may start the probe build early with --build-only so it overlaps
     # other checks; the tier command below builds anything still missing, so
     # only the command that runs the contracts has to match this lane.
@@ -145,7 +154,7 @@ def check_lane_consistency(root: Path) -> list[str]:
     workflow_path = root / CI_WORKFLOW
     dockerfile_path = root / DOCKERFILE
     try:
-        contract = lane_contract(workflow_path.read_text(encoding="utf-8"))
+        contract = lane_contract(workflow_path.read_text(encoding="utf-8"), root)
     except (LaneError, OSError) as exc:
         return [f"cannot read the CI lane contract: {exc}"]
 

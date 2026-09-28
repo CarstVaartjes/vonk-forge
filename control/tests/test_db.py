@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -22,15 +23,19 @@ def test_built_wheel_contains_alembic_config_next_to_installed_module(
 ) -> None:
     project = Path(__file__).resolve().parents[1]
     subprocess.run(
+        # The locked build backend in the test environment: no isolated build
+        # environment, no network.
         [
-            "uv",
+            sys.executable,
+            "-m",
+            "hatchling",
             "build",
-            "--project",
-            str(project),
-            "--wheel",
-            "--out-dir",
+            "--target",
+            "wheel",
+            "--directory",
             str(tmp_path),
         ],
+        cwd=project,
         check=True,
         capture_output=True,
         text=True,

@@ -100,7 +100,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Install readiness runtime
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -123,7 +123,7 @@ jobs:
           }
           development_run() {
             local workflow=$1 variable=$2 result status
-            if result=$(uv run --no-project --with pyyaml==6.0.3 \
+            if result=$(uv run --frozen --only-group dev \
               scripts/resolve-publication-producer "$workflow" "$SOURCE_SHA"); then
               printf -v "$variable" '%s' "$result"
             else
@@ -296,7 +296,7 @@ jobs:
           ref: ${{ needs.authority.outputs.source_sha }}
 
       - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -402,8 +402,9 @@ jobs:
           mapfile -t cli_wheels < <(find "$RUNNER_TEMP/cli-wheel" -maxdepth 1 -type f -name 'vonk_cluster_profiles-*-py3-none-any.whl')
           test "${#cli_wheels[@]}" = 1
           output=$RUNNER_TEMP/installer-publication
+          scripts/build-control-wheel
           assemble=(
-            uv run --no-project --with-editable agent_protocol --with cryptography==46.0.7 python scripts/install-release-publication assemble
+            uv run --project control --frozen python scripts/install-release-publication assemble
             --channel "$CHANNEL"
             --version "$VERSION"
             --source-sha "$SOURCE_SHA"
@@ -531,7 +532,7 @@ jobs:
 
       - name: Install uv and Python
         timeout-minutes: 5
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -624,7 +625,7 @@ jobs:
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
           export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
-          uv run python tests/acceptance/test_fresh_nas_install.py
+          uv run --frozen python tests/acceptance/test_fresh_nas_install.py
 
       - name: Delete isolated disposable Tailscale tailnet
         if: always() && matrix.lane == 'native'
@@ -711,7 +712,7 @@ jobs:
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
           export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
-          uv run python tests/acceptance/test_fresh_nas_install.py
+          uv run --frozen python tests/acceptance/test_fresh_nas_install.py
 
       - name: Write exact NAS lane evidence
         shell: bash
@@ -870,13 +871,13 @@ jobs:
           printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
 
       - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
           enable-cache: true
       - name: Build recipe library index and packages
-        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+        run: scripts/retry-dependency-fetch scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
 
       - name: Build and verify the Controller protocol wheel
         uses: ./.github/actions/prepare-control-wheel
@@ -934,8 +935,7 @@ jobs:
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
           export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
-          uv run --project control --frozen --with-editable . \
-            --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
+          uv run --project control --frozen \
             python tests/acceptance/test_spark_lifecycle.py run \
             --candidate-release "$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/release.json" \
             --baseline-release "$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/acceptance-baseline/release.json" \
@@ -979,7 +979,7 @@ jobs:
           ref: ${{ needs.authority.outputs.source_sha }}
 
       - name: Install canonical publication model runtime
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -1027,8 +1027,9 @@ jobs:
           # Spark agents are ARM64-only. Acceptance therefore binds one
           # aggregate NAS report and one linux-arm64 Spark report.
           test "${#reports[@]}" = 2
+          scripts/build-control-wheel
           command=(
-            uv run --no-project --with-editable agent_protocol python scripts/install-release-publication accept
+            uv run --project control --frozen python scripts/install-release-publication accept
             --channel "$CHANNEL"
             --version "$VERSION"
             --source-sha "$SOURCE_SHA"
@@ -1169,7 +1170,7 @@ jobs:
           persist-credentials: false
 
       - name: Install canonical publication model runtime
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -1257,7 +1258,8 @@ jobs:
             "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT"
           openssl pkey -pubin -in "$public_key" -text -noout \
             | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
-          uv run --no-project --with-editable agent_protocol python scripts/install-release-publication refresh \
+          scripts/build-control-wheel
+          uv run --project control --frozen python scripts/install-release-publication refresh \
             --channel "$CHANNEL" \
             --expires-at "$(($(date +%s) + 604800))" \
             --signing-key "$signing_key" \

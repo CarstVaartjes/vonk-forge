@@ -23,15 +23,24 @@ dependencies = [
 
 [tool.uv.sources]
 vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-3.0.0-py3-none-any.whl" }
-vonk-cluster-profiles = { path = ".." }
+# Editable, so the repository and Compose suites that run in this environment
+# exercise the working tree rather than a snapshot built at sync time.
+vonk-cluster-profiles = { path = "..", editable = true }
 # Resolve the public contract from the recipe repository's moving main branch.
 # control/packaging/public-contracts.lock records the exact commit consumed by
 # each lock/build update; the image build uses that same commit explicitly.
 vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", branch = "main", subdirectory = "contracts" }
 
+# The one locked tool environment for every suite, lint and type check, local
+# and CI alike (docs/testing-and-ci.md). Nothing is added with `uv run --with`
+# or `uvx`. Ruff lives in the root project's dev group: openapi-python-client
+# pins an older ruff for formatting generated code.
 [dependency-groups]
 dev = [
+    "hatchling==1.31.0",
     "openapi-python-client==0.26.2",
+    # The nodejs extra ships Node as a wheel, so pyright never downloads it.
+    "pyright[nodejs]==1.1.408",
     "pytest==9.1.1",
     "pytest-timeout==2.4.0",
     "pytest-xdist==3.8.0",

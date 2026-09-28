@@ -269,7 +269,7 @@ The `Controller and Spark wire contract` CI job checks both sides of the
 launch boundary. It runs when the Controller, agent, public-contract lock,
 recipe revision, runtime compiler, or harness configuration changes.
 
-- `scripts/tests/check_recipe_launch_contracts.py` loads every published Model
+- `control/tests/test_recipe_launch_contracts.py` loads every published Model
   and Recipe through their canonical Pydantic classes, compiles every recipe
   role with the production compiler, and validates the final launch document
   through the shared `CompiledExecutionPlan`. Cache receipts are synthetic;
@@ -427,7 +427,7 @@ forces that interleaving and verifies that workers claim different operations.
 
 ## Discovered HTTP completeness gate
 
-`scripts/tests/check_api_contract_completeness.py` constructs both supported
+`control/tests/test_api_contract_completeness.py` constructs both supported
 browser-auth configurations and discovers mounted FastAPI routes, including
 child applications. Every operation must have an OpenAPI declaration; hidden
 or opaque transports fail rather than disappearing from the inventory. The
@@ -465,7 +465,7 @@ Controller tests can collect the actual successful bytes emitted by production
 ASGI routes, including response middleware, with:
 
 ```sh
-uv run --project control --frozen --with-editable . pytest -q control/tests \
+uv run --project control --frozen pytest -q control/tests \
   --api-response-witness=/tmp/controller-response-witnesses.json
 ```
 
