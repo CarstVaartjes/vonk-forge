@@ -179,7 +179,6 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             "semantic_version": builder.semantic_version,
             "build_digest": builder.build_digest,
             "binary_digest": builder.binary_digest,
-            "self_test_passed": builder.self_test_passed,
         }
     jobs = AgentJobService(
         sessions,
@@ -255,6 +254,7 @@ def test_native_source_fetch_failure_reaches_availability_owner(
                 tmp_path / "agent-state",
                 source_server,
                 certs,
+                node_id=node_id,
             ),
         )
         assert result.state == "failed"

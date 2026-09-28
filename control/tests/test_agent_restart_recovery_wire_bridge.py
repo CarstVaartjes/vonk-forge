@@ -297,11 +297,18 @@ def restart_probe() -> Path:
 
 
 def _probe_request(
-    mode: str, claim, root: Path, server, certs: dict[str, Path]
+    mode: str,
+    claim,
+    root: Path,
+    server,
+    certs: dict[str, Path],
+    *,
+    node_id: str = NODE_A,
 ) -> dict[str, object]:
     return {
         "mode": mode,
         "data_root": str(root),
+        "node_id": node_id,
         "claim": claim.model_dump(mode="json"),
         "controller_url": f"https://localhost:{server.server_port}/",
         "ca_sha256": hashlib.sha256(
