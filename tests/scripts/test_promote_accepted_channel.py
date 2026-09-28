@@ -44,6 +44,7 @@ shift
 """,
         binary / "git": """#!/usr/bin/env bash
 if [[ $1 == rev-parse ]]; then echo "$CURRENT_SHA"; fi
+if [[ $1 == merge-base ]]; then [[ ${ON_MAIN:-1} == 1 ]]; fi
 """,
     }
     for path, content in helpers.items():
@@ -108,7 +109,23 @@ def test_dev_aliases_advance_after_preflight_and_before_pointer(tmp_path: Path) 
     assert log.read_text().splitlines() == ["preflight", "aliases:dev", "pointer"]
 
 
-@pytest.mark.parametrize("failure", ["preflight", "stale_source"])
+def test_accepted_dev_source_promotes_after_main_advanced(tmp_path: Path) -> None:
+    """Acceptance outlasts main: an accepted source behind the tip still promotes."""
+    command, environment, log = _fixture(tmp_path)
+    environment["CURRENT_SHA"] = "f" * 40
+    result = subprocess.run(
+        command,
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert log.read_text().splitlines() == ["preflight", "aliases:dev", "pointer"]
+
+
+@pytest.mark.parametrize("failure", ["preflight", "source_off_main"])
 def test_invalid_candidate_never_advances_aliases(tmp_path: Path, failure: str) -> None:
     command, environment, log = _fixture(tmp_path)
     environment.update(
@@ -116,6 +133,7 @@ def test_invalid_candidate_never_advances_aliases(tmp_path: Path, failure: str) 
         if failure == "preflight"
         else {
             "CURRENT_SHA": "f" * 40,
+            "ON_MAIN": "0",
         }
     )
     result = subprocess.run(
