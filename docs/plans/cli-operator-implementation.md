@@ -1563,9 +1563,10 @@ to hit a race:
 2. Interactive load previews, shows effects, confirms once, and submits that
    exact digest. On a stale-plan refusal, display changed reasons and require
    new review; never auto-accept a refreshed plan.
-3. Noninteractive load requires `--expected-plan DIGEST --yes`, plus explicit
-   `--profile N`. `--yes` alone cannot approve an unseen freshly generated
-   decision. Preserve `--detach`, observation options, and request-key replay.
+3. Noninteractive load requires `--yes`, plus explicit `--profile N`. The CLI
+   fetches the latest plan before submission; the Controller parks requests
+   with waitable blockers and continues to enforce authorization and identity.
+   Preserve `--detach`, observation options, and request-key replay.
 4. Register the request identity before mutation. A lost response follows
    W09's existing-request reconciliation. JSON uncertainty contains the key
    and recovery command without adding a second output document.
@@ -1574,9 +1575,9 @@ to hit a race:
 
 **Tests:** command → real HTTP route → actual service integration, plus a
 small PTY interaction test. Cover reject/accept once, JSON and pipe no-input,
-`--yes` missing digest, stale review, detached receipt, lost response after
-commit, and a later profile edit during recovery. Assert exact submitted digest
-and absence of a second dispatch. Regenerate and validate the web client.
+waitable blockers, stale plan refresh, detached receipt, lost response after
+commit, and a later profile edit during recovery. Assert the latest submitted
+plan and request identity. Regenerate and validate the web client.
 
 **Done:** a human and a script can review, submit, and reconnect to the same
 authorized application, with no alternate unreviewed load path.
@@ -1594,10 +1595,10 @@ their presence in the parser is not the M3 acceptance gate.
 2. **Close the interaction matrix.** Interactive preview goes to stderr,
    followed by one default-no confirmation; only the accepted receipt/final
    result goes to stdout. Dry-run never prompts or submits. JSON, redirected
-   input and `--no-input` require the explicit reviewed digest plus `--yes`.
+   input and `--no-input` require `--yes`; the CLI obtains the latest plan.
    EOF, refusal or invalid consent flags create no remote intent. A stale
-   review ends with the refusal and a command for a new review; it does not
-   silently preview and submit again.
+   review is refreshed and the same request identity is resubmitted against
+   the latest plan.
 3. **Close uncertain submission.** Allocate one UUID after consent and before
    POST. Validate receipt request key, original review digest and application
    ID. On a lost answer, query the original request; only a canonical not-found
@@ -1617,23 +1618,21 @@ consent. These are target examples; use the current runbook for released
 commands:
 
 ```bash
-# Inspect this exact decision before approving its digest.
+# Inspect the current plan.
 vonkctl --profile 2 --json profile load --dry-run > reviewed-plan.json
 
-# REVIEWED_DIGEST is the full plan_digest from that reviewed document.
+# Submit with explicit consent; the CLI fetches the latest plan.
 vonkctl --profile 2 --json profile load \
-  --expected-plan "$REVIEWED_DIGEST" --yes --detach
+  --yes --detach
 
 # ORIGINAL_REQUEST_KEY comes from the accepted or uncertain-submission receipt.
 vonkctl --profile 2 profile progress \
   --request-key "$ORIGINAL_REQUEST_KEY" --follow
 ```
 
-Run the first command successfully and inspect its `allowed` state, blockers
-and effects before setting `REVIEWED_DIGEST`. Do not pipe a freshly generated
-plan directly into unconditional approval in the operator examples. A script
-may apply its own explicit approval policy, but the Controller still enforces
-current authority and the exact reviewed decision.
+Run the first command to inspect the plan. A waitable blocker does not prevent
+an explicitly approved request from being parked by the Controller. The
+Controller still enforces current authority and exact identity.
 
 ### W11 — Cancel model work while preserving usable assets
 
