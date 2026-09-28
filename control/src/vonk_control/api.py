@@ -293,8 +293,6 @@ def build_agent_services(
     sessions: Any,
     clock: Callable[[], Any],
     *,
-    revision_eligible: Callable[[str], bool] | None = None,
-    current_revision: Callable[[], str] | None = None,
     distribution: Any | None = None,
     model_cache: Any | None = None,
 ) -> AgentApiServices:
@@ -1322,9 +1320,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
 
     from .agent_upgrades import AgentUpgradeService
     from .availability_production import build_recipe_image_availability
-    from .database_authority import (
-        DatabaseAuthorityService,
-    )
     from .db import build_engine, session_factory
     from .execution_plan_service import ControllerExecutionPlanService
     from .fleet_events import FleetEventRepository
@@ -1367,13 +1362,10 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     token_codec = TokenCodec(settings.token_signing_key)
     cursor_codec = token_codec.cursor_codec()
     job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
-    authority = DatabaseAuthorityService(sessions, clock=clock)
-    authority.ensure_initialized()
     database_bundles = DatabaseSourceBundleStore(sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
     visual_fleet = FleetProjection(
-        authority,
         sessions,
         clock=clock,
         events=fleet_event_repository,
@@ -1402,16 +1394,10 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     model_cache.resume_operations()
 
-    def revision_eligible(revision: str) -> bool:
-        return revision == authority.head()
-
-    current_revision = authority.head
     agent_services = build_agent_services(
         settings,
         sessions,
         clock,
-        revision_eligible=revision_eligible,
-        current_revision=current_revision,
         model_cache=model_cache,
     )
     runtime_image_transport = SkopeoOCIImageTransport()
@@ -1579,7 +1565,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         sessions,
         agent_services.operations,
         clock=clock,
-        current_revision=current_revision,
         channel=settings.install_channel,
         release_api_url=AGENT_RELEASE_API_URL,
     )

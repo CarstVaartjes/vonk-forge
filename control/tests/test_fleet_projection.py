@@ -4,7 +4,6 @@ import json
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -12,6 +11,7 @@ from sqlalchemy import create_engine, event, text, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
+    _AUTHORITY_REVISION,
     CapacityReservations,
     FleetProjection,
     FleetSnapshot,
@@ -156,36 +156,6 @@ def _canonical_catalog_documents(
     )
 
 
-class Repository:
-    def __init__(self, nodes: dict[str, dict[str, object]] | None = None) -> None:
-        self.calls: list[str] = []
-        self.nodes = (
-            nodes
-            if nodes is not None
-            else {
-                NODE_B: {
-                    "display_name": "Beta",
-                    "hostname": "beta.internal",
-                    "lifecycle": "managed",
-                    "labels": {"rack": "right"},
-                },
-                NODE_A: {
-                    "display_name": "Alpha",
-                    "hostname": "alpha.internal",
-                    "lifecycle": "managed",
-                    "labels": {"rack": "left"},
-                },
-            }
-        )
-
-    def head(self) -> str:
-        self.calls.append("head")
-        return COMMIT
-
-    def read_document(self, commit: str, path: str) -> SimpleNamespace:
-        raise AssertionError(f"unexpected document read: {commit} {path}")
-
-
 def _inventory(
     node_id: str, observed_at: datetime, *, free_bytes: int
 ) -> NodeInventorySnapshot:
@@ -298,7 +268,7 @@ def test_fleet_is_empty_when_repository_has_old_nodes_but_database_has_no_agents
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
 
-    projection = FleetProjection(Repository(), sessions, clock=lambda: NOW)
+    projection = FleetProjection(sessions, clock=lambda: NOW)
 
     assert projection.read().nodes == []
 
@@ -317,7 +287,7 @@ def test_fleet_contains_registered_node_absent_from_repository() -> None:
             )
         )
 
-    projection = FleetProjection(Repository({}), sessions, clock=lambda: NOW)
+    projection = FleetProjection(sessions, clock=lambda: NOW)
 
     snapshot = projection.read()
     assert [node.id for node in snapshot.nodes] == ["spk_" + "1" * 32]
@@ -340,16 +310,6 @@ def test_fleet_excludes_revoked_agent_nodes() -> None:
         )
 
     projection = FleetProjection(
-        Repository(
-            {
-                NODE_A: {
-                    "display_name": "Alpha",
-                    "hostname": "alpha.internal",
-                    "lifecycle": "managed",
-                    "labels": {},
-                }
-            }
-        ),
         sessions,
         clock=lambda: NOW,
     )
@@ -363,7 +323,6 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    repository = Repository()
     with sessions.begin() as session:
         session.execute(
             update(FleetEventCursor)
@@ -473,15 +432,14 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         statements.append(" ".join(statement.split()).lower())
 
     event.listen(engine, "before_cursor_execute", record_statement)
-    snapshot = FleetProjection(repository, sessions, clock=lambda: NOW).read()
+    snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
     event.remove(engine, "before_cursor_execute", record_statement)
 
-    assert repository.calls == ["head"]
     assert snapshot.model_dump(mode="json") == {
         "schema_version": 1,
         "event_cursor": 7,
         "generated_at": "2026-08-15T12:00:00Z",
-        "authority_revision": COMMIT,
+        "authority_revision": _AUTHORITY_REVISION,
         "nodes": [
             {
                 "id": NODE_A,
@@ -679,7 +637,7 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
             )
         )
 
-    projection = FleetProjection(Repository({}), sessions, clock=lambda: NOW)
+    projection = FleetProjection(sessions, clock=lambda: NOW)
     identity = projection.update_display_name(NODE_A, "Studio Spark")
 
     assert identity.model_dump() == {
@@ -710,16 +668,11 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
         )
 
 
-def test_read_captures_the_committed_cursor_before_repository_projection() -> None:
+def test_read_captures_the_committed_cursor() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     order: list[str] = []
-
-    class OrderedRepository(Repository):
-        def head(self) -> str:
-            order.append("repository")
-            return super().head()
 
     class Events(FleetEventRepository):
         def high_watermark(self) -> int:
@@ -727,13 +680,12 @@ def test_read_captures_the_committed_cursor_before_repository_projection() -> No
             return 41
 
     snapshot = FleetProjection(
-        OrderedRepository({}),
         sessions,
         clock=lambda: NOW,
         events=Events(sessions, clock=lambda: NOW),
     ).read()
 
-    assert order == ["watermark", "repository"]
+    assert order == ["watermark"]
     assert snapshot.event_cursor == 41
 
 
@@ -888,7 +840,7 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     node_ids = [f"spk_{index:032x}" for index in range(1, 13)]
-    nodes = {
+    {
         node_id: {
             "display_name": node_id,
             "hostname": "node.internal",
@@ -1003,7 +955,7 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
             ]
         )
 
-    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
+    snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
 
     assert [
         (
@@ -1081,7 +1033,7 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
             session.flush()
             session.add(NodeTelemetryLatest(node_id=node_id, sample_id=sample.id))
 
-    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
+    snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
 
     assert [
         (
@@ -1125,20 +1077,6 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
     healthy_run_id = "00000000-0000-4000-8000-000000000107"
     degraded_run_id = "00000000-0000-4000-8000-000000000108"
     route_failed_run_id = "00000000-0000-4000-8000-000000000121"
-    nodes = {
-        NODE_A: {
-            "display_name": "Alpha",
-            "hostname": "alpha.internal",
-            "lifecycle": "managed",
-            "labels": {},
-        },
-        NODE_B: {
-            "display_name": "Beta",
-            "hostname": "beta.internal",
-            "lifecycle": "managed",
-            "labels": {},
-        },
-    }
     with sessions.begin() as session:
         session.add_all(
             [
@@ -1438,7 +1376,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
             ]
         )
 
-    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
+    snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
     from cluster_profiles.cli_render import render_payload
 
     render_payload(snapshot.model_dump(mode="json"), "fleet")
@@ -1552,13 +1490,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
         node.state = "revoked"
         node.revoked_at = NOW
 
-    registered_visible = (
-        FleetProjection(
-            Repository({NODE_A: nodes[NODE_A]}), sessions, clock=lambda: NOW
-        )
-        .read()
-        .nodes[0]
-    )
+    registered_visible = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
     external_install = next(
         value
         for value in registered_visible.installed
@@ -1605,14 +1537,6 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
     build_id = "00000000-0000-4000-8000-000000000406"
     installation_id = "00000000-0000-4000-8000-000000000407"
     run_id = "00000000-0000-4000-8000-000000000408"
-    nodes = {
-        NODE_A: {
-            "display_name": "Alpha",
-            "hostname": "alpha.internal",
-            "lifecycle": "managed",
-            "labels": {},
-        }
-    }
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -1760,7 +1684,7 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
                 {"value": value, "id": revision_id},
             )
 
-    projection = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW)
+    projection = FleetProjection(sessions, clock=lambda: NOW)
     if damage == "candidate":
         snapshot = projection.read()
         assert (snapshot.nodes[0].installed, snapshot.nodes[0].loaded) == ([], [])
@@ -1777,16 +1701,6 @@ def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronolog
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    repository = Repository(
-        {
-            NODE_A: {
-                "display_name": "Alpha",
-                "hostname": "alpha.internal",
-                "lifecycle": "managed",
-                "labels": {},
-            }
-        }
-    )
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -1821,7 +1735,7 @@ def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronolog
                 ),
             ]
         )
-    projection = FleetProjection(repository, sessions, clock=lambda: NOW)
+    projection = FleetProjection(sessions, clock=lambda: NOW)
 
     history = projection.telemetry_history(
         NODE_A,
@@ -1939,7 +1853,7 @@ def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
         session.flush()
         session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=sample.id))
 
-    projection = FleetProjection(Repository({}), sessions, clock=lambda: NOW)
+    projection = FleetProjection(sessions, clock=lambda: NOW)
     source = TelemetryRepository(sessions).latest([NODE_A])[NODE_A]
     source_metrics = source.metrics.model_dump()
     direct_point = telemetry_point(source)
@@ -1971,16 +1885,6 @@ def test_non_rfc_non_nil_boot_id_flows_through_snapshot_and_history() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    repository = Repository(
-        {
-            NODE_A: {
-                "display_name": "Alpha",
-                "hostname": "alpha.internal",
-                "lifecycle": "managed",
-                "labels": {},
-            }
-        }
-    )
     with sessions.begin() as session:
         session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
         sample = _telemetry(
@@ -1995,7 +1899,7 @@ def test_non_rfc_non_nil_boot_id_flows_through_snapshot_and_history() -> None:
         session.flush()
         session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=sample.id))
 
-    projection = FleetProjection(repository, sessions, clock=lambda: NOW)
+    projection = FleetProjection(sessions, clock=lambda: NOW)
     snapshot = projection.read()
     history = projection.telemetry_history(
         NODE_A,
@@ -2019,14 +1923,6 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
     revision_id = "00000000-0000-4000-8000-000000000302"
     mapping_id = "00000000-0000-4000-8000-000000000303"
     build_id = "00000000-0000-4000-8000-000000000304"
-    nodes = {
-        NODE_A: {
-            "display_name": "Alpha",
-            "hostname": "alpha.internal",
-            "lifecycle": "managed",
-            "labels": {},
-        }
-    }
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -2126,7 +2022,7 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
                 )
             )
 
-    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
+    snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
 
     installation_ids = [value.installation_id for value in snapshot.nodes[0].installed]
     assert len(installation_ids) == 512
@@ -2159,7 +2055,7 @@ def test_projection_rejects_more_than_500_registered_nodes_before_state_queries(
 
     event.listen(engine, "before_cursor_execute", record_statement)
     with pytest.raises(ValueError, match="more than 500 registered nodes"):
-        FleetProjection(Repository({}), sessions, clock=lambda: NOW).read()
+        FleetProjection(sessions, clock=lambda: NOW).read()
     event.remove(engine, "before_cursor_execute", record_statement)
 
     selects = [value for value in statements if value.startswith("select")]
@@ -2351,15 +2247,7 @@ def _installed_byte_group(
 
 
 def _installed_presence(sessions, installation_id: str) -> RecipePresence:
-    nodes = {
-        NODE_A: {
-            "display_name": "Alpha",
-            "hostname": "alpha.internal",
-            "lifecycle": "managed",
-            "labels": {},
-        }
-    }
-    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
+    snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
     return next(
         value
         for value in snapshot.nodes[0].installed

@@ -865,11 +865,10 @@ def initialize_database(
     database_url: str,
     *,
     config_path: Path = _ALEMBIC_CONFIG,
-) -> str:
-    """Serialize schema migration and authority-head creation for API startup."""
-    from .database_authority import DatabaseAuthorityService
+) -> None:
+    """Serialize schema migration and reconciliation for API startup."""
 
-    def initialize_once() -> str:
+    def initialize_once() -> None:
         engine = build_engine(database_url)
         try:
             if engine.dialect.name != "postgresql":
@@ -893,8 +892,6 @@ def initialize_database(
                             "transaction was rolled back. Startup will retry "
                             f"reconciliation automatically; schema failure: {error}"
                         ) from error
-                    authority = DatabaseAuthorityService(session_factory(engine))
-                    return authority.ensure_initialized(acquire_advisory_lock=False)
                 finally:
                     if lock_connection.in_transaction():
                         lock_connection.rollback()
@@ -906,4 +903,4 @@ def initialize_database(
         finally:
             engine.dispose()
 
-    return run_with_database_startup_retry(initialize_once, label="PostgreSQL")
+    run_with_database_startup_retry(initialize_once, label="PostgreSQL")

@@ -169,7 +169,6 @@ def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_
         sessions,
         operations,
         clock=lambda: now,
-        current_revision=lambda: REVISION,
     )
 
     ordinary = upgrades.preview([NODE_A], REPAIR_PACKAGE)
@@ -216,7 +215,6 @@ def test_repair_plan_requires_one_explicit_bound_spark(tmp_path, node_ids) -> No
         sessions,
         operations,
         clock=lambda: now,
-        current_revision=lambda: REVISION,
     )
     with pytest.raises(AgentUpgradeConflict, match="exactly its explicit Spark"):
         upgrades.preview(
@@ -252,7 +250,6 @@ def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_lea
         sessions,
         operations,
         clock=lambda: now,
-        current_revision=lambda: REVISION,
     )
     mutable = json.loads(json.dumps(REPAIR_MANIFEST))
     mutable["package"]["package_url"] = (
@@ -318,7 +315,6 @@ def test_rollout_queues_only_one_spark_until_new_identity_is_proven(tmp_path) ->
         sessions,
         operations,
         clock=lambda: now,
-        current_revision=lambda: REVISION,
     )
     operations.set_result_consumer(upgrades.consume_agent_result)
     plan = upgrades.preview(None, PACKAGE)
@@ -512,7 +508,6 @@ def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
         sessions,
         restarted_operations,
         clock=clock,
-        current_revision=lambda: REVISION,
     )
     restarted_operations.set_result_consumer(restarted_upgrades.consume_agent_result)
 
@@ -1444,7 +1439,6 @@ def test_current_candidate_is_derived_from_the_published_arm64_release(
         sessions,
         operations,
         clock=lambda: datetime(2026, 8, 27, tzinfo=UTC),
-        current_revision=lambda: REVISION,
         release_api_url="http://caddy:8084",
         transport=httpx2.MockTransport(handler),
     )
@@ -1568,7 +1562,6 @@ def _rollout(
         sessions,
         operations,
         clock=service_clock,
-        current_revision=lambda: REVISION,
     )
     operations.set_result_consumer(upgrades.consume_agent_result)
     plan = upgrades.preview(None, PACKAGE)

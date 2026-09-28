@@ -353,9 +353,7 @@ dependency for local execution, and a Spark-local copy never changes profile
 authority. TUF remains the authority for signed platform release artifacts;
 desired platform topology and policy are persisted in PostgreSQL.
 
-For the current platform path, the API owns the PostgreSQL authority head,
-immutable revisions, persisted proposals, and eligibility policy. The catalog
-owns exact model versions, execution harnesses, recipe revisions,
+For the current platform path, the catalog owns exact model versions, execution harnesses, recipe revisions,
 installations, mappings, and runs. Recipe route publication derives LiteLLM
 configuration from the accepted v1 run itself; no external repository or
 Hermes fallback policy participates. Platform plans remain canonical and

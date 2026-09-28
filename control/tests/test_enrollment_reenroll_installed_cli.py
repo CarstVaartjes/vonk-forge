@@ -31,11 +31,6 @@ from .test_profile_load_installed_cli import (
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
-class _RevisionSource:
-    def head(self) -> str:
-        return "a" * 64
-
-
 def _stack(postgres_engine, tmp_path: Path):
     _agent_api, services, codec, clock = make_agent_system(
         tmp_path, engine=postgres_engine
@@ -61,7 +56,7 @@ def _stack(postgres_engine, tmp_path: Path):
             jobs=Jobs(),
             tokens=codec,
             now=lambda: 0,
-            fleet_projection=FleetProjection(_RevisionSource(), sessions, clock=clock),
+            fleet_projection=FleetProjection(sessions, clock=clock),
             fleet_services=build_fleet_operator_services(
                 agent_services=services, upgrades=None
             ),

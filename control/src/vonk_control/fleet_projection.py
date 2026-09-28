@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Literal
 
 from pydantic import (
     ConfigDict,
@@ -140,6 +140,10 @@ NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
 BootId = Annotated[str, StringConstraints(pattern=_BOOT_UUID_PATTERN)]
 AuthorityRevision = Annotated[str, StringConstraints(pattern=_REVISION_PATTERN)]
+# vonkctl qualification compares this snapshot field across views.  The
+# Controller keeps no revisioned authority document, so the value is the fixed
+# digest of the empty document the retired authority head always named.
+_AUTHORITY_REVISION = "ffb039e4a059e137e67110b3f845ab477b048e97ae9383031feb9dcfcbcbba55"
 Text32 = Annotated[str, StringConstraints(min_length=1, max_length=32)]
 Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
 Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -225,12 +229,6 @@ def _run_degraded_reason(value: str | None) -> RunDegradedReason | None:
     if value is None:
         return None
     return _RUN_DEGRADED_REASON_ADAPTER.validate_python(value, strict=True)
-
-
-class _AuthorityRevisionSource(Protocol):
-    """The revision head the projection binds its snapshot to."""
-
-    def head(self) -> str: ...
 
 
 class _StrictModel(StrictJSONModel):
@@ -712,7 +710,6 @@ class FleetProjection:
 
     def __init__(
         self,
-        authority: _AuthorityRevisionSource,
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -735,7 +732,6 @@ class FleetProjection:
             raise ValueError("Fleet projection freshness windows must be positive")
         if telemetry_delayed_seconds < telemetry_live_seconds:
             raise ValueError("Fleet telemetry freshness windows are invalid")
-        self._authority = authority
         self._sessions = sessions
         self._clock = clock
         self._events = events or FleetEventRepository(sessions, clock=clock)
@@ -789,7 +785,6 @@ class FleetProjection:
             or not 0 <= event_cursor <= 9_223_372_036_854_775_807
         ):
             raise CursorError("Fleet event cursor is invalid")
-        revision = self._authority.head()
         current = _utc(self._clock())
         with self._sessions.begin() as session:
             agents = self._registered_agents(session)
@@ -824,7 +819,7 @@ class FleetProjection:
         return FleetSnapshot(
             event_cursor=event_cursor,
             generated_at=current,
-            authority_revision=revision,
+            authority_revision=_AUTHORITY_REVISION,
             nodes=[
                 self._node(
                     node_id,

@@ -150,37 +150,6 @@ class JobLogEntry(Base):
     )
 
 
-class ControlAuthorityRevision(Base):
-    """Immutable control-plane authority document revision in PostgreSQL."""
-
-    __tablename__ = "control_authority_revisions"
-    revision_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    parent_revision: Mapped[str | None] = mapped_column(
-        ForeignKey("control_authority_revisions.revision_id"), index=True
-    )
-    documents: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    dependencies: Mapped[dict[str, list[str]]] = mapped_column(JSON, nullable=False)
-    actor: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-
-
-class ControlAuthorityHead(Base):
-    """Singleton pointer to the current immutable authority revision."""
-
-    __tablename__ = "control_authority_heads"
-    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    revision_id: Mapped[str] = mapped_column(
-        ForeignKey("control_authority_revisions.revision_id"),
-        nullable=False,
-        unique=True,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
 class Observation(Base):
     __tablename__ = "observations"
     __table_args__ = (

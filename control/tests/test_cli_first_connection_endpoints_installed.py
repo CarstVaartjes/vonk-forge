@@ -71,13 +71,6 @@ pytest_plugins = ("tests.test_profile_load_installed_cli",)
 _TOKEN_KEY = b"first-connection-and-profile-endpoints-key"
 
 
-class _Authority:
-    """A stable revision source for the real fleet projection."""
-
-    def head(self) -> str:
-        return "a" * 64
-
-
 def _api(
     sessions: sessionmaker,
     route_root: Path,
@@ -98,7 +91,7 @@ def _api(
     app = create_app(
         jobs=JobService(sessions, clock=clock),
         tokens=codec,
-        fleet_projection=FleetProjection(_Authority(), sessions, clock=clock),
+        fleet_projection=FleetProjection(sessions, clock=clock),
         operations=operations,
         fleet_profiles=profile_service,
         now=lambda: 100,

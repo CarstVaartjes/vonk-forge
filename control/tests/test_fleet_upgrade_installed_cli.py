@@ -22,8 +22,7 @@ from vonk_control.models import AgentCertificate, AgentNode, AgentOperation, Bas
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.operator_projection_api import FleetOperatorServices
 
-from .test_agent_upgrades import NODE_A, NODE_B, OLD_IDENTITY, PACKAGE, REVISION, SOURCE
-from .test_cli_first_connection_endpoints_installed import _Authority
+from .test_agent_upgrades import NODE_A, NODE_B, OLD_IDENTITY, PACKAGE, SOURCE
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
@@ -65,9 +64,7 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
         lambda *_: AgentPackageSource.model_validate(SOURCE),
     )
     operations = AgentJobService(sessions, clock=lambda: now)
-    upgrades = AgentUpgradeService(
-        sessions, operations, clock=lambda: now, current_revision=lambda: REVISION
-    )
+    upgrades = AgentUpgradeService(sessions, operations, clock=lambda: now)
     # The external release publisher is outside this control-plane acceptance;
     # admission, sequential dispatch and failure reconciliation are actual owners.
     monkeypatch.setattr(upgrades, "current_package", lambda: dict(PACKAGE))
@@ -83,7 +80,7 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
     app = create_app(
         jobs=JobService(sessions, clock=lambda: now),
         tokens=tokens,
-        fleet_projection=FleetProjection(_Authority(), sessions, clock=lambda: now),
+        fleet_projection=FleetProjection(sessions, clock=lambda: now),
         fleet_services=FleetOperatorServices(upgrades=upgrades),
         operations=projected,
         now=lambda: 100,
