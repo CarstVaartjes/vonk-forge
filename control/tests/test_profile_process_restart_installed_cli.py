@@ -246,8 +246,6 @@ def test_installed_cli_follows_same_profile_application_after_api_process_restar
             str(profile_number),
             "profile",
             "load",
-            "--expected-plan",
-            plan_digest,
             "--yes",
             "--request-key",
             request_key,

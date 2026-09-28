@@ -28,7 +28,7 @@ test("a protected recipe displays the owner blocker and cannot be removed", asyn
   expect(removeRecipe).not.toHaveBeenCalled();
 });
 
-test("a refused review requires a fresh review and a new explicit confirmation", async () => {
+test("a changed removal plan refreshes and resumes the confirmed request", async () => {
   const first = cacheRemovalReview();
   const second = cacheRemovalReview({review_digest: "c".repeat(64)});
   const recipeRemovalReview = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);
@@ -47,22 +47,16 @@ test("a refused review requires a fresh review and a new explicit confirmation",
       state: "queued" as const,
       progress: {phase: "queued"},
     }));
-  const recipeCacheRequest = vi.fn();
+  const recipeCacheRequest = vi.fn().mockRejectedValue(new ApiError(404, "Not found"));
   const api = {recipeRemovalReview, removeRecipe, recipeCacheRequest} as unknown as ControlApi;
   render(<LibraryRecipeRemoveAction api={api} selector={first.selector} onRemoved={() => undefined}/>);
   fireEvent.click(screen.getByRole("button", {name: "Remove recipe"}));
   fireEvent.click(screen.getByRole("button", {name: "Keep the model"}));
   fireEvent.click(await screen.findByRole("button", {name: "Confirm remove"}));
-  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Removal scope changed"));
-  expect(screen.queryByRole("button", {name: "Confirm remove"})).not.toBeInTheDocument();
-  expect(removeRecipe).toHaveBeenCalledTimes(1);
-  expect(recipeRemovalReview).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", {name: "Keep the model"}));
-  await screen.findByRole("button", {name: "Confirm remove"});
-  expect(removeRecipe).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", {name: "Confirm remove"}));
   await waitFor(() => expect(removeRecipe).toHaveBeenCalledTimes(2));
-  expect(removeRecipe.mock.calls[1]?.[3]).toBe(second.review_digest);
+  expect(recipeRemovalReview).toHaveBeenCalledTimes(2);
+  expect(recipeCacheRequest).toHaveBeenCalled();
+  expect(screen.getByLabelText("Cache removal progress")).toBeVisible();
 });
 
 test("a model revision changed since Library display cannot be silently removed", async () => {

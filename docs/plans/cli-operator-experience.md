@@ -384,19 +384,18 @@ reset other authoring fields or change a running workload.
 ### Step F — Review and apply exact changes
 
 Keep the existing `profile load` command and its `--dry-run` option. Proposed
-additional flags are `--expected-plan DIGEST`, `--yes`, and `--no-input`.
+additional flags are `--yes` and `--no-input`.
 
 ```text
 vonkctl --profile 2 profile load --dry-run
 vonkctl --profile 2 profile load
-vonkctl --profile 2 profile load --expected-plan PLAN_DIGEST --yes --detach
+vonkctl --profile 2 profile load --yes --detach
 ```
 
 Interactive load fetches a server preview, presents its effects, asks once,
-and submits that exact plan identity. A script first obtains a valid dry-run
-result and then supplies `--expected-plan` plus `--yes`; it does not approve a
-silently regenerated plan. Blocked review displays all actionable blockers
-and performs no mutation.
+and submits the latest plan. A script can inspect a dry-run before using
+`--yes`. Waitable blockers park the request until the Controller can proceed;
+authorization and identity checks remain enforced.
 
 The review must include profile revision and whole-fleet scope; unchanged,
 stop, start, install, and remove effects; idle Sparks; atomic multi-Spark
@@ -405,15 +404,13 @@ reusable target assets; resource headroom; endpoint changes; and disruptive
 effects. Readiness and expected interruption are distinct from an invented
 duration estimate.
 
-**Controller prerequisite:** extend the current schema-2 load request with
-the reviewed-plan precondition and validate it under the admission boundary.
-Bind reviewed profile, target membership, recipe/model/image identities, and
-relevant resource facts. Recheck safety at admission; reject changed decisions
-instead of silently substituting a newer recipe/image. Exclude incidental
-timestamps from the decision identity. Same-key replay reconciles already
-accepted intent before considering a fresh preview. Updating connected
-producers, generated clients, and consumers is one change; no fallback load
-path may bypass the precondition.
+**Controller prerequisite:** bind reviewed profile, target membership,
+recipe/model/image identities, and relevant resource facts under the admission
+boundary. Recheck safety at admission; never silently substitute a newer
+recipe or image. Exclude incidental timestamps from the decision identity.
+Same-key replay reconciles already accepted intent before considering a fresh
+preview. Updating connected producers, generated clients, and consumers is one
+change; no fallback load path may bypass the admission checks.
 
 Ordinary profile loading resolves a current compatible cached recipe; the
 saved profile itself is not converted into a permanently pinned execution

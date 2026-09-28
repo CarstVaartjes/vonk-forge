@@ -235,6 +235,42 @@ def _profile_application() -> dict[str, Any]:
     }
 
 
+def _profile_preview(profile: dict[str, Any]) -> dict[str, Any]:
+    """An allowed empty review; load submits its current plan digest."""
+    return {
+        "schema_version": 2,
+        "profile_id": PROFILE_ID,
+        "profile_name": profile["name"],
+        "profile_digest": "a" * 64,
+        "profile_revision": profile["revision"],
+        "profile_definition": None,
+        "allowed": True,
+        "scope": {"node_ids": [SPARK], "idle_node_ids": []},
+        "summary": {
+            "already_correct": 0,
+            "placements": 0,
+            "builds": 0,
+            "distributions": 0,
+            "installs": 0,
+            "starts": 0,
+            "stops": 0,
+            "uninstalls": 0,
+            "blockers": 0,
+        },
+        "assignments": [],
+        "resolved_assignments": [],
+        "admission_decisions": [],
+        "preparation_decisions": [],
+        "effects": {"runs": [], "installations": [], "superseded": []},
+        "steps": [],
+        "reasons": [],
+        "generated_at": NOW,
+        "assessments": [],
+        "preparations": [],
+        "plan_digest": "c" * 64,
+    }
+
+
 def _app() -> FastAPI:
     from .test_fleet_profiles_canonical import _seed, _sessions
 
@@ -325,6 +361,13 @@ def _app() -> FastAPI:
         if number != 1:
             raise HTTPException(status_code=404, detail="profile not found")
         return {key: profile[key] for key in ("id", "number", "revision", "definition")}
+
+    @app.post("/api/profile/{number}/preview")
+    def preview_profile(number: int, request: Request) -> dict[str, Any]:
+        _auth(request, mutation=True)
+        if number != 1:
+            raise HTTPException(status_code=404, detail="profile not found")
+        return _profile_preview(profile)
 
     @app.post("/api/profile/{number}/load", status_code=202)
     def load_profile(number: int, request: Request) -> dict[str, Any]:
@@ -442,8 +485,6 @@ def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:
         "1",
         "profile",
         "load",
-        "--expected-plan",
-        "c" * 64,
         "--yes",
         "--json",
     ) == browser_transport.request("POST", "/api/profile/1/load", load_request)
