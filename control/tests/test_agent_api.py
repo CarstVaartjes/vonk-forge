@@ -113,7 +113,7 @@ STOP_PAYLOAD = RecipeStopPayload(
     installation_id="00000000-0000-4000-8000-000000000002",
     recipe_revision_id="00000000-0000-4000-8000-000000000003",
     mapping_id="00000000-0000-4000-8000-000000000004",
-    plan_digest=_STOP_PLAN.identity.execution_sha256,
+    plan_digest="a" * 64,
     compiled_execution_plan=_STOP_PLAN,
     cancel_pending_start=True,
 ).model_dump(mode="json")
@@ -121,8 +121,6 @@ STOP_PAYLOAD = RecipeStopPayload(
 
 def image_import_payload(digest: str) -> dict[str, object]:
     return {
-        "schema_version": 1,
-        "kind": "recipe.image.import.v1",
         "build_id": "00000000-0000-4000-8000-000000000010",
         "mapping_id": "00000000-0000-4000-8000-000000000011",
         "mapping_generation": 1,
@@ -3314,8 +3312,6 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
         "recipe.image.import.v1",
         "a" * 64,
         {
-            "schema_version": 1,
-            "kind": "recipe.image.import.v1",
             "build_id": "00000000-0000-4000-8000-000000000010",
             "mapping_id": "00000000-0000-4000-8000-000000000011",
             "mapping_generation": 1,

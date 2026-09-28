@@ -409,7 +409,7 @@ def setup_services(
     inventory = InventoryRepository(sessions, clock=lambda: NOW)
     capabilities = ("runtime.vonk.v1", "recipe.operations.v1") + (
         (
-            "fabric.connected.mbps.1000",
+            "fabric.connected.mbps.200000",
             "recipe.start.two-phase.v1",
             "recipe.run.inspect.exact.v1",
         )
@@ -431,7 +431,7 @@ def setup_services(
                 False,
                 capabilities,
                 fabric_address=(f"192.168.100.{index + 2}" if nodes > 1 else None),
-                fabric_bandwidth_mbps=(1000 if nodes > 1 else None),
+                fabric_bandwidth_mbps=(200000 if nodes > 1 else None),
                 memory_pool="shared",
             )
         )
