@@ -255,7 +255,7 @@ def test_cancelled_dns_cannot_delay_exit_or_send_a_late_request(
             and failure.value.context.transport == "timeout"
         )
         with pytest.raises(ControlTransportError):
-            client.request("GET", "/api/model")
+            client.request("GET", "/api/model/library")
         assert len(lookups) == 1, (
             "repeated requests accumulated stalled resolver workers"
         )
@@ -318,7 +318,7 @@ def test_untrusted_tls_is_classified_without_exposing_credentials(
     client, state = https_peer
     monkeypatch.delenv("SSL_CERT_FILE")
     with pytest.raises(ControlTransportError) as failure:
-        client.request("GET", "/api/model")
+        client.request("GET", "/api/model/library")
     assert (
         failure.value.context is not None and failure.value.context.transport == "tls"
     )

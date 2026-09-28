@@ -60,7 +60,6 @@ if TYPE_CHECKING:
 TELEMETRY_RANGES = ("1h", "24h", "7d", "31d")
 MAX_PAGE_LIMIT = 512
 # An enrollment grant lives for the longest time the Controller allows.
-_ENROLLMENT_TTL_SECONDS = 900
 MAX_LOG_LINES = 1000
 
 
@@ -474,9 +473,6 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     upgrade.set_defaults(outcome_context="mutation")
     upgrade.add_argument("selector", nargs="?", metavar="SPARK")
     upgrade.add_argument("--all", action="store_true")
-    upgrade.add_argument(
-        "--strategy", choices=("one-at-a-time",), default="one-at-a-time"
-    )
     upgrade.add_argument("--request-key", type=_uuid_argument)
     upgrade.add_argument(
         "--detach",
@@ -1142,7 +1138,6 @@ def _submit_fleet_upgrade(
     body: dict[str, object] = {
         "all": args.all,
         "request_key": key,
-        "strategy": args.strategy,
     }
     if args.selector:
         body["selectors"] = [args.selector]
@@ -1181,8 +1176,6 @@ def _submit_fleet_upgrade(
             *scope,
             "--request-key",
             key,
-            "--strategy",
-            args.strategy,
             "--yes",
         ]
     )
@@ -1442,7 +1435,7 @@ def _submit_model_removal(
         key=key,
         path=path,
         lookup=lookup,
-        body={"schema_version": 2, "request_key": key},
+        body={"request_key": key},
         noun="model",
         action="remove",
         validate=validate,
@@ -1491,7 +1484,6 @@ def _submit_recipe_removal(
         path=path,
         lookup=lookup,
         body={
-            "schema_version": 2,
             "request_key": key,
             "with_model": with_model,
         },
@@ -1600,7 +1592,7 @@ def _submit_cache_request(
     else:
         path = f"/api/{noun}/{_quoted(args.selector)}/download"
     lookup = f"/api/{noun}/requests/{key}"
-    body: dict[str, object] = {"schema_version": 2, "request_key": key}
+    body: dict[str, object] = {"request_key": key}
     if action == "update":
         body.update(all=args.all, selectors=[args.selector] if args.selector else [])
 
@@ -1672,7 +1664,6 @@ def _submit_model_cancellation(
     path = f"/api/model/operations/{_quoted(operation_id)}/cancel"
     lookup = f"/api/model/operations/{_quoted(operation_id)}"
     body: dict[str, object] = {
-        "schema_version": 2,
         "request_key": key,
         "reason": reason,
     }
@@ -1758,7 +1749,6 @@ def _submit_recipe_cancellation(
     path = f"/api/recipe/operations/{_quoted(operation_id)}/cancel"
     lookup = f"/api/recipe/operations/{_quoted(operation_id)}"
     body: dict[str, object] = {
-        "schema_version": 2,
         "request_key": key,
         "reason": reason,
     }
@@ -2102,9 +2092,9 @@ def _overview(
     if noun == "fleet":
         return client.request("GET", "/api/fleet")
     if noun == "model":
-        return client.request("GET", "/api/model")
+        return client.request("GET", "/api/model/library", query={"local": True})
     if noun == "recipe":
-        return client.request("GET", "/api/recipe")
+        return client.request("GET", "/api/recipe/library")
     return client.request("GET", f"/api/profile/{_profile_number(args)}")
 
 
@@ -2142,7 +2132,7 @@ def _deliver_enrollment(
     payload: dict[str, object] = {"request_key": identity}
     target: dict[str, object]
     if args.fleet_action == "enroll":
-        payload.update(name=args.name, ttl_seconds=_ENROLLMENT_TTL_SECONDS)
+        payload.update(name=args.name)
         validate_control_document("FleetEnrollRequest", payload)
         path = "/api/fleet/enroll"
         target = {"display_name": args.name}

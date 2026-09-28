@@ -20,10 +20,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor
 from vonk_control.fleet_projection import FleetSnapshot
-from vonk_control.logging import DatabaseJobLogStore
 from vonk_control.models import AgentOperation, AgentOperationAttempt, Base
 from vonk_control.operator_projection_api import (
-    ControllerJobLogProvider,
+    AgentFailureLogProvider,
     FleetOperatorServices,
     install_operator_projection_routes,
 )
@@ -191,9 +190,7 @@ def _client(sessions) -> TestClient:
         fleet_projection=_FleetProjection(),
         library_projection=None,
         fleet_services=FleetOperatorServices(
-            logs=ControllerJobLogProvider(
-                sessions, DatabaseJobLogStore(sessions), clock=lambda: _NOW
-            )
+            logs=AgentFailureLogProvider(sessions, clock=lambda: _NOW)
         ),
     )
     return TestClient(app)

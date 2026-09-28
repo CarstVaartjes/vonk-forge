@@ -278,8 +278,6 @@ def _control_error(
                         *scope,
                         "--request-key",
                         request_key,
-                        "--strategy",
-                        str(getattr(args, "strategy", "one-at-a-time")),
                         "--yes",
                     ]
                 )

@@ -1,18 +1,13 @@
-"""Central structured redaction and content-addressed operational logs."""
+"""Central structured redaction for Controller logs."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging as stdlib_logging
 import re
 import sys
-import uuid
 from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
-
-from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
 
 _SENSITIVE_KEY = re.compile(
     r"(?i)(authorization|api.?key|password|secret|token|private.?key|credential)"
@@ -24,9 +19,7 @@ _PRIVATE_BLOCK = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL
 )
 _HTTP_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
-_DIGEST = re.compile(r"[0-9a-f]{64}")
 _MAX_FIELD = 4096
-_MAX_LOG_INPUT = 1_048_576
 
 
 class _CurrentStderrHandler(stdlib_logging.StreamHandler):
@@ -132,89 +125,3 @@ def log_event(
         **{key: _safe(value, key) for key, value in fields.items()},
     }
     logger.info(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-
-
-def _job_id(job_id: str) -> str:
-    try:
-        parsed = uuid.UUID(job_id)
-    except ValueError:
-        raise ValueError("job log ID must be a UUID") from None
-    if str(parsed) != job_id:
-        raise ValueError("job log ID must use canonical UUID form")
-    return job_id
-
-
-class JobLogCorruptError(RuntimeError):
-    """A retained job log no longer matches the digest that names it.
-
-    Deliberately not a ``ValueError``: the routes that read logs treat a
-    ``ValueError`` as a bad request (an unknown or malformed digest) and answer
-    404, which would report corrupted stored evidence as "not found".
-    """
-
-
-class DatabaseJobLogStore:
-    """Redacted content-addressed job logs stored in PostgreSQL."""
-
-    def __init__(self, sessions: sessionmaker[Session], *, clock=None) -> None:
-        self._sessions = sessions
-        self._clock = clock or (lambda: datetime.now(UTC))
-
-    @staticmethod
-    def _job_id(job_id: str) -> str:
-        return _job_id(job_id)
-
-    def save(self, job_id: str, content: bytes) -> str:
-        identity = self._job_id(job_id)
-        if not isinstance(content, bytes) or len(content) > _MAX_LOG_INPUT:
-            raise ValueError("job log input is invalid or too large")
-        sanitized = (
-            redact_text(content.decode("utf-8", errors="replace")).encode() + b"\n"
-        )
-        digest = hashlib.sha256(sanitized).hexdigest()
-        from .models import JobLogEntry
-
-        with self._sessions.begin() as session:
-            existing = session.get(JobLogEntry, (identity, digest))
-            if existing is None:
-                session.add(
-                    JobLogEntry(
-                        job_id=identity,
-                        digest=digest,
-                        content=sanitized,
-                        created_at=self._clock(),
-                    )
-                )
-            elif existing.content != sanitized:
-                raise ValueError("existing job log conflicts")
-        return digest
-
-    def list(self, job_id: str) -> tuple[str, ...]:
-        identity = self._job_id(job_id)
-        from .models import JobLogEntry
-
-        with self._sessions() as session:
-            return tuple(
-                session.scalars(
-                    select(JobLogEntry.digest)
-                    .where(JobLogEntry.job_id == identity)
-                    .order_by(JobLogEntry.digest)
-                )
-            )
-
-    def read(self, job_id: str, digest: str) -> bytes:
-        identity = self._job_id(job_id)
-        if _DIGEST.fullmatch(digest) is None:
-            raise ValueError("job log digest is invalid")
-        from .models import JobLogEntry
-
-        with self._sessions() as session:
-            row = session.get(JobLogEntry, (identity, digest))
-            if row is None:
-                raise KeyError(digest)
-            content = row.content
-        if hashlib.sha256(content).hexdigest() != digest:
-            raise JobLogCorruptError(
-                f"retained job log {digest} does not match its recorded digest"
-            )
-        return content

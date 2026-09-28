@@ -428,7 +428,6 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
     event.remove(engine, "before_cursor_execute", record_statement)
 
     assert snapshot.model_dump(mode="json") == {
-        "schema_version": 1,
         "event_cursor": 7,
         "generated_at": "2026-08-15T12:00:00Z",
         "authority_revision": _AUTHORITY_REVISION,
@@ -647,7 +646,6 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
         assert event is not None
         FleetChangeEvent.model_validate(
             {
-                "schema_version": 1,
                 "projection_refresh_required": True,
                 "change": {
                     "entity_kind": event.entity_kind,

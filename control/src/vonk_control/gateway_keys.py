@@ -94,7 +94,6 @@ class GatewayKeyRevoked(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     name: str = Field(min_length=1, max_length=63)
-    revoked: bool
 
 
 def _text(value: object) -> str | None:
@@ -227,7 +226,7 @@ class GatewayKeyService:
         code, _ = self._request("POST", "/key/delete", json={"key_aliases": [name]})
         if code != 200:
             raise GatewayKeyError(f"LiteLLM refused to revoke the key (HTTP {code})")
-        return GatewayKeyRevoked(name=name, revoked=True)
+        return GatewayKeyRevoked(name=name)
 
     def ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool:
         """Keep a working `default` key whose secret is in `path`.

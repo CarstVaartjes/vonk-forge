@@ -74,7 +74,6 @@ def test_remove_is_the_current_model_eviction_boundary():
     response = _client(service).post(
         "/api/model/model/remove",
         json={
-            "schema_version": 2,
             "request_key": REQUEST_KEY,
         },
     )
@@ -88,9 +87,8 @@ def test_remove_is_the_current_model_eviction_boundary():
         request_key=REQUEST_KEY,
     )
     for body in (
-        {"schema_version": 2},
+        {},
         {
-            "schema_version": 2,
             "request_key": REQUEST_KEY,
             "review_digest": REVIEW_DIGEST,
         },
@@ -197,7 +195,6 @@ def test_cancel_route_requires_operator_and_returns_durable_intent():
     service.cancel_operation.return_value = operation
     service.get_operator_operation.return_value = (operation, "download", "model")
     body = {
-        "schema_version": 2,
         "request_key": CANCEL_KEY,
         "reason": "operator stopped this download",
     }

@@ -246,7 +246,6 @@ def test_cli_profile_endpoint_uses_generated_scoped_endpoint_client(
                     "node_id": "spk_" + "a" * 32,
                     "observed_at": "2026-09-23T12:59:30Z",
                     "plan_digest": "a" * 64,
-                    "state": "published",
                 },
             }
         ],
@@ -408,7 +407,6 @@ def test_request_validates_canonical_route_models(
     tmp_path: Path,
 ) -> None:
     capabilities = {
-        "schema_version": 1,
         "storage": {
             "in_flight_uploads": 0,
             "max_stored_bytes": 1024,
@@ -463,7 +461,7 @@ def test_request_rejects_response_outside_canonical_route_model(tmp_path: Path) 
         _token(tmp_path),
         opener=lambda *_args, **_kwargs: _Response(
             200,
-            {"schema_version": 1, "storage": {}, "transport": {}},
+            {"storage": {}, "transport": {}},
         ),
     )
 
@@ -485,7 +483,6 @@ def test_request_rejects_scalar_and_unknown_response_fields(
     tmp_path: Path, mutation
 ) -> None:
     payload = {
-        "schema_version": 1,
         "storage": {
             "in_flight_uploads": 0,
             "max_stored_bytes": 1024,
@@ -549,7 +546,6 @@ def test_request_rejects_undocumented_success_status(tmp_path: Path) -> None:
         opener=lambda *_args, **_kwargs: _Response(
             299,
             {
-                "schema_version": 1,
                 "storage": {
                     "in_flight_uploads": 0,
                     "max_stored_bytes": 1024,
@@ -601,7 +597,6 @@ def test_generated_transport_uses_raw_openapi_contract_before_attrs_parser(
         "event_cursor": 0,
         "generated_at": "2026-09-07T00:00:00+00:00",
         "nodes": [],
-        "schema_version": 1,
     }
     client = ControlClient(
         "https://forge.example.test",
@@ -698,7 +693,6 @@ def test_openapi_validation_is_safe_for_concurrent_requests(
     tmp_path: Path,
 ) -> None:
     capabilities = {
-        "schema_version": 1,
         "storage": {
             "in_flight_uploads": 0,
             "max_stored_bytes": 1024,

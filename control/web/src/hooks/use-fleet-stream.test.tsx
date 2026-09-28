@@ -72,7 +72,6 @@ function point(cpu: number): TelemetryPoint {
 
 function snapshot(cursor: number, cpu = 10): VisualFleetSnapshot {
   return {
-    schema_version: 1,
     event_cursor: cursor,
     generated_at: "2026-08-15T12:00:00Z",
     authority_revision: "a".repeat(64),
@@ -132,16 +131,16 @@ test("uses same-origin EventSource and reconciles increments and backward resets
   act(() => stream.emit("open"));
   expect(screen.getByTestId("connection")).toHaveTextContent("live");
 
-  act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(73)}, "6"));
+  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(73)}, "6"));
   expect(screen.getByTestId("cpu")).toHaveTextContent("73");
-  act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(99)}, "6"));
+  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(99)}, "6"));
   expect(screen.getByTestId("cpu")).toHaveTextContent("73");
-  act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-b", sample: point(88)}, "7"));
+  act(() => stream.emit("node-telemetry", {node_id: "node-b", sample: point(88)}, "7"));
   expect(screen.getByTestId("cursor")).toHaveTextContent("6");
-  act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "7"));
+  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "7"));
   expect(screen.getByTestId("cpu")).toHaveTextContent("77");
 
-  act(() => stream.emit("fleet-snapshot", {schema_version: 1, reset_reason: "cursor-ahead", snapshot: snapshot(2, 22)}, "2"));
+  act(() => stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(2, 22)}, "2"));
   expect(screen.getByTestId("cursor")).toHaveTextContent("2");
   expect(screen.getByTestId("cpu")).toHaveTextContent("22");
 });
@@ -153,14 +152,14 @@ test("keeps one native EventSource across browser-managed Last-Event-ID reconnec
 
   act(() => {
     stream.emit("open");
-    stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(66)}, "6");
+    stream.emit("node-telemetry", {node_id: "node-a", sample: point(66)}, "6");
     stream.emit("error");
   });
   expect(screen.getByTestId("connection")).toHaveTextContent("reconnecting");
 
   act(() => {
     stream.emit("open");
-    stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "7");
+    stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "7");
   });
 
   expect(FakeEventSource.instances).toHaveLength(1);
@@ -180,8 +179,8 @@ test("coalesces sparse recipe, profile, and operation refresh signals", async ()
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("recipe-state", {schema_version: 1, projection_refresh_required: true}, "6");
-    stream.emit("node-profile", {schema_version: 1, projection_refresh_required: true}, "7");
+    stream.emit("recipe-state", {projection_refresh_required: true}, "6");
+    stream.emit("node-profile", {projection_refresh_required: true}, "7");
     vi.advanceTimersByTime(100);
   });
   await flush();
@@ -201,9 +200,9 @@ test("authoritative cursor-ahead reset cancels old sparse retries and starts a n
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("recipe-state", {schema_version: 1, projection_refresh_required: true}, "100");
-    stream.emit("fleet-snapshot", {schema_version: 1, reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
-    stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "21");
+    stream.emit("recipe-state", {projection_refresh_required: true}, "100");
+    stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
+    stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "21");
     vi.advanceTimersByTime(10_000);
   });
   await flush();
@@ -226,15 +225,15 @@ test("ignores an old-timeline sparse response already in flight across an author
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("recipe-state", {schema_version: 1, projection_refresh_required: true}, "100");
+    stream.emit("recipe-state", {projection_refresh_required: true}, "100");
     vi.advanceTimersByTime(100);
   });
   expect(visualFleet).toHaveBeenCalledTimes(2);
 
   act(() => {
-    stream.emit("fleet-snapshot", {schema_version: 1, reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
-    stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "21");
-    stream.emit("operation-state", {schema_version: 1, projection_refresh_required: true}, "22");
+    stream.emit("fleet-snapshot", {reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
+    stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "21");
+    stream.emit("operation-state", {projection_refresh_required: true}, "22");
   });
   await act(async () => resolveOldTimeline(snapshot(100, 100)));
   act(() => vi.advanceTimersByTime(100));
@@ -259,7 +258,7 @@ test("retries a failed sparse refresh until the required cursor is reconciled", 
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("recipe-state", {schema_version: 1, projection_refresh_required: true}, "6");
+    stream.emit("recipe-state", {projection_refresh_required: true}, "6");
     vi.advanceTimersByTime(100);
   });
   await flush();
@@ -287,11 +286,11 @@ test("retries when concurrent telemetry makes a sparse REST response stale", asy
   const stream = FakeEventSource.instances[0];
 
   act(() => {
-    stream.emit("operation-state", {schema_version: 1, projection_refresh_required: true}, "6");
+    stream.emit("operation-state", {projection_refresh_required: true}, "6");
     vi.advanceTimersByTime(100);
   });
   expect(visualFleet).toHaveBeenCalledTimes(2);
-  act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "7"));
+  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "7"));
   await act(async () => resolveRefresh(snapshot(6, 66)));
 
   expect(screen.getByTestId("cursor")).toHaveTextContent("7");
@@ -394,7 +393,7 @@ test("does not let an older in-flight poll overwrite a newer stream increment", 
     stream.emit("error");
     vi.advanceTimersByTime(10_000);
   });
-  act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "7"));
+  act(() => stream.emit("node-telemetry", {node_id: "node-a", sample: point(77)}, "7"));
   await act(async () => resolvePoll(snapshot(6, 66)));
 
   expect(screen.getByTestId("cursor")).toHaveTextContent("7");

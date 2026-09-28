@@ -271,7 +271,6 @@ class ArtifactJobStorageCapabilities(ArtifactJobContractModel):
 
 
 class ArtifactJobCapabilitiesResponse(ArtifactJobContractModel):
-    schema_version: Literal[1] = 1
     transport: ArtifactJobTransportCapabilities
     storage: ArtifactJobStorageCapabilities
 
@@ -951,7 +950,6 @@ class ArtifactJobService:
 
     def capabilities(self) -> dict[str, object]:
         return {
-            "schema_version": 1,
             "transport": {
                 "max_input_files": MAX_INPUT_FILES,
                 "max_input_file_bytes": MAX_INPUT_FILE_BYTES,
@@ -1505,12 +1503,6 @@ class ArtifactJobService:
                 )
             )
             job.updated_at = now
-
-    def result_metadata(self, job_id: str) -> ArtifactJobView:
-        view = self.get(job_id)
-        if view.state != "succeeded":
-            raise ArtifactJobError("artifact job result is not available")
-        return view
 
     def result_blob(
         self, job_id: str, name: str, sha256: str

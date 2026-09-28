@@ -323,7 +323,7 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
                 object(),
                 SimpleNamespace(state="succeeded", result=result),
             )
-        assert service.result_metadata(job_id).state == "succeeded"
+        assert service.get(job_id).state == "succeeded"
 
         output_directory = tmp_path / "downloaded-output"
         output_directory.mkdir()
@@ -527,7 +527,7 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
         view = service.get(job_id)
         assert view.state == expected_state
         if expected_state == "succeeded":
-            result = service.result_metadata(job_id)
+            result = service.get(job_id)
             assert result.output_files == ()
             assert result.output_manifest_sha256 == recipe_job_manifest_sha256(
                 empty_outputs

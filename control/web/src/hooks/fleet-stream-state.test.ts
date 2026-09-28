@@ -4,7 +4,6 @@ import {fleetStreamReducer, initialFleetStreamState} from "./fleet-stream-state"
 
 function snapshot(cursor: number, cpu = 10): VisualFleetSnapshot {
   return {
-    schema_version: 1,
     event_cursor: cursor,
     generated_at: "2026-08-15T12:00:00Z",
     authority_revision: "a".repeat(64),

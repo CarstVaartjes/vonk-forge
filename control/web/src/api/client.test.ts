@@ -42,12 +42,12 @@ test("creates a Fleet enrollment grant through the current operator endpoint", a
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     requests.push(request);
-    return new Response(JSON.stringify({schema_version: 2, action: "enroll", state: "created", grant: {}}), {
+    return new Response(JSON.stringify({action: "enroll", state: "created", grant: {}}), {
       status: 201,
       headers: {"Content-Type": "application/json"},
     });
   });
-  const input = {name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101", ttl_seconds: 900};
+  const input = {name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101"};
   await new ApiClient().enrollFleetNode(input);
   expect(requests).toHaveLength(1);
   expect(requests[0]!.method).toBe("POST");

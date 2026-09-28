@@ -12,7 +12,7 @@ from vonk_control.catalog_api import (
     ManagedCatalogSyncResponse,
     install_catalog_routes,
 )
-from vonk_control.catalog_service import CatalogConflict, CatalogError, CatalogService
+from vonk_control.catalog_service import CatalogConflict, CatalogError
 from vonk_control.catalog_sync import CatalogSyncError
 from vonk_control.recipe_library_types import RecipeLibraryError
 
@@ -32,17 +32,6 @@ class _FailingSync:
         return None
 
 
-class _BundleService(CatalogService):
-    """Exercise only the source-bundle read path of the catalog service."""
-
-    def __init__(self) -> None:
-        pass
-
-    def read_source_bundle(self, sha256: str) -> bytes:
-        del sha256
-        return b"raw source bundle bytes"
-
-
 def _sync_client(error: Exception) -> TestClient:
     app = FastAPI()
 
@@ -60,24 +49,7 @@ def _sync_client(error: Exception) -> TestClient:
     return TestClient(app)
 
 
-def test_source_bundle_download_preserves_raw_bytes() -> None:
-    app = FastAPI()
-    install_catalog_routes(
-        app,
-        actor_dependency=Depends(_administrator),
-        service=_BundleService(),
-    )
-
-    response = TestClient(app).get("/api/catalog/source-bundles/" + "a" * 64)
-
-    assert response.status_code == 200
-    assert response.content == b"raw source bundle bytes"
-    assert response.headers["content-type"] == (
-        "application/vnd.vonk-forge.source-bundle.v1+tar"
-    )
-
-
-def test_catalog_api_exposes_only_canonical_bundle_and_sync_routes() -> None:
+def test_catalog_api_exposes_only_canonical_sync_routes() -> None:
     app = FastAPI()
     install_catalog_routes(
         app,
@@ -85,13 +57,7 @@ def test_catalog_api_exposes_only_canonical_bundle_and_sync_routes() -> None:
         service=None,
     )
     paths = app.openapi()["paths"]
-    assert "/api/catalog/source-bundles/{sha256}" in paths
-    assert (
-        paths["/api/catalog/source-bundles/{sha256}"]["get"][
-            "x-vonk-streaming-transport"
-        ]
-        is True
-    )
+    assert "/api/catalog/source-bundles/{sha256}" not in paths
     assert "/api/catalog/managed-recipes/sync" in paths
     assert "/api/catalog/managed-recipes/sync-status" in paths
     assert "/api/catalog/public-recipes" not in paths

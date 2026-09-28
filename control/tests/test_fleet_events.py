@@ -56,7 +56,6 @@ def _draft(
         entity_id=entity_id,
         payload=payload
         or {
-            "schema_version": 1,
             "entity_kind": "job",
             "entity_id": entity_id,
             "kind": "deploy",
@@ -392,9 +391,9 @@ def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -
     "draft",
     [
         _draft(event_type="fleet-snapshot"),
-        _draft(payload={"schema_version": 1, "secret_token": "do-not-store"}),
-        _draft(payload={"schema_version": 1, "value": "x" * 8192}),
-        _draft(payload={"schema_version": 1, "value": object()}),
+        _draft(payload={"secret_token": "do-not-store"}),
+        _draft(payload={"value": "x" * 8192}),
+        _draft(payload={"value": object()}),
     ],
     ids=["event-vocabulary", "secret-field", "payload-size", "json-type"],
 )
@@ -417,7 +416,6 @@ def test_invalid_draft_fails_the_source_transaction(sessions, draft) -> None:
 def test_repository_rejects_unknown_fields_in_a_typed_change_payload(sessions) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
     payload = {
-        "schema_version": 1,
         "entity_kind": "job",
         "entity_id": "job-typed",
         "kind": "deploy",
@@ -556,12 +554,10 @@ def test_recorder_captures_every_authoritative_insert_with_public_payloads(
         "agent-operation",
     ]
     assert rows[0].payload == {
-        "schema_version": 1,
         "node_id": "spk_" + "a" * 32,
         "sample_id": "sample-1",
     }
     assert rows[5].payload == {
-        "schema_version": 1,
         "entity_kind": "job",
         "entity_id": "job-1",
         "kind": "deploy",
@@ -569,7 +565,6 @@ def test_recorder_captures_every_authoritative_insert_with_public_payloads(
         "target_count": 1,
     }
     assert rows[6].payload == {
-        "schema_version": 1,
         "entity_kind": "agent-operation",
         "entity_id": "operation-1",
         "parent_job_id": "job-1",
@@ -581,7 +576,6 @@ def test_recorder_captures_every_authoritative_insert_with_public_payloads(
     for row in rows[1:]:
         FleetChangeEvent.model_validate(
             {
-                "schema_version": 1,
                 "projection_refresh_required": True,
                 "change": {
                     "entity_kind": row.entity_kind,
@@ -652,14 +646,12 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
         ("node-profile", "node-profile", node_id),
     ]
     assert rows[-1].payload == {
-        "schema_version": 1,
         "node_id": node_id,
         "profile_changed": True,
     }
     for row in rows:
         FleetChangeEvent.model_validate(
             {
-                "schema_version": 1,
                 "projection_refresh_required": True,
                 "change": {
                     "entity_kind": row.entity_kind,

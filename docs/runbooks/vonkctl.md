@@ -29,8 +29,8 @@ vonkctl update --apply
 
 `vonkctl` is the local, authenticated CLI for the Controller. It has four
 singular operator areas: Fleet, Model, Recipe, and Profile. The CLI uses the
-same current Controller routes as the operator API: `/api/fleet`,
-`/api/model`, `/api/recipe`, and `/api/profile`. Machine-facing agent
+same current Controller routes as the operator API: `/api/fleet*`,
+`/api/model/*`, `/api/recipe/*`, and `/api/profile*`. Machine-facing agent
 transport is separate and is not a CLI fallback.
 
 ## Connect
@@ -234,8 +234,8 @@ The Controller rechecks current authorization and the intent of every target
 before accepting it. Resume does not grant permission to replay superseded or
 revoked work. Already authorized retries retain their original retry budget.
 
-Fleet upgrades use `--strategy one-at-a-time`; this is the only accepted
-strategy. The receipt identifies the exact job to follow. A failure stops
+Fleet upgrades roll out one Spark at a time. The receipt identifies the exact
+job to follow. A failure stops
 consequential rollout to later Sparks. This command upgrades enrolled Sparks;
 Controller deployment and the signed local CLI `update` command have separate
 owners.

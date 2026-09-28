@@ -824,7 +824,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
             object(),
             SimpleNamespace(state="succeeded", result=result),
         )
-    completed = service.result_metadata(job.id)
+    completed = service.get(job.id)
     assert completed.state == "succeeded"
     assert completed.output_manifest_sha256 == recipe_job_manifest_sha256(outputs)
     from vonk_control.artifact_job_api import _view
@@ -870,7 +870,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         assert row is not None
         row.output_manifest_sha256 = None
     with pytest.raises(ValidationError, match="requires output manifest"):
-        service.result_metadata(job.id)
+        service.get(job.id)
 
 
 @pytest.mark.parametrize(

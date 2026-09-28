@@ -44,7 +44,6 @@ class RecipeUpdateScope(StrictJSONModel):
 
 
 class RecipeUpdateRequest(RecipeUpdateScope):
-    schema_version: Literal[2] = 2
     request_key: RequestKey
 
 
@@ -127,7 +126,6 @@ class RecipeUpdateDocument(StrictJSONModel):
 
 
 class RecipeUpdateResponse(StrictJSONModel):
-    schema_version: Literal[2] = 2
     kind: Literal["recipe.cache.update.v2"] = UPDATE_KIND
     action: Literal["update"] = "update"
     id: Identifier

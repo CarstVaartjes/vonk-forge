@@ -256,7 +256,7 @@ def test_unexpected_route_errors_use_bounded_context_and_request_id() -> None:
 def test_central_catalog_http_errors_are_serialized_by_catalog_problem() -> None:
     client, _, _ = _client("viewer")
 
-    response = client.get("/api/catalog/source-bundles/" + "a" * 64)
+    response = client.get("/api/catalog/managed-recipes/sync-status")
 
     assert response.status_code == 401
     problem = CatalogProblem.model_validate_json(response.content)

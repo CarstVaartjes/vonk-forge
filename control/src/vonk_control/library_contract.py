@@ -195,7 +195,6 @@ class LibraryResourceProjection(_StrictModel):
 class LibraryModelProjection(_StrictModel):
     """One exact canonical model variant with operator-facing projections."""
 
-    schema_version: Literal[2] = 2
     selector: Text256
     identity: LibraryModelIdentity
     document: ModelDefinition
@@ -250,7 +249,6 @@ class LibraryFilterValues(_StrictModel):
 
 
 class ModelLibraryResponse(_StrictModel):
-    schema_version: Literal[2] = 2
     generated_at: datetime
     models: list[LibraryModelProjection] = Field(max_length=_MAX_PAGE_RECIPES)
     facets: LibraryFacetValues
@@ -290,7 +288,6 @@ class RecipeReadiness(_StrictModel):
 class LibraryRecipeProjection(_StrictModel):
     """One exact canonical recipe and its model/resource/local projections."""
 
-    schema_version: Literal[2] = 2
     selector: Text256
     identity: LibraryRecipeIdentity
     document: RecipeDefinition
@@ -305,7 +302,6 @@ class LibraryRecipeProjection(_StrictModel):
 
 
 class RecipeLibraryResponse(_StrictModel):
-    schema_version: Literal[2] = 2
     generated_at: datetime
     recipes: list[LibraryRecipeProjection] = Field(max_length=_MAX_PAGE_RECIPES)
     facets: LibraryFacetValues

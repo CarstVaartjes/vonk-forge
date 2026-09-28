@@ -41,7 +41,7 @@ test("Fleet creates a one-use grant and shows the exact Spark command, token, an
   fireEvent.click(screen.getByRole("button", {name: "Create enrollment grant"}));
 
   await waitFor(() => expect(enrollFleetNode).toHaveBeenCalledWith({
-    name: "Kitchen Spark", request_key: "12345678-1234-4234-8234-123456789abc", ttl_seconds: 900,
+    name: "Kitchen Spark", request_key: "12345678-1234-4234-8234-123456789abc",
   }));
   expect(await screen.findByText("Run this command on the Spark. The installer will ask for the one-use pairing token.")).toBeVisible();
   const command = `curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS='192.168.1.231' VONK_ENROLLMENT_URL='https://enroll.example.test' VONK_CONTROLLER_CA_SHA256='${"a".repeat(64)}' sh -s -- --enroll`;

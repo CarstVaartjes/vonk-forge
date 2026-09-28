@@ -596,7 +596,7 @@ def _download(
     args.artifact_job_id = args.job_id
     args.artifact_job_downloaded = []
     result = _job(
-        client.request("GET", f"/api/artifact-jobs/{quote(args.job_id)}/result"),
+        client.request("GET", f"/api/artifact-jobs/{quote(args.job_id)}"),
         expected_id=args.job_id,
     )
     if result["state"] != "succeeded":

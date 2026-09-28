@@ -2328,7 +2328,6 @@ def _typed_paired_fleet(
             "event_cursor": cursor,
             "generated_at": timestamp,
             "nodes": nodes,
-            "schema_version": 1,
         }
     ).to_dict()
 

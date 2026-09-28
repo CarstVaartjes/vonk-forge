@@ -76,7 +76,7 @@ test("queued and partial cleanup remain visible until the same owner succeeds", 
     action: "remove", operation_id: "accepted-cleanup", request_key: requestKey,
     selector: review.selector,
     recipe_revision_id: review.target_identity, with_model: false,
-    reclaimed_bytes: 0, schema_version: 2,
+    reclaimed_bytes: 0,
     state: "queued", progress: {phase: "waiting for worker", completed_bytes: 0, total_bytes_known: false},
   };
   const removeRecipe = vi.fn().mockResolvedValue(accepted);
@@ -109,7 +109,7 @@ test("an observation of another operation cannot complete accepted cleanup", asy
   const initial: RecipeOperatorResponse = {
     action: "remove", operation_id: "accepted-cleanup", request_key: "original-key",
     selector: "example/recipe", with_model: false,
-    recipe_revision_id: "exact-revision", reclaimed_bytes: 0, schema_version: 2,
+    recipe_revision_id: "exact-revision", reclaimed_bytes: 0,
     state: "queued", progress: {phase: "queued", completed_bytes: 0, total_bytes_known: false},
   };
   const review = cacheRemovalReview({selector: initial.selector, target_identity: initial.recipe_revision_id, with_model: initial.with_model});
@@ -128,7 +128,7 @@ test("a receipt for another retention choice is reconciled by key and never repo
   const wrongReceipt: RecipeOperatorResponse = {
     action: "remove", operation_id: "wrong-target-operation", request_key: "00000000-0000-4000-8000-000000000932",
     selector: review.selector, with_model: true,
-    recipe_revision_id: "different-revision", reclaimed_bytes: 10, schema_version: 2,
+    recipe_revision_id: "different-revision", reclaimed_bytes: 10,
     state: "succeeded", progress: {phase: "completed", completed_bytes: 10, total_bytes_known: true},
   };
   vi.spyOn(crypto, "randomUUID").mockReturnValue(wrongReceipt.request_key as ReturnType<typeof crypto.randomUUID>);
@@ -152,7 +152,7 @@ test.each(["disconnect", "timeout"])("an accepted POST with %s recovers through 
   const accepted: RecipeOperatorResponse = {
     action: "remove", operation_id: "recovered-operation", request_key: "00000000-0000-4000-8000-000000000933",
     selector: review.selector, with_model: false,
-    recipe_revision_id: review.target_identity, reclaimed_bytes: 0, schema_version: 2,
+    recipe_revision_id: review.target_identity, reclaimed_bytes: 0,
     state: "queued", progress: {phase: "queued", completed_bytes: 0, total_bytes_known: false},
   };
   vi.spyOn(crypto, "randomUUID").mockReturnValue(accepted.request_key as ReturnType<typeof crypto.randomUUID>);
@@ -190,7 +190,6 @@ test.each(["disconnect", "timeout"])("an accepted POST with %s recovers through 
   expect(requestLookup?.method).toBe("GET");
   expect(calls[1]?.body).toEqual({
     request_key: accepted.request_key,
-    schema_version: 2,
     with_model: false,
   });
 });

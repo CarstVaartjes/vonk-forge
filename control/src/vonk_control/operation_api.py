@@ -105,7 +105,6 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/artifact-jobs/{job_id}/finalize"): "finalizeArtifactJob",
     ("post", "/api/artifact-jobs/{job_id}/submit"): "submitArtifactJob",
     ("post", "/api/artifact-jobs/{job_id}/cancel"): "cancelArtifactJob",
-    ("get", "/api/artifact-jobs/{job_id}/result"): "getArtifactJobResult",
     (
         "get",
         "/api/artifact-jobs/{job_id}/results/{name}/{sha256}",
@@ -116,8 +115,6 @@ _ADMIN_OPERATION_IDS = {
     ("get", "/api/jobs/{job_id}"): "getJob",
     ("get", "/api/operations/{operation_id}"): "getOperation",
     ("post", "/api/jobs/{job_id}/resume"): "resumeJob",
-    ("get", "/api/jobs/{job_id}/logs"): "listJobLogs",
-    ("get", "/api/jobs/{job_id}/logs/{digest}"): "getJobLog",
 }
 
 
@@ -304,7 +301,6 @@ class OperationOwnerReference(StrictModel):
 
 
 class OperationDetailResponse(StrictModel):
-    schema_version: Literal[2] = 2
     id: str = Field(min_length=1, max_length=128)
     parent_id: str | None = Field(default=None, max_length=128)
     node_ids: list[NodeIdentifier] = Field(max_length=1024)
@@ -341,7 +337,6 @@ class OperationDetailResponse(StrictModel):
 
 
 class OperationsResponse(StrictModel):
-    schema_version: Literal[2] = 2
     operations: list[OperationDetailResponse] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=512)
     total: int = Field(ge=0)
@@ -425,11 +420,6 @@ class JobsResponse(StrictModel):
     jobs: list[JobSummary] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=512)
     total: int = Field(ge=0)
-
-
-class JobLogsResponse(StrictModel):
-    job_id: str = Field(min_length=1, max_length=128)
-    digests: list[DigestIdentifier] = Field(max_length=100)
 
 
 @dataclass(frozen=True)
@@ -1540,7 +1530,6 @@ class _DurableOperationProjection:
             node_id=node_id,
             observed_at=observed_at,
             plan_digest=plan_digest,
-            state="published",
         )
 
     @staticmethod

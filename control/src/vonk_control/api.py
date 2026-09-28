@@ -90,7 +90,7 @@ from .installation_reconciliation_api import (
     install_installation_reconciliation_routes,
 )
 from .library_assessment import LibraryAssessment
-from .logging import JobLogCorruptError, configure_controller_logging
+from .logging import configure_controller_logging
 from .metrics import MetricsRegistry, runnable_job_ages
 from .model_cache_api import (
     install_model_operator_routes,
@@ -101,7 +101,6 @@ from .operation_api import (
     ErrorContextResponse,
     HealthzResponse,
     JobDetailResponse,
-    JobLogsResponse,
     JobProgress,
     JobResumeRequest,
     JobResumeResponse,
@@ -475,7 +474,6 @@ def create_app(
     metrics: MetricsRegistry | None = None,
     metrics_token: str | None = None,
     metrics_refresh: Callable[[], None] | None = None,
-    job_logs=None,
     agent: AgentApiServices | None = None,
     trusted_agent_proxy_auth: bytes = b"",
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
@@ -1228,59 +1226,6 @@ def create_app(
             ) from None
         return JobResumeResponse(id=job_id, state="queued")
 
-    @app.get(
-        "/api/jobs/{job_id}/logs",
-        response_model=JobLogsResponse,
-        responses=bounded_error_responses(401, 403, 404, 503),
-        operation_id="listJobLogs",
-    )
-    def job_log_list(
-        job_id: str, authenticated: Actor = authenticated_actor
-    ) -> JobLogsResponse:
-        if authenticated.role not in {"operator", "administrator"}:
-            raise HTTPException(status_code=403, detail="insufficient role")
-        if job_logs is None:
-            raise HTTPException(status_code=503, detail="job logs unavailable")
-        try:
-            jobs.get(job_id)
-            return JobLogsResponse(job_id=job_id, digests=list(job_logs.list(job_id)))
-        except JobLogCorruptError:
-            raise HTTPException(
-                status_code=503, detail="job logs unavailable"
-            ) from None
-        except (KeyError, ValueError):
-            raise HTTPException(status_code=404, detail="job not found") from None
-
-    @app.get(
-        "/api/jobs/{job_id}/logs/{digest}",
-        response_class=Response,
-        responses={
-            **bounded_error_responses(401, 403, 404, 503),
-            **download_responses("text/plain"),
-        },
-        openapi_extra={"x-vonk-streaming-transport": True},
-    )
-    def job_log_content(
-        job_id: str, digest: str, authenticated: Actor = authenticated_actor
-    ) -> Response:
-        if authenticated.role not in {"operator", "administrator"}:
-            raise HTTPException(status_code=403, detail="insufficient role")
-        if job_logs is None:
-            raise HTTPException(status_code=503, detail="job logs unavailable")
-        try:
-            jobs.get(job_id)
-            return Response(
-                job_logs.read(job_id, digest), media_type="text/plain; charset=utf-8"
-            )
-        except JobLogCorruptError:
-            # The log exists but no longer matches its digest. Answering 404
-            # would report corrupt retained evidence as absent.
-            raise HTTPException(
-                status_code=503, detail="job logs unavailable"
-            ) from None
-        except (KeyError, ValueError):
-            raise HTTPException(status_code=404, detail="job log not found") from None
-
     return app
 
 
@@ -1302,7 +1247,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     from .jobs import JobService
     from .library_projection import LibraryProjection
-    from .logging import DatabaseJobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .model_cache import ModelCacheService
     from .models import CatalogDocumentRevision, Job
@@ -1730,7 +1674,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         metrics=metrics,
         metrics_token=settings.metrics_token,
         metrics_refresh=refresh_metrics,
-        job_logs=DatabaseJobLogStore(sessions, clock=clock),
         agent=(agent_services if settings.agent_runtime_enabled else None),
         trusted_agent_proxy_auth=settings.agent_proxy_auth,
         operations=register_model_cache_operation_provider(
@@ -1765,7 +1708,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             agent_services=(agent_services if settings.agent_runtime_enabled else None),
             upgrades=agent_upgrades,
             sessions=sessions,
-            job_logs=DatabaseJobLogStore(sessions, clock=clock),
         ),
         failure_evidence=FailureEvidenceService(sessions),
         agent_upgrades=agent_upgrades,

@@ -292,24 +292,6 @@ def install_artifact_job_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.get(
-        "/api/artifact-jobs/{job_id}/result",
-        response_model=ArtifactJobResponse,
-        responses=bounded_error_responses(401, 404, 409, 422, 503),
-        operation_id="getArtifactJobResult",
-    )
-    def result_metadata(
-        job_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
-    ) -> ArtifactJobResponse:
-        try:
-            return _view(_service(service).result_metadata(job_id))
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="artifact job not found"
-            ) from None
-        except ArtifactJobError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-
-    @app.get(
         "/api/artifact-jobs/{job_id}/results/{name}/{sha256}",
         operation_id="downloadArtifactJobResult",
         response_class=StreamingResponse,

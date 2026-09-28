@@ -388,7 +388,6 @@ class FleetNode(_StrictModel):
 
 
 class FleetSnapshot(_StrictModel):
-    schema_version: Literal[1] = 1
     event_cursor: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     generated_at: datetime
     authority_revision: AuthorityRevision
@@ -570,7 +569,6 @@ class FleetProjection:
                         entity_kind="node-profile",
                         entity_id=node_id,
                         payload={
-                            "schema_version": 1,
                             "node_id": node_id,
                             "display_name_changed": True,
                         },

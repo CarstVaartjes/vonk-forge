@@ -10,7 +10,6 @@ const TARGET_ID = `spk_${"1".repeat(32)}`;
 const TECHNICAL_TARGET_ID = `spk_${"2".repeat(32)}`;
 
 const visualFleet = {
-  schema_version: 1 as const,
   generated_at: "2026-08-15T12:00:00Z",
   authority_revision: "a".repeat(64),
   event_cursor: 1,
@@ -21,7 +20,6 @@ const visualFleet = {
 };
 
 const emptyLibrary = {
-  schema_version: 2 as const,
   generated_at: "2026-08-15T12:00:00Z",
   freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
   models: [],
@@ -29,7 +27,7 @@ const emptyLibrary = {
   next_cursor: null,
 };
 
-const noOperations = () => vi.fn().mockResolvedValue({schema_version: 2, operations: [], total: 0, next_cursor: null});
+const noOperations = () => vi.fn().mockResolvedValue({operations: [], total: 0, next_cursor: null});
 
 function recordedOperations(): OperationDetail[] {
   const quiet = {failure: null, recovery: {actions: ["inspect" as const], uncertain: false}, progress: null};
@@ -62,7 +60,7 @@ function api(
     progress: {completed: 0, failed: 0, running: 1, total: 1},
   }),
   resumeJob = vi.fn().mockResolvedValue({id: "operation-1", state: "queued"}),
-  loadOperations = vi.fn().mockResolvedValue({schema_version: 2, operations: recordedOperations(), total: 3, next_cursor: null}),
+  loadOperations = vi.fn().mockResolvedValue({operations: recordedOperations(), total: 3, next_cursor: null}),
 ): Pick<ControlApi, "job" | "jobs" | "resumeJob" | "visualFleet" | "operations" | "operation"> {
   return {
     operations: loadOperations,
@@ -388,7 +386,7 @@ test("keeps available jobs visible when operations loading fails and retries all
   const loadOperations = vi.fn().mockImplementation(async () => {
     calls += 1;
     if (calls === 1) throw new Error("operation projection unavailable");
-    return {schema_version: 2, operations: [], total: 0, next_cursor: null};
+    return {operations: [], total: 0, next_cursor: null};
   });
   const user = userEvent.setup();
   const noJobs = vi.fn().mockResolvedValue({jobs: [], next_cursor: null, total: 0});
@@ -478,7 +476,7 @@ test("discloses bounded API windows and loads older operations when a cursor is 
 
 function canonicalOperation(overrides: Partial<OperationDetail> = {}): OperationDetail {
   return {
-    schema_version: 2, id: "profile-attempt-1", parent_id: null,
+    id: "profile-attempt-1", parent_id: null,
     kind: "profile.load", state: "failed", attempt: 1,
     node_ids: [TARGET_ID], created_at: "2026-08-15T12:00:00Z",
     progress: {phase: "prepare", completed_bytes: 0, total_bytes_known: false},
@@ -490,7 +488,7 @@ function canonicalOperation(overrides: Partial<OperationDetail> = {}): Operation
 
 function canonicalApi(operations: OperationDetail[]) {
   const client = api(vi.fn().mockResolvedValue({jobs: [], total: 0, next_cursor: null}));
-  vi.mocked(client.operations).mockResolvedValue({schema_version: 2, operations, total: operations.length, next_cursor: null});
+  vi.mocked(client.operations).mockResolvedValue({operations, total: operations.length, next_cursor: null});
   return client;
 }
 
@@ -579,9 +577,9 @@ test("paginates jobs and canonical operations independently after a partial page
   const second = canonicalOperation({id: "older-operation", kind: "profile.load"});
   const client = canonicalApi([first]);
   vi.mocked(client.operations)
-    .mockResolvedValueOnce({schema_version: 2, operations: [first], next_cursor: "operations-next", total: 2})
+    .mockResolvedValueOnce({operations: [first], next_cursor: "operations-next", total: 2})
     .mockRejectedValueOnce(new Error("cursor fetch failed"))
-    .mockResolvedValueOnce({schema_version: 2, operations: [first, second], next_cursor: null, total: 2});
+    .mockResolvedValueOnce({operations: [first, second], next_cursor: null, total: 2});
   vi.mocked(client.jobs)
     .mockResolvedValueOnce({jobs: [], next_cursor: "jobs-next", total: 1})
     .mockResolvedValueOnce({jobs: [{id: first.id, kind: "agent-upgrade", state: "running", created_at: "2026-08-15T12:00:00Z"}], next_cursor: null, total: 1});

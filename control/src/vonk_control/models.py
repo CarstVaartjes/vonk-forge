@@ -136,15 +136,6 @@ class JobAttempt(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
-class JobLogEntry(Base):
-    """Redacted content-addressed job log stored in PostgreSQL."""
-
-    __tablename__ = "job_log_entries"
-    job_id: Mapped[str] = mapped_column(
-        ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
-    )
-    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
-    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )

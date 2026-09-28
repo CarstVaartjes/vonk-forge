@@ -131,8 +131,6 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             "upgrade",
             "--all",
             "--yes",
-            "--strategy",
-            "one-at-a-time",
             "--request-key",
             request_key,
             "--detach",

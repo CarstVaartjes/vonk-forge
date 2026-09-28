@@ -257,7 +257,6 @@ class RunSwitchCleanupPreviewRequest(_StrictModel):
     and the retry budget for the removal.
     """
 
-    schema_version: Literal[2] = 2
     installation_id: UuidId
     cleanup_mode: Literal["uninstall", "reconcile"] = "uninstall"
 
@@ -1271,7 +1270,6 @@ class RunSwitchOperationResult(_StrictModel):
 
 
 class RunSwitchOperation(_StrictModel):
-    schema_version: Literal[2] = 2
     operation_id: UuidId
     kind: RunSwitchOperationKind
     action: RunSwitchAction

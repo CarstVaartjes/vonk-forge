@@ -139,9 +139,7 @@ class FakeClient:
         )
         known_get = {
             "/api/fleet",
-            "/api/model",
             "/api/model/library",
-            "/api/recipe",
             "/api/recipe/library",
             "/api/profile",
             "/api/operations",
@@ -270,16 +268,13 @@ class FakeClient:
         }:
             assert isinstance(payload, dict)
             if selector_path.group(1) == "model" and selector_path.group(2) == "remove":
-                assert set(payload) == {"schema_version", "request_key"}
-                assert payload["schema_version"] == 2
+                assert set(payload) == {"request_key"}
                 uuid.UUID(payload["request_key"])
             else:
-                assert set(payload) <= {"schema_version", "request_key", "with_model"}
-                assert payload["schema_version"] == 2
+                assert set(payload) <= {"request_key", "with_model"}
                 uuid.UUID(payload["request_key"])
                 if selector_path.group(2) == "remove":
                     assert set(payload) == {
-                        "schema_version",
                         "request_key",
                         "with_model",
                     }
@@ -289,15 +284,13 @@ class FakeClient:
                 assert "yes" not in payload and "with_model" not in payload
         elif path == "/api/recipe/update":
             assert isinstance(payload, dict)
-            assert set(payload) == {"schema_version", "request_key", "selectors", "all"}
-            assert payload["schema_version"] == 2
+            assert set(payload) == {"request_key", "selectors", "all"}
             uuid.UUID(payload["request_key"])
             assert isinstance(payload["selectors"], list)
             assert isinstance(payload["all"], bool)
         elif model_cancel_path is not None:
             assert isinstance(payload, dict)
-            assert set(payload) == {"schema_version", "request_key", "reason"}
-            assert payload["schema_version"] == 2
+            assert set(payload) == {"request_key", "reason"}
             uuid.UUID(payload["request_key"])
             assert isinstance(payload["reason"], str) and payload["reason"].strip()
         elif re.fullmatch(r"/api/recipe/operations/[^/]+/cancel", path):
@@ -305,21 +298,19 @@ class FakeClient:
             validate_control_document("RecipeCancellationRequest", payload)
         elif path == "/api/fleet/upgrade":
             assert (
-                {"all", "request_key", "strategy"}
+                {"all", "request_key"}
                 <= set(payload)
                 <= {
                     "selectors",
                     "all",
                     "request_key",
-                    "strategy",
                 }
             )
-            assert payload["strategy"] == "one-at-a-time"
             uuid.UUID(payload["request_key"])
             if "selectors" in payload:
                 assert isinstance(payload["selectors"], list) and payload["selectors"]
         elif path == "/api/fleet/enroll":
-            assert set(payload) == {"name", "ttl_seconds"}
+            assert set(payload) == {"name"}
         elif path.endswith("/rename"):
             assert set(payload) == {"display_name"}
         elif path.endswith(("/re-enroll", "/remove")):
@@ -362,7 +353,6 @@ def _reconciliation_operation(
 ) -> dict[str, object]:
     node_id = "spk_" + "2" * 32
     return {
-        "schema_version": 2,
         "operation_id": "33333333-3333-4333-8333-333333333333",
         "kind": "recipe.cleanup.v2",
         "action": "cleanup",
@@ -407,7 +397,6 @@ def _operation_owner_page(request_key: str) -> dict[str, object]:
     node_id = "spk_" + "2" * 32
     owner = {"kind": "job", "id": operation_id, "request_id": request_key}
     return {
-        "schema_version": 2,
         "operations": [
             {
                 "id": operation_id,
@@ -475,7 +464,7 @@ def test_recipe_installation_reconcile_submits_without_a_preview() -> None:
     installation_id = "22222222-2222-4222-8222-222222222222"
     key = "11111111-1111-4111-8111-111111111111"
     apply = f"/api/recipe/installations/{installation_id}/reconcile"
-    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    empty = {"operations": [], "next_cursor": None, "total": 0}
     client = FakeClient(
         {
             ("GET", "/api/operations"): empty,
@@ -640,7 +629,7 @@ def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identit
     installation_id = "22222222-2222-4222-8222-222222222222"
     key = "11111111-1111-4111-8111-111111111111"
     apply = f"/api/recipe/installations/{installation_id}/reconcile"
-    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
+    empty = {"operations": [], "next_cursor": None, "total": 0}
     operation = _reconciliation_operation(key, installation_id)
     client = FakeClient(
         {
@@ -682,7 +671,6 @@ def _model_detail(selector: str = "qwen") -> tuple[dict[str, object], str]:
     digest = content_sha256(model)
     return (
         {
-            "schema_version": 2,
             "selector": selector,
             "identity": {
                 "kind": "model",
@@ -709,7 +697,6 @@ def _recipe_removal_receipt(
     selector: str, request_key: str, *, with_model: bool
 ) -> dict[str, object]:
     return {
-        "schema_version": 2,
         "action": "remove",
         "selector": selector,
         "request_key": request_key,
@@ -1024,12 +1011,10 @@ def test_download_is_one_step_and_repeated_calls_keep_server_operation_states() 
         client.calls[0][2]
         == client.calls[1][2]
         == {
-            "schema_version": 2,
             "request_key": "11111111-1111-4111-8111-111111111111",
         }
     )
     assert client.calls[2][2] == {
-        "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
     }
 
@@ -1040,7 +1025,6 @@ def test_recipe_download_rejects_a_forced_selector_intent_receipt() -> None:
     path = f"/api/recipe/{selector}/download"
     lookup = f"/api/recipe/requests/{request_key}"
     receipt = {
-        "schema_version": 2,
         "id": "recipe-download",
         "request_id": request_key,
         "kind": "recipe.image.availability.v2",
@@ -1077,7 +1061,7 @@ def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None
                 "resources": {},
                 "document": {},
             },
-            ("GET", "/api/model"): {
+            ("GET", "/api/model/library"): {
                 "models": [
                     {
                         "selector": "qwen",
@@ -1117,7 +1101,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "model", "qwen", model_digest=model_digest
             ),
             ("POST", "/api/model/qwen/remove"): {
-                "schema_version": 2,
                 "action": "remove",
                 "selector": "qwen",
                 "request_key": request_key,
@@ -1132,7 +1115,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "recipe", "vision", with_model=True
             ),
             ("POST", "/api/recipe/vision/remove"): {
-                "schema_version": 2,
                 "state": "accepted",
                 "action": "remove",
                 "selector": "vision",
@@ -1144,7 +1126,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "reclaimed_bytes": 0,
             },
             ("GET", f"/api/recipe/operations/{recipe_operation_id}"): {
-                "schema_version": 2,
                 "state": "succeeded",
                 "action": "remove",
                 "selector": "vision",
@@ -1174,7 +1155,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
         ("POST", "/api/model/qwen/remove"),
     ]
     assert client.calls[1][2] == {
-        "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
     }
     assert (
@@ -1204,7 +1184,6 @@ def test_model_remove_reconciles_after_lost_acceptance() -> None:
     operation_id = "11111111-1111-4111-8111-111111111121"
     _detail, digest = _model_detail(selector)
     receipt = {
-        "schema_version": 2,
         "action": "remove",
         "selector": selector,
         "request_key": request_key,
@@ -1254,7 +1233,6 @@ def test_model_remove_reconciles_after_lost_acceptance() -> None:
     ]
     body = client.calls[2][2]
     assert body == {
-        "schema_version": 2,
         "request_key": request_key,
     }
 
@@ -1265,7 +1243,6 @@ def test_model_remove_reconnects_to_existing_key_before_resolving_current_head()
     selector = "qwen"
     request_key = "11111111-1111-4111-8111-111111111111"
     receipt = {
-        "schema_version": 2,
         "action": "remove",
         "selector": selector,
         "request_key": request_key,
@@ -1340,7 +1317,6 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
         ("GET", lookup),
     ]
     assert client.calls[2][2] == {
-        "schema_version": 2,
         "request_key": request_key,
         "with_model": False,
     }
@@ -1436,7 +1412,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
     if noun == "model":
         model_detail, model_digest = _model_detail(selector)
         receipt: dict[str, object] = {
-            "schema_version": 2,
             "action": "remove",
             "selector": selector,
             "request_key": request_key,
@@ -1449,7 +1424,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
         }
     else:
         receipt = {
-            "schema_version": 2,
             "action": "remove",
             "selector": selector,
             "request_key": request_key,
@@ -1699,7 +1673,6 @@ def test_model_cancel_requires_consent_and_reuses_its_stable_identity() -> None:
             "POST",
             path,
             {
-                "schema_version": 2,
                 "request_key": cancel_key,
                 "reason": "switching to another model",
             },
@@ -1753,7 +1726,6 @@ def test_model_cancel_reconciles_a_lost_acceptance_before_replay() -> None:
     assert status == 0 and payload["state"] == "cancelled", payload
     assert [call[0] for call in client.calls] == ["POST", "GET"]
     assert client.calls[0][2] == {
-        "schema_version": 2,
         "request_key": cancel_key,
         "reason": "operator request",
     }
@@ -2902,7 +2874,6 @@ def test_profile_endpoint_uses_scoped_current_controller_projection(
                             "node_id": "spk_" + "a" * 32,
                             "observed_at": "2026-09-23T12:59:30Z",
                             "plan_digest": "a" * 64,
-                            "state": "published",
                         },
                     },
                     {
@@ -3058,7 +3029,7 @@ def test_error_output_redacts_request_secrets_and_keeps_json_clean() -> None:
 def test_plain_output_is_adaptive_and_keeps_identity_before_optional_columns() -> None:
     client = FakeClient(
         {
-            ("GET", "/api/model"): {
+            ("GET", "/api/model/library"): {
                 "models": [
                     {
                         "selector": "qwen-3.8-nvfp4",
@@ -3227,7 +3198,6 @@ def test_recipe_cancel_recovers_accepted_request_after_lost_response() -> None:
         ("GET", "/api/recipe/operations/recipe-operation"),
     ]
     assert client.calls[0][2] == {
-        "schema_version": 2,
         "request_key": key,
         "reason": "stop preparation",
     }
@@ -3513,7 +3483,6 @@ def test_fleet_upgrade_resolves_friendly_scope_before_explicit_consent() -> None
     assert body == {
         "all": False,
         "request_key": request_key,
-        "strategy": "one-at-a-time",
         "selectors": [node_id],
     }
 
@@ -3561,7 +3530,6 @@ def test_fleet_upgrade_prompts_for_resolved_scope_in_a_terminal(monkeypatch) -> 
 
 def _fleet_log_response(node_id: str, *, follow: bool) -> dict[str, object]:
     return {
-        "schema_version": 2,
         "node_id": node_id,
         "since": "2026-09-24T10:00:00Z",
         "lines": 100,
@@ -3871,26 +3839,11 @@ def test_fleet_upgrade_unknown_acceptance_recommends_exact_request_replay() -> N
     assert status == 2
     assert result["error"] == "Upgrade acceptance is unknown"
     assert result["reconcile"] == {
-        "operation": (
-            "vonkctl fleet upgrade --all --request-key "
-            f"{request_key} --strategy one-at-a-time --yes"
-        ),
+        "operation": (f"vonkctl fleet upgrade --all --request-key {request_key} --yes"),
         "request_key": request_key,
     }
     assert len(client.calls) == 2
     assert client.calls[0][2] == client.calls[1][2]
-
-
-def test_cli_rejects_retired_fleet_upgrade_strategy_before_request() -> None:
-    client = FakeClient({})
-
-    status, _result = run(
-        ("fleet", "upgrade", "--all", "--strategy", "all-at-once", "--json"),
-        client,
-    )
-
-    assert status == 2
-    assert not client.calls
 
 
 @pytest.mark.parametrize("since", ["yesterday", "15", "-1m", "2026-09-13T08:00:00"])
@@ -4049,7 +4002,6 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
                 }
             if path == "/api/profile/1/definition":
                 return {
-                    "schema_version": 2,
                     "id": "22222222-2222-4222-8222-222222222222",
                     "number": 1,
                     "revision": 0,

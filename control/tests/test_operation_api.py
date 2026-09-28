@@ -296,11 +296,9 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     detail = client.get(f"/api/operations/{item['id']}", headers=operator)
 
     assert listed.status_code == 200
-    assert listed.json()["schema_version"] == 2
     assert listed.json()["total"] == 1
     assert listed.json()["operations"][0]["parent_id"] == item["parent_id"]
     assert listed.json()["operations"][0]["node_ids"] == [NODE_ID]
-    assert listed.json()["operations"][0]["schema_version"] == 2
     assert listed.json()["operations"][0]["recovery"] == {
         "uncertain": True,
         "actions": ["inspect"],
@@ -497,7 +495,6 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     )
 
     assert first.status_code == 200
-    assert first.json()["schema_version"] == 2
     assert first.json()["total"] == 2
     assert first.json()["operations"][0]["id"] == "cache-1"
     assert first.json()["operations"][0]["node_ids"] == []
@@ -762,7 +759,6 @@ def test_fleet_exposes_typed_visual_state() -> None:
 
     assert visual.status_code == 200
     assert visual.json() == {
-        "schema_version": 1,
         "event_cursor": 11,
         "generated_at": "2026-08-15T12:00:00Z",
         "authority_revision": COMMIT,
@@ -1327,7 +1323,6 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
         payload={
             "node_order": [NODE_ID],
             "package": package,
-            "strategy": "one-at-a-time",
         },
         current_attempt=1,
         status_reason="operator-facing explanation",
