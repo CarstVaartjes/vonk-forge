@@ -716,13 +716,76 @@ def test_preinst_accepts_every_valid_nondowngrade_dpkg_invocation(
 
 
 @pytest.mark.parametrize("operation", ("install", "upgrade"))
-def test_preinst_refuses_every_direct_package_downgrade_form(
+def test_preinst_installs_a_requested_signed_downgrade(
     tmp_path: Path, operation: str
 ) -> None:
+    # Catches a version-ordering refusal that strands a node on a newer build
+    # after the Controller explicitly requested an older signed package.
     result = _run_preinst(tmp_path, candidate="0.9.0", arguments=(operation, "1.0.0"))
 
-    assert result.returncode != 0
-    assert "refusing downgrade from 1.0.0 to 0.9.0" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "installing requested downgrade from 1.0.0 to 0.9.0" in result.stderr
+
+
+def test_preinst_recover_without_intent_is_a_successful_noop(tmp_path: Path) -> None:
+    # Catches a recovery runner that parks the unit in a terminal failure
+    # (exit 78) once a newer install or a prior run already retired the intent.
+    if Path("/var/lib/vonk-forge/package-upgrade/intent").exists():
+        pytest.skip("host has a live package upgrade intent")
+    result = _run_preinst(tmp_path, candidate="0.1.1", arguments=("recover",))
+
+    assert result.returncode == 0, result.stderr
+    assert "unsafe package recovery state" not in result.stderr
+
+
+def _run_discard_own_state(
+    tmp_path: Path, script: Path, target: Path
+) -> subprocess.CompletedProcess[str]:
+    source = script.read_text()
+    start = source.index("discard_own_state() {")
+    end = source.index("\n}\n", start) + 3
+    runner = tmp_path / f"discard-{script.name}"
+    runner.write_text(
+        "#!/bin/sh\nset -eu\n"
+        + source[start:end]
+        + '\ndiscard_own_state "$1" "test state"\n'
+    )
+    runner.chmod(0o755)
+    return subprocess.run(
+        [runner, target],
+        env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize("script", (PREINST, POSTINST), ids=("preinst", "postinst"))
+def test_malformed_own_state_is_discarded_without_following_symlinks(
+    tmp_path: Path, script: Path
+) -> None:
+    # Catches maintainer scripts that exit on malformed package-owned state
+    # instead of regenerating it, and a discard that follows a planted symlink.
+    malformed = tmp_path / "state"
+    malformed.write_text("not a valid record\n")
+    assert _run_discard_own_state(tmp_path, script, malformed).returncode == 0
+    assert not malformed.exists()
+
+    victim = tmp_path / "victim"
+    victim.write_text("keep\n")
+    link = tmp_path / "link"
+    link.symlink_to(victim)
+    assert _run_discard_own_state(tmp_path, script, link).returncode == 0
+    assert not link.is_symlink()
+    assert victim.read_text() == "keep\n"
+
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    assert _run_discard_own_state(tmp_path, script, directory).returncode != 0
+    assert directory.is_dir()
+
+    absent = tmp_path / "absent"
+    assert _run_discard_own_state(tmp_path, script, absent).returncode == 0
 
 
 @pytest.mark.parametrize(
@@ -800,7 +863,7 @@ def test_package_lifecycle_accepts_only_current_pending_and_has_no_bridge() -> N
     for lifecycle in (preinst, postinst, prerm):
         assert "state=pre-unpack" not in lifecycle
     assert '[ "$(/usr/bin/wc -l < "$pending")" -eq 3 ]' in preinst
-    assert postinst.count('[ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ]') == 3
+    assert postinst.count('[ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ]') == 2
     assert '[ "$(/usr/bin/wc -l < "$pending")" -eq 3 ]' in prerm
     assert "bridge_dropin" not in postinst
     assert "upgrade-bridge" not in postinst
@@ -942,15 +1005,13 @@ def test_durable_recovery_capsule_is_single_owner_boot_gated_and_intent_retired_
         "capsule_suppression_sha256=",
     ):
         assert binding in preinst
-    assert "safe_recovery_capsule || unsafe_state 'recovery capsule'" in preinst
+    assert "safe_recovery_capsule || abandon_intent recovery-capsule" in preinst
     assert "safe_capsule_enablement" in preinst
     assert (
         'if [ -e "$embedded_destination" ] || [ -L "$embedded_destination" ]' in preinst
     )
     intent_retire = preinst.index('/usr/bin/rm -- "$intent"')
-    capsule_retire = preinst.index(
-        "retire_recovery_capsule || unsafe_state", intent_retire
-    )
+    capsule_retire = preinst.index("if ! retire_recovery_capsule; then", intent_retire)
     assert intent_retire < capsule_retire
     assert (
         "ExecStart=/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner"
@@ -1453,7 +1514,10 @@ def test_recovery_is_static_offline_named_only_and_compare_deletes() -> None:
     assert "state=pre-unpack" not in preinst
     pending_guard = preinst[preinst.index("safe_known_pending()") : normalize]
     assert '[ "$(/usr/bin/wc -l < "$pending")" -eq 3 ]' in pending_guard
-    blocker_retire = preinst.index('/usr/bin/rm -- "$agent_blocker"')
+    blocker_retire = preinst.index(
+        'discard_own_state "$agent_blocker" || unsafe_state',
+        preinst.index("recover_upgrade() {"),
+    )
     agent_restart = preinst.index('restart "$agent_unit"', blocker_retire)
     intent_retire = preinst.index('/usr/bin/rm -- "$intent"', agent_restart)
     assert blocker_retire < agent_restart < intent_retire
@@ -1610,12 +1674,15 @@ def test_interrupted_upgrade_state_has_safe_fresh_recovery_and_remove_paths() ->
         "interrupted helper activation requires a live systemd configure retry"
         in postinst
     )
-    assert "pending helper upgrade state is unsafe" in postinst
+    # Malformed pending state is discarded and rewritten, not a dpkg failure;
+    # only an unsafe root-owned parent directory still refuses.
+    pending_discard = postinst.index(
+        "discard_own_state \"$helper_pending\" 'pending helper upgrade state'"
+    )
+    assert pending_probe < pending_discard < pending_write
 
     stop_finisher = prerm.index("vonk-forge-package-helper-upgrade-finish.service")
-    refuse_durable = prerm.index(
-        "cannot remove package during durable upgrade recovery"
-    )
+    refuse_durable = prerm.index("removal supersedes durable upgrade recovery")
     stop_agent = prerm.index("deb-systemd-invoke stop vonk-forge-agent.service")
     stop_helper = prerm.index(
         "deb-systemd-invoke stop vonk-forge-package-helper.service"

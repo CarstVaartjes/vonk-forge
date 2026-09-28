@@ -268,6 +268,19 @@ safe_agent_blocker() {
             | grep -Fxq "agent_sha256=$expected_agent_sha256"
 }
 
+# Discard one malformed package-owned state file whose root-owned parent the
+# caller has already validated. rm never follows a symlink; a directory or
+# other non-file object still fails closed.
+discard_own_state() {
+    discard_path=$1
+    if [ -L "$discard_path" ] || [ -f "$discard_path" ]; then
+        echo "vonk-forge-agent: discarded malformed package state $discard_path" >&2
+        /usr/bin/rm -f -- "$discard_path" || return 1
+        /usr/bin/sync -f "$(/usr/bin/dirname "$discard_path")" || true
+    fi
+    [ ! -e "$discard_path" ] && [ ! -L "$discard_path" ]
+}
+
 safe_known_pending() {
     safe_root_file "$pending" 600 \
         && [ "$(/usr/bin/wc -l < "$pending")" -eq 3 ] \
@@ -281,7 +294,7 @@ safe_known_pending() {
 
 normalize_pending_gate() {
     if [ -e "$pending" ] || [ -L "$pending" ]; then
-        safe_known_pending || return 1
+        safe_known_pending || discard_own_state "$pending" || return 1
     fi
     pending_text="version=$intent_version
 helper_sha256=$expected_helper_sha256
@@ -1122,16 +1135,51 @@ allow_agent_start() {
             | /usr/bin/cut -d' ' -f1)" = "$expected_agent_sha256" ]
 }
 
+# An intent this runner cannot finish (malformed, bound to another runner,
+# superseded by a newer install, or naming bytes that fail integrity) is not
+# a reason to wedge the node. Refuse those bytes, retire the intent and its
+# gates, and let the agent start so the Controller re-drives the latest
+# requested version through the normal signed path.
+abandon_intent() {
+    abandon_reason=$1
+    echo "vonk-forge-agent: abandoning durable package upgrade intent: $abandon_reason" >&2
+    /usr/bin/logger -t vonk-forge-agent \
+        "abandoning durable package upgrade intent: $abandon_reason" \
+        >/dev/null 2>&1 || true
+    discard_own_state "$intent" || unsafe_state 'intent retirement'
+    discard_own_state "$agent_blocker" || unsafe_state 'agent start blocker'
+    /usr/bin/find "$state_dir" -mindepth 1 -maxdepth 1 -name '*.deb' \
+        \( -type f -o -type l \) -delete || true
+    /usr/bin/sync -f "$state_dir" || true
+    cleanup_unbound_recovery_capsule || true
+    discard_own_state "$socket_dropin" || true
+    /usr/bin/systemctl --system daemon-reload >/dev/null 2>&1 || true
+    /usr/bin/systemctl --system --no-block start "$helper_unit" "$agent_unit" \
+        >/dev/null 2>&1 || true
+    recovery_stage=complete
+    write_recovery_status failed "abandoned_$abandon_reason" || true
+    exit 0
+}
+
 recover_upgrade() {
+    if [ ! -e "$intent" ] && [ ! -L "$intent" ]; then
+        # Nothing to recover: a prior run or a newer install already retired it.
+        exit 0
+    fi
     recovery_stage=preflight
     write_recovery_status running start || true
     safe_root_directory "$state_dir" 700 || unsafe_state 'state directory'
+    if [ ! -e "$lock" ] && [ ! -L "$lock" ]; then
+        : > "$lock"
+        /usr/bin/chmod 0600 "$lock"
+        /usr/bin/sync -f "$state_dir"
+    fi
     safe_root_file "$lock" 600 || unsafe_state 'serialization lock'
     recovery_stage=serialization
     write_recovery_status running lock || true
     exec 9>> "$lock"
     /usr/bin/flock -x 9 || temporary_failure 'cannot acquire serialization lock'
-    read_intent || unsafe_state 'intent'
+    read_intent || abandon_intent malformed-intent
     if { [ "$intent_version" = "$target_version" ] \
         && [ "$intent_architecture" = "$target_architecture" ] \
         && [ "$expected_agent_sha256" = "$target_agent_sha256" ] \
@@ -1145,12 +1193,12 @@ recover_upgrade() {
             = "$recovery_capsule_suppression_sha256" ]; }; then
         :
     else
-        unsafe_state 'intent does not belong to installed recovery runner'
+        abandon_intent intent-not-bound-to-runner
     fi
-    safe_cached_package || unsafe_state 'cached package'
-    safe_recovery_capsule || unsafe_state 'recovery capsule'
+    safe_cached_package || abandon_intent cached-package-integrity
+    safe_recovery_capsule || abandon_intent recovery-capsule
     intent_snapshot=$(/usr/bin/sha256sum "$intent" | /usr/bin/cut -d' ' -f1)
-    valid_digest "$intent_snapshot" || unsafe_state 'intent digest'
+    valid_digest "$intent_snapshot" || temporary_failure 'intent digest'
     normalize_pending_gate || unsafe_state 'pending gate normalization'
     wait_for_original_dpkg || temporary_failure 'original dpkg is still active'
     /usr/bin/systemctl --system stop "$agent_unit" >/dev/null 2>&1 || true
@@ -1160,7 +1208,8 @@ recover_upgrade() {
     write_recovery_status running inspect || true
     if query_package_state; then
         if /usr/bin/dpkg --compare-versions "$installed_version" gt "$intent_version"; then
-            unsafe_state 'newer installed package would be downgraded'
+            # A newer install happened after this intent: it is superseded.
+            abandon_intent newer-package-installed
         fi
     else
         package_status=absent
@@ -1204,7 +1253,15 @@ recover_upgrade() {
     else
         temporary_failure 'named package is not fully installed'
     fi
-    prove_installed_payload || unsafe_state 'installed package identity'
+    if ! prove_installed_payload; then
+        # Installed bytes differ from the signed intent: reinstall the exact
+        # cached package and prove again; otherwise retry later.
+        reinstall_exact_package && query_package_state \
+            && [ "$package_status" = ii ] \
+            && [ "$installed_version" = "$intent_version" ] \
+            && prove_installed_payload \
+            || temporary_failure 'installed package identity'
+    fi
     /usr/bin/systemctl --system daemon-reload >/dev/null \
         || temporary_failure 'systemd reload failed'
     recovery_stage=helper-restart
@@ -1217,18 +1274,19 @@ recover_upgrade() {
         || temporary_failure 'running helper identity proof failed'
     write_receipt || temporary_failure 'receipt commit failed'
     [ "$(/usr/bin/sha256sum "$intent" | /usr/bin/cut -d' ' -f1)" \
-        = "$intent_snapshot" ] || unsafe_state 'intent changed before gate retirement'
+        = "$intent_snapshot" ] || temporary_failure 'intent changed before gate retirement'
+    # The exact helper identity is proven and receipted above; these gates are
+    # retired whether or not their own bytes are still well formed.
     if [ -e "$pending" ] || [ -L "$pending" ]; then
-        safe_pending || unsafe_state 'pending gate'
-        /usr/bin/rm -- "$pending"
-        /usr/bin/sync -f "$state_parent"
+        safe_pending || echo 'vonk-forge-agent: retiring malformed pending gate' >&2
+        discard_own_state "$pending" || unsafe_state 'pending gate'
     fi
     if [ -e "$agent_blocker" ] || [ -L "$agent_blocker" ]; then
-        safe_agent_blocker || unsafe_state 'agent start blocker'
-        /usr/bin/rm -- "$agent_blocker"
-        /usr/bin/sync -f "$state_dir"
+        safe_agent_blocker \
+            || echo 'vonk-forge-agent: retiring malformed agent start blocker' >&2
+        discard_own_state "$agent_blocker" || unsafe_state 'agent start blocker'
     else
-        safe_durable_receipt || unsafe_state 'agent start release evidence'
+        safe_durable_receipt || temporary_failure 'agent start release evidence'
     fi
     recovery_stage=agent-restart
     write_recovery_status running restart || true
@@ -1242,25 +1300,20 @@ recover_upgrade() {
     prove_running_unit "$helper_unit" "$expected_helper_sha256" \
         || temporary_failure 'helper identity changed during activation'
     [ "$(/usr/bin/sha256sum "$intent" | /usr/bin/cut -d' ' -f1)" \
-        = "$intent_snapshot" ] || unsafe_state 'intent changed before retirement'
+        = "$intent_snapshot" ] || temporary_failure 'intent changed before retirement'
     recovery_stage=retirement
     write_recovery_status running retire || true
-    safe_recovery_capsule || unsafe_state 'recovery capsule before retirement'
     /usr/bin/rm -- "$intent"
     /usr/bin/sync -f "$state_dir"
-    retire_recovery_capsule || unsafe_state 'recovery capsule retirement'
+    if ! retire_recovery_capsule; then
+        echo 'vonk-forge-agent: recovery capsule retired by manifest cleanup' >&2
+        cleanup_unbound_recovery_capsule || true
+    fi
     /usr/bin/rm -f -- "$cached_package"
     /usr/bin/sync -f "$state_dir"
     if [ -e "$socket_dropin" ] || [ -L "$socket_dropin" ]; then
-        safe_root_file "$socket_dropin" 644 || unsafe_state 'socket recovery drop-in'
-        if ! { [ "$(/usr/bin/wc -l < "$socket_dropin")" -eq 2 ] \
-            && grep -Fxq '[Unit]' "$socket_dropin" \
-            && grep -Fxq 'Wants=vonk-forge-package-upgrade-recover.service' \
-                "$socket_dropin"; }; then
-            unsafe_state 'socket recovery drop-in contents'
-        fi
-        /usr/bin/rm -- "$socket_dropin"
-        /usr/bin/sync -f "$socket_dropin_dir"
+        discard_own_state "$socket_dropin" \
+            || echo 'vonk-forge-agent: socket recovery drop-in is not a file' >&2
         /usr/bin/systemctl --system daemon-reload >/dev/null || true
     fi
     recovery_stage=complete
@@ -1285,15 +1338,9 @@ esac
 
 if [ -n "$old_version" ] \
     && dpkg --compare-versions "$target_version" lt "$old_version"; then
-    # Only the retained root-custody watchdog may restore this exact signed
-    # source in the same failed activation attempt. An arbitrary downgrade,
-    # even with a copied nonce, cannot enter that systemd cgroup.
-    if ! /var/lib/vonk-forge/package-rollback/runner \
-        --validate-package-rollback "$target_version" \
-        "$target_agent_sha256" "$target_helper_sha256"; then
-        echo "vonk-forge-agent: refusing downgrade from $old_version to $target_version" >&2
-        exit 1
-    fi
+    # A requested downgrade is an ordinary signed install: the package source
+    # and payload are verified before dpkg runs, and the latest request leads.
+    echo "vonk-forge-agent: installing requested downgrade from $old_version to $target_version" >&2
 fi
 
 if [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then

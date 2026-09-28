@@ -76,13 +76,14 @@ source DEB, and verifies configured package state plus the actual restarted
 process executable. Interrupted restoration resumes from that same durable
 transaction; it cannot select a different package or overwrite a third identity.
 
-The source package's normal downgrade guard remains active. Its fixed read-only
-rollback validator accepts the exact captured source only from systemd's
-watchdog cgroup, while the transaction is `rolling_back` and its attempt nonce
-matches. A copied nonce used from another process, another package, or another
-attempt does not authorize a downgrade. Source installation runs with the
-current maintainer scripts' offline activation setting; the watchdog itself
-restarts and proves the source process afterwards.
+Maintainer scripts no longer refuse a downgrade: a root operator's explicit
+`dpkg --install` of an older package is the latest request and proceeds. The
+Controller path stays anti-rollback: the signed helper arms rollback only for a
+candidate whose version is at least the exact captured source, so a
+Controller-driven install cannot downgrade. The watchdog restores only the exact
+captured source while the transaction is `rolling_back`. Source installation runs
+with the current maintainer scripts' offline activation setting; the watchdog
+itself restarts and proves the source process afterwards.
 
 The Controller issues the signed fixed `confirm-package-activation` operation
 only for the candidate that has met the contact/readiness gate. It binds the

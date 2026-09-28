@@ -1449,12 +1449,37 @@ def install_agent_routes(
                 status_code=422,
                 detail="recipe run observation time is outside the accepted window",
             )
+        # One stale, replayed, or no-longer-assigned run must not discard the
+        # evidence for every other run in the snapshot.  Each item is judged on
+        # its own; rejected items are skipped and the rest commit.  Helper
+        # signature, key, and nonce verification stays exact per item.
+        rejected: list[str] = []
+        accepted = 0
         try:
             authority = None
             by_run = {run.run_id: run for run in body.runs}
             with required.sessions.begin() as session:
+                included = set(by_run)
+                if included:
+                    current = set(
+                        session.scalars(
+                            select(RunNode.run_id)
+                            .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+                            .where(
+                                RunNode.node_id == identity.node_id,
+                                RecipeRun.state == "running",
+                            )
+                        )
+                    )
+                    rejected.extend(
+                        f"recipe run {run_id} observation is not assigned"
+                        for run_id in sorted(included - current)
+                    )
+                    included &= current
+                if by_run and not included:
+                    raise ValueError("; ".join(rejected[:4]))
                 assigned = prepare_exact_recipe_run_observation_nodes(
-                    session, identity.node_id, observed_at, set(by_run)
+                    session, identity.node_id, observed_at, included
                 )
                 agent_node = session.get(AgentNode, identity.node_id)
                 if agent_node is None:
@@ -1463,16 +1488,18 @@ def install_agent_routes(
                     run = session.get(RecipeRun, node.run_id)
                     assert run is not None
                     evidence = by_run.get(node.run_id)
-                    if evidence is None:
+                    if evidence is None or node.run_id not in included:
                         continue
                     evidence_observed_at = evidence.observed_at.astimezone(UTC)
                     if (
                         agent_node.observation_receipt_public_key
                         != evidence.observation_receipt_public_key
                     ):
-                        raise ValueError("recipe run observation receipt key is stale")
+                        rejected.append("recipe run observation receipt key is stale")
+                        continue
                     if evidence.run_generation != run.run_generation:
-                        raise ValueError("recipe run observation generation is stale")
+                        rejected.append("recipe run observation generation is stale")
+                        continue
                     if authority is None:
                         authority = host_runtime_service()
                     # Helper receipts sign whole Unix seconds. A fresh grant
@@ -1481,7 +1508,8 @@ def install_agent_routes(
                     if int(_now(node.updated_at).timestamp()) > int(
                         evidence_observed_at.timestamp()
                     ):
-                        raise ValueError("recipe run observation was replayed")
+                        rejected.append("recipe run observation was replayed")
+                        continue
                     try:
                         (
                             observed_identity,
@@ -1498,7 +1526,8 @@ def install_agent_routes(
                             helper_receipt=evidence.helper_receipt,
                         )
                     except RecipeRunObservationReplayError as error:
-                        raise ValueError(str(error)) from error
+                        rejected.append(str(error))
+                        continue
                     except HostHelperAuthorityError:
                         # An authenticated same-generation identity mismatch is
                         # rank failure, not permission to keep serving.
@@ -1511,7 +1540,9 @@ def install_agent_routes(
                         node.updated_at = max(
                             _now(node.updated_at).astimezone(UTC), evidence_observed_at
                         )
+                        accepted += 1
                         continue
+                    accepted += 1
                     # The grace period bounds the first authenticated receipt,
                     # not every later renewal's timestamp. Once this generation
                     # has a receipt, freshness checks govern continuing service.
@@ -1566,8 +1597,21 @@ def install_agent_routes(
                     ):
                         run.route_next_attempt_at = None
                         run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
+                if rejected and not accepted:
+                    # Nothing in this snapshot was usable; report the cause so
+                    # the agent's log names it.  No state changed.
+                    raise ValueError("; ".join(rejected[:4]))
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
+        if rejected:
+            logging.getLogger(__name__).warning(
+                "agent.recipe_run_observations.partial node_id=%s accepted=%d "
+                "rejected=%d first_reason=%s",
+                identity.node_id,
+                accepted,
+                len(rejected),
+                rejected[0],
+            )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @agent.post(

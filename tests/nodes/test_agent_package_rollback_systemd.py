@@ -429,20 +429,19 @@ def main() -> None:
             ).stdout
             == healthy_candidate_pid
         )
-        # Outside the watchdog unit the same signed prior DEB cannot bypass
-        # the current production downgrade guard, even if given the nonce.
-        forbidden = run(
+        # A root operator's explicit install of an older DEB is the latest
+        # request and is no longer refused by the maintainer scripts; the
+        # Controller path above stays anti-rollback in the signed helper.
+        operator_downgrade = run(
             "/usr/bin/dpkg",
             "--install",
             str(source["package"]),
             check=False,
-            env=dict(
-                os.environ,
-                SYSTEMD_OFFLINE="1",
-                VONK_FORGE_PACKAGE_ROLLBACK_NONCE=ack["attempt_nonce"],
-            ),
+            env=dict(os.environ, SYSTEMD_OFFLINE="1"),
         )
-        assert forbidden.returncode != 0 and sha(AGENT) == candidate["binary_sha256"]
+        assert operator_downgrade.returncode == 0, operator_downgrade.stderr
+        assert "installing requested downgrade" in operator_downgrade.stderr
+        assert sha(AGENT) == source["binary_sha256"]
 
         baseline()
         probe(operation(broken, deadline=45), success=False)
