@@ -75,7 +75,6 @@ OLD_IDENTITY = {
     "binary_digest": "f" * 64,
     "build_digest": "sha256:" + "f" * 64,
     "semantic_version": "0.1.0",
-    "observation_receipt_public_key": "d" * 64,
 }
 NEW_IDENTITY = {
     **OLD_IDENTITY,

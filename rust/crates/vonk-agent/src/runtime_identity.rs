@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::Read;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
 use rustix::fs::{Mode, OFlags};
@@ -12,8 +11,6 @@ pub use vonk_agent_protocol::generated::AgentRuntimeIdentity;
 use vonk_agent_protocol::generated::AgentRuntimeIdentityArchitecture;
 
 const MAX_AGENT_BYTES: u64 = 512 * 1024 * 1024;
-pub const OBSERVATION_RECEIPT_PUBLIC_KEY_PATH: &str =
-    "/etc/vonk-forge-agent/observation-receipt.pub";
 
 #[derive(Debug, Error)]
 pub enum RuntimeIdentityError {
@@ -21,8 +18,6 @@ pub enum RuntimeIdentityError {
     UnsafeExecutable,
     #[error("agent executable could not be read")]
     Io(#[from] std::io::Error),
-    #[error("observation receipt public key is unsafe")]
-    UnsafeObservationReceiptKey,
     #[error("agent runtime identity is invalid")]
     InvalidIdentity,
 }
@@ -46,7 +41,6 @@ pub struct PreparedRuntimeIdentity {
     pub build_digest: String,
     pub binary_digest: String,
     pub architecture: AgentRuntimeIdentityArchitecture,
-    observation_receipt_public_key: Option<[u8; 32]>,
 }
 
 impl PreparedRuntimeIdentity {
@@ -84,34 +78,16 @@ impl PreparedRuntimeIdentity {
             } else {
                 AgentRuntimeIdentityArchitecture::LinuxAmd64
             },
-            observation_receipt_public_key: None,
         })
     }
 
-    pub fn with_observation_receipt_public_key(
-        mut self,
-        path: &Path,
-    ) -> Result<Self, RuntimeIdentityError> {
-        self.observation_receipt_public_key = Some(load_observation_public_key(path)?);
-        Ok(self)
-    }
-
-    pub(crate) fn with_observation_receipt_public_key_bytes(mut self, key: [u8; 32]) -> Self {
-        self.observation_receipt_public_key = Some(key);
-        self
-    }
-
     pub fn mark_self_test_passed(self) -> Result<AgentRuntimeIdentity, RuntimeIdentityError> {
-        let observation_receipt_public_key = self
-            .observation_receipt_public_key
-            .ok_or(RuntimeIdentityError::UnsafeObservationReceiptKey)?;
         let identity = AgentRuntimeIdentity {
             semantic_version: self.semantic_version,
             build_digest: self.build_digest,
             binary_digest: self.binary_digest,
             architecture: self.architecture,
             package_activation: None,
-            observation_receipt_public_key: hex::encode(observation_receipt_public_key),
         };
         let document = canonical_generated_json(&identity)
             .map_err(|_| RuntimeIdentityError::InvalidIdentity)?;
@@ -119,50 +95,20 @@ impl PreparedRuntimeIdentity {
     }
 }
 
-pub(crate) fn load_observation_public_key(path: &Path) -> Result<[u8; 32], RuntimeIdentityError> {
-    let descriptor = rustix::fs::open(
-        path,
-        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-        Mode::empty(),
-    )
-    .map_err(std::io::Error::from)?;
-    let mut file = File::from(descriptor);
-    let metadata = file.metadata()?;
-    if !metadata.is_file()
-        || metadata.nlink() != 1
-        || metadata.uid() != 0
-        || metadata.permissions().mode() & 0o777 != 0o640
-        || metadata.len() != 32
-    {
-        return Err(RuntimeIdentityError::UnsafeObservationReceiptKey);
-    }
-    let mut raw = Vec::with_capacity(32);
-    file.by_ref().take(33).read_to_end(&mut raw)?;
-    if raw.len() != 32 {
-        return Err(RuntimeIdentityError::UnsafeObservationReceiptKey);
-    }
-    raw.try_into()
-        .map_err(|_| RuntimeIdentityError::UnsafeObservationReceiptKey)
-}
-
 #[cfg(test)]
 mod tests {
     use super::PreparedRuntimeIdentity;
 
     #[test]
-    fn prepared_identity_becomes_wire_identity_only_after_key_and_self_test() {
+    fn prepared_identity_becomes_wire_identity_after_self_test() {
         let directory = tempfile::tempdir().unwrap();
         let executable = directory.path().join("vonk-agent");
         std::fs::write(&executable, b"direct-agent-binary").unwrap();
 
-        let prepared = PreparedRuntimeIdentity::from_executable(&executable).unwrap();
-        assert!(prepared.clone().mark_self_test_passed().is_err());
-
-        let complete = prepared
-            .with_observation_receipt_public_key_bytes([9; 32])
+        let complete = PreparedRuntimeIdentity::from_executable(&executable)
+            .unwrap()
             .mark_self_test_passed()
             .unwrap();
-        assert_eq!(complete.observation_receipt_public_key, "09".repeat(32));
         assert!(complete.package_activation.is_none());
     }
 }

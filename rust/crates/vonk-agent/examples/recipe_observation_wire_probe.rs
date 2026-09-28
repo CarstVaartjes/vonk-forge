@@ -46,7 +46,6 @@ struct PersistBindingInput {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SerializeInput {
-    node_id: String,
     observed_at: DateTime<Utc>,
     runs: Vec<ExactRecipeRunObservation>,
 }
@@ -68,12 +67,7 @@ fn persist_binding(
         installation.join("recipe-content.sha256"),
         input.request.recipe_content_sha256(),
     )?;
-    let identity = RecipeRunStartIdentity {
-        mapping_id: input.request.mapping_id,
-        recipe_content_sha256: input.request.recipe_content_sha256().to_owned(),
-        recipe_revision_id: input.request.recipe_revision_id,
-        run_generation,
-    };
+    let identity = RecipeRunStartIdentity { run_generation };
     let runner = NoProcess;
     let runtime = OciRuntime {
         runner: &runner,
@@ -104,9 +98,15 @@ fn persist_binding(
     let binding = runtime
         .recipe_run_inspection_plans()?
         .into_iter()
-        .find(|plan| plan.binding.run_id == input.request.run_id)
-        .map(|plan| plan.binding)
-        .ok_or_else(|| "persisted observation binding was not planned".to_owned())?;
+        .find(|plan| plan.run_id == input.request.run_id)
+        .map(|plan| {
+            serde_json::json!({
+                "run_id": plan.run_id,
+                "run_generation": plan.run_generation,
+                "endpoint_owner": plan.endpoint_address.is_some(),
+            })
+        })
+        .ok_or_else(|| "persisted run was not planned for observation".to_owned())?;
     Ok(serde_json::json!({"binding": binding, "evidence": evidence}))
 }
 
@@ -126,16 +126,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             "serialize" => {
                 let input: SerializeInput = serde_json::from_str(&line)?;
-                let envelope = build_exact_recipe_run_observations(
-                    &input.node_id,
-                    input.observed_at,
-                    &input.runs,
-                )?;
+                let envelope = build_exact_recipe_run_observations(input.observed_at, &input.runs)?;
                 println!("{}", serde_json::to_string(&envelope)?);
             }
             "parse" => {
                 let observation = parse_strict::<ExactRecipeRunObservation>(line.as_bytes())?;
-                observation.validate()?;
                 println!("{}", serde_json::to_string(&observation)?);
             }
             _ => return Err("unknown recipe observation probe mode".into()),

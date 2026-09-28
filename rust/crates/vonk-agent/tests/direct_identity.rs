@@ -34,7 +34,7 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
         identity.build_digest,
         format!("sha256:{}", identity.binary_digest)
     );
-    assert!(identity.mark_self_test_passed().is_err());
+    identity.mark_self_test_passed().unwrap();
 }
 
 #[test]

@@ -5,7 +5,6 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -94,7 +93,6 @@ fn main() {
         fence,
         arguments: arguments.clone(),
         job_plan: None,
-        observation: None,
         installation_id: None,
         reconciliation_identity: None,
         run_generation: start_plan.as_ref().map(|plan| plan.run_generation),
@@ -128,7 +126,6 @@ fn main() {
             },
             fence,
             request_sha256: request_sha.clone(),
-            observation_identity_sha256: None,
             installation_id: None,
             reconciliation_identity: None,
             start_plan_sha256: start_plan
@@ -191,31 +188,9 @@ fn setup_files() {
         "0000000000000000000000000000000000000000000000000000000000000000",
     )
     .unwrap();
-    let observation = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
-    let observation_pair = Ed25519KeyPair::from_pkcs8(observation.as_ref()).unwrap();
-    fs::write(
-        "/var/lib/vonk-forge/helper/observation-receipt.pk8",
-        observation.as_ref(),
-    )
-    .unwrap();
-    fs::write(
-        "/etc/vonk-forge-agent/observation-receipt.pub",
-        observation_pair.public_key().as_ref(),
-    )
-    .unwrap();
     fs::write(
         "/etc/vonk-forge-agent/agent.toml",
         "node_id = \"spk_0123456789abcdef0123456789abcdef\"\n",
-    )
-    .unwrap();
-    fs::set_permissions(
-        "/var/lib/vonk-forge/helper/observation-receipt.pk8",
-        fs::Permissions::from_mode(0o600),
-    )
-    .unwrap();
-    fs::set_permissions(
-        "/etc/vonk-forge-agent/observation-receipt.pub",
-        fs::Permissions::from_mode(0o640),
     )
     .unwrap();
     fs::set_permissions(

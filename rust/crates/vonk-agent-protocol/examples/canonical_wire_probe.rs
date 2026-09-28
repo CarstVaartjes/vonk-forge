@@ -33,9 +33,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "RecipeRunObservationsWire" => {
             let value: vonk_agent_protocol::RecipeRunObservationsWire =
                 serde_json::from_slice(&input)?;
-            for run in &value.runs {
-                run.validate()?;
-            }
             canonical_generated_json(&value)?
         }
         "RecipeStartPayload" => {

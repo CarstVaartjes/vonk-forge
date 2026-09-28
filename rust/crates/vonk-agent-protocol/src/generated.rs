@@ -526,7 +526,6 @@ pub struct AgentRuntimeIdentity {
     pub architecture: AgentRuntimeIdentityArchitecture,
     pub binary_digest: ::std::string::String,
     pub build_digest: ::std::string::String,
-    pub observation_receipt_public_key: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub package_activation: ::std::option::Option<PackageActivationReceipt>,
     pub semantic_version: ::std::string::String,
@@ -1091,7 +1090,6 @@ pub struct EnrollmentEvidence {
     pub hardware_fingerprint: ::std::string::String,
     pub host_key_fingerprint: ::std::string::String,
     pub node_id: ::std::string::String,
-    pub observation_receipt_public_key: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1241,8 +1239,6 @@ pub struct ExecuteContainerRuntimeRequestOperation {
     pub fence: ::uuid::Uuid,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub installation_id: ::std::option::Option<::uuid::Uuid>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub observation_identity_sha256: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
@@ -1473,9 +1469,9 @@ pub struct HostHelperResponse {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub exit_code: ::std::option::Option<u32>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub observation_receipt: ::std::option::Option<SignedRecipeRunObservationReceipt>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub process_running: ::std::option::Option<bool>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub request_id: ::std::option::Option<::uuid::Uuid>,
     pub schema_version: u8,
@@ -1683,8 +1679,6 @@ pub struct HostRuntimeRequest {
     pub installation_id: ::std::option::Option<::uuid::Uuid>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub job_plan: ::std::option::Option<RecipeJobRunRequest>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -2914,200 +2908,19 @@ pub struct RecipeReconciliationIdentity {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
-pub struct RecipeRunInspectionBinding {
-    pub artifact_set_digest: ::std::string::String,
-    pub image_digest: ::std::string::String,
-    pub installation_id: ::uuid::Uuid,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub local_address: ::std::option::Option<::std::net::IpAddr>,
-    pub mapping_generation: u64,
-    pub mapping_id: ::uuid::Uuid,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub master_address: ::std::option::Option<::std::net::IpAddr>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub master_port: ::std::option::Option<u16>,
-    pub model_identity: ::std::string::String,
-    pub port: u16,
-    pub rank: u32,
-    pub recipe_content_sha256: ::std::string::String,
-    pub recipe_revision_id: ::uuid::Uuid,
-    pub role: ::std::string::String,
-    pub run_generation: u32,
-    pub run_id: ::uuid::Uuid,
-    pub runtime_arguments_sha256: ::std::string::String,
-    pub world_size: u32,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct RecipeRunObservationGrantRequest {
-    pub artifact_set_digest: ::std::string::String,
-    pub attempt: u32,
-    pub expires_in_seconds: u8,
-    pub fence: ::uuid::Uuid,
-    pub image_digest: ::std::string::String,
-    pub installation_id: ::uuid::Uuid,
-    pub job_id: ::uuid::Uuid,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub local_address: ::std::option::Option<::std::net::IpAddr>,
-    pub mapping_generation: u64,
-    pub mapping_id: ::uuid::Uuid,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub master_address: ::std::option::Option<::std::net::IpAddr>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub master_port: ::std::option::Option<u16>,
-    pub model_identity: ::std::string::String,
-    pub node_id: ::std::string::String,
-    pub operation_id: ::uuid::Uuid,
-    pub port: u16,
-    pub rank: u32,
-    pub recipe_content_sha256: ::std::string::String,
-    pub recipe_revision_id: ::uuid::Uuid,
-    pub request_sha256: ::std::string::String,
-    pub role: ::std::string::String,
-    pub run_generation: u32,
-    pub run_id: ::uuid::Uuid,
-    pub runtime_arguments_sha256: ::std::string::String,
-    pub schema_version: u8,
-    pub world_size: u32,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct RecipeRunObservationGrantWire {
-    pub grant: SignedHostHelperGrant,
-    pub observation_identity_sha256: ::std::string::String,
-    pub schema_version: u8,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct RecipeRunObservationIdentity {
-    pub artifact_set_digest: ::std::string::String,
-    pub image_digest: ::std::string::String,
-    pub installation_id: ::uuid::Uuid,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub local_address: ::std::option::Option<::std::net::IpAddr>,
-    pub mapping_generation: u64,
-    pub mapping_id: ::uuid::Uuid,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub master_address: ::std::option::Option<::std::net::IpAddr>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub master_port: ::std::option::Option<u16>,
-    pub model_identity: ::std::string::String,
-    pub node_id: ::std::string::String,
-    pub port: u16,
-    pub rank: u32,
-    pub recipe_content_sha256: ::std::string::String,
-    pub recipe_revision_id: ::uuid::Uuid,
-    pub role: ::std::string::String,
-    pub run_generation: u32,
-    pub run_id: ::uuid::Uuid,
-    pub runtime_arguments_sha256: ::std::string::String,
-    pub schema_version: u8,
-    pub world_size: u32,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct RecipeRunObservationReceiptClaims {
-    pub authority: ::std::string::String,
-    pub node_id: ::std::string::String,
-    pub observation_identity_sha256: ::std::string::String,
-    pub observed_at: i64,
-    pub outcome: RecipeRunObservationReceiptClaimsOutcome,
+pub struct RecipeRunInspectionRequest {
     pub request_id: ::uuid::Uuid,
     pub request_sha256: ::std::string::String,
-    pub schema_version: u8,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum RecipeRunObservationReceiptClaimsOutcome {
-    #[serde(rename = "running")]
-    Running,
-    #[serde(rename = "not-running")]
-    NotRunning,
-}
-impl ::std::fmt::Display for RecipeRunObservationReceiptClaimsOutcome {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Running => f.write_str("running"),
-            Self::NotRunning => f.write_str("not-running"),
-        }
-    }
-}
-impl ::std::str::FromStr for RecipeRunObservationReceiptClaimsOutcome {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "running" => Ok(Self::Running),
-            "not-running" => Ok(Self::NotRunning),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for RecipeRunObservationReceiptClaimsOutcome {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for RecipeRunObservationReceiptClaimsOutcome {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeRunObservationWire {
-    pub artifact_set_digest: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub endpoint_ready: ::std::option::Option<bool>,
-    pub grant: SignedHostHelperGrant,
-    pub helper_receipt: SignedRecipeRunObservationReceipt,
-    pub image_digest: ::std::string::String,
-    pub installation_id: ::uuid::Uuid,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub local_address: ::std::option::Option<::std::net::IpAddr>,
-    pub mapping_generation: u64,
-    pub mapping_id: ::uuid::Uuid,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub master_address: ::std::option::Option<::std::net::IpAddr>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub master_port: ::std::option::Option<u16>,
-    pub model_identity: ::std::string::String,
-    pub node_id: ::std::string::String,
-    pub observation_identity_sha256: ::std::string::String,
-    pub observation_receipt_public_key: ::std::string::String,
-    #[serde(
-        serialize_with = "crate::wire_datetime::serialize",
-        deserialize_with = "crate::wire_datetime::deserialize"
-    )]
-    pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
-    pub port: u16,
-    pub rank: u32,
-    pub recipe_content_sha256: ::std::string::String,
-    pub recipe_revision_id: ::uuid::Uuid,
-    pub role: ::std::string::String,
+    pub process_running: bool,
     pub run_generation: u32,
     pub run_id: ::uuid::Uuid,
-    pub runtime_arguments_sha256: ::std::string::String,
-    pub schema_version: u8,
-    pub world_size: u32,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -3119,7 +2932,6 @@ pub struct RecipeRunObservationsWire {
     )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
     pub runs: ::std::vec::Vec<RecipeRunObservationWire>,
-    pub schema_version: u8,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -3387,14 +3199,6 @@ pub struct RuntimePreflightResult {
 #[derive(Eq)]
 pub struct SignedHostHelperGrant {
     pub claims: HostHelperGrantClaims,
-    pub schema_version: u8,
-    pub signature: HostHelperSignature,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct SignedRecipeRunObservationReceipt {
-    pub claims: RecipeRunObservationReceiptClaims,
     pub schema_version: u8,
     pub signature: HostHelperSignature,
 }
@@ -4067,7 +3871,6 @@ impl<'de> ::serde::Deserialize<'de> for AgentRuntimeIdentity {
             pub architecture: AgentRuntimeIdentityArchitecture,
             pub binary_digest: ::std::string::String,
             pub build_digest: ::std::string::String,
-            pub observation_receipt_public_key: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub package_activation: ::std::option::Option<PackageActivationReceipt>,
             pub semantic_version: ::std::string::String,
@@ -4078,7 +3881,6 @@ impl<'de> ::serde::Deserialize<'de> for AgentRuntimeIdentity {
             architecture: raw.architecture,
             binary_digest: raw.binary_digest,
             build_digest: raw.build_digest,
-            observation_receipt_public_key: raw.observation_receipt_public_key,
             package_activation: raw.package_activation,
             semantic_version: raw.semantic_version,
         })
@@ -4932,7 +4734,6 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentEvidence {
             pub hardware_fingerprint: ::std::string::String,
             pub host_key_fingerprint: ::std::string::String,
             pub node_id: ::std::string::String,
-            pub observation_receipt_public_key: ::std::string::String,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -4943,7 +4744,6 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentEvidence {
             hardware_fingerprint: raw.hardware_fingerprint,
             host_key_fingerprint: raw.host_key_fingerprint,
             node_id: raw.node_id,
-            observation_receipt_public_key: raw.observation_receipt_public_key,
         })
     }
 }
@@ -5073,8 +4873,6 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub installation_id: ::std::option::Option<::uuid::Uuid>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub observation_identity_sha256: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -5098,7 +4896,6 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             action: raw.action,
             fence: raw.fence,
             installation_id: raw.installation_id,
-            observation_identity_sha256: raw.observation_identity_sha256,
             reconciliation_identity: raw.reconciliation_identity,
             request_sha256: raw.request_sha256,
             run_generation: raw.run_generation,
@@ -5335,9 +5132,9 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub exit_code: ::std::option::Option<u32>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub observation_receipt: ::std::option::Option<SignedRecipeRunObservationReceipt>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub process_running: ::std::option::Option<bool>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub request_id: ::std::option::Option<::uuid::Uuid>,
             pub schema_version: u8,
@@ -5349,8 +5146,8 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             diagnostic: raw.diagnostic,
             error_code: raw.error_code,
             exit_code: raw.exit_code,
-            observation_receipt: raw.observation_receipt,
             process_logs: raw.process_logs,
+            process_running: raw.process_running,
             request_id: raw.request_id,
             schema_version: raw.schema_version,
             status: raw.status,
@@ -5527,8 +5324,6 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub job_plan: ::std::option::Option<RecipeJobRunRequest>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub observation: ::std::option::Option<RecipeRunInspectionBinding>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub run_generation: ::std::option::Option<u32>,
@@ -5545,7 +5340,6 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             fence: raw.fence,
             installation_id: raw.installation_id,
             job_plan: raw.job_plan,
-            observation: raw.observation,
             reconciliation_identity: raw.reconciliation_identity,
             run_generation: raw.run_generation,
             start_plan: raw.start_plan,
@@ -7230,273 +7024,24 @@ impl<'de> ::serde::Deserialize<'de> for RecipeReconciliationIdentity {
         })
     }
 }
-impl<'de> ::serde::Deserialize<'de> for RecipeRunInspectionBinding {
+impl<'de> ::serde::Deserialize<'de> for RecipeRunInspectionRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeRunInspectionBinding", &mut value)
+        crate::wire_schema::validate_and_materialize("RecipeRunInspectionRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub artifact_set_digest: ::std::string::String,
-            pub image_digest: ::std::string::String,
-            pub installation_id: ::uuid::Uuid,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub local_address: ::std::option::Option<::std::net::IpAddr>,
-            pub mapping_generation: u64,
-            pub mapping_id: ::uuid::Uuid,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub master_address: ::std::option::Option<::std::net::IpAddr>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub master_port: ::std::option::Option<u16>,
-            pub model_identity: ::std::string::String,
-            pub port: u16,
-            pub rank: u32,
-            pub recipe_content_sha256: ::std::string::String,
-            pub recipe_revision_id: ::uuid::Uuid,
-            pub role: ::std::string::String,
-            pub run_generation: u32,
-            pub run_id: ::uuid::Uuid,
-            pub runtime_arguments_sha256: ::std::string::String,
-            pub world_size: u32,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            artifact_set_digest: raw.artifact_set_digest,
-            image_digest: raw.image_digest,
-            installation_id: raw.installation_id,
-            local_address: raw.local_address,
-            mapping_generation: raw.mapping_generation,
-            mapping_id: raw.mapping_id,
-            master_address: raw.master_address,
-            master_port: raw.master_port,
-            model_identity: raw.model_identity,
-            port: raw.port,
-            rank: raw.rank,
-            recipe_content_sha256: raw.recipe_content_sha256,
-            recipe_revision_id: raw.recipe_revision_id,
-            role: raw.role,
-            run_generation: raw.run_generation,
-            run_id: raw.run_id,
-            runtime_arguments_sha256: raw.runtime_arguments_sha256,
-            world_size: raw.world_size,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationGrantRequest {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize(
-            "RecipeRunObservationGrantRequest",
-            &mut value,
-        )
-        .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub artifact_set_digest: ::std::string::String,
-            pub attempt: u32,
-            pub expires_in_seconds: u8,
-            pub fence: ::uuid::Uuid,
-            pub image_digest: ::std::string::String,
-            pub installation_id: ::uuid::Uuid,
-            pub job_id: ::uuid::Uuid,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub local_address: ::std::option::Option<::std::net::IpAddr>,
-            pub mapping_generation: u64,
-            pub mapping_id: ::uuid::Uuid,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub master_address: ::std::option::Option<::std::net::IpAddr>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub master_port: ::std::option::Option<u16>,
-            pub model_identity: ::std::string::String,
-            pub node_id: ::std::string::String,
-            pub operation_id: ::uuid::Uuid,
-            pub port: u16,
-            pub rank: u32,
-            pub recipe_content_sha256: ::std::string::String,
-            pub recipe_revision_id: ::uuid::Uuid,
-            pub request_sha256: ::std::string::String,
-            pub role: ::std::string::String,
-            pub run_generation: u32,
-            pub run_id: ::uuid::Uuid,
-            pub runtime_arguments_sha256: ::std::string::String,
-            pub schema_version: u8,
-            pub world_size: u32,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            artifact_set_digest: raw.artifact_set_digest,
-            attempt: raw.attempt,
-            expires_in_seconds: raw.expires_in_seconds,
-            fence: raw.fence,
-            image_digest: raw.image_digest,
-            installation_id: raw.installation_id,
-            job_id: raw.job_id,
-            local_address: raw.local_address,
-            mapping_generation: raw.mapping_generation,
-            mapping_id: raw.mapping_id,
-            master_address: raw.master_address,
-            master_port: raw.master_port,
-            model_identity: raw.model_identity,
-            node_id: raw.node_id,
-            operation_id: raw.operation_id,
-            port: raw.port,
-            rank: raw.rank,
-            recipe_content_sha256: raw.recipe_content_sha256,
-            recipe_revision_id: raw.recipe_revision_id,
-            request_sha256: raw.request_sha256,
-            role: raw.role,
-            run_generation: raw.run_generation,
-            run_id: raw.run_id,
-            runtime_arguments_sha256: raw.runtime_arguments_sha256,
-            schema_version: raw.schema_version,
-            world_size: raw.world_size,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationGrantWire {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeRunObservationGrantWire", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub grant: SignedHostHelperGrant,
-            pub observation_identity_sha256: ::std::string::String,
-            pub schema_version: u8,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            grant: raw.grant,
-            observation_identity_sha256: raw.observation_identity_sha256,
-            schema_version: raw.schema_version,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationIdentity {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeRunObservationIdentity", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub artifact_set_digest: ::std::string::String,
-            pub image_digest: ::std::string::String,
-            pub installation_id: ::uuid::Uuid,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub local_address: ::std::option::Option<::std::net::IpAddr>,
-            pub mapping_generation: u64,
-            pub mapping_id: ::uuid::Uuid,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub master_address: ::std::option::Option<::std::net::IpAddr>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub master_port: ::std::option::Option<u16>,
-            pub model_identity: ::std::string::String,
-            pub node_id: ::std::string::String,
-            pub port: u16,
-            pub rank: u32,
-            pub recipe_content_sha256: ::std::string::String,
-            pub recipe_revision_id: ::uuid::Uuid,
-            pub role: ::std::string::String,
-            pub run_generation: u32,
-            pub run_id: ::uuid::Uuid,
-            pub runtime_arguments_sha256: ::std::string::String,
-            pub schema_version: u8,
-            pub world_size: u32,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            artifact_set_digest: raw.artifact_set_digest,
-            image_digest: raw.image_digest,
-            installation_id: raw.installation_id,
-            local_address: raw.local_address,
-            mapping_generation: raw.mapping_generation,
-            mapping_id: raw.mapping_id,
-            master_address: raw.master_address,
-            master_port: raw.master_port,
-            model_identity: raw.model_identity,
-            node_id: raw.node_id,
-            port: raw.port,
-            rank: raw.rank,
-            recipe_content_sha256: raw.recipe_content_sha256,
-            recipe_revision_id: raw.recipe_revision_id,
-            role: raw.role,
-            run_generation: raw.run_generation,
-            run_id: raw.run_id,
-            runtime_arguments_sha256: raw.runtime_arguments_sha256,
-            schema_version: raw.schema_version,
-            world_size: raw.world_size,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationReceiptClaims {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize(
-            "RecipeRunObservationReceiptClaims",
-            &mut value,
-        )
-        .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub authority: ::std::string::String,
-            pub node_id: ::std::string::String,
-            pub observation_identity_sha256: ::std::string::String,
-            pub observed_at: i64,
-            pub outcome: RecipeRunObservationReceiptClaimsOutcome,
             pub request_id: ::uuid::Uuid,
             pub request_sha256: ::std::string::String,
-            pub schema_version: u8,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            authority: raw.authority,
-            node_id: raw.node_id,
-            observation_identity_sha256: raw.observation_identity_sha256,
-            observed_at: raw.observed_at,
-            outcome: raw.outcome,
             request_id: raw.request_id,
             request_sha256: raw.request_sha256,
-            schema_version: raw.schema_version,
         })
-    }
-}
-impl RecipeRunObservationReceiptClaimsOutcome {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Running => "running",
-            Self::NotRunning => "not-running",
-        }
-    }
-}
-impl ::std::ops::Deref for RecipeRunObservationReceiptClaimsOutcome {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for RecipeRunObservationReceiptClaimsOutcome {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for RecipeRunObservationReceiptClaimsOutcome {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
@@ -7508,70 +7053,19 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub artifact_set_digest: ::std::string::String,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub endpoint_ready: ::std::option::Option<bool>,
-            pub grant: SignedHostHelperGrant,
-            pub helper_receipt: SignedRecipeRunObservationReceipt,
-            pub image_digest: ::std::string::String,
-            pub installation_id: ::uuid::Uuid,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub local_address: ::std::option::Option<::std::net::IpAddr>,
-            pub mapping_generation: u64,
-            pub mapping_id: ::uuid::Uuid,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub master_address: ::std::option::Option<::std::net::IpAddr>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub master_port: ::std::option::Option<u16>,
-            pub model_identity: ::std::string::String,
-            pub node_id: ::std::string::String,
-            pub observation_identity_sha256: ::std::string::String,
-            pub observation_receipt_public_key: ::std::string::String,
-            #[serde(
-                serialize_with = "crate::wire_datetime::serialize",
-                deserialize_with = "crate::wire_datetime::deserialize"
-            )]
-            pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
-            pub port: u16,
-            pub rank: u32,
-            pub recipe_content_sha256: ::std::string::String,
-            pub recipe_revision_id: ::uuid::Uuid,
-            pub role: ::std::string::String,
+            pub process_running: bool,
             pub run_generation: u32,
             pub run_id: ::uuid::Uuid,
-            pub runtime_arguments_sha256: ::std::string::String,
-            pub schema_version: u8,
-            pub world_size: u32,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            artifact_set_digest: raw.artifact_set_digest,
             endpoint_ready: raw.endpoint_ready,
-            grant: raw.grant,
-            helper_receipt: raw.helper_receipt,
-            image_digest: raw.image_digest,
-            installation_id: raw.installation_id,
-            local_address: raw.local_address,
-            mapping_generation: raw.mapping_generation,
-            mapping_id: raw.mapping_id,
-            master_address: raw.master_address,
-            master_port: raw.master_port,
-            model_identity: raw.model_identity,
-            node_id: raw.node_id,
-            observation_identity_sha256: raw.observation_identity_sha256,
-            observation_receipt_public_key: raw.observation_receipt_public_key,
-            observed_at: raw.observed_at,
-            port: raw.port,
-            rank: raw.rank,
-            recipe_content_sha256: raw.recipe_content_sha256,
-            recipe_revision_id: raw.recipe_revision_id,
-            role: raw.role,
+            process_running: raw.process_running,
             run_generation: raw.run_generation,
             run_id: raw.run_id,
-            runtime_arguments_sha256: raw.runtime_arguments_sha256,
-            schema_version: raw.schema_version,
-            world_size: raw.world_size,
         })
     }
 }
@@ -7590,14 +7084,12 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationsWire {
             )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
             pub runs: ::std::vec::Vec<RecipeRunObservationWire>,
-            pub schema_version: u8,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             observed_at: raw.observed_at,
             runs: raw.runs,
-            schema_version: raw.schema_version,
         })
     }
 }
@@ -7975,31 +7467,6 @@ impl<'de> ::serde::Deserialize<'de> for SignedHostHelperGrant {
         })
     }
 }
-impl<'de> ::serde::Deserialize<'de> for SignedRecipeRunObservationReceipt {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize(
-            "SignedRecipeRunObservationReceipt",
-            &mut value,
-        )
-        .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub claims: RecipeRunObservationReceiptClaims,
-            pub schema_version: u8,
-            pub signature: HostHelperSignature,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            claims: raw.claims,
-            schema_version: raw.schema_version,
-            signature: raw.signature,
-        })
-    }
-}
 impl<'de> ::serde::Deserialize<'de> for SourceBundleDigestManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -8217,130 +7684,6 @@ impl From<&RecipeReconcilePayload> for RecipeReconciliationIdentity {
         Self {
             installation_id: value.installation_id,
             plan_digest: value.plan_digest.clone(),
-        }
-    }
-}
-impl From<&RecipeRunObservationGrantRequest> for RecipeRunObservationIdentity {
-    fn from(value: &RecipeRunObservationGrantRequest) -> Self {
-        Self {
-            artifact_set_digest: value.artifact_set_digest.clone(),
-            image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id,
-            local_address: value.local_address,
-            mapping_generation: value.mapping_generation,
-            mapping_id: value.mapping_id,
-            master_address: value.master_address,
-            master_port: value.master_port,
-            model_identity: value.model_identity.clone(),
-            node_id: value.node_id.clone(),
-            port: value.port,
-            rank: value.rank,
-            recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id,
-            role: value.role.clone(),
-            run_generation: value.run_generation,
-            run_id: value.run_id,
-            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            schema_version: value.schema_version,
-            world_size: value.world_size,
-        }
-    }
-}
-impl From<&RecipeRunObservationGrantRequest> for RecipeRunInspectionBinding {
-    fn from(value: &RecipeRunObservationGrantRequest) -> Self {
-        Self {
-            artifact_set_digest: value.artifact_set_digest.clone(),
-            image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id,
-            local_address: value.local_address,
-            mapping_generation: value.mapping_generation,
-            mapping_id: value.mapping_id,
-            master_address: value.master_address,
-            master_port: value.master_port,
-            model_identity: value.model_identity.clone(),
-            port: value.port,
-            rank: value.rank,
-            recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id,
-            role: value.role.clone(),
-            run_generation: value.run_generation,
-            run_id: value.run_id,
-            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            world_size: value.world_size,
-        }
-    }
-}
-impl From<&RecipeRunObservationIdentity> for RecipeRunInspectionBinding {
-    fn from(value: &RecipeRunObservationIdentity) -> Self {
-        Self {
-            artifact_set_digest: value.artifact_set_digest.clone(),
-            image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id,
-            local_address: value.local_address,
-            mapping_generation: value.mapping_generation,
-            mapping_id: value.mapping_id,
-            master_address: value.master_address,
-            master_port: value.master_port,
-            model_identity: value.model_identity.clone(),
-            port: value.port,
-            rank: value.rank,
-            recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id,
-            role: value.role.clone(),
-            run_generation: value.run_generation,
-            run_id: value.run_id,
-            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            world_size: value.world_size,
-        }
-    }
-}
-impl From<&RecipeRunObservationWire> for RecipeRunObservationIdentity {
-    fn from(value: &RecipeRunObservationWire) -> Self {
-        Self {
-            artifact_set_digest: value.artifact_set_digest.clone(),
-            image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id,
-            local_address: value.local_address,
-            mapping_generation: value.mapping_generation,
-            mapping_id: value.mapping_id,
-            master_address: value.master_address,
-            master_port: value.master_port,
-            model_identity: value.model_identity.clone(),
-            node_id: value.node_id.clone(),
-            port: value.port,
-            rank: value.rank,
-            recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id,
-            role: value.role.clone(),
-            run_generation: value.run_generation,
-            run_id: value.run_id,
-            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            schema_version: value.schema_version,
-            world_size: value.world_size,
-        }
-    }
-}
-impl From<&RecipeRunObservationWire> for RecipeRunInspectionBinding {
-    fn from(value: &RecipeRunObservationWire) -> Self {
-        Self {
-            artifact_set_digest: value.artifact_set_digest.clone(),
-            image_digest: value.image_digest.clone(),
-            installation_id: value.installation_id,
-            local_address: value.local_address,
-            mapping_generation: value.mapping_generation,
-            mapping_id: value.mapping_id,
-            master_address: value.master_address,
-            master_port: value.master_port,
-            model_identity: value.model_identity.clone(),
-            port: value.port,
-            rank: value.rank,
-            recipe_content_sha256: value.recipe_content_sha256.clone(),
-            recipe_revision_id: value.recipe_revision_id,
-            role: value.role.clone(),
-            run_generation: value.run_generation,
-            run_id: value.run_id,
-            runtime_arguments_sha256: value.runtime_arguments_sha256.clone(),
-            world_size: value.world_size,
         }
     }
 }

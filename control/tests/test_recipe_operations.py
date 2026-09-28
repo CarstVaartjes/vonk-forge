@@ -12,7 +12,6 @@ from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
@@ -29,15 +28,12 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     RecipeInstallPayload,
-    RecipeRunObservationReceiptClaims,
     RecipeStartPayload,
     RecipeStopPayload,
-    SignedRecipeRunObservationReceipt,
     canonical_message,
     host_helper_grant_signing_bytes,
-    recipe_run_observation_receipt_signing_bytes,
 )
-from vonk_agent_protocol.host_helper import HostHelperSignature, HostRuntimeRequest
+from vonk_agent_protocol.host_helper import HostRuntimeRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import _digest
@@ -210,7 +206,6 @@ class ConcurrentPublisher(AtomicRecipeRoutePublisher):
 
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
-RECEIPT_SIGNER = ed25519.Ed25519PrivateKey.from_private_bytes(b"r" * 32)
 
 
 def _required[T](value: T | None) -> T:
@@ -340,38 +335,6 @@ class _CanonicalModelCache:
         )
 
 
-def signed_observation_receipt(
-    grant,
-    observation_identity_sha256: str,
-    *,
-    node_id: str,
-    observed_at: datetime,
-    outcome: Literal["running", "not-running"] = "running",
-) -> SignedRecipeRunObservationReceipt:
-    claims = RecipeRunObservationReceiptClaims(
-        schema_version=1,
-        authority="vonk.recipe-run-observation-helper",
-        node_id=node_id,
-        request_id=grant.claims.request_id,
-        request_sha256=str(grant.claims.operation.request_sha256),
-        observation_identity_sha256=observation_identity_sha256,
-        outcome=outcome,
-        observed_at=int(observed_at.timestamp()),
-    )
-    public_key = RECEIPT_SIGNER.public_key().public_bytes_raw()
-    return SignedRecipeRunObservationReceipt(
-        schema_version=1,
-        claims=claims,
-        signature=HostHelperSignature(
-            algorithm="ed25519",
-            key_id=hashlib.sha256(public_key).hexdigest(),
-            value=RECEIPT_SIGNER.sign(
-                recipe_run_observation_receipt_signing_bytes(claims)
-            ).hex(),
-        ),
-    )
-
-
 def _placement(payload: object) -> dict[str, object]:
     """The compiled placement a Start/Stop/job payload carries."""
 
@@ -422,11 +385,6 @@ def setup_services(
                     node_id=node_id,
                     state="active",
                     architecture="linux-arm64",
-                    observation_receipt_public_key=(
-                        RECEIPT_SIGNER.public_key().public_bytes_raw().hex()
-                        if nodes > 1
-                        else None
-                    ),
                 )
             )
             session.flush()
@@ -454,7 +412,6 @@ def setup_services(
             "fabric.connected.mbps.1000",
             "recipe.start.two-phase.v1",
             "recipe.run.inspect.exact.v1",
-            "recipe.run.inspect.receipt.v1",
         )
         if nodes > 1
         else ()
@@ -801,9 +758,8 @@ def mark_current_exact_observations(
             select(RunNode).where(RunNode.run_id == run_id).order_by(RunNode.rank)
         ):
             node.observed_run_generation = run.run_generation
-            node.observation_receipt_sha256 = hashlib.sha256(
-                f"{run_id}:{run.run_generation}:{node.node_id}".encode()
-            ).hexdigest()
+            node.observation_process_running = True
+            node.observation_observed_at = observed_at
             node.observation_endpoint_ready = (
                 True if node.role == "entrypoint" else None
             )
@@ -820,15 +776,10 @@ def _issue_exact_stop_grant(
 ):
     """Claim a queued Stop and exercise the production exact-plan signer."""
 
-    with sessions() as session:
-        node = _required(session.get(AgentNode, node_id))
-        receipt_public_key = node.observation_receipt_public_key
     runtime_identity = {
         **PACKAGED_RUNTIME_IDENTITY,
         "architecture": "linux-arm64",
     }
-    if receipt_public_key is not None:
-        runtime_identity["observation_receipt_public_key"] = receipt_public_key
     queue = AgentJobService(sessions, clock=lambda: grant_now)
     claim = claim_agent(
         queue,
@@ -1878,7 +1829,7 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
             )
         )
         owner.observed_run_generation = 1
-        owner.observation_receipt_sha256 = "d" * 64
+        owner.observation_observed_at = NOW
         owner.observation_endpoint_ready = True
         owner.updated_at = NOW
     with pytest.raises(RecipeRouteNotReady):
@@ -1892,7 +1843,7 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
             )
         )
         worker.observed_run_generation = 1
-        worker.observation_receipt_sha256 = "e" * 64
+        worker.observation_observed_at = NOW
         worker.observation_endpoint_ready = None
         worker.updated_at = NOW
     routes.publish_run(start.owner_id)
@@ -1954,12 +1905,7 @@ def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
         return start_evidence(payload)
 
     def claim(node_id: str):
-        with sessions() as session:
-            node = _required(session.get(AgentNode, node_id))
-            receipt_key = node.observation_receipt_public_key
         runtime_identity = dict(PACKAGED_RUNTIME_IDENTITY)
-        if receipt_key is not None:
-            runtime_identity["observation_receipt_public_key"] = receipt_key
         return claim_agent(
             jobs,
             node_id,
@@ -2022,7 +1968,7 @@ def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
             )
         )
         owner.observed_run_generation = 1
-        owner.observation_receipt_sha256 = "d" * 64
+        owner.observation_observed_at = NOW
         owner.observation_endpoint_ready = True
         owner.updated_at = NOW
         worker = _required(
@@ -2033,7 +1979,7 @@ def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
             )
         )
         worker.observed_run_generation = 1
-        worker.observation_receipt_sha256 = "e" * 64
+        worker.observation_observed_at = NOW
         worker.observation_endpoint_ready = None
         worker.updated_at = NOW
     routes.publish_run(start.owner_id)
@@ -2352,27 +2298,6 @@ def test_distributed_start_deadline_is_enforced_before_phase_advance(
         assert {stop.plan_digest for stop in stop_payloads} == {start.plan_digest}
         assert {stop.run_generation for stop in stop_payloads} == {1}
         assert all(stop.cancel_pending_start for stop in stop_payloads)
-
-
-def test_distributed_start_requires_enrollment_pinned_receipt_key(
-    tmp_path: Path,
-) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True
-    )
-    installation = installed_recipe(
-        service, mapping_id, build_id, nodes, request_id="k" * 36
-    )
-    with sessions.begin() as session:
-        _required(
-            session.get(AgentNode, nodes[1])
-        ).observation_receipt_public_key = None
-
-    plan = service.preview_run(installation.owner_id, "unpinned-receipt-key")
-    assert plan.allowed is False
-    assert "run.distributed_observation_receipt_capability_missing" in {
-        blocker.code for blocker in plan.nodes[1].blockers
-    }
 
 
 def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(

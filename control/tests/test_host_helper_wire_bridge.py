@@ -14,8 +14,6 @@ from vonk_agent_protocol.host_helper import (
     ExecuteContainerRuntimeRequestOperation,
     RecipeReconciliationIdentity,
     SignedHostHelperGrant,
-    SignedRecipeRunObservationReceipt,
-    recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_control.host_helper_authority import HostHelperGrantIssuer
 
@@ -61,18 +59,6 @@ def test_python_issuer_matches_the_rust_verified_host_grant_fixture() -> None:
         bytes.fromhex(parsed.signature.value),
         b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
         + canonical_message(parsed.claims.to_mapping()),
-    )
-
-
-def test_rust_signed_receipt_fixture_is_a_controller_verifiable_wire_message() -> None:
-    raw = (FIXTURES / "recipe-run-observation-receipt.json").read_bytes().rstrip(b"\n")
-    receipt = SignedRecipeRunObservationReceipt.parse(json.loads(raw))
-
-    assert canonical_message(receipt.to_mapping()) == raw
-    assert receipt.claims.request_id == "10000000-0000-4000-8000-000000000001"
-    ed25519.Ed25519PublicKey.from_public_bytes(PUBLIC_KEY).verify(
-        bytes.fromhex(receipt.signature.value),
-        recipe_run_observation_receipt_signing_bytes(receipt.claims),
     )
 
 
@@ -126,7 +112,6 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
                     runtime_run_id=runtime_run_id,
                     runtime_target_id=runtime_target_id,
                     runtime_installation_id=runtime_installation_id,
-                    observation_identity_sha256="b" * 64,
                 ),
                 expires_in_seconds=expires_in_seconds,
             )
@@ -155,19 +140,7 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
         check=False,
     )
     assert produced.returncode == 0, produced.stderr.decode()
-    receipt_raw = produced.stdout.rstrip(b"\n")
-    receipt = SignedRecipeRunObservationReceipt.parse(json.loads(receipt_raw))
-    assert canonical_message(receipt.to_mapping()) == receipt_raw
-    receipt_public_key = ed25519.Ed25519PrivateKey.from_private_bytes(
-        bytes([23]) * 32
-    ).public_key()
-    receipt_public_key.verify(
-        bytes.fromhex(receipt.signature.value),
-        recipe_run_observation_receipt_signing_bytes(receipt.claims),
-    )
-    assert receipt.claims.request_id == grant.claims.request_id
-    assert receipt.claims.request_sha256 == request["request_sha256"]
-    assert receipt.claims.observation_identity_sha256 is not None
+    assert produced.stdout == grant_bytes
 
 
 def test_python_reconciliation_grant_is_verified_unchanged_by_rust(

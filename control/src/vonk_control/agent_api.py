@@ -42,8 +42,6 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     DistributionAssignment,
     InventoryRequest,
-    RecipeRunObservationGrantRequest,
-    RecipeRunObservationGrantWire,
     RecipeRunObservationsWire,
     SignedHostHelperGrant,
     canonical_message,
@@ -83,8 +81,6 @@ from .enrollment_contract import EnrollmentId
 from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
-    RecipeRunObservationPendingError,
-    RecipeRunObservationReplayError,
     recipe_run_known,
 )
 from .inventory_repository import (
@@ -116,8 +112,8 @@ from .strict_json import ControllerAPIRoute, StrictJSONModel
 from .telemetry import TelemetryRepository, TelemetrySampleInput
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-#: Response header on an observation grant that names a run this Controller
-#: has no record of; the grant then authorizes only a read-only probe.
+#: Response header on a disposition lookup naming a run this Controller has
+#: no record of; the agent then retires that run's local lifecycle.
 RECIPE_RUN_DISPOSITION_HEADER = "x-vonk-recipe-run-disposition"
 RECIPE_RUN_UNOWNED = "unowned"
 _UUID4_TEXT = (
@@ -1077,11 +1073,6 @@ def install_agent_routes(
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        if body.observed_at.tzinfo is None or body.observed_at.utcoffset() is None:
-            raise HTTPException(
-                status_code=422,
-                detail="recipe run observation time must be timezone-aware",
-            )
         observed_at = body.observed_at.astimezone(UTC)
         now = _now(required.clock()).astimezone(UTC)
         if observed_at > now + timedelta(seconds=30) or now - observed_at > timedelta(
@@ -1091,15 +1082,12 @@ def install_agent_routes(
                 status_code=422,
                 detail="recipe run observation time is outside the accepted window",
             )
-        # One stale, replayed, or no-longer-assigned run must not discard the
-        # evidence for every other run in the snapshot.  Each item is judged on
-        # its own; rejected items are skipped and the rest commit.  Helper
-        # signature, key, and nonce verification stays exact per item.
+        # One stale or no-longer-assigned run must not discard the evidence
+        # for every other run in the report: each run is judged on its own.
         rejected: list[str] = []
         accepted = 0
+        by_run = {run.run_id: run for run in body.runs}
         try:
-            authority = None
-            by_run = {run.run_id: run for run in body.runs}
             with required.sessions.begin() as session:
                 included = set(by_run)
                 if included:
@@ -1123,116 +1111,55 @@ def install_agent_routes(
                 assigned = prepare_exact_recipe_run_observation_nodes(
                     session, identity.node_id, observed_at, included
                 )
-                agent_node = session.get(AgentNode, identity.node_id)
-                if agent_node is None:
-                    raise ValueError("recipe run observation node is unavailable")
                 for node in assigned:
-                    run = session.get(RecipeRun, node.run_id)
-                    assert run is not None
                     evidence = by_run.get(node.run_id)
                     if evidence is None or node.run_id not in included:
                         continue
-                    evidence_observed_at = evidence.observed_at.astimezone(UTC)
-                    if (
-                        agent_node.observation_receipt_public_key
-                        != evidence.observation_receipt_public_key
-                    ):
-                        rejected.append("recipe run observation receipt key is stale")
-                        continue
+                    run = session.get(RecipeRun, node.run_id)
+                    assert run is not None
                     if evidence.run_generation != run.run_generation:
                         rejected.append("recipe run observation generation is stale")
                         continue
-                    if authority is None:
-                        authority = host_runtime_service()
-                    # Helper receipts sign whole Unix seconds. A fresh grant
-                    # may inspect a start completed within that same second;
-                    # nonce consumption below remains the replay authority.
-                    if int(_now(node.updated_at).timestamp()) > int(
-                        evidence_observed_at.timestamp()
+                    if node.state not in {"running", "failed"} or (
+                        node.state == "failed" and run.route_state != "withdrawn"
                     ):
-                        rejected.append("recipe run observation was replayed")
+                        # The start or recovery operation owns this rank now.
                         continue
-                    try:
-                        (
-                            observed_identity,
-                            process_running,
-                            receipt_sha256,
-                        ) = authority.consume_recipe_run_observation_grant(
-                            session,
-                            node_id=identity.node_id,
-                            certificate_serial=identity.certificate_serial,
-                            identity=evidence.observation_identity(),
-                            observed_at=evidence_observed_at,
-                            received_at=now,
-                            signed_grant=evidence.grant,
-                            helper_receipt=evidence.helper_receipt,
-                        )
-                    except RecipeRunObservationReplayError as error:
-                        rejected.append(str(error))
-                        continue
-                    except HostHelperAuthorityError:
-                        # An authenticated same-generation identity mismatch is
-                        # rank failure, not permission to keep serving.
-                        node.state = "failed"
-                        node.observed_run_generation = None
-                        node.observation_receipt_sha256 = None
-                        node.observation_process_running = None
-                        node.observation_observed_at = None
-                        node.observation_endpoint_ready = None
-                        node.updated_at = max(
-                            _now(node.updated_at).astimezone(UTC), evidence_observed_at
-                        )
-                        accepted += 1
+                    if _now(node.updated_at).astimezone(UTC) > observed_at:
+                        rejected.append("recipe run observation is stale")
                         continue
                     accepted += 1
-                    # The grace period bounds the first authenticated receipt,
-                    # not every later renewal's timestamp. Once this generation
-                    # has a receipt, freshness checks govern continuing service.
+                    # The grace period bounds the first observation of a
+                    # generation, not every later one.
                     initial_observation_late = (
                         node.observed_run_generation != run.run_generation
                         and run.observation_deadline_at is not None
-                        and evidence_observed_at > _now(run.observation_deadline_at)
+                        and observed_at > _now(run.observation_deadline_at)
                     )
                     mapping = session.get(ClusterMapping, run.mapping_id)
                     owner = (
                         mapping is not None
                         and mapping.endpoint_owner_node_id == identity.node_id
                     )
-                    observation_identity_mismatch = (
-                        observed_identity != evidence.observation_identity_sha256
-                        or (owner and type(evidence.endpoint_ready) is not bool)
-                        or (not owner and evidence.endpoint_ready is not None)
-                    )
-                    if observation_identity_mismatch:
-                        node.state = "failed"
-                        node.observed_run_generation = None
-                        node.observation_receipt_sha256 = None
-                        node.observation_process_running = None
-                        node.observation_observed_at = None
-                        node.observation_endpoint_ready = None
-                    elif initial_observation_late:
+                    if initial_observation_late:
                         # Late first evidence cannot make the run routable, but
-                        # its exact signed process result remains valid evidence
-                        # for Controller-owned recovery.
+                        # its process result remains valid evidence for
+                        # Controller-owned recovery.
                         node.state = "failed"
                     elif node.state != "failed":
                         node.state = (
                             "running"
-                            if process_running
+                            if evidence.process_running
                             and (not owner or evidence.endpoint_ready is True)
                             else "failed"
                         )
-                    if not observation_identity_mismatch:
-                        node.observed_run_generation = run.run_generation
-                        node.observation_receipt_sha256 = receipt_sha256
-                        node.observation_process_running = process_running
-                        node.observation_observed_at = evidence_observed_at
-                        node.observation_endpoint_ready = (
-                            evidence.endpoint_ready if owner else None
-                        )
-                    node.updated_at = max(
-                        _now(node.updated_at).astimezone(UTC), evidence_observed_at
+                    node.observed_run_generation = run.run_generation
+                    node.observation_process_running = evidence.process_running
+                    node.observation_observed_at = observed_at
+                    node.observation_endpoint_ready = (
+                        evidence.endpoint_ready if owner else None
                     )
+                    node.updated_at = observed_at
                     if (
                         run.route_state == "withdrawn"
                         and run.route_next_attempt_at is not None
@@ -1240,7 +1167,7 @@ def install_agent_routes(
                         run.route_next_attempt_at = None
                         run.updated_at = max(_now(run.updated_at).astimezone(UTC), now)
                 if rejected and not accepted:
-                    # Nothing in this snapshot was usable; report the cause so
+                    # Nothing in this report was usable; report the cause so
                     # the agent's log names it.  No state changed.
                     raise ValueError("; ".join(rejected[:4]))
         except ValueError as error:
@@ -1255,102 +1182,6 @@ def install_agent_routes(
                 rejected[0],
             )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-    @agent.post(
-        "/recipe-runs/observation-grants",
-        response_model=RecipeRunObservationGrantWire,
-    )
-    def recipe_run_observation_grant(
-        body: RecipeRunObservationGrantRequest, request: Request, response: Response
-    ) -> RecipeRunObservationGrantWire:
-        identity = helper_identity(request)
-        required = host_runtime_service()
-        if body.node_id != identity.node_id:
-            raise HTTPException(
-                status_code=409,
-                detail="recipe run observation authority rejected request",
-            )
-        try:
-            probe = required.issue_unowned_recipe_run_probe_grant(
-                node_id=identity.node_id,
-                certificate_serial=identity.certificate_serial,
-                identity=body.observation_identity(),
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
-                fence=body.fence,
-                request_sha256=body.request_sha256,
-                expires_in_seconds=body.expires_in_seconds,
-            )
-        except (TypeError, ValueError, HostHelperAuthorityError):
-            raise HTTPException(
-                status_code=409,
-                detail="recipe run observation authority rejected request",
-            ) from None
-        if probe is not None:
-            # This Controller has no record of the run (for example after its
-            # database was rebuilt), so no observation of it can ever be
-            # accepted.  Authorize only the read-only probe and say so: the
-            # agent retires the local lifecycle once the helper proves the
-            # process is gone, instead of asking for this grant forever.
-            observation_identity, grant = probe
-            response.headers[RECIPE_RUN_DISPOSITION_HEADER] = RECIPE_RUN_UNOWNED
-            return RecipeRunObservationGrantWire(
-                schema_version=1,
-                observation_identity_sha256=observation_identity,
-                grant=SignedHostHelperGrant.parse(grant.to_mapping()),
-            )
-        with _require_services(services).sessions() as session:
-            run = session.get(RecipeRun, body.run_id)
-            run_node = session.scalar(
-                select(RunNode).where(
-                    RunNode.run_id == body.run_id,
-                    RunNode.node_id == identity.node_id,
-                )
-            )
-            if (
-                run is not None
-                and run_node is not None
-                and (run.state == "starting" or run_node.state == "starting")
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_425_TOO_EARLY,
-                    detail="recipe run observation is not ready",
-                )
-        try:
-            observation_identity, grant = required.issue_recipe_run_observation_grant(
-                node_id=identity.node_id,
-                certificate_serial=identity.certificate_serial,
-                identity=body.observation_identity(),
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
-                fence=body.fence,
-                request_sha256=body.request_sha256,
-                expires_in_seconds=body.expires_in_seconds,
-            )
-        except RecipeRunObservationPendingError:
-            # An outstanding, unconsumed grant is the authoritative "not yet",
-            # exactly like the "starting" 425 above.  Name it with a stable
-            # code so the agent can retry the run instead of reading a lost
-            # authorization and abandoning its whole observation sweep.
-            raise HTTPException(
-                status_code=409,
-                detail="recipe run observation grant is already pending",
-                headers={
-                    "x-vonk-error-code": "controller.recipe_run.observation_pending"
-                },
-            ) from None
-        except (TypeError, ValueError, HostHelperAuthorityError):
-            raise HTTPException(
-                status_code=409,
-                detail="recipe run observation authority rejected request",
-            ) from None
-        return RecipeRunObservationGrantWire(
-            schema_version=1,
-            observation_identity_sha256=observation_identity,
-            grant=SignedHostHelperGrant.parse(grant.to_mapping()),
-        )
 
     @agent.get(
         "/recipe-runs/{run_id}/disposition",
@@ -1373,13 +1204,10 @@ def install_agent_routes(
     def recipe_run_disposition(run_id: str, request: Request) -> Response:
         """Say whether this Controller has any record of one local run.
 
-        A Spark can retain a run directory whose managed metadata this agent
-        can no longer parse (for example one written before an upgrade), so
-        it cannot build the exact binding an observation grant needs.  The
-        run id alone is enough to learn that no owner exists; the agent then
-        retires that unusable lifecycle instead of skipping it forever.  A
-        known run is never named unowned, so its integrity failure stays
-        visible.
+        A Spark can retain a run this Controller never owned (for example
+        after its database was rebuilt).  No observation of it is ever
+        accepted, so the agent asks once and retires the local lifecycle
+        instead of reporting it forever.
         """
 
         helper_identity(request)

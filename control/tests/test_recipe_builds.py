@@ -2070,7 +2070,6 @@ def test_build_plan_accepts_public_network_only_with_egress_boundary_capability(
                 "semantic_version": "1.2.3",
                 "build_digest": "sha256:" + "a" * 64,
                 "binary_digest": "1" * 64,
-                "observation_receipt_public_key": "d" * 64,
             },
         )
         is None

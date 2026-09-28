@@ -426,9 +426,7 @@ def setup(
                     observed_run_generation=(
                         run.run_generation if exact_distributed else None
                     ),
-                    observation_receipt_sha256=(
-                        str(rank + 1) * 64 if exact_distributed else None
-                    ),
+                    observation_observed_at=NOW if exact_distributed else None,
                     observation_endpoint_ready=(
                         True
                         if exact_distributed and rank == endpoint_owner_rank
@@ -591,7 +589,7 @@ def add_running_run(
                 reserved_memory_bytes=100,
                 endpoint={"url": f"http://10.0.0.{identity}:8000"},
                 observed_run_generation=1,
-                observation_receipt_sha256=f"{identity:x}" * 64,
+                observation_observed_at=NOW,
                 observation_endpoint_ready=True,
                 updated_at=NOW,
             )
@@ -1134,7 +1132,7 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
         run.observation_deadline_at = NOW + timedelta(seconds=60)
         for node in session.query(RunNode).filter_by(run_id=run_id):
             node.observed_run_generation = None
-            node.observation_receipt_sha256 = None
+            node.observation_observed_at = None
             node.observation_endpoint_ready = None
         session.add(
             Job(
@@ -1192,11 +1190,11 @@ def test_direct_publication_accepts_renewed_exact_observation_after_initial_dead
         run.observation_deadline_at = deadline
         for node in session.query(RunNode).filter_by(run_id=run_id):
             node.observed_run_generation = run.run_generation
-            node.observation_receipt_sha256 = "a" * 64
+            node.observation_observed_at = deadline + timedelta(microseconds=1)
             node.observation_endpoint_ready = node.role == "entrypoint" or None
             node.updated_at = deadline + timedelta(microseconds=1)
 
-    # Signed ingress has already enforced the first-receipt deadline. The
+    # Observation ingress has already enforced the first-observation deadline. The
     # latest timestamp is a renewal and must retain its current health meaning.
     generation = service.publish_run(run_id)
     assert generation.generation == 1

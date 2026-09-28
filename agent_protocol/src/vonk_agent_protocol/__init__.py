@@ -60,12 +60,10 @@ from .host_helper import (
     InstallVonkDebOperation,
     HostRuntimeRequest,
     RecipeReconciliationIdentity,
-    RecipeRunObservationReceiptClaims,
+    RecipeRunInspectionRequest,
     RestartUnit,
     SignedHostHelperGrant,
-    SignedRecipeRunObservationReceipt,
     host_helper_grant_signing_bytes,
-    recipe_run_observation_receipt_signing_bytes,
 )
 from .inventory import InventoryRequest
 from .recipe_jobs import (
@@ -85,9 +83,6 @@ from .recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from .recipe_observations import (
-    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
-    RecipeRunObservationGrantRequest,
-    RecipeRunObservationGrantWire,
     RecipeRunObservationsWire,
     RecipeRunObservationWire,
 )
@@ -138,7 +133,6 @@ __all__ = [
     "MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES",
     "MAX_DOCUMENT_BYTES",
     "RECIPE_OPERATIONS",
-    "RECIPE_RUN_OBSERVATION_SCHEMA_VERSION",
     "AgentClaim",
     "AgentDirective",
     "AgentFailureKind",
@@ -197,9 +191,7 @@ __all__ = [
     "RecipeReconcilePayload",
     "RecipeReconcileResult",
     "RecipeReconciliationIdentity",
-    "RecipeRunObservationGrantRequest",
-    "RecipeRunObservationGrantWire",
-    "RecipeRunObservationReceiptClaims",
+    "RecipeRunInspectionRequest",
     "RecipeRunObservationWire",
     "RecipeRunObservationsWire",
     "RecipeStartPayload",
@@ -210,7 +202,6 @@ __all__ = [
     "RecipeUninstallResult",
     "RestartUnit",
     "SignedHostHelperGrant",
-    "SignedRecipeRunObservationReceipt",
     "StrictJSONModel",
     "TelemetryRequest",
     "TelemetrySample",
@@ -224,7 +215,6 @@ __all__ = [
     "parse_recipe_operation_result",
     "recipe_job_manifest_document",
     "recipe_job_manifest_sha256",
-    "recipe_run_observation_receipt_signing_bytes",
     "schema_validator",
     "validate_compiled_execution_plan",
     "validate_result_for_operation",

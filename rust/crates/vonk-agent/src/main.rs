@@ -222,7 +222,6 @@ async fn run_control_lane(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runner = SystemProcessRunner;
     let mut failures = 0_u32;
-    let mut observation_failures = 0_u32;
     let mut inventory_reported_at = None;
     let mut readiness_published = false;
     loop {
@@ -295,8 +294,6 @@ async fn run_control_lane(
             recipes: RecipeExecutor {
                 client: &client,
                 runtime_root: Path::new("/run/vonk-forge-agent"),
-                observation_receipt_public_key: runtime_identity
-                    .observation_receipt_public_key()?,
                 runtime: OciRuntime {
                     runner: &runner,
                     data_root: &config.data_dir,
@@ -312,25 +309,12 @@ async fn run_control_lane(
             .report_exact_recipe_run_observations()
             .await;
         let local_managed_runs = executor.recipes.managed_recipe_run_count().unwrap_or(0);
-        let exact_observation_disposition =
-            exact_observation_disposition(&exact_observation_result, local_managed_runs);
-        let exact_observation_count = exact_observation_disposition.managed_run_count;
-        match exact_observation_result {
-            Ok(_) => {
-                observation_failures = 0;
-            }
-            Err(_) if exact_observation_disposition.transition_not_ready => {
-                // A rank-launch lifecycle is retained before the Controller can
-                // mark the run running.  Do not delay the collective-readiness
-                // claim on that expected, explicitly typed transition.
-            }
-            Err(error) => {
-                // Exact observation collection is fail-closed by its explicit
-                // empty v2 report.  It must not terminate the claim lane: a
-                // stop/recovery operation may already be waiting for us.
-                observation_failures = observation_failures.saturating_add(1);
-                eprintln!("vonk-agent: exact recipe observation failed: {error}");
-            }
+        let exact_observation_count =
+            managed_run_count(&exact_observation_result, local_managed_runs);
+        if let Err(error) = &exact_observation_result {
+            // A failed report must not terminate the claim lane: a
+            // stop/recovery operation may already be waiting for us.
+            eprintln!("vonk-agent: exact recipe observation failed: {error}");
         }
         let wait_seconds = claim_wait_seconds(
             POLL_MAX_SECONDS,
@@ -561,24 +545,14 @@ where
     outcome
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ExactObservationDisposition {
-    managed_run_count: usize,
-    transition_not_ready: bool,
-}
-
-fn exact_observation_disposition(
+/// A refused sweep reports no count, but the runs it could not report are
+/// still retained locally.  Counting them as absent made the agent fall back
+/// to the idle claim cadence exactly when it had work to observe.
+fn managed_run_count(
     result: &Result<usize, RecipeObservationError>,
     local_managed_runs: usize,
-) -> ExactObservationDisposition {
-    ExactObservationDisposition {
-        // A refused sweep reports no count, but the runs it could not report
-        // are still retained locally.  Counting them as absent made the agent
-        // fall back to the idle claim cadence exactly when it had work to
-        // observe, which delayed every later receipt.
-        managed_run_count: result.as_ref().copied().unwrap_or(local_managed_runs),
-        transition_not_ready: result.as_ref().is_err_and(|error| error.not_ready()),
-    }
+) -> usize {
+    result.as_ref().copied().unwrap_or(local_managed_runs)
 }
 
 fn claim_wait_seconds(
@@ -601,9 +575,9 @@ fn claim_wait_seconds(
 mod tests {
     use super::{
         LaneExitWithRotation, claim_wait_seconds, collect_inventory_until_ready,
-        ensure_startup_identity, exact_observation_disposition, inventory_refresh_due,
-        inventory_retry_delay, loop_error_is_fatal, report_ready_after_self_test,
-        rotate_until_settled, supervise_lanes_with_rotation,
+        ensure_startup_identity, inventory_refresh_due, inventory_retry_delay, loop_error_is_fatal,
+        managed_run_count, report_ready_after_self_test, rotate_until_settled,
+        supervise_lanes_with_rotation,
     };
     use std::{
         cell::{Cell, RefCell},
@@ -615,9 +589,7 @@ mod tests {
         time::{Duration, Instant},
     };
     use vonk_agent::client::{ClientError, ControllerError};
-    use vonk_agent::{
-        executor::RecipeObservationError, host_runtime::HostRuntimeError, rotation::RotationError,
-    };
+    use vonk_agent::{executor::RecipeObservationError, rotation::RotationError};
     use vonk_agent::{inventory::Inventory, inventory::InventoryError};
 
     #[test]
@@ -711,40 +683,12 @@ mod tests {
     }
 
     #[test]
-    fn exact_observation_failures_never_stop_the_next_claim() {
-        let transition = Err(RecipeObservationError::Inspection(
-            HostRuntimeError::Controller(ClientError::ObservationNotReady),
-        ));
-        let transition = exact_observation_disposition(&transition, 0);
-        assert_eq!(transition.managed_run_count, 0);
-        assert!(transition.transition_not_ready);
-
-        let denied = Err(RecipeObservationError::Inspection(
-            HostRuntimeError::Controller(ClientError::Protocol),
-        ));
-        let denied = exact_observation_disposition(&denied, 0);
-        assert_eq!(denied.managed_run_count, 0);
-        assert!(!denied.transition_not_ready);
-
-        for cycle in [Ok(2), Ok(2)] {
-            let complete = exact_observation_disposition(&cycle, 0);
-            assert_eq!(complete.managed_run_count, 2);
-            assert!(!complete.transition_not_ready);
-        }
-    }
-
-    #[test]
     fn refused_observation_sweep_keeps_the_managed_run_cadence() {
-        // The wrong implementation counted a refused sweep as zero managed
-        // runs, so exactly when a run needed observing the agent fell back to
-        // the idle long poll and the next receipt arrived a minute later.
-        let refused = Err(RecipeObservationError::Inspection(
-            HostRuntimeError::Controller(ClientError::Protocol),
-        ));
-        let refused = exact_observation_disposition(&refused, 1);
-        assert_eq!(refused.managed_run_count, 1);
-        assert_eq!(claim_wait_seconds(60, refused.managed_run_count, true), 10);
-        assert_eq!(claim_wait_seconds(300, refused.managed_run_count, true), 10);
+        let refused = Err(RecipeObservationError::Report(ClientError::Protocol));
+        let count = managed_run_count(&refused, 1);
+        assert_eq!(count, 1);
+        assert_eq!(claim_wait_seconds(60, count, true), 10);
+        assert_eq!(managed_run_count(&Ok(2), 0), 2);
     }
 
     #[test]

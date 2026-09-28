@@ -947,7 +947,6 @@ mod tests {
             fence: Uuid::new_v4(),
             arguments,
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(start_plan.run_generation),

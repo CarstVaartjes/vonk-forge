@@ -3128,7 +3128,6 @@ class SparkLifecycle:
             "self_test_passed",
             "semantic_version",
         }
-        receipt_key = document.get("observation_receipt_public_key")
         if (
             not isinstance(document, dict)
             or not identity_fields <= set(document)
@@ -3137,13 +3136,6 @@ class SparkLifecycle:
             or re.fullmatch(r"sha256:[0-9a-f]{64}", document["build_digest"]) is None
             or not isinstance(document.get("binary_digest"), str)
             or SHA256.fullmatch(document["binary_digest"]) is None
-            or (
-                receipt_key is not None
-                and (
-                    not isinstance(receipt_key, str)
-                    or SHA256.fullmatch(receipt_key) is None
-                )
-            )
         ):
             raise LifecycleError("direct Rust agent self-test is invalid")
         binary = self._hash_path(AGENT_BINARY)

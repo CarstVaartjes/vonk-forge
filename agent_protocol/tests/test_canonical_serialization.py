@@ -142,7 +142,7 @@ def test_host_grant_signing_bytes_use_the_same_optional_null_policy() -> None:
         },
     }
     omitted = HostHelperGrantClaims.model_validate(value)
-    value["operation"]["observation_identity_sha256"] = None
+    value["operation"]["installation_id"] = None
     explicit = HostHelperGrantClaims.model_validate(value)
     assert host_helper_grant_signing_bytes(omitted) == host_helper_grant_signing_bytes(
         explicit

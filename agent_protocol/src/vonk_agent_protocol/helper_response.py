@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from .failure_evidence import FailureLogTail
-from .host_helper import SignedRecipeRunObservationReceipt, Uuid4Text
+from .host_helper import Uuid4Text
 from .wire_model import ErrorCode, WireModel
 
 
@@ -36,6 +36,7 @@ class HostHelperResponse(WireModel):
     ]
     exit_code: Annotated[int, Field(ge=0, le=255)] | None = None
     error_code: ErrorCode | None = None
-    observation_receipt: SignedRecipeRunObservationReceipt | None = None
+    # Set only in the reply to a RecipeRunInspectionRequest.
+    process_running: bool | None = None
     diagnostic: Annotated[str, Field(max_length=8192)] | None = None
     process_logs: HostHelperProcessLogs | None = None

@@ -232,7 +232,6 @@ def evidence(
         "hardware_fingerprint": "hardware-fingerprint",
         "agent_digest": "a" * 64,
         "boot_id": "b9e9b12a-63e4-4cb5-83f3-4d963d321ec8",
-        "observation_receipt_public_key": "c" * 64,
     }
     result.update(overrides)
     return result
@@ -346,49 +345,6 @@ def test_named_grant_persists_approved_spark_name_on_submit(service) -> None:
         assert stored_grant.requested_display_name == "Living Spark"
         assert profile is not None
         assert profile.display_name == "Living Spark"
-
-
-def test_enrollment_pins_and_explicit_reenrollment_rotates_receipt_key(service) -> None:
-    enrollment, sessions, _, _ = service
-    request = csr()
-    grant = enrollment.create(NODE_ID, "admin", 600)
-    enrollment.submit(
-        grant.token,
-        request,
-        evidence(request, observation_receipt_public_key="1" * 64),
-    )
-    with sessions() as session:
-        assert (
-            session.get(AgentNode, NODE_ID).observation_receipt_public_key == "1" * 64
-        )
-
-    replacement = csr()
-    replacement_grant = enrollment.create_reenrollment(
-        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
-    )
-    enrollment.submit(
-        replacement_grant.token,
-        replacement,
-        evidence(replacement, observation_receipt_public_key="2" * 64),
-    )
-    with sessions() as session:
-        node = session.get(AgentNode, NODE_ID)
-        stored = session.scalar(
-            select(AgentEnrollment).order_by(AgentEnrollment.created_at.desc())
-        )
-        assert node.observation_receipt_public_key == "2" * 64
-        assert stored.observation_receipt_public_key == "2" * 64
-
-
-def test_enrollment_rejects_receipt_less_evidence(service) -> None:
-    enrollment, _, _, _ = service
-    request = csr()
-    grant = enrollment.create(NODE_ID, "admin", 600)
-    submitted = evidence(request)
-    submitted.pop("observation_receipt_public_key")
-
-    with pytest.raises(EnrollmentDenied, match="evidence fields are invalid"):
-        enrollment.submit(grant.token, request, submitted)
 
 
 def test_reenrollment_replaces_existing_active_identity_and_replay_is_idempotent(
@@ -712,7 +668,6 @@ def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(
             source=source,
             runtime_identity={
                 **PACKAGED_RUNTIME_IDENTITY,
-                "observation_receipt_public_key": "c" * 64,
             },
         )
         try:
@@ -792,7 +747,6 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
         source=old_source,
         runtime_identity={
             **PACKAGED_RUNTIME_IDENTITY,
-            "observation_receipt_public_key": "c" * 64,
         },
     )
     assert claim is not None

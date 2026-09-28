@@ -3967,20 +3967,6 @@ class AgentJobService:
             if profile is not None and profile.hostname != hostname:
                 profile.hostname = hostname
         if runtime_identity is not None:
-            receipt_key = runtime_identity.observation_receipt_public_key
-            if (
-                receipt_key is not None
-                and node.observation_receipt_public_key is not None
-                and node.observation_receipt_public_key != receipt_key
-            ):
-                raise ValueError("agent observation receipt key changed")
-            if (
-                isinstance(receipt_key, str)
-                and node.observation_receipt_public_key is None
-            ):
-                # The first authenticated contact binds the immutable receipt
-                # identity; subsequent contacts remain change-protected above.
-                node.observation_receipt_public_key = receipt_key
             # A claim is the only caller with a runtime identity; it passed the
             # single protocol gate, so the node now speaks this version.
             node.protocol_version = AGENT_PROTOCOL_VERSION

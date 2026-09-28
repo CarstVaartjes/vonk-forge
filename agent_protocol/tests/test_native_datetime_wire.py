@@ -85,11 +85,7 @@ def test_inventory_native_datetimes_preserve_declared_offset(timestamp: str) -> 
 
 def test_actual_snapshot_producer_uses_the_same_native_timestamp_bytes() -> None:
     value = RecipeRunObservationsWire.model_validate(
-        {
-            "schema_version": 2,
-            "observed_at": "2026-09-08T15:00:00.123000+02:00",
-            "runs": [],
-        }
+        {"observed_at": "2026-09-08T15:00:00.123000+02:00", "runs": []}
     )
     expected = canonical_message(value)
     assert probe("RecipeRunObservationsWire", expected) == expected

@@ -8,14 +8,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use ring::signature;
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeAction, HostRuntimeRequest, HostRuntimeRequestRule, RecipeJobRunRequest,
-    RecipeReconciliationIdentity, RecipeRunInspectionBinding, RecipeRunObservationOutcome,
-    RecipeRunObservationReceipt, RecipeStartRequest, RecipeStopRequest, SignedHostHelperGrant,
-    canonical_json, hex_sha256, parse_strict, recipe_run_observation_receipt_signing_bytes,
+    RecipeReconciliationIdentity, RecipeRunInspectionRequest, RecipeStartRequest,
+    RecipeStopRequest, canonical_generated_json, canonical_json, hex_sha256, parse_strict,
 };
 
 use crate::client::{AgentHttpClient, ClientError};
@@ -102,13 +100,8 @@ pub enum HelperProtocolCause {
     RequestStorage,
     /// The host clock is before the Unix epoch.
     SystemClock,
-    /// An executed inspection reply did not carry exactly one signed
-    /// observation receipt.
-    InspectionReceipt,
-    /// The signed observation receipt did not prove this inspection.
-    ObservationReceipt,
-    /// The signed observation time is not representable.
-    ObservationTimestamp,
+    /// An inspection reply did not say whether the process is running.
+    InspectionOutcome,
 }
 
 impl HelperProtocolCause {
@@ -131,9 +124,7 @@ impl HelperProtocolCause {
             Self::RequestArgumentNulByte => "request_argument_nul_byte",
             Self::RequestStorage => "request_storage_invalid",
             Self::SystemClock => "system_clock_invalid",
-            Self::InspectionReceipt => "inspection_receipt_invalid",
-            Self::ObservationReceipt => "observation_receipt_invalid",
-            Self::ObservationTimestamp => "observation_timestamp_invalid",
+            Self::InspectionOutcome => "inspection_outcome_invalid",
         }
     }
 
@@ -149,12 +140,7 @@ impl HelperProtocolCause {
             HostRuntimeRequestRule::RequestBytes { .. } => Self::RequestBytes,
             HostRuntimeRequestRule::PlanBytes { .. } => Self::RequestPlanBytes,
             HostRuntimeRequestRule::ArgumentNulByte { .. } => Self::RequestArgumentNulByte,
-            // The observation binding is an inspection contract rather than one
-            // of the argument-envelope rules, and it is unreachable from a
-            // Start, which always carries `observation: None`.
-            HostRuntimeRequestRule::ObservationBinding
-            | HostRuntimeRequestRule::ObservationAction
-            | HostRuntimeRequestRule::Encoding => Self::RequestDocument,
+            HostRuntimeRequestRule::Encoding => Self::RequestDocument,
         }
     }
 }
@@ -258,21 +244,10 @@ impl HostRuntimePlan {
     }
 }
 
-pub struct RecipeRunInspectionOutcome {
-    pub grant: SignedHostHelperGrant,
-    pub observation_identity_sha256: String,
-    pub receipt: RecipeRunObservationReceipt,
-    pub process_running: bool,
-    /// The Controller has no record of this run (see
-    /// [`crate::client::RecipeRunInspectionGrant::unowned`]).
-    pub unowned: bool,
-}
-
 pub struct HostRuntimeBoundary<'a> {
     pub client: &'a AgentHttpClient,
     pub request_root: &'a Path,
     pub helper_socket: &'a Path,
-    pub observation_receipt_public_key: [u8; 32],
 }
 
 struct RequestFileCleanup(PathBuf);
@@ -284,20 +259,17 @@ impl Drop for RequestFileCleanup {
 }
 
 impl HostRuntimeBoundary<'_> {
+    /// Ask the helper whether the exact container of one managed run is
+    /// running.  The inspection is read-only, so it needs no Controller grant.
     pub async fn inspect_recipe_run(
         &self,
-        binding: RecipeRunInspectionBinding,
         arguments: Vec<String>,
-    ) -> Result<RecipeRunInspectionOutcome, HostRuntimeError> {
-        binding
-            .validate()
-            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestDocument))?;
+    ) -> Result<bool, HostRuntimeError> {
         let request = HostRuntimeRequest {
             action: HostRuntimeAction::RunInspect,
             fence: uuid::Uuid::new_v4(),
             arguments,
             job_plan: None,
-            observation: Some(binding.clone()),
             installation_id: None,
             reconciliation_identity: None,
             run_generation: None,
@@ -312,48 +284,32 @@ impl HostRuntimeBoundary<'_> {
         let digest = hex_sha256(&body);
         let request_path = write_request(self.request_root, &digest, &body)?;
         let _request_cleanup = RequestFileCleanup(request_path);
-        let authorization = self
-            .client
-            .recipe_run_inspection_grant(&binding, &request, &digest)
-            .await?;
-        let request_id = authorization.grant.claims.request_id.to_string();
-        let grant_bytes = canonical_json(&authorization.grant)
-            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
+        let request_id = uuid::Uuid::new_v4();
+        let frame = canonical_generated_json(&RecipeRunInspectionRequest {
+            request_id,
+            request_sha256: digest,
+        })
+        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let helper_socket = self.helper_socket.to_path_buf();
         let response = tokio::task::spawn_blocking(move || {
-            call_helper(&helper_socket, &grant_bytes, Duration::from_secs(15))
+            call_helper(&helper_socket, &frame, Duration::from_secs(15))
         })
         .await
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))??;
-        require_bound_response(&response, &request_id)?;
+        require_bound_response(&response, &request_id.to_string())?;
         if response.error_code.is_some() {
             return Err(runtime_rejection(&response, HostRuntimeAction::RunInspect));
         }
-        let receipt = require_inspection_receipt(&response)?.clone();
-        let issued_at = authorization.grant.claims.issued_at;
-        let expires_at = authorization.grant.claims.expires_at;
-        let received_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::SystemClock))?
-            .as_secs() as i64;
-        let process_running = verify_observation_receipt(
-            &receipt,
-            &self.observation_receipt_public_key,
-            self.client.node_id(),
-            &request_id,
-            &digest,
-            &authorization.observation_identity_sha256,
-            issued_at,
-            expires_at,
-            received_at,
-        )?;
-        Ok(RecipeRunInspectionOutcome {
-            grant: authorization.grant,
-            observation_identity_sha256: authorization.observation_identity_sha256,
-            receipt,
-            process_running,
-            unowned: authorization.unowned,
-        })
+        if response.status != "container-runtime-request-executed" || response.exit_code.is_some() {
+            return Err(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::InspectionOutcome,
+            ));
+        }
+        response
+            .process_running
+            .ok_or(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::InspectionOutcome,
+            ))
     }
 
     pub async fn execute(
@@ -466,7 +422,6 @@ impl HostRuntimeBoundary<'_> {
             fence: claim.fence,
             arguments,
             job_plan,
-            observation: None,
             installation_id,
             reconciliation_identity: reconciliation_identity.clone(),
             run_generation,
@@ -566,7 +521,7 @@ fn unbound_rejection_is_expected(code: &str) -> bool {
 }
 
 /// The executed-outcome contract. A successful helper reply carries no
-/// rejection, no capture diagnostic and no signed inspection receipt, names the
+/// rejection, no capture diagnostic and no inspection outcome, names the
 /// executed status unless it is the deliberate stop-uncertain outcome, and
 /// reports a 64-character lowercase evidence digest with, at most, a byte-sized
 /// exit code.
@@ -575,7 +530,7 @@ fn require_executed_outcome(
     stop_uncertain: bool,
 ) -> Result<(), HostRuntimeError> {
     let malformed = || HostRuntimeError::HelperProtocol(HelperProtocolCause::OutcomeMalformed);
-    if response.observation_receipt.is_some() {
+    if response.process_running.is_some() {
         return Err(malformed());
     }
     if response.diagnostic.is_some()
@@ -598,7 +553,7 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
     };
     if response.status != "rejected"
         || response.exit_code.is_some()
-        || response.observation_receipt.is_some()
+        || response.process_running.is_some()
         || !stable_runtime_error_code(code)
         || response.diagnostic.is_some()
             && (action != HostRuntimeAction::RunInspect || code != "runtime_process_exited")
@@ -674,70 +629,8 @@ fn stable_runtime_error_code(value: &str) -> bool {
             | "request_argument_nul_byte"
             | "request_storage_invalid"
             | "system_clock_invalid"
-            | "inspection_receipt_invalid"
-            | "observation_receipt_invalid"
-            | "observation_timestamp_invalid"
+            | "inspection_outcome_invalid"
     )
-}
-
-fn require_inspection_receipt(
-    response: &HelperResponse,
-) -> Result<&RecipeRunObservationReceipt, HostRuntimeError> {
-    if response.status != "container-runtime-request-executed"
-        || response.error_code.is_some()
-        || response.exit_code.is_some()
-    {
-        return Err(HostRuntimeError::HelperProtocol(
-            HelperProtocolCause::InspectionReceipt,
-        ));
-    }
-    response
-        .observation_receipt
-        .as_ref()
-        .ok_or(HostRuntimeError::HelperProtocol(
-            HelperProtocolCause::InspectionReceipt,
-        ))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn verify_observation_receipt(
-    receipt: &RecipeRunObservationReceipt,
-    public_key: &[u8; 32],
-    node_id: &str,
-    request_id: &str,
-    request_sha256: &str,
-    observation_identity_sha256: &str,
-    issued_at: i64,
-    expires_at: i64,
-    received_at: i64,
-) -> Result<bool, HostRuntimeError> {
-    receipt
-        .validate()
-        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationReceipt))?;
-    if receipt.claims.node_id != node_id
-        || receipt.claims.request_id.to_string() != request_id
-        || receipt.claims.request_sha256 != request_sha256
-        || receipt.claims.observation_identity_sha256 != observation_identity_sha256
-        || receipt.signature.key_id != hex_sha256(public_key)
-        || receipt.claims.observed_at < issued_at
-        || receipt.claims.observed_at >= expires_at
-        || received_at > expires_at.saturating_add(5)
-    {
-        return Err(HostRuntimeError::HelperProtocol(
-            HelperProtocolCause::ObservationReceipt,
-        ));
-    }
-    let signature_bytes = hex::decode(&receipt.signature.value)
-        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationReceipt))?;
-    signature::UnparsedPublicKey::new(&signature::ED25519, public_key)
-        .verify(
-            &recipe_run_observation_receipt_signing_bytes(&receipt.claims).map_err(|_| {
-                HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationReceipt)
-            })?,
-            &signature_bytes,
-        )
-        .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationReceipt))?;
-    Ok(receipt.claims.outcome == RecipeRunObservationOutcome::Running)
 }
 
 fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, HostRuntimeError> {
@@ -848,11 +741,9 @@ fn call_helper(
 #[cfg(test)]
 mod tests {
     use super::{
-        HelperProtocolCause, HelperResponse, HostRuntimeError, call_helper, require_bound_response,
-        require_executed_outcome, require_inspection_receipt, runtime_rejection,
-        verify_observation_receipt, write_request,
+        HelperProtocolCause, HostRuntimeError, call_helper, require_bound_response,
+        require_executed_outcome, runtime_rejection, write_request,
     };
-    use ring::signature::{Ed25519KeyPair, KeyPair};
     use std::fs;
     use std::io::{Read, Write};
     use std::os::unix::fs::{PermissionsExt, symlink};
@@ -860,38 +751,7 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
     use uuid::Uuid;
-    use vonk_agent_protocol::{
-        HostRuntimeAction, RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunObservationOutcome,
-        RecipeRunObservationReceipt, RecipeRunObservationReceiptClaims,
-        RecipeRunObservationReceiptSignature, RecipeStartRequest, hex_sha256,
-        recipe_run_observation_receipt_signing_bytes,
-    };
-
-    fn signed_receipt(signer: &Ed25519KeyPair, request_id: Uuid) -> RecipeRunObservationReceipt {
-        let claims = RecipeRunObservationReceiptClaims {
-            schema_version: 1,
-            authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            request_id,
-            request_sha256: "a".repeat(64),
-            observation_identity_sha256: "b".repeat(64),
-            outcome: RecipeRunObservationOutcome::Running,
-            observed_at: 105,
-        };
-        RecipeRunObservationReceipt {
-            schema_version: 1,
-            signature: RecipeRunObservationReceiptSignature {
-                algorithm: "ed25519".to_owned(),
-                key_id: hex_sha256(signer.public_key().as_ref()),
-                value: hex::encode(
-                    signer
-                        .sign(&recipe_run_observation_receipt_signing_bytes(&claims).unwrap())
-                        .as_ref(),
-                ),
-            },
-            claims,
-        }
-    }
+    use vonk_agent_protocol::{HostRuntimeAction, RecipeStartRequest};
 
     #[test]
     fn runtime_rejection_binds_and_redacts_captured_process_logs() {
@@ -910,13 +770,10 @@ mod tests {
             super::runtime_rejection(&response, HostRuntimeAction::RunInspect),
             super::HostRuntimeError::HelperProtocol(super::HelperProtocolCause::RejectionMalformed,)
         ));
-        // A rejection never carries the observation receipt that only an
-        // executed run produces, whatever the action claimed it ran.
+        // A rejection never carries the inspection outcome that only an
+        // executed inspection produces, whatever the action claimed it ran.
         response.error_code = Some("runtime_process_exited".into());
-        response.observation_receipt = Some(signed_receipt(
-            &Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap(),
-            Uuid::new_v4(),
-        ));
+        response.process_running = Some(true);
         assert!(matches!(
             super::runtime_rejection(&response, HostRuntimeAction::RunInspect),
             super::HostRuntimeError::HelperProtocol(super::HelperProtocolCause::RejectionMalformed,)
@@ -1057,103 +914,6 @@ mod tests {
         for (error, expected) in cases {
             assert_eq!(error.preflight_code(), expected);
         }
-    }
-
-    #[test]
-    fn helper_receipt_signature_is_required_and_bound_to_exact_request() {
-        let signer = Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
-        let request_id = Uuid::new_v4();
-        let receipt = signed_receipt(&signer, request_id);
-        let public_key: [u8; 32] = signer.public_key().as_ref().try_into().unwrap();
-        assert!(
-            verify_observation_receipt(
-                &receipt,
-                &public_key,
-                "spk_0123456789abcdef0123456789abcdef",
-                &request_id.to_string(),
-                &"a".repeat(64),
-                &"b".repeat(64),
-                100,
-                110,
-                106,
-            )
-            .unwrap()
-        );
-
-        for mismatch in ["request", "observation", "node", "replay"] {
-            let mut changed = receipt.clone();
-            let (node, request, observation, issued) = match mismatch {
-                "request" => (
-                    changed.claims.node_id.clone(),
-                    "c".repeat(64),
-                    "b".repeat(64),
-                    100,
-                ),
-                "observation" => (
-                    changed.claims.node_id.clone(),
-                    "a".repeat(64),
-                    "c".repeat(64),
-                    100,
-                ),
-                "node" => (
-                    "spk_11111111111111111111111111111111".to_owned(),
-                    "a".repeat(64),
-                    "b".repeat(64),
-                    100,
-                ),
-                _ => {
-                    changed.claims.observed_at = 99;
-                    (
-                        changed.claims.node_id.clone(),
-                        "a".repeat(64),
-                        "b".repeat(64),
-                        100,
-                    )
-                }
-            };
-            assert!(
-                verify_observation_receipt(
-                    &changed,
-                    &public_key,
-                    &node,
-                    &request_id.to_string(),
-                    &request,
-                    &observation,
-                    issued,
-                    110,
-                    106,
-                )
-                .is_err()
-            );
-        }
-
-        let mut forged_outcome = receipt;
-        forged_outcome.claims.outcome = RecipeRunObservationOutcome::NotRunning;
-        assert!(
-            verify_observation_receipt(
-                &forged_outcome,
-                &public_key,
-                "spk_0123456789abcdef0123456789abcdef",
-                &request_id.to_string(),
-                &"a".repeat(64),
-                &"b".repeat(64),
-                100,
-                110,
-                106,
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn helper_success_without_an_execution_receipt_is_rejected() {
-        let response: HelperResponse = serde_json::from_value(serde_json::json!({
-            "schema_version": 1,
-            "request_id": Uuid::new_v4().to_string(),
-            "status": "container-runtime-request-executed"
-        }))
-        .unwrap();
-        assert!(require_inspection_receipt(&response).is_err());
     }
 
     #[test]
@@ -1328,16 +1088,13 @@ mod tests {
         .unwrap();
         assert_rejection_malformed(&other_status, HostRuntimeAction::RunInspect);
 
-        // A rejection never carries an exit code or the
-        // observation receipt only an executed run owns.
+        // A rejection never carries execution evidence, an exit code or the
+        // inspection outcome only an executed inspection owns.
         let mut response = baseline.clone();
         response.exit_code = Some(0);
         assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
         let mut response = baseline.clone();
-        response.observation_receipt = Some(signed_receipt(
-            &Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap(),
-            Uuid::new_v4(),
-        ));
+        response.process_running = Some(true);
         assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
 
         // A code outside the stable set.
@@ -1395,13 +1152,10 @@ mod tests {
         response.exit_code = Some(256);
         assert_outcome_malformed(&response);
 
-        // An executed outcome never carries the signed inspection receipt only a
-        // rejection-free inspection does.
+        // An executed outcome never carries the inspection outcome only an
+        // inspection reply does.
         let mut response = baseline;
-        response.observation_receipt = Some(signed_receipt(
-            &Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap(),
-            Uuid::new_v4(),
-        ));
+        response.process_running = Some(true);
         assert_outcome_malformed(&response);
 
         // The deliberate stop-uncertain outcome and a byte-sized exit code stay
@@ -1451,7 +1205,6 @@ mod tests {
             fence: Uuid::new_v4(),
             arguments: vec!["sha256:image".to_owned(), "run".to_owned()],
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(plan.run_generation),
@@ -1604,21 +1357,13 @@ mod tests {
     }
 
     #[test]
-    fn inspection_observation_rules_keep_the_document_cause() {
-        // The observation binding is an inspection contract, not one of the
-        // argument-envelope rules, and a Start always carries
-        // `observation: None`, so a Start can never reach these rules.
-        for rule in [
-            vonk_agent_protocol::HostRuntimeRequestRule::ObservationBinding,
-            vonk_agent_protocol::HostRuntimeRequestRule::ObservationAction,
-            vonk_agent_protocol::HostRuntimeRequestRule::Encoding,
-        ] {
-            assert_eq!(
-                HostRuntimeError::HelperProtocol(HelperProtocolCause::from_request_rule(rule))
-                    .preflight_code(),
-                "helper_request_document_invalid"
-            );
-        }
+    fn unencodable_requests_keep_the_document_cause() {
+        let rule = vonk_agent_protocol::HostRuntimeRequestRule::Encoding;
+        assert_eq!(
+            HostRuntimeError::HelperProtocol(HelperProtocolCause::from_request_rule(rule))
+                .preflight_code(),
+            "helper_request_document_invalid"
+        );
     }
 
     #[test]
@@ -1658,80 +1403,6 @@ mod tests {
     }
 
     #[test]
-    fn inspection_receipt_refusal_names_the_inspection_reply() {
-        // Wrong implementation: an executed RunInspect reply with the wrong
-        // status, unexpected execution evidence, or no signed receipt collapsed
-        // into `helper_protocol_invalid`.
-        let request_id = "10000000-0000-4000-8000-000000000001";
-        let no_receipt: super::HelperResponse = vonk_agent_protocol::parse_strict(
-            format!(
-                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed"}}"#
-            )
-            .as_bytes(),
-        )
-        .unwrap();
-        let error = match require_inspection_receipt(&no_receipt) {
-            Ok(_) => panic!("an executed inspection without a receipt must be refused"),
-            Err(error) => error,
-        };
-        assert_eq!(error.preflight_code(), "helper_inspection_receipt_invalid");
-        assert!(error.diagnostic().is_none());
-
-        let rejected: super::HelperResponse = vonk_agent_protocol::parse_strict(
-            format!(
-                r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected","error_code":"operation_failed"}}"#
-            )
-            .as_bytes(),
-        )
-        .unwrap();
-        let error = match require_inspection_receipt(&rejected) {
-            Ok(_) => panic!("a rejection is never an executed inspection"),
-            Err(error) => error,
-        };
-        assert_eq!(error.preflight_code(), "helper_inspection_receipt_invalid");
-    }
-
-    #[test]
-    fn observation_receipt_refusal_names_the_signed_proof() {
-        // Wrong implementation: a signed observation receipt that did not prove
-        // this node, request, observation identity or freshness window collapsed
-        // into `helper_protocol_invalid`.
-        let signer = Ed25519KeyPair::from_seed_unchecked(&[7; 32]).unwrap();
-        let request_id = Uuid::new_v4();
-        let receipt = signed_receipt(&signer, request_id);
-        let public_key: [u8; 32] = signer.public_key().as_ref().try_into().unwrap();
-        let error = verify_observation_receipt(
-            &receipt,
-            &public_key,
-            "spk_11111111111111111111111111111111",
-            &request_id.to_string(),
-            &"a".repeat(64),
-            &"b".repeat(64),
-            100,
-            110,
-            106,
-        )
-        .expect_err("a receipt for another node must be refused");
-        assert_eq!(error.preflight_code(), "helper_observation_receipt_invalid");
-        assert!(error.diagnostic().is_none());
-    }
-
-    #[test]
-    fn observation_timestamp_refusal_names_the_receipt_time() {
-        // Wrong implementation: a signed observation time outside the
-        // representable range collapsed into `helper_protocol_invalid`. This is
-        // the executor's conversion of `receipt.claims.observed_at`; an
-        // unrepresentable value cannot be staged through the wire schema, so
-        // this pins the mapping that site uses.
-        let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::ObservationTimestamp);
-        assert_eq!(
-            error.preflight_code(),
-            "helper_observation_timestamp_invalid"
-        );
-        assert!(error.diagnostic().is_none());
-    }
-
-    #[test]
     fn stop_uncertain_is_named_without_pretending_the_reply_was_malformed() {
         // Wrong implementation: the executor's stop-uncertain short-circuit
         // returned `HostRuntimeError::Protocol`, so "we could not confirm the
@@ -1763,9 +1434,7 @@ mod tests {
             HelperProtocolCause::RequestArgumentNulByte,
             HelperProtocolCause::RequestStorage,
             HelperProtocolCause::SystemClock,
-            HelperProtocolCause::InspectionReceipt,
-            HelperProtocolCause::ObservationReceipt,
-            HelperProtocolCause::ObservationTimestamp,
+            HelperProtocolCause::InspectionOutcome,
         ] {
             assert!(
                 super::stable_runtime_error_code(cause.code()),

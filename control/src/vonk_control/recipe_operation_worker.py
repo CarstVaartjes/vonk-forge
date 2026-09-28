@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import traceback
 from collections.abc import Callable
@@ -231,9 +230,7 @@ class RecipeOperationWorker:
                     node
                     for node in nodes
                     if node.observed_run_generation != run.run_generation
-                    or not isinstance(node.observation_receipt_sha256, str)
-                    or re.fullmatch(r"[0-9a-f]{64}", node.observation_receipt_sha256)
-                    is None
+                    or node.observation_observed_at is None
                 )
                 if not missing:
                     continue

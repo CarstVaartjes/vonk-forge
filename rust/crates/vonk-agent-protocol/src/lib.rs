@@ -26,13 +26,10 @@ pub use generated::{
 pub use generated::{
     ExecuteContainerRuntimeRequestOperationAction as HostHelperContainerRuntimeAction,
     HostHelperGrantClaims, HostHelperSignature as HostHelperGrantSignature,
-    HostHelperSignature as RecipeRunObservationReceiptSignature,
     HostOperation as HostHelperOperation, HostRuntimeRequest,
     HostRuntimeRequestAction as HostRuntimeAction, RecipeReconciliationIdentity,
-    RecipeRunInspectionBinding, RecipeRunObservationReceiptClaims,
-    RecipeRunObservationReceiptClaimsOutcome as RecipeRunObservationOutcome,
-    RecipeRunObservationWire, RecipeRunObservationsWire, SignedHostHelperGrant,
-    SignedRecipeRunObservationReceipt as RecipeRunObservationReceipt,
+    RecipeRunInspectionRequest, RecipeRunObservationWire, RecipeRunObservationsWire,
+    SignedHostHelperGrant,
 };
 
 pub mod operation_progress;
@@ -50,8 +47,6 @@ pub use package_upgrade::{
 
 use std::collections::{BTreeMap, BTreeSet};
 
-#[cfg(test)]
-use chrono::DateTime;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -80,8 +75,8 @@ pub const MAX_HELPER_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_HOST_RUNTIME_REQUEST_BYTES: usize =
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES + MAX_HELPER_FRAME_BYTES;
 /// The bytes a canonical [`HostRuntimeRequest`] spends on everything but its
-/// argument payload: field names, identity and version fields, the largest legal
-/// inspection `observation` binding, optional typed-plan keys, and array syntax.
+/// argument payload: field names, identity and version fields, optional
+/// typed-plan keys, and array syntax.
 ///
 /// The projected argv's `MAX_ARGV_BYTES` remains separately bounded by one
 /// helper frame minus this envelope. The complete request can be larger because
@@ -113,9 +108,6 @@ pub const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES: usize =
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES;
-pub const RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY: &str = "vonk.recipe-run-observation-helper";
-pub const RECIPE_RUN_OBSERVATION_SCHEMA_VERSION: u8 = 2;
-const RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN: &[u8] = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\0";
 pub const HOST_HELPER_AUTHORITY: &str = "vonk.host-maintenance-helper";
 const HOST_HELPER_GRANT_DOMAIN: &[u8] = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\0";
 
@@ -133,13 +125,6 @@ impl HostHelperOperation {
                     && (operation.installation_id.is_some()
                         == (operation.action
                             == HostHelperContainerRuntimeAction::InstallationCleanup))
-                    && operation
-                        .observation_identity_sha256
-                        .as_ref()
-                        .is_none_or(|digest| {
-                            operation.action == HostHelperContainerRuntimeAction::RunInspect
-                                && lower_hex(digest, 64)
-                        })
                     && operation
                         .reconciliation_identity
                         .as_ref()
@@ -230,12 +215,6 @@ pub enum HostRuntimeRequestRule {
     /// An argument carries a NUL byte, which an exec argv cannot frame.
     #[error("host runtime request argument carries a NUL byte")]
     ArgumentNulByte { observed: u64 },
-    /// The inspection observation binding does not match the request.
-    #[error("host runtime request observation binding is invalid")]
-    ObservationBinding,
-    /// A non-inspection action carried an observation binding.
-    #[error("host runtime request observation action is invalid")]
-    ObservationAction,
     /// The arguments could not be canonicalized.
     #[error("host runtime request arguments could not be encoded")]
     Encoding,
@@ -334,23 +313,6 @@ impl HostRuntimeRequest {
                 });
             }
         }
-        match (&self.action, &self.observation) {
-            (HostRuntimeAction::RunInspect, Some(binding)) => {
-                binding
-                    .validate()
-                    .map_err(|_| HostRuntimeRequestRule::ObservationBinding)?;
-                if hex_sha256(
-                    &canonical_json(&self.arguments)
-                        .map_err(|_| HostRuntimeRequestRule::Encoding)?,
-                ) != binding.runtime_arguments_sha256
-                {
-                    return Err(HostRuntimeRequestRule::ObservationBinding);
-                }
-            }
-            (HostRuntimeAction::RunInspect, None) => {}
-            (_, None) => {}
-            (_, Some(_)) => return Err(HostRuntimeRequestRule::ObservationAction),
-        }
         Ok(())
     }
 }
@@ -387,7 +349,6 @@ mod installation_cleanup_contract_tests {
             fence: Uuid::new_v4(),
             arguments: Vec::new(),
             job_plan: None,
-            observation: None,
             installation_id,
             reconciliation_identity: None,
             run_generation: None,
@@ -444,8 +405,7 @@ mod installation_cleanup_contract_tests {
 mod host_runtime_request_bound_tests {
     use super::{
         HOST_RUNTIME_REQUEST_ENVELOPE_BYTES, HostRuntimeAction, HostRuntimeRequest,
-        HostRuntimeRequestRule, MAX_HOST_RUNTIME_REQUEST_BYTES, RecipeRunInspectionBinding,
-        canonical_json,
+        HostRuntimeRequestRule, MAX_HOST_RUNTIME_REQUEST_BYTES, canonical_json,
     };
     use uuid::Uuid;
 
@@ -456,7 +416,6 @@ mod host_runtime_request_bound_tests {
             fence: Uuid::new_v4(),
             arguments,
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(plan.run_generation),
@@ -477,38 +436,11 @@ mod host_runtime_request_bound_tests {
         // ceiling while its comment called it a backstop "below" that ceiling,
         // so an argv inside the plan's own budget could still be unframeable.
         // Re-measure the envelope rather than restating the subtraction.
-        let binding = RecipeRunInspectionBinding {
-            artifact_set_digest: "a".repeat(64),
-            image_digest: "b".repeat(64),
-            installation_id: Uuid::new_v4(),
-            local_address: None,
-            // The largest value the Rust wire type can carry, not merely the
-            // Pydantic maximum, so the envelope cannot be undershot by a
-            // document this validator admits.
-            mapping_generation: u64::MAX,
-            mapping_id: Uuid::new_v4(),
-            master_address: None,
-            master_port: None,
-            // 1024 single-byte control characters escape to six bytes each in
-            // JSON, which is the widest a legal `model_identity` can render.
-            model_identity: "\u{1}".repeat(1024),
-            port: u16::MAX,
-            rank: 0,
-            recipe_content_sha256: "c".repeat(64),
-            recipe_revision_id: Uuid::new_v4(),
-            role: "a".to_owned(),
-            run_generation: u32::MAX,
-            run_id: Uuid::new_v4(),
-            runtime_arguments_sha256: "d".repeat(64),
-            world_size: 1,
-        };
-        assert!(binding.validate().is_ok());
         let request = HostRuntimeRequest {
             action: HostRuntimeAction::RunInspect,
             fence: Uuid::new_v4(),
             arguments: Vec::new(),
             job_plan: None,
-            observation: Some(binding),
             installation_id: None,
             reconciliation_identity: None,
             run_generation: None,
@@ -581,123 +513,6 @@ mod host_runtime_request_bound_tests {
         ]);
         assert_eq!(request.validate(), Ok(()));
     }
-}
-
-/// Immutable Controller/run identity carried inside an exact periodic runtime
-/// inspection request.  Because the host-helper grant signs the canonical
-/// request digest, these fields are bound to the exact RunInspect arguments and
-/// cannot be replayed for another generation or installed recipe.
-impl RecipeRunInspectionBinding {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.mapping_generation == 0
-            || self.run_generation == 0
-            || self.world_size == 0
-            || self.rank >= self.world_size
-            || self.port == 0
-            || !valid_role(&self.role)
-            || !lower_hex(&self.recipe_content_sha256, 64)
-            || !lower_hex(&self.artifact_set_digest, 64)
-            || !lower_hex(&self.image_digest, 64)
-            || !lower_hex(&self.runtime_arguments_sha256, 64)
-            || self.model_identity.is_empty()
-            || self.model_identity.len() > 1024
-            || self.model_identity.contains(['\0', '\r', '\n'])
-            || self.run_id.get_version() != Some(uuid::Version::Random)
-            || self.installation_id.get_version() != Some(uuid::Version::Random)
-            || self.mapping_id.get_version() != Some(uuid::Version::Random)
-            || self.recipe_revision_id.get_version() != Some(uuid::Version::Random)
-        {
-            return Err(ProtocolError::Identity("recipe run inspection binding"));
-        }
-        let singleton = self.world_size == 1;
-        let rendezvous_valid = if singleton {
-            self.local_address.is_none()
-                && self.master_address.is_none()
-                && self.master_port.is_none()
-        } else {
-            self.local_address.is_some_and(valid_fabric_address)
-                && self.master_address.is_some_and(valid_fabric_address)
-                && self.master_port.is_some_and(|port| port >= 1024)
-        };
-        if !rendezvous_valid {
-            return Err(ProtocolError::Identity("recipe run inspection rendezvous"));
-        }
-        Ok(())
-    }
-}
-
-impl RecipeRunObservationReceiptClaims {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema_version != 1
-            || self.authority != RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY
-            || !valid_node_id(&self.node_id)
-            || self.request_id.get_version() != Some(uuid::Version::Random)
-            || !lower_hex(&self.request_sha256, 64)
-            || !lower_hex(&self.observation_identity_sha256, 64)
-            || self.observed_at <= 0
-        {
-            return Err(ProtocolError::Identity(
-                "recipe run observation receipt claims",
-            ));
-        }
-        Ok(())
-    }
-}
-
-impl RecipeRunObservationReceipt {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        self.claims.validate()?;
-        if self.schema_version != 1
-            || self.signature.algorithm != "ed25519"
-            || !lower_hex(&self.signature.key_id, 64)
-            || !lower_hex(&self.signature.value, 128)
-        {
-            return Err(ProtocolError::Identity("recipe run observation receipt"));
-        }
-        Ok(())
-    }
-}
-
-impl RecipeRunObservationWire {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        RecipeRunInspectionBinding::from(self).validate()?;
-        self.helper_receipt.validate()?;
-        if self.schema_version != 1
-            || !valid_node_id(&self.node_id)
-            || self.node_id.is_empty()
-            || !lower_hex(&self.observation_identity_sha256, 64)
-            || !lower_hex(&self.observation_receipt_public_key, 64)
-            || self.grant.validate().is_err()
-            || self.grant.claims.node_id != self.node_id
-            || self.grant.claims.request_id != self.helper_receipt.claims.request_id
-            || self.helper_receipt.claims.node_id != self.node_id
-            || self.helper_receipt.claims.observation_identity_sha256
-                != self.observation_identity_sha256
-            || match &self.grant.claims.operation {
-                HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
-                    operation.action != HostHelperContainerRuntimeAction::RunInspect
-                        || operation.request_sha256 != self.helper_receipt.claims.request_sha256
-                        || operation.observation_identity_sha256.as_deref()
-                            != Some(self.observation_identity_sha256.as_str())
-                }
-                _ => true,
-            }
-            || self.observed_at.timestamp() != self.helper_receipt.claims.observed_at
-            || (self.local_address == self.master_address) != self.endpoint_ready.is_some()
-        {
-            return Err(ProtocolError::Identity("recipe run observation"));
-        }
-        Ok(())
-    }
-}
-
-pub fn recipe_run_observation_receipt_signing_bytes(
-    claims: &RecipeRunObservationReceiptClaims,
-) -> Result<Vec<u8>, ProtocolError> {
-    claims.validate()?;
-    let mut value = RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN.to_vec();
-    value.extend(canonical_json(claims)?);
-    Ok(value)
 }
 
 #[derive(Debug, Error)]
@@ -1145,17 +960,6 @@ mod agent_result_binding_tests {
     }
 }
 
-impl EnrollmentEvidence {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        if !lower_hex(&self.observation_receipt_public_key, 64) {
-            return Err(ProtocolError::Identity(
-                "enrollment observation receipt public key",
-            ));
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecipeOperationRequest {
     RuntimePreflight(runtime_preflight::RuntimePreflightRequest),
@@ -1382,7 +1186,6 @@ mod recipe_start_tests {
             "master_address": master_address,
             "master_port": if world_size > 1 { Some(29500) } else { None },
             "memory_floor_bytes": 2 * 1024_u64.pow(3),
-            "memory_kind": "unified",
             "port": 8000,
             "rank": rank,
             "reserved_memory_bytes": 1024,
@@ -1494,7 +1297,6 @@ mod recipe_start_tests {
             fence: Uuid::new_v4(),
             arguments: vec!["sha256:image".to_owned(), "run".to_owned()],
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(start.run_generation),
@@ -1522,7 +1324,6 @@ mod recipe_start_tests {
             fence: Uuid::new_v4(),
             arguments: Vec::new(),
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(stop.run_generation),
@@ -1558,7 +1359,6 @@ mod recipe_start_tests {
             fence: claim.fence,
             arguments: vec!["sha256:image".to_owned(), "job".to_owned()],
             job_plan: Some(job.clone()),
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(job.run_generation),
@@ -2595,7 +2395,6 @@ mod host_helper_reconciliation_identity_tests {
                     action: HostHelperContainerRuntimeAction::InstallationCleanup,
                     fence: Uuid::new_v4(),
                     request_sha256: "e".repeat(64),
-                    observation_identity_sha256: None,
                     installation_id: Some(identity.installation_id),
                     reconciliation_identity: Some(identity),
                     run_generation: None,
@@ -2632,214 +2431,6 @@ mod host_helper_reconciliation_identity_tests {
         operation.action = HostHelperContainerRuntimeAction::Start;
         operation.installation_id = None;
         assert!(wrong_action.validate().is_err());
-    }
-}
-
-#[cfg(test)]
-mod recipe_run_inspection_tests {
-    use super::*;
-
-    fn binding() -> RecipeRunInspectionBinding {
-        RecipeRunInspectionBinding {
-            artifact_set_digest: "a".repeat(64),
-            image_digest: "b".repeat(64),
-            installation_id: Uuid::new_v4(),
-            local_address: Some("192.168.100.11".parse().unwrap()),
-            master_address: Some("192.168.100.10".parse().unwrap()),
-            master_port: Some(29500),
-            mapping_generation: 3,
-            mapping_id: Uuid::new_v4(),
-            model_identity: "example/model@0123456789abcdef".to_owned(),
-            port: 8000,
-            rank: 1,
-            recipe_content_sha256: "c".repeat(64),
-            recipe_revision_id: Uuid::new_v4(),
-            role: "worker".to_owned(),
-            run_id: Uuid::new_v4(),
-            run_generation: 2,
-            runtime_arguments_sha256: hex_sha256(
-                &canonical_json(&vec![
-                    format!("sha256:{}", "b".repeat(64)),
-                    "run".to_owned(),
-                ])
-                .unwrap(),
-            ),
-            world_size: 2,
-        }
-    }
-
-    #[test]
-    fn exact_inspection_binds_generation_and_is_run_inspect_only() {
-        let binding = binding();
-        let mut request = HostRuntimeRequest {
-            action: HostRuntimeAction::RunInspect,
-            fence: Uuid::new_v4(),
-            arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
-            job_plan: None,
-            observation: Some(binding.clone()),
-            installation_id: None,
-            reconciliation_identity: None,
-            run_generation: None,
-            start_plan: None,
-            stop_plan: None,
-        };
-        request.validate().unwrap();
-
-        request.action = HostRuntimeAction::Start;
-        assert!(request.validate().is_err());
-        request.action = HostRuntimeAction::RunInspect;
-        request.observation.as_mut().unwrap().run_generation = 0;
-        assert!(request.validate().is_err());
-    }
-
-    #[test]
-    fn observation_receipt_has_strict_domain_separated_claims() {
-        let claims = RecipeRunObservationReceiptClaims {
-            schema_version: 1,
-            authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
-            node_id: "spk_11111111111111111111111111111111".to_owned(),
-            request_id: Uuid::new_v4(),
-            request_sha256: "a".repeat(64),
-            observation_identity_sha256: "b".repeat(64),
-            outcome: RecipeRunObservationOutcome::NotRunning,
-            observed_at: 1_788_000_000,
-        };
-        let signing = recipe_run_observation_receipt_signing_bytes(&claims).unwrap();
-        assert!(signing.starts_with(b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\0"));
-        assert!(signing.ends_with(&canonical_json(&claims).unwrap()));
-
-        let receipt = RecipeRunObservationReceipt {
-            schema_version: 1,
-            claims: claims.clone(),
-            signature: RecipeRunObservationReceiptSignature {
-                algorithm: "ed25519".to_owned(),
-                key_id: "c".repeat(64),
-                value: "d".repeat(128),
-            },
-        };
-        receipt.validate().unwrap();
-        let mut replay_shaped = receipt;
-        replay_shaped.claims.request_sha256 = "e".repeat(64);
-        assert_ne!(
-            recipe_run_observation_receipt_signing_bytes(&claims).unwrap(),
-            recipe_run_observation_receipt_signing_bytes(&replay_shaped.claims).unwrap()
-        );
-        replay_shaped.claims.node_id = "wrong".to_owned();
-        assert!(replay_shaped.validate().is_err());
-    }
-
-    #[test]
-    fn singleton_observation_uses_the_same_required_signed_shape() {
-        let mut binding = binding();
-        binding.rank = 0;
-        binding.role = "entrypoint".to_owned();
-        binding.world_size = 1;
-        binding.local_address = None;
-        binding.master_address = None;
-        binding.master_port = None;
-        binding.validate().unwrap();
-
-        let observed_at = DateTime::from_timestamp(1_788_000_000, 0).unwrap();
-        let identity_sha256 = "a".repeat(64);
-        let receipt = RecipeRunObservationReceipt {
-            schema_version: 1,
-            claims: RecipeRunObservationReceiptClaims {
-                schema_version: 1,
-                authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
-                node_id: "spk_11111111111111111111111111111111".to_owned(),
-                request_id: Uuid::new_v4(),
-                request_sha256: "b".repeat(64),
-                observation_identity_sha256: identity_sha256.clone(),
-                outcome: RecipeRunObservationOutcome::Running,
-                observed_at: observed_at.timestamp(),
-            },
-            signature: RecipeRunObservationReceiptSignature {
-                algorithm: "ed25519".to_owned(),
-                key_id: "c".repeat(64),
-                value: "d".repeat(128),
-            },
-        };
-        let grant = SignedHostHelperGrant {
-            schema_version: 1,
-            claims: HostHelperGrantClaims {
-                schema_version: 1,
-                authority: "vonk.host-maintenance-helper".to_owned(),
-                request_id: receipt.claims.request_id,
-                node_id: receipt.claims.node_id.clone(),
-                issued_at: observed_at.timestamp(),
-                expires_at: observed_at.timestamp() + 60,
-                operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
-                    generated::ExecuteContainerRuntimeRequestOperation {
-                        type_: "execute-container-runtime-request".into(),
-                        action: HostHelperContainerRuntimeAction::RunInspect,
-                        fence: Uuid::new_v4(),
-                        request_sha256: "b".repeat(64),
-                        observation_identity_sha256: Some(identity_sha256.clone()),
-                        installation_id: None,
-                        reconciliation_identity: None,
-                        run_generation: None,
-                        runtime_installation_id: None,
-                        runtime_run_id: None,
-                        runtime_target_id: None,
-                        start_plan_sha256: None,
-                        stop_plan_sha256: None,
-                    },
-                ),
-            },
-            signature: HostHelperGrantSignature {
-                algorithm: "ed25519".to_owned(),
-                key_id: "f".repeat(64),
-                value: "e".repeat(128),
-            },
-        };
-        let observation = RecipeRunObservationWire {
-            schema_version: 1,
-            node_id: receipt.claims.node_id.clone(),
-            artifact_set_digest: binding.artifact_set_digest,
-            image_digest: binding.image_digest,
-            installation_id: binding.installation_id,
-            local_address: binding.local_address,
-            mapping_generation: binding.mapping_generation,
-            mapping_id: binding.mapping_id,
-            master_address: binding.master_address,
-            master_port: binding.master_port,
-            model_identity: binding.model_identity,
-            port: binding.port,
-            rank: binding.rank,
-            recipe_content_sha256: binding.recipe_content_sha256,
-            recipe_revision_id: binding.recipe_revision_id,
-            role: binding.role,
-            run_generation: binding.run_generation,
-            run_id: binding.run_id,
-            runtime_arguments_sha256: binding.runtime_arguments_sha256,
-            world_size: binding.world_size,
-            observed_at: observed_at.into(),
-            endpoint_ready: Some(true),
-            observation_identity_sha256: identity_sha256,
-            grant,
-            helper_receipt: receipt,
-            observation_receipt_public_key: "e".repeat(64),
-        };
-        observation.validate().unwrap();
-        let mut wrong_operation = observation.clone();
-        wrong_operation.grant.claims.operation =
-            HostHelperOperation::ConfirmPackageActivationOperation(
-                generated::ConfirmPackageActivationOperation {
-                    type_: "confirm-package-activation".into(),
-                    package_sha256: "a".repeat(64),
-                    attempt_nonce: "b".repeat(64),
-                },
-            );
-        assert!(wrong_operation.validate().is_err());
-
-        let mut partial_rendezvous = RecipeRunInspectionBinding::from(&observation);
-        partial_rendezvous.world_size = 2;
-        partial_rendezvous.master_address = Some("10.0.0.2".parse().unwrap());
-        assert!(partial_rendezvous.validate().is_err());
-
-        let mut encoded = serde_json::to_value(&observation).unwrap();
-        encoded.as_object_mut().unwrap().remove("endpoint_ready");
-        assert!(serde_json::from_value::<RecipeRunObservationWire>(encoded).is_err());
     }
 }
 
@@ -2910,34 +2501,6 @@ mod distribution_tests {
         value.validate().unwrap();
         value.objects[0].kind = "oci-archive".parse().unwrap();
         assert!(value.validate().is_err());
-    }
-}
-
-impl generated::AgentRuntimeIdentity {
-    pub fn observation_receipt_public_key(&self) -> Result<[u8; 32], ProtocolError> {
-        if !lower_hex(&self.observation_receipt_public_key, 64) {
-            return Err(ProtocolError::Identity("observation receipt public key"));
-        }
-        let mut bytes = [0; 32];
-        for (index, pair) in self
-            .observation_receipt_public_key
-            .as_bytes()
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .enumerate()
-        {
-            let digit = |value: u8| {
-                if value.is_ascii_digit() {
-                    value - b'0'
-                } else {
-                    value - b'a' + 10
-                }
-            };
-            let [high, low] = *pair;
-            bytes[index] = digit(high) * 16 + digit(low);
-        }
-        Ok(bytes)
     }
 }
 

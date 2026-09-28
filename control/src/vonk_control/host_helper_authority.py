@@ -13,7 +13,6 @@ from uuid import uuid4
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentProtocolError, canonical_message
@@ -32,24 +31,17 @@ from vonk_agent_protocol.host_helper import (
     InstallVonkDebOperation,
     RecipeReconciliationIdentity,
     SignedHostHelperGrant,
-    SignedRecipeRunObservationReceipt,
     host_helper_grant_signing_bytes,
-    recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
-from vonk_agent_protocol.recipe_observations import RecipeRunObservationIdentity
 from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
     RecipeUninstallPayload,
 )
-from vonk_forge_contracts import read_recipe
 
 from .agent_jobs import (
     _WORKLOAD_INTENT_OPERATIONS,
     superseded_cancellation_deadline,
-)
-from .distributed_recovery import (
-    _accepted_start_authority,
 )
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
@@ -60,20 +52,12 @@ from .models import (
     AgentCertificate,
     AgentNode,
     AgentOperationAttempt,
-    CatalogDocumentRevision,
-    ClusterMapping,
     Job,
-    RecipeInstallation,
     RecipeRun,
-    RecipeRunObservationGrant,
     RunNode,
 )
 from .models import AgentOperation as StoredAgentOperation
 from .package_activation import matches_receipt
-from .recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_run_plan,
-)
 
 
 def _aware(value: datetime) -> datetime:
@@ -83,8 +67,8 @@ def _aware(value: datetime) -> datetime:
 def recipe_run_known(session: Session, run_id: str) -> bool:
     """Whether this Controller has any record of one recipe run.
 
-    One predicate owns "unowned": the read-only probe grant and the agent's
-    disposition lookup must never disagree about a run this Controller knows.
+    The agent's disposition lookup uses it to learn that a local run has no
+    owner here and can be retired.
     """
 
     return session.get(RecipeRun, run_id) is not None or (
@@ -139,20 +123,6 @@ def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
     if not isinstance(key, ed25519.Ed25519PrivateKey):
         raise HostHelperAuthorityError("host helper private key must be Ed25519")
     return key
-
-
-class RecipeRunObservationReplayError(HostHelperAuthorityError):
-    """A valid observation repeats an already consumed current grant."""
-
-
-class RecipeRunObservationPendingError(HostHelperAuthorityError):
-    """An unconsumed observation grant for this run is still outstanding.
-
-    This is the bounded, *expected* refusal: the Controller already authorized
-    this exact run and the agent's previous grant has not been consumed yet.
-    It must stay distinguishable from an authority rejection, because the agent
-    retries a pending grant and must never read it as a lost authorization.
-    """
 
 
 class HostHelperGrantIssuer:
@@ -373,406 +343,6 @@ class HostRuntimeAuthorityService:
                 "host runtime grant exceeds the active attempt lease"
             )
         return grant
-
-    def issue_recipe_run_observation_grant(
-        self,
-        *,
-        node_id: str,
-        certificate_serial: str,
-        identity: Mapping[str, object],
-        job_id: str,
-        operation_id: str,
-        attempt: int,
-        fence: str,
-        request_sha256: str,
-        expires_in_seconds: int,
-    ) -> tuple[str, SignedHostHelperGrant]:
-        """Authorize one exact, read-only local rank inspection."""
-
-        if expires_in_seconds != 10:
-            raise HostHelperAuthorityError(
-                "recipe run observation grant TTL is invalid"
-            )
-        now = _aware(self._clock())
-        with self._sessions.begin() as session:
-            observation_identity = self._validate_observation_identity(
-                session,
-                node_id=node_id,
-                certificate_serial=certificate_serial,
-                identity=identity,
-                now=now,
-            )
-            if job_id != identity.get("run_id") or attempt != identity.get(
-                "run_generation"
-            ):
-                raise HostHelperAuthorityError(
-                    "recipe run observation execution binding is invalid"
-                )
-            run_node = session.scalar(
-                select(RunNode)
-                .where(
-                    RunNode.run_id == identity["run_id"],
-                    RunNode.node_id == node_id,
-                )
-                .with_for_update(of=RunNode)
-            )
-            assert run_node is not None
-            pending = session.scalar(
-                select(RecipeRunObservationGrant)
-                .where(RecipeRunObservationGrant.run_node_id == run_node.id)
-                .with_for_update()
-            )
-            if (
-                pending is not None
-                and pending.consumed is not True
-                and pending.expires_at + 5 >= int(now.timestamp())
-            ):
-                raise RecipeRunObservationPendingError(
-                    "recipe run observation grant is already pending"
-                )
-            grant = self._issuer.issue_grant(
-                node_id=node_id,
-                operation=ExecuteContainerRuntimeRequestOperation(
-                    type=HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
-                    action=ContainerRuntimeAction.RUN_INSPECT.value,
-                    fence=fence,
-                    request_sha256=request_sha256,
-                    observation_identity_sha256=observation_identity,
-                ),
-                expires_in_seconds=expires_in_seconds,
-            )
-            if pending is None:
-                pending = RecipeRunObservationGrant(run_node_id=run_node.id)
-                session.add(pending)
-            pending.request_id = grant.claims.request_id
-            pending.identity_sha256 = observation_identity
-            pending.issued_at = grant.claims.issued_at
-            pending.expires_at = grant.claims.expires_at
-            pending.consumed = False
-            return observation_identity, grant
-
-    def issue_unowned_recipe_run_probe_grant(
-        self,
-        *,
-        node_id: str,
-        certificate_serial: str,
-        identity: Mapping[str, object],
-        job_id: str,
-        operation_id: str,
-        attempt: int,
-        fence: str,
-        request_sha256: str,
-        expires_in_seconds: int,
-    ) -> tuple[str, SignedHostHelperGrant] | None:
-        """Authorize a read-only probe of a local run this Controller never owned.
-
-        A Spark can retain the lifecycle of a run that no longer exists in this
-        Controller's database, for example after the database was rebuilt.  No
-        exact observation can ever be accepted for it, so the agent needs one
-        authenticated answer instead: whether the process still runs.  The
-        grant is the same exact, ten-second, node-bound ``RUN_INSPECT`` the
-        helper already enforces; it changes nothing on the host, is never
-        consumed as an observation of an owned run, and is refused whenever
-        this Controller has any record of the run.  ``None`` means the run is
-        known and the ordinary observation authority decides.
-        """
-
-        if expires_in_seconds != 10:
-            raise HostHelperAuthorityError(
-                "recipe run observation grant TTL is invalid"
-            )
-        now = _aware(self._clock())
-        with self._sessions.begin() as session:
-            try:
-                normalized = RecipeRunObservationIdentity.model_validate(
-                    dict(identity)
-                ).model_dump(mode="json")
-            except ValidationError as error:
-                raise HostHelperAuthorityError(
-                    "recipe run observation identity is invalid"
-                ) from error
-            run_id = normalized.get("run_id")
-            if not isinstance(run_id, str) or recipe_run_known(session, run_id):
-                return None
-            node = session.get(AgentNode, node_id)
-            certificate = session.get(AgentCertificate, certificate_serial)
-            if (
-                normalized.get("node_id") != node_id
-                or job_id != run_id
-                or attempt != normalized.get("run_generation")
-                or node is None
-                or node.state != "active"
-                or node.revoked_at is not None
-                or certificate is None
-                or certificate.node_id != node_id
-                or certificate.state != "active"
-                or certificate.revoked_at is not None
-                or certificate.ca_revoked_at is not None
-                or _aware(certificate.not_before) > now
-                or _aware(certificate.not_after) <= now
-            ):
-                raise HostHelperAuthorityError(
-                    "recipe run probe authority is unavailable"
-                )
-            observation_identity = hashlib.sha256(
-                canonical_message(normalized)
-            ).hexdigest()
-            grant = self._issuer.issue_grant(
-                node_id=node_id,
-                operation=ExecuteContainerRuntimeRequestOperation(
-                    type=HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
-                    action=ContainerRuntimeAction.RUN_INSPECT.value,
-                    fence=fence,
-                    request_sha256=request_sha256,
-                    observation_identity_sha256=observation_identity,
-                ),
-                expires_in_seconds=expires_in_seconds,
-            )
-            return observation_identity, grant
-
-    def consume_recipe_run_observation_grant(
-        self,
-        session: Session,
-        *,
-        node_id: str,
-        certificate_serial: str,
-        identity: Mapping[str, object],
-        observed_at: datetime,
-        received_at: datetime,
-        signed_grant: SignedHostHelperGrant,
-        helper_receipt: SignedRecipeRunObservationReceipt,
-    ) -> tuple[str, bool, str]:
-        """Verify and consume the exact grant echoed by an observation result."""
-
-        now = _aware(received_at)
-        observation_identity = self._validate_observation_identity(
-            session,
-            node_id=node_id,
-            certificate_serial=certificate_serial,
-            identity=identity,
-            now=now,
-        )
-        try:
-            grant = signed_grant
-            self._issuer.public_key.verify(
-                bytes.fromhex(grant.signature.value),
-                host_helper_grant_signing_bytes(grant.claims),
-            )
-        except Exception as error:
-            raise HostHelperAuthorityError(
-                "recipe run observation grant signature is invalid"
-            ) from error
-        try:
-            receipt = helper_receipt
-            node = session.get(AgentNode, node_id)
-            if node is None or node.observation_receipt_public_key is None:
-                raise HostHelperAuthorityError(
-                    "recipe run observation receipt key is unavailable"
-                )
-            receipt_public_key = bytes.fromhex(node.observation_receipt_public_key)
-            receipt_key_id = hashlib.sha256(receipt_public_key).hexdigest()
-            if receipt.signature.key_id != receipt_key_id:
-                raise HostHelperAuthorityError(
-                    "recipe run observation receipt key is stale"
-                )
-            ed25519.Ed25519PublicKey.from_public_bytes(receipt_public_key).verify(
-                bytes.fromhex(receipt.signature.value),
-                recipe_run_observation_receipt_signing_bytes(receipt.claims),
-            )
-        except HostHelperAuthorityError:
-            raise
-        except Exception as error:
-            raise HostHelperAuthorityError(
-                "recipe run observation receipt signature is invalid"
-            ) from error
-        operation = grant.claims.operation
-        if not isinstance(operation, ExecuteContainerRuntimeRequestOperation):
-            raise HostHelperAuthorityError(
-                "recipe run observation grant operation is invalid"
-            )
-        expected_operation = {
-            "type": HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
-            "action": ContainerRuntimeAction.RUN_INSPECT.value,
-            "fence": operation.fence,
-            "request_sha256": operation.request_sha256,
-            "observation_identity_sha256": observation_identity,
-        }
-        observed_epoch = int(_aware(observed_at).timestamp())
-        if (
-            grant.claims.node_id != node_id
-            or operation.to_mapping() != expected_operation
-            or not grant.signature.key_id == self._issuer.key_id
-            or not grant.claims.issued_at <= observed_epoch <= grant.claims.expires_at
-            or int(now.timestamp()) > grant.claims.expires_at + 5
-            or receipt.claims.node_id != node_id
-            or receipt.claims.request_id != grant.claims.request_id
-            or receipt.claims.request_sha256 != operation.request_sha256
-            or receipt.claims.observation_identity_sha256 != observation_identity
-            or receipt.claims.observed_at != observed_epoch
-            or not grant.claims.issued_at
-            <= receipt.claims.observed_at
-            <= grant.claims.expires_at
-        ):
-            raise HostHelperAuthorityError("recipe run observation grant is stale")
-        run_node = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == identity["run_id"], RunNode.node_id == node_id
-            )
-        )
-        assert run_node is not None
-        pending = session.scalar(
-            select(RecipeRunObservationGrant)
-            .where(RecipeRunObservationGrant.run_node_id == run_node.id)
-            .with_for_update()
-        )
-        if (
-            pending is None
-            or pending.request_id != grant.claims.request_id
-            or pending.identity_sha256 != observation_identity
-        ):
-            raise HostHelperAuthorityError("recipe run observation grant was replayed")
-        if pending.consumed is not False:
-            raise RecipeRunObservationReplayError(
-                "recipe run observation grant was replayed"
-            )
-        pending.consumed = True
-        receipt_digest = hashlib.sha256(
-            canonical_message(receipt.to_mapping())
-        ).hexdigest()
-        return observation_identity, receipt.claims.outcome == "running", receipt_digest
-
-    @staticmethod
-    def _validate_observation_identity(
-        session: Session,
-        *,
-        node_id: str,
-        certificate_serial: str,
-        identity: Mapping[str, object],
-        now: datetime,
-    ) -> str:
-        try:
-            identity = RecipeRunObservationIdentity.model_validate(
-                dict(identity)
-            ).model_dump(mode="json")
-        except ValidationError as error:
-            raise HostHelperAuthorityError(
-                "recipe run observation identity is invalid"
-            ) from error
-        run = session.get(RecipeRun, identity.get("run_id"))
-        installation = session.get(RecipeInstallation, identity.get("installation_id"))
-        revision = session.get(
-            CatalogDocumentRevision, identity.get("recipe_revision_id")
-        )
-        mapping = session.get(ClusterMapping, identity.get("mapping_id"))
-        run_node = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == identity.get("run_id"),
-                RunNode.node_id == node_id,
-            )
-        )
-        node = session.get(AgentNode, node_id)
-        certificate = session.get(AgentCertificate, certificate_serial)
-        try:
-            exact_observations = (
-                parse_stored_run_plan(run.plan).observation_schema_version == 2
-                if run is not None
-                else False
-            )
-        except RecipeExecutionContractError:
-            exact_observations = False
-        if (
-            run is None
-            or installation is None
-            or revision is None
-            or mapping is None
-            or run_node is None
-            or node is None
-            or certificate is None
-            or run.state != "running"
-            or run_node.state not in {"running", "failed"}
-            or (run_node.state == "failed" and run.route_state != "withdrawn")
-            or not exact_observations
-            or installation.state != "installed"
-            or revision.kind != "recipe"
-            or revision.schema_version != 2
-            or revision.state != "active"
-            or mapping.state != "ready"
-            or certificate.node_id != node_id
-            or certificate.state != "active"
-            or certificate.revoked_at is not None
-            or certificate.ca_revoked_at is not None
-            or _aware(certificate.not_before) > now
-            or _aware(certificate.not_after) <= now
-        ):
-            raise HostHelperAuthorityError("recipe run observation authority is stale")
-        try:
-            read_recipe(revision.document)
-        except (TypeError, ValueError) as error:
-            raise HostHelperAuthorityError(
-                "recipe run observation authority is stale"
-            ) from error
-        run_node_ids = tuple(
-            session.scalars(
-                select(RunNode.node_id)
-                .where(RunNode.run_id == run.id)
-                .order_by(RunNode.node_id)
-            )
-        )
-        try:
-            start, workload_intent_ordinal = _accepted_start_authority(
-                session,
-                run,
-                revision.content_digest,
-                node_id,
-                allow_multi_target=len(run_node_ids) > 1,
-                now=now,
-            )
-        except RuntimeError as error:
-            raise HostHelperAuthorityError(
-                "recipe run launch evidence is unavailable"
-            ) from error
-        if node.workload_intent_ordinal != workload_intent_ordinal or (
-            isinstance(start.result, Mapping)
-            and start.result.get("cancel_requested") is True
-        ):
-            raise HostHelperAuthorityError("recipe run launch evidence is unavailable")
-        result = start.result
-        evidence = (
-            result.get("launch_evidence") if isinstance(result, Mapping) else None
-        )
-        launch = evidence.get(node_id) if isinstance(evidence, Mapping) else None
-        if (
-            not isinstance(launch, Mapping)
-            or launch.get("run_generation") != run.run_generation
-        ):
-            raise HostHelperAuthorityError("recipe run launch evidence is unavailable")
-        expected = RecipeRunObservationIdentity.model_validate(
-            {
-                "schema_version": 1,
-                "node_id": node_id,
-                "run_id": run.id,
-                "installation_id": installation.id,
-                "recipe_revision_id": revision.id,
-                "recipe_content_sha256": revision.content_digest,
-                "mapping_id": mapping.id,
-                "mapping_generation": run.mapping_generation,
-                "run_generation": run.run_generation,
-                "image_digest": installation.image_digest.removeprefix("sha256:"),
-                "artifact_set_digest": launch.get("artifact_set_digest"),
-                "model_identity": launch.get("model_identity"),
-                "rank": run_node.rank,
-                "role": run_node.role,
-                "world_size": launch.get("world_size"),
-                "local_address": launch.get("local_address"),
-                "master_address": launch.get("master_address"),
-                "master_port": launch.get("master_port"),
-                "port": run_node.port,
-                "runtime_arguments_sha256": launch.get("runtime_arguments_sha256"),
-            }
-        ).model_dump(mode="json")
-        if dict(identity) != expected:
-            raise HostHelperAuthorityError("recipe run observation identity is stale")
-        return hashlib.sha256(canonical_message(expected)).hexdigest()
 
     def issue_agent_upgrade_grant(
         self,

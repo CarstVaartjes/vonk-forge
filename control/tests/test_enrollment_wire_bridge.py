@@ -46,10 +46,6 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
     parsed = ClaimRequest.model_validate_json(raw)
     assert parsed.node_id == NODE_A
     assert parsed.protocol_version == 3
-    assert (
-        parsed.runtime_identity.observation_receipt_public_key
-        == (PACKAGED_RUNTIME_IDENTITY["observation_receipt_public_key"])
-    )
     # Submit the production serializer's bytes unchanged, bypassing the
     # convenience client's automatic claim fixture completion.
     response = client.request(
@@ -64,7 +60,7 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
     assert response.status_code == 204, response.text
 
     invalid = dict(PACKAGED_RUNTIME_IDENTITY)
-    del invalid["observation_receipt_public_key"]
+    del invalid["binary_digest"]
     rejected = subprocess.run(
         [str(enrollment_wire_probe), "--claim", NODE_A],
         input=json.dumps(invalid).encode() + b"\n",

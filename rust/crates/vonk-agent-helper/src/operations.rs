@@ -22,7 +22,7 @@ use vonk_agent_protocol::generated::{
 };
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeReconciliationIdentity,
-    RecipeRunObservationOutcome, canonical_json,
+    canonical_json,
     compiled_oci::{
         CompiledOciError, CompiledOciPaths, ExecInvocationLimits, measure_exec_invocation,
         start_arguments_for_paths,
@@ -450,13 +450,10 @@ pub struct OperationOutcome {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recipe_run_observation: Option<RecipeRunObservationOutcome>,
 }
 
 struct RuntimeRequestOutcome {
     exit_code: Option<i32>,
-    recipe_run_observation: Option<RecipeRunObservationOutcome>,
 }
 
 /// The helper's durable proof that one Controller-authorized archive delivery
@@ -831,7 +828,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .validate()
             .map_err(|_| OperationError::InvalidOperation)?;
         self.require_directory(&self.roots.data)?;
-        let (status, exit_code, recipe_run_observation) = match operation {
+        let (status, exit_code) = match operation {
             HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
                 package_sha256,
                 package_signature,
@@ -844,7 +841,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     rollback,
                     observation_node_id.ok_or(OperationError::InvalidOperation)?,
                 )?;
-                ("package-installed", None, None)
+                ("package-installed", None)
             }
             HostOperation::ConfirmPackageActivationOperation(
                 ConfirmPackageActivationOperation {
@@ -860,14 +857,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         attempt_nonce,
                     )
                     .map_err(|_| OperationError::PackagePreflightFailed)?;
-                ("package-activation-confirmed", None, None)
+                ("package-activation-confirmed", None)
             }
             HostOperation::ExecuteContainerRuntimeRequestOperation(
                 ExecuteContainerRuntimeRequestOperation {
                     action,
                     fence,
                     request_sha256,
-                    observation_identity_sha256,
                     installation_id,
                     reconciliation_identity,
                     start_plan_sha256,
@@ -893,29 +889,36 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         runtime_installation_id: runtime_installation_id.as_ref(),
                     },
                     request_sha256,
-                    observation_identity_sha256.as_deref(),
-                    observation_node_id,
                 );
-                let (status, exit_code, recipe_run_observation) = match outcome {
-                    Ok(outcome) => (
-                        "container-runtime-request-executed",
-                        outcome.exit_code,
-                        outcome.recipe_run_observation,
-                    ),
+                let (status, exit_code) = match outcome {
+                    Ok(outcome) => ("container-runtime-request-executed", outcome.exit_code),
                     Err(OperationError::StopUncertain) => {
-                        ("container-runtime-stop-uncertain", Some(124), None)
+                        ("container-runtime-stop-uncertain", Some(124))
                     }
                     Err(error) => return Err(error),
                 };
-                (status, exit_code, recipe_run_observation)
+                (status, exit_code)
             }
         };
         Ok(OperationOutcome {
             schema_version: 1,
             status: status.to_owned(),
             exit_code,
-            recipe_run_observation,
         })
+    }
+
+    /// Report whether the exact container of one agent-written `run-inspect`
+    /// request is running.  Read-only, so it needs no Controller grant.
+    pub fn inspect_recipe_run(&self, request_sha256: &str) -> Result<bool, OperationError> {
+        self.require_directory(&self.roots.data)?;
+        let request = self.read_runtime_request(request_sha256)?;
+        if request.action != HostRuntimeAction::RunInspect
+            || request.installation_id.is_some()
+            || request.reconciliation_identity.is_some()
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        self.runtime_run_inspect(&request.arguments, false)
     }
 
     fn install_package(
@@ -1088,8 +1091,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
         action: &ContainerRuntimeAction,
         binding: RuntimeRequestGrantBinding<'_>,
         request_sha256: &str,
-        observation_identity_sha256: Option<&str>,
-        observation_node_id: Option<&str>,
     ) -> Result<RuntimeRequestOutcome, OperationError> {
         let request = self.read_runtime_request(request_sha256)?;
         let expected_action = match action {
@@ -1108,29 +1109,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        match (
-            request.observation.as_ref(),
-            observation_identity_sha256,
-            observation_node_id,
-        ) {
-            (None, None, _) => {}
-            (Some(binding), Some(expected), Some(node_id)) => {
-                let mut identity = serde_json::to_value(binding)
-                    .map_err(|_| OperationError::InvalidOperation)?
-                    .as_object()
-                    .cloned()
-                    .ok_or(OperationError::InvalidOperation)?;
-                identity.insert("schema_version".to_owned(), serde_json::json!(1));
-                identity.insert("node_id".to_owned(), serde_json::json!(node_id));
-                if hex_sha256(
-                    &canonical_json(&identity).map_err(|_| OperationError::InvalidOperation)?,
-                ) != expected
-                {
-                    return Err(OperationError::InvalidOperation);
-                }
-            }
-            _ => return Err(OperationError::InvalidOperation),
-        }
         let authorized_effect = self.authorize_runtime_effect(&request, binding)?;
         match request.action {
             HostRuntimeAction::RuntimePreflight => {
@@ -1146,39 +1124,19 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .map_err(|_| OperationError::CommandFailed)?;
                 Ok(RuntimeRequestOutcome {
                     exit_code: Some(code),
-                    recipe_run_observation: None,
                 })
             }
-            HostRuntimeAction::ImageImport => {
-                self.runtime_image_import(&request.arguments)
-                    .map(|()| RuntimeRequestOutcome {
-                        exit_code: None,
-                        recipe_run_observation: None,
-                    })
-            }
-            HostRuntimeAction::ImageInspect => {
-                self.runtime_image_inspect(&request.arguments)
-                    .map(|()| RuntimeRequestOutcome {
-                        exit_code: None,
-                        recipe_run_observation: None,
-                    })
-            }
+            HostRuntimeAction::ImageImport => self
+                .runtime_image_import(&request.arguments)
+                .map(|()| RuntimeRequestOutcome { exit_code: None }),
+            HostRuntimeAction::ImageInspect => self
+                .runtime_image_inspect(&request.arguments)
+                .map(|()| RuntimeRequestOutcome { exit_code: None }),
             HostRuntimeAction::RunInspect => {
-                let running =
-                    self.runtime_run_inspect(&request.arguments, request.observation.is_none())?;
-                if request.observation.is_none() && !running {
+                if !self.runtime_run_inspect(&request.arguments, true)? {
                     return Err(OperationError::InvalidArtifact);
                 }
-                Ok(RuntimeRequestOutcome {
-                    exit_code: None,
-                    recipe_run_observation: request.observation.as_ref().map(|_| {
-                        if running {
-                            RecipeRunObservationOutcome::Running
-                        } else {
-                            RecipeRunObservationOutcome::NotRunning
-                        }
-                    }),
-                })
+                Ok(RuntimeRequestOutcome { exit_code: None })
             }
             HostRuntimeAction::Start => {
                 let Some(AuthorizedRuntimeEffect::Start {
@@ -1195,10 +1153,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     logical_run_id,
                     &plan_digest,
                 )
-                .map(|exit_code| RuntimeRequestOutcome {
-                    exit_code,
-                    recipe_run_observation: None,
-                })
+                .map(|exit_code| RuntimeRequestOutcome { exit_code })
             }
             HostRuntimeAction::Stop => {
                 let Some(AuthorizedRuntimeEffect::Stop {
@@ -1218,10 +1173,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     stop_timeout_seconds,
                     cancel_pending_start,
                 )
-                .map(|()| RuntimeRequestOutcome {
-                    exit_code: None,
-                    recipe_run_observation: None,
-                })
+                .map(|()| RuntimeRequestOutcome { exit_code: None })
             }
             HostRuntimeAction::InstallationCleanup => {
                 let installation_id = request
@@ -1236,10 +1188,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 } else {
                     self.runtime_installation_cleanup(&installation_id.to_string())?;
                 }
-                Ok(RuntimeRequestOutcome {
-                    exit_code: None,
-                    recipe_run_observation: None,
-                })
+                Ok(RuntimeRequestOutcome { exit_code: None })
             }
         }
     }
@@ -1253,7 +1202,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
             HostRuntimeAction::Start => {
                 if request.installation_id.is_some()
                     || request.reconciliation_identity.is_some()
-                    || request.observation.is_some()
                     || request.stop_plan.is_some()
                     || request.run_generation.is_none()
                     || (request.start_plan.is_some() == request.job_plan.is_some())
@@ -1346,7 +1294,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     || request.reconciliation_identity.is_some()
                     || request.start_plan.is_some()
                     || request.job_plan.is_some()
-                    || request.observation.is_some()
                     || request.run_generation != Some(plan.run_generation)
                     || grant.run_generation != Some(plan.run_generation)
                     || grant.runtime_run_id != Some(&plan.run_id)
@@ -5395,7 +5342,6 @@ mod tests {
             action: parts.action,
             fence: *fence,
             arguments: parts.arguments,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             job_plan: None,
@@ -7462,7 +7408,6 @@ mod tests {
             arguments: (0..3000)
                 .map(|index| format!("--mount=type=bind,src=/run/vonk/models/{index:05}"))
                 .collect(),
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             job_plan: None,

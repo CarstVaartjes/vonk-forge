@@ -353,15 +353,6 @@ class RunAdmissionService:
                     .order_by(ClusterMappingNode.rank)
                 )
             )
-            agent_nodes = tuple(
-                session.scalars(
-                    select(AgentNode).where(
-                        AgentNode.node_id.in_(
-                            [mapping_node.node_id for mapping_node in mapping_nodes]
-                        )
-                    )
-                )
-            )
             unreconciled_lost_ranks: dict[str, list[tuple[str, str]]] = {}
             for node_id, run_id, run_alias in session.execute(
                 select(RunNode.node_id, RecipeRun.id, RecipeRun.alias)
@@ -378,10 +369,6 @@ class RunAdmissionService:
                 unreconciled_lost_ranks.setdefault(node_id, []).append(
                     (run_id, run_alias)
                 )
-            receipt_keys = {
-                node.node_id: node.observation_receipt_public_key
-                for node in agent_nodes
-            }
             installed_nodes = {
                 (row.node_id, row.rank, row.role)
                 for row in session.scalars(
@@ -418,7 +405,6 @@ class RunAdmissionService:
         topology = recipe_topology(revision.document)
         role_by_name = {role.name: role for role in topology.roles}
         multi_node = len(ordered) > 1
-        two_phase_start = multi_node and topology.distributed
         endpoint_owner = next(
             (item for item in mapping_nodes if item.endpoint_owner), None
         )
@@ -465,15 +451,6 @@ class RunAdmissionService:
                 blockers.append(
                     AdmissionReason(
                         "run.stale_inventory", "GPU node memory inventory is stale."
-                    )
-                )
-            if two_phase_start and not isinstance(
-                receipt_keys.get(placement.node_id), str
-            ):
-                blockers.append(
-                    AdmissionReason(
-                        "run.distributed_observation_receipt_capability_missing",
-                        "Spark agent does not support signed distributed rank observations.",
                     )
                 )
             role = role_by_name.get(placement.role)
@@ -837,7 +814,7 @@ class RunAdmissionService:
             else {}
         )
         logical_job = next(iter(port_demands.values())).logical_job
-        # Exact signed observation is the sole current run contract for every
+        # Exact observation is the sole current run contract for every
         # topology.  Singleton runs retain a durable generation while their
         # rendezvous fields remain explicitly nullable.
         observation_schema_version = 2

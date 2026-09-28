@@ -49,8 +49,6 @@ started=$test_root/start
 crash_observed=$test_root/crash-observed
 # The simulated old helper can write only its declared ReadWritePaths.
 upgrade_invocations=/var/lib/vonk-forge/upgrade-invocations.$(basename "$test_root")
-observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8
-observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub
 recovery_failed_line=unavailable
 recovery_failed_status=unavailable
 
@@ -104,7 +102,6 @@ cleanup() {
   rm -f -- /var/lib/vonk-forge/helper-upgrade.pending \
     /var/lib/vonk-forge/helper-upgrade.receipt \
     /var/lib/vonk-forge/package-upgrade.status
-  rm -f -- "$observation_receipt_private"
   rmdir --ignore-fail-on-non-empty /var/lib/vonk-forge/helper/requests \
     /var/lib/vonk-forge/helper >/dev/null 2>&1 || true
   if dpkg-query --show vonk-forge-agent >/dev/null 2>&1; then
@@ -115,7 +112,6 @@ cleanup() {
     cleanup_status=1
   fi
   rm -rf -- /var/lib/vonk-forge-agent
-  rm -f -- "$observation_receipt_public"
   rmdir --ignore-fail-on-non-empty /etc/vonk-forge-agent \
     >/dev/null 2>&1 || true
   rm -f -- "$upgrade_invocations"
@@ -158,8 +154,6 @@ if dpkg-query -W vonk-forge-agent >/dev/null 2>&1 \
     || -L /var/lib/vonk-forge/helper-upgrade.receipt ]] \
   || [[ -e /var/lib/vonk-forge/package-upgrade.status \
     || -L /var/lib/vonk-forge/package-upgrade.status ]] \
-  || [[ -e "$observation_receipt_private" \
-    || -L "$observation_receipt_private" ]] \
   || [[ -e /etc/vonk-forge-agent || -L /etc/vonk-forge-agent ]] \
   || [[ -e "$package_recovery_gate" || -L "$package_recovery_gate" ]] \
   || [[ -e /lib/systemd/system/vonk-forge-package-helper.socket.d \

@@ -160,7 +160,7 @@ def test_singleton_recovery_cooldown_is_durable_and_resumes_after_expiry(
         assert run.route_next_attempt_at.replace(tzinfo=NOW.tzinfo) == now[
             0
         ] + timedelta(seconds=5)
-        assert "fresh exact signed absence" in (run.route_error or "")
+        assert "fresh exact absence" in (run.route_error or "")
 
 
 def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
