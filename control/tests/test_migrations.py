@@ -33,6 +33,10 @@ def _upgrade(database_url: str) -> None:
     command.upgrade(_config(database_url), "head")
 
 
+def _initialize_source_checkout(database_url: str) -> str:
+    return initialize_database(database_url, config_path=ROOT / "alembic.ini")
+
+
 def _schema_tables(engine) -> set[str]:
     return set(inspect(engine).get_table_names()) - {"alembic_version"}
 
@@ -175,12 +179,98 @@ def test_postgres_fresh_schema_matches_metadata_has_current_kind_and_roundtrips_
     _assert_current_schema(postgres_engine)
     _assert_model_cache_operation_kind_is_current(postgres_engine)
     _assert_json_roundtrip(postgres_engine)
-    # The reviewed tolerance avoids attempting a redundant uniqueness constraint.
     with postgres_engine.connect() as connection:
         verify_schema_is_current(connection)
+    with postgres_engine.connect() as connection:
+        verify_schema_is_current(connection)
+    with postgres_engine.begin() as connection:
+        event_id = connection.execute(
+            text(
+                "INSERT INTO fleet_stream_events "
+                "(event_type, entity_kind, entity_id, payload, occurred_at, expires_at) "
+                "VALUES ('node-profile', 'node', 'node-a', '{}', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 hour') "
+                "RETURNING id"
+            )
+        ).scalar_one()
+        assert event_id > 0
+        owner_id = connection.execute(
+            text(
+                "INSERT INTO route_publication_owner (owner_generation) "
+                "VALUES (0) RETURNING singleton_id"
+            )
+        ).scalar_one()
+        assert owner_id == 1
+        connection.execute(
+            text(
+                "INSERT INTO control_authority_revisions "
+                "(revision_id, documents, dependencies, actor, created_at) "
+                "VALUES ('serial-pk-test', '{}', '{}', 'migration-test', CURRENT_TIMESTAMP)"
+            )
+        )
+        authority_head_id = connection.execute(
+            text(
+                "INSERT INTO control_authority_heads (revision_id, updated_at) "
+                "VALUES ('serial-pk-test', CURRENT_TIMESTAMP) RETURNING singleton_id"
+            )
+        ).scalar_one()
+        assert authority_head_id > 0
 
 
-def test_schema_reconciliation_drops_an_unexpected_column(
+def test_postgres_reconciliation_preserves_unknown_table_and_column_data(
+    postgres_engine,
+) -> None:
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE operator_extension (id integer PRIMARY KEY, value text)")
+        )
+        connection.execute(
+            text("INSERT INTO operator_extension VALUES (7, 'retained')")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO fleet_stream_events "
+                "(event_type, entity_kind, entity_id, payload, occurred_at, expires_at) "
+                "VALUES ('node-profile', 'node', 'node-a', '{}', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 hour')"
+            )
+        )
+        connection.execute(
+            text("ALTER TABLE fleet_stream_events ADD COLUMN operator_note text")
+        )
+        connection.execute(
+            text("UPDATE fleet_stream_events SET operator_note='retained'")
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE fleet_stream_events ALTER COLUMN operator_note SET NOT NULL"
+            )
+        )
+    _initialize_source_checkout(database_url)
+    with postgres_engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("SELECT value FROM operator_extension WHERE id=7")
+            ).scalar_one()
+            == "retained"
+        )
+        assert (
+            connection.execute(
+                text("SELECT operator_note FROM fleet_stream_events")
+            ).scalar_one()
+            == "retained"
+        )
+        nullable = next(
+            column
+            for column in inspect(connection).get_columns("fleet_stream_events")
+            if column["name"] == "operator_note"
+        )["nullable"]
+        assert nullable is True
+
+
+def test_schema_reconciliation_preserves_unexpected_column(
     tmp_path: Path,
 ) -> None:
     """``alembic_version`` is not evidence about the physical schema.
@@ -205,7 +295,7 @@ def test_schema_reconciliation_drops_an_unexpected_column(
             )
         with engine.begin() as connection:
             verify_schema_is_current(connection)
-        assert "receipt_id" not in {
+        assert "receipt_id" in {
             column["name"]
             for column in inspect(engine).get_columns("runtime_image_authorizations")
         }
@@ -213,7 +303,7 @@ def test_schema_reconciliation_drops_an_unexpected_column(
         engine.dispose()
 
 
-def test_postgres_schema_reconciliation_drops_the_retired_receipt_column(
+def test_postgres_schema_reconciliation_relaxes_retired_required_receipt_column(
     postgres_engine,
 ) -> None:
     """Reproduce the stale ``receipt_id NOT NULL`` column an upgraded NAS kept.
@@ -232,12 +322,14 @@ def test_postgres_schema_reconciliation_drops_the_retired_receipt_column(
         )
     with postgres_engine.begin() as connection:
         verify_schema_is_current(connection)
-    assert "receipt_id" not in {
-        column["name"]
+    receipt_column = next(
+        column
         for column in inspect(postgres_engine).get_columns(
             "runtime_image_authorizations"
         )
-    }
+        if column["name"] == "receipt_id"
+    )
+    assert receipt_column["nullable"] is True
 
 
 def test_postgres_schema_reconciliation_replaces_changed_check_expression(
@@ -284,8 +376,8 @@ def test_postgres_startup_repairs_deployed_schema_and_is_idempotent(
             "ALTER TABLE recipe_runs DROP COLUMN recovery_attempts"
         )
 
-    initialize_database(database_url)
-    _assert_current_schema(postgres_engine)
+    _initialize_source_checkout(database_url)
+    assert set(Base.metadata.tables) <= _schema_tables(postgres_engine)
     columns = {
         column["name"]: column
         for column in inspect(postgres_engine).get_columns("recipe_runs")
@@ -309,8 +401,8 @@ def test_postgres_startup_repairs_deployed_schema_and_is_idempotent(
     }
     assert "ck_recipe_runs_recovery_attempts" in checks
 
-    initialize_database(database_url)
-    _assert_current_schema(postgres_engine)
+    _initialize_source_checkout(database_url)
+    assert set(Base.metadata.tables) <= _schema_tables(postgres_engine)
 
 
 def test_postgres_reconciliation_keeps_equivalent_literal_array_casts(

@@ -1,3 +1,5 @@
+import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,29 @@ def test_default_alembic_config_is_packaged_with_the_control_library() -> None:
     from vonk_control import db
 
     assert db._ALEMBIC_CONFIG == Path(db.__file__).resolve().parent / "alembic.ini"
+
+
+def test_built_wheel_contains_alembic_config_next_to_installed_module(
+    tmp_path: Path,
+) -> None:
+    project = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--project",
+            str(project),
+            "--wheel",
+            "--out-dir",
+            str(tmp_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheel = next(tmp_path.glob("*.whl"))
+    with zipfile.ZipFile(wheel) as package:
+        assert "vonk_control/alembic.ini" in package.namelist()
 
 
 def test_upgrade_schema_runs_the_linear_alembic_head(

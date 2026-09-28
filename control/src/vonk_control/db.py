@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .settings import database_wait_budgets
 
 _STARTUP_ADVISORY_LOCK = 8_241_779_103
-_ALEMBIC_CONFIG = Path(__file__).resolve().parents[2] / "alembic.ini"
+_ALEMBIC_CONFIG = Path(__file__).resolve().parent / "alembic.ini"
 _DATABASE_STARTUP_TIMEOUT_SECONDS = 120.0
 _DATABASE_RETRYABLE_ERRORS = (InterfaceError, OperationalError, TimeoutError)
 _LOGGER = logging.getLogger(__name__)
@@ -169,6 +169,7 @@ _SCHEMA_DIFFERENCE_LABELS = {
 _TOLERATED_SCHEMA_DIFFERENCES = frozenset(
     {("add_constraint", "uq_model_cache_set_artifact_key")}
 )
+_REPLACED_CONSTRAINT_NAMES = frozenset({"uq_control_process_heartbeats_kind"})
 _SCHEMA_DIFFERENCE_LIMIT = 16
 # Differences whose fourth element is a ``Column`` rather than a name.
 _COLUMN_DIFFERENCE_OPERATIONS = frozenset(
@@ -322,6 +323,27 @@ def _column_default_sql(column: object, connection: Connection) -> str | None:
     return processor(value)
 
 
+def _cosmetic_type_difference(existing_type: object, model_type: object) -> bool:
+    """Recognize dialect spellings for the same binary/date-time storage type."""
+    from sqlalchemy import DateTime, LargeBinary
+
+    existing_name = type(existing_type).__name__.upper()
+    if isinstance(model_type, DateTime) and existing_name in {
+        "DATETIME",
+        "TIMESTAMP",
+    }:
+        return True
+    return isinstance(model_type, LargeBinary) and existing_name in {"BLOB", "BYTEA"}
+
+
+def _is_generated_sequence_default(default: object, reflected_column: object) -> bool:
+    """Never remove PostgreSQL serial/identity ownership during reconciliation."""
+    if getattr(reflected_column, "get", lambda *_: None)("identity"):
+        return True
+    rendered = str(default or "").lower()
+    return "nextval(" in rendered
+
+
 def _constraint_kind(constraint: object) -> str | None:
     from sqlalchemy import (
         CheckConstraint,
@@ -451,6 +473,21 @@ def reconcile_schema(connection: Connection) -> None:
     inspector = inspect(connection)
     tables = set(inspector.get_table_names()) - {"alembic_version"}
     metadata_tables = set(Base.metadata.tables)
+    reported_type_changes = {
+        (str(difference[2]), str(difference[3].name))
+        for difference in differences
+        if difference[0] == "modify_type"
+    }
+    reported_default_changes = {
+        (str(difference[2]), str(difference[3].name))
+        for difference in differences
+        if difference[0] == "modify_default"
+    }
+    reported_nullable_changes = {
+        (str(difference[2]), str(difference[3].name))
+        for difference in differences
+        if difference[0] == "modify_nullable"
+    }
 
     # Create absent tables as a group so foreign-key dependencies are present.
     for table in Base.metadata.sorted_tables:
@@ -516,7 +553,12 @@ def reconcile_schema(connection: Connection) -> None:
             if old is None:
                 continue
             try:
-                if str(old["type"]) != str(column.type):
+                if (
+                    table_name,
+                    column.name,
+                ) in reported_type_changes and not _cosmetic_type_difference(
+                    old["type"], column.type
+                ):
                     using = None
                     if connection.dialect.name == "postgresql":
                         quoted = connection.dialect.identifier_preparer.quote(
@@ -540,7 +582,11 @@ def reconcile_schema(connection: Connection) -> None:
                     column.name,
                     error,
                 )
-            if old.get("nullable") and not column.nullable:
+            if (
+                (table_name, column.name) in reported_nullable_changes
+                and old.get("nullable")
+                and not column.nullable
+            ):
                 default_sql = _column_default_sql(column, connection)
                 try:
                     with connection.begin_nested():
@@ -569,21 +615,22 @@ def reconcile_schema(connection: Connection) -> None:
                         column.name,
                         error,
                     )
-            elif not old.get("nullable") and column.nullable:
+            elif (
+                (table_name, column.name) in reported_nullable_changes
+                and not old.get("nullable")
+                and column.nullable
+            ):
                 ops.alter_column(
                     table_name, column.name, nullable=True, existing_type=column.type
                 )
                 _LOGGER.info("Made column %s.%s nullable", table_name, column.name)
             existing_default = old.get("default")
-            target_default = column.server_default
-            target_sql = (
-                _column_default_sql(column, connection)
-                if target_default is not None
-                else None
-            )
-            if connection.dialect.name == "postgresql" and (
-                existing_default or None
-            ) != (target_sql or None):
+            if (
+                connection.dialect.name == "postgresql"
+                and (table_name, column.name) in reported_default_changes
+                and not _is_generated_sequence_default(existing_default, old)
+            ):
+                target_sql = _column_default_sql(column, connection)
                 try:
                     with connection.begin_nested():
                         ops.alter_column(
@@ -603,6 +650,31 @@ def reconcile_schema(connection: Connection) -> None:
                         error,
                     )
 
+    # Unknown columns on model-owned tables can prevent new rows from being
+    # inserted when they are NOT NULL without a default. Keep their data and
+    # definition, but remove that insertion barrier. Tables outside our models
+    # remain completely untouched.
+    inspector = inspect(connection)
+    for table_name in sorted(tables & metadata_tables):
+        model_columns = set(Base.metadata.tables[table_name].columns.keys())
+        for old in inspector.get_columns(table_name):
+            if (
+                old["name"] in model_columns
+                or old.get("nullable", True)
+                or old.get("default") is not None
+            ):
+                continue
+            ops.alter_column(
+                table_name,
+                old["name"],
+                nullable=True,
+                existing_type=old["type"],
+            )
+            _LOGGER.warning(
+                "Made extra column %s.%s nullable so inserts can continue; existing data was retained",
+                table_name,
+                old["name"],
+            )
     # Install indexes and unique constraints before dropping old forms. Savepoints
     # let a data conflict skip just the new uniqueness rule.
     failed_index_tables: set[str] = set()
@@ -643,13 +715,56 @@ def reconcile_schema(connection: Connection) -> None:
     _repair_check_constraints(connection)
 
     # Drop obsolete constraints/indexes before their columns.
+    added_constraints = {
+        (
+            difference[1].table.name,
+            difference[1].name,
+            _constraint_kind(difference[1]),
+            frozenset(column.name for column in difference[1].columns),
+        )
+        for difference in differences
+        if difference[0] == "add_constraint"
+    }
+    added_indexes = {
+        (difference[1].table.name, difference[1].name)
+        for difference in differences
+        if difference[0] == "add_index"
+    }
     for difference in differences:
         operation = difference[0]
         if operation == "remove_constraint":
             constraint = difference[1]
             name = getattr(constraint, "name", None)
             kind = _constraint_kind(constraint)
-            if name and kind:
+            table_name = constraint.table.name
+            if (
+                name
+                and kind
+                and table_name in metadata_tables
+                and (
+                    name in _REPLACED_CONSTRAINT_NAMES
+                    or any(
+                        added_table == table_name
+                        and (
+                            added_name == name
+                            or (
+                                kind == "unique"
+                                and added_kind == "unique"
+                                and added_columns
+                                == frozenset(
+                                    column.name for column in constraint.columns
+                                )
+                            )
+                        )
+                        for (
+                            added_table,
+                            added_name,
+                            added_kind,
+                            added_columns,
+                        ) in added_constraints
+                    )
+                )
+            ):
                 if constraint.table.name in failed_constraint_tables:
                     _LOGGER.warning(
                         "Retained obsolete constraint %s.%s because its replacement could not be installed",
@@ -669,6 +784,15 @@ def reconcile_schema(connection: Connection) -> None:
                     )
         elif operation == "remove_index":
             index = difference[1]
+            if (
+                index.table.name not in metadata_tables
+                or (
+                    index.table.name,
+                    index.name,
+                )
+                not in added_indexes
+            ):
+                continue
             if index.table.name in failed_index_tables:
                 _LOGGER.warning(
                     "Retained obsolete index %s because its replacement could not be installed",
@@ -683,43 +807,6 @@ def reconcile_schema(connection: Connection) -> None:
                 _LOGGER.warning(
                     "Could not drop obsolete index %s: %s", index.name, error
                 )
-
-    referenced = _referenced_columns(connection)
-    for difference in differences:
-        if difference[0] != "remove_column":
-            continue
-        table_name, old_column = difference[2], difference[3]
-        if (table_name, old_column.name) in referenced:
-            _LOGGER.warning(
-                "Retained obsolete referenced column %s.%s", table_name, old_column.name
-            )
-            continue
-        try:
-            with connection.begin_nested():
-                ops.drop_column(table_name, old_column.name)
-            _LOGGER.info("Dropped obsolete column %s.%s", table_name, old_column.name)
-        except SQLAlchemyError as error:
-            _LOGGER.warning(
-                "Could not drop obsolete column %s.%s: %s",
-                table_name,
-                old_column.name,
-                error,
-            )
-
-    for table_name in sorted(tables - metadata_tables, reverse=True):
-        if any(
-            table_name == referred for referred, _ in _referenced_columns(connection)
-        ):
-            _LOGGER.warning("Retained obsolete referenced table %s", table_name)
-            continue
-        try:
-            with connection.begin_nested():
-                connection.exec_driver_sql(
-                    f"DROP TABLE {_quoted(connection, table_name)}"
-                )
-            _LOGGER.info("Dropped obsolete table %s", table_name)
-        except SQLAlchemyError as error:
-            _LOGGER.warning("Could not drop obsolete table %s: %s", table_name, error)
 
     remaining = _check_constraint_differences(connection)
     if remaining:
@@ -762,10 +849,9 @@ def initialize_database(
                             verify_schema_is_current(schema_connection)
                     except SQLAlchemyError as error:
                         raise RuntimeError(
-                            "Controller startup stopped because transactional schema "
-                            "reconciliation failed. The reconciliation transaction "
-                            "was rolled back; inspect the named schema operation and "
-                            f"database cause before restarting: {error}"
+                            "Controller startup schema reconciliation failed and the "
+                            "transaction was rolled back. Startup will retry "
+                            f"reconciliation automatically; schema failure: {error}"
                         ) from error
                     authority = DatabaseAuthorityService(session_factory(engine))
                     return authority.ensure_initialized(acquire_advisory_lock=False)

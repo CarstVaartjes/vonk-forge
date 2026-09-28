@@ -196,17 +196,39 @@ mkdir -p "$test_root/target-bin" "$test_root/baseline-bin" \
   "$test_root/target-dist" "$test_root/baseline-dist"
 build_digest="sha256:$(printf durable-recovery-fixture | sha256sum | cut -d' ' -f1)"
 cat > "$test_root/agent.c" <<SOURCE
+#define _GNU_SOURCE
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 static volatile const char build[] = "VONK_AGENT_BUILD_DIGEST=$build_digest";
 static volatile const char semantic[] = "VONK_AGENT_SEMANTIC_VERSION=$semantic_version";
+static void ready(void) {
+  const char *path = getenv("NOTIFY_SOCKET");
+  if (path == NULL) return;
+  int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) return;
+  struct sockaddr_un address = { .sun_family = AF_UNIX };
+  if (path[0] == '@') {
+    address.sun_path[0] = '\0';
+    snprintf(address.sun_path + 1, sizeof(address.sun_path) - 1, "%s", path + 1);
+  } else {
+    snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
+  }
+  sendto(fd, "READY=1", 7, MSG_NOSIGNAL,
+         (struct sockaddr *)&address, sizeof(address));
+  close(fd);
+}
 int main(int argc, char **argv) {
   if (argc == 2 && strcmp(argv[1], "--version") == 0) {
     printf("vonk-agent %s\\n", "$semantic_version");
     return build[0] == 'V' && semantic[0] == 'V' ? 0 : 1;
   }
+  /* Models the post-self-test readiness contract for this lifecycle fixture. */
+  ready();
   for (;;) pause();
 }
 SOURCE
@@ -1051,6 +1073,7 @@ test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent | cut -c1-2)" = 
 test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$version"
 test "$(systemctl --system show --property=ActiveState --value "$helper_unit")" = active
 test "$(systemctl --system show --property=ActiveState --value "$agent_unit")" = active
+test "$(systemctl --system show --property=TimeoutStartUSec --value "$agent_unit")" = infinity
 helper_pid=$(systemctl --system show --property=MainPID --value "$helper_unit")
 agent_pid=$(systemctl --system show --property=MainPID --value "$agent_unit")
 test "$(sha256sum "/proc/$helper_pid/exe" | cut -d' ' -f1)" = "$helper_digest"
