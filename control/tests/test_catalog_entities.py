@@ -226,7 +226,7 @@ def test_model_capability_revision_reuses_its_artifact_projection(
     first = _resolve(service, original)
     changed = copy.deepcopy(original)
     _metadata(changed)["description"] = "updated capability documentation"
-    _provenance(changed)["evidence_digest"] = "a" * 64
+    _provenance(changed)["attribution"] = ["updated attribution"]
     successor = service.revise(
         first.document_id, changed, actor="operator", expected_revision=1
     )
@@ -246,7 +246,7 @@ def test_recipe_reuse_keys_follow_effective_model_artifact(
 
     changed_model = copy.deepcopy(original)
     _metadata(changed_model)["description"] = "updated capability documentation"
-    _provenance(changed_model)["evidence_digest"] = "a" * 64
+    _provenance(changed_model)["attribution"] = ["updated attribution"]
     changed_model_revision = service.revise(
         model_revision.document_id,
         changed_model,

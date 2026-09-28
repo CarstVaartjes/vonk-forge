@@ -493,25 +493,34 @@ class RecipePackageClient:
             )
         catalog_entities: list[dict[str, object]] = []
         identities: set[tuple[str, str]] = set()
+        # Each model and recipe document is validated on its own: one document
+        # this Controller's contract cannot read (for example from a newer
+        # release) is skipped and reported, and the rest of the signed index
+        # still applies. Only the index envelope itself is all-or-nothing.
+        problems: list[dict[str, object]] = []
         for entry in raw_entities:
             if not isinstance(entry, Mapping) or not isinstance(
                 entry.get("document"), Mapping
             ):
-                raise RecipePackageError(
-                    "recipe_package.response_invalid", "catalog model entry is invalid"
+                problems.append(
+                    _index_problem(None, "catalog model entry is invalid", entry)
                 )
+                continue
             try:
                 model = ModelDefinition.model_validate(entry["document"])
             except (TypeError, ValueError) as error:
-                raise RecipePackageError(
-                    "recipe_package.response_invalid",
-                    "catalog model document is invalid",
-                ) from error
+                problems.append(
+                    _index_problem(
+                        None, "catalog model document is invalid", entry, error
+                    )
+                )
+                continue
             digest = entry.get("content_sha256")
             if not isinstance(digest, str) or digest != content_sha256(model):
-                raise RecipePackageError(
-                    "recipe_package.response_invalid", "catalog model digest is invalid"
+                problems.append(
+                    _index_problem(None, "catalog model digest is invalid", entry)
                 )
+                continue
             identity = (model.identity.publisher, model.identity.slug)
             if identity in identities:
                 raise RecipePackageError(
@@ -527,31 +536,45 @@ class RecipePackageClient:
                 or not isinstance(recipe.get("document"), Mapping)
                 or not isinstance(recipe.get("package"), Mapping)
             ):
-                raise RecipePackageError(
-                    "recipe_package.response_invalid", "recipe package entry is invalid"
+                problems.append(
+                    _index_problem(None, "recipe package entry is invalid", recipe)
                 )
+                continue
             try:
                 document = RecipeDefinition.model_validate(recipe["document"])
             except (TypeError, ValueError) as error:
-                raise RecipePackageError(
-                    "recipe_package.response_invalid",
-                    "recipe package recipe document is invalid",
-                ) from error
+                problems.append(
+                    _index_problem(
+                        _entry_uri(recipe),
+                        "recipe package recipe document is invalid",
+                        recipe,
+                        error,
+                    )
+                )
+                continue
             package = recipe["package"]
             package_media_type = package.get("media_type")
             if package_media_type not in _PACKAGE_MEDIA_TYPES:
-                raise RecipePackageError(
-                    "recipe_package.response_invalid",
-                    "recipe package media type is unsupported",
+                problems.append(
+                    _index_problem(
+                        _entry_uri(recipe),
+                        "recipe package media type is unsupported",
+                        recipe,
+                    )
                 )
+                continue
             if package.get("recipe_content_sha256") not in {
                 None,
                 recipe.get("content_sha256"),
             }:
-                raise RecipePackageError(
-                    "recipe_package.response_invalid",
-                    "package recipe identity is inconsistent",
+                problems.append(
+                    _index_problem(
+                        _entry_uri(recipe),
+                        "package recipe identity is inconsistent",
+                        recipe,
+                    )
                 )
+                continue
             raw_packages.append(
                 {
                     "publisher": document.identity.publisher,
@@ -655,6 +678,7 @@ class RecipePackageClient:
             items=tuple(items),
             repository=repository,
             catalog_entities=tuple(catalog_entities),
+            problems=tuple(problems),
         ), packages
 
     def _persist_index(
@@ -770,13 +794,25 @@ class RecipePackageClient:
             if self._previous_snapshot
             else {}
         )
-        self._prepared = {
-            item.uri: self.fetch(item.uri)
-            for item in snapshot.items
-            if item.uri not in previous
-            or previous[item.uri].content_sha256 != item.content_sha256
-            or not self._same_package(item)
-        }
+        prepared: dict[str, RecipeLibraryItem] = {}
+        for item in snapshot.items:
+            if (
+                item.uri in previous
+                and previous[item.uri].content_sha256 == item.content_sha256
+                and self._same_package(item)
+            ):
+                continue
+            try:
+                prepared[item.uri] = self.fetch(item.uri)
+            except RecipeLibraryError as error:
+                # Integrity and transport failures fail the whole candidate
+                # generation so the previous verified one stays active. A
+                # package whose documents this Controller's contract cannot
+                # read belongs to that recipe alone: the sync fetches it again
+                # and reports it as that recipe's problem.
+                if error.code != "recipe_package.document_incompatible":
+                    raise
+        self._prepared = prepared
         self._promote_candidate()
 
     def _same_package(self, item: RecipeLibraryItem) -> bool:
@@ -980,6 +1016,17 @@ class RecipePackageClient:
                 recipe, set(files) - {"manifest.json"}, manifest.get("build_inputs")
             )
             release_history = _release_history(recipe, item.content_sha256)
+        except ValidationError as error:
+            # The package bytes are the signed ones, but a document in it does
+            # not fit this Controller's contract: that recipe alone is skipped.
+            raise RecipePackageError(
+                "recipe_package.document_incompatible",
+                _incompatible_detail(
+                    f"recipe package document is incompatible {item.publisher}/"
+                    f"{item.slug}",
+                    error,
+                ),
+            ) from error
         except (
             KeyError,
             TypeError,
@@ -1100,6 +1147,64 @@ class RecipePackageClient:
                         path.rmdir()
                 temporary.rmdir()
         return target
+
+
+def _entry_uri(entry: Mapping[str, object]) -> str | None:
+    """Return the catalog URI an index entry claims, when it is well formed."""
+    document = entry.get("document")
+    identity = document.get("identity") if isinstance(document, Mapping) else None
+    digest = entry.get("content_sha256")
+    if not isinstance(identity, Mapping) or not isinstance(digest, str):
+        return None
+    publisher, slug = identity.get("publisher"), identity.get("slug")
+    if (
+        not isinstance(publisher, str)
+        or not isinstance(slug, str)
+        or not _SLUG.fullmatch(publisher)
+        or not _SLUG.fullmatch(slug)
+        or not _SHA256.fullmatch(digest)
+    ):
+        return None
+    return f"vonk://catalog/{publisher}/{slug}@sha256:{digest}"
+
+
+def _index_problem(
+    uri: str | None,
+    detail: str,
+    entry: object,
+    error: Exception | None = None,
+) -> dict[str, object]:
+    """Describe one skipped index document without echoing untrusted values."""
+    name = ""
+    if isinstance(entry, Mapping):
+        document = entry.get("document")
+        identity = document.get("identity") if isinstance(document, Mapping) else None
+        if isinstance(identity, Mapping):
+            publisher, slug = identity.get("publisher"), identity.get("slug")
+            if (
+                isinstance(publisher, str)
+                and isinstance(slug, str)
+                and _SLUG.fullmatch(publisher)
+                and _SLUG.fullmatch(slug)
+            ):
+                name = f" {publisher}/{slug}"
+    return {
+        "recipe_uri": uri,
+        "code": "recipe_package.document_incompatible"
+        if error is not None
+        else "recipe_package.response_invalid",
+        "detail": _incompatible_detail(f"{detail}{name}", error),
+    }
+
+
+def _incompatible_detail(detail: str, error: Exception | None) -> str:
+    """Name the document fields a contract mismatch concerns, bounded."""
+    if not isinstance(error, ValidationError):
+        return detail[:256]
+    locations = sorted(
+        {".".join(str(part) for part in item["loc"]) for item in error.errors()}
+    )
+    return f"{detail}: {', '.join(locations)}"[:256] if locations else detail[:256]
 
 
 def _bind_release(

@@ -12,6 +12,7 @@ import vonk_control.catalog_entities as catalog_entities_module
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
+from vonk_control.catalog_api import ManagedCatalogSyncResponse, _managed_sync
 from vonk_control.catalog_queries import active_head_revision
 from vonk_control.catalog_revision_contract import (
     CatalogRevisionContractError,
@@ -746,3 +747,132 @@ def test_sync_round_trip_rejects_malformed_persisted_result(tmp_path, damage):
         sync.get(result.id)
     with pytest.raises(CatalogSyncError, match="stored catalog sync result is invalid"):
         sync.automatic()
+
+
+def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
+    tmp_path: Path,
+) -> None:
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    index["recipes"] = index["recipes"][:2]
+    models, recipes = index["catalog_entities"], index["recipes"]
+    # A newer release may carry a field this Controller's contract does not
+    # know, or omit one it still requires: only those documents are skipped.
+    models[0]["document"]["future_field"] = "added by a newer contract"
+    del recipes[0]["document"]["metadata"]
+    skipped_model = models[0]["document"]["identity"]
+    skipped_recipe = recipes[0]["document"]["identity"]
+
+    snapshot = (
+        SignedRecipeRelease.from_library(index, ROOT)
+        .client(tmp_path / "packages")
+        .list()
+    )
+
+    assert len(snapshot.catalog_entities) == len(models) - 1
+    assert [(item.publisher, item.slug) for item in snapshot.items] == [
+        (
+            recipes[1]["document"]["identity"]["publisher"],
+            recipes[1]["document"]["identity"]["slug"],
+        )
+    ]
+    codes = {problem["code"] for problem in snapshot.problems}
+    assert codes == {"recipe_package.document_incompatible"}
+    details = [str(problem["detail"]) for problem in snapshot.problems]
+    assert any(
+        f"{skipped_model['publisher']}/{skipped_model['slug']}" in detail
+        and "future_field" in detail
+        for detail in details
+    )
+    assert any(
+        f"{skipped_recipe['publisher']}/{skipped_recipe['slug']}" in detail
+        and "metadata" in detail
+        for detail in details
+    )
+    recipe_problem = next(
+        problem for problem in snapshot.problems if problem["recipe_uri"] is not None
+    )
+    assert recipe_problem["recipe_uri"] == (
+        f"vonk://catalog/{skipped_recipe['publisher']}/{skipped_recipe['slug']}"
+        f"@sha256:{recipes[0]['content_sha256']}"
+    )
+
+
+def test_sync_reports_skipped_index_documents_as_partial(tmp_path: Path) -> None:
+    sessions, service, reader, _item = _fixture(tmp_path)
+    problem = {
+        "recipe_uri": None,
+        "code": "recipe_package.document_incompatible",
+        "detail": "catalog model document is invalid example/future: future_field",
+    }
+    reader.snapshot = replace(reader.snapshot, problems=(problem,))
+
+    result = _sync(sessions, service, reader).sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit=reader.snapshot.commit,
+    )
+
+    assert result.state == "partial"
+    assert result.imported_count == 1
+    assert result.skipped_count == 1
+    assert [(item["code"], item["detail"]) for item in result.problems] == [
+        (problem["code"], problem["detail"])
+    ]
+    assert result.processed_count == result.total_count
+
+
+def test_automatic_read_failure_is_visible_until_a_sync_succeeds(
+    tmp_path: Path,
+) -> None:
+    sessions, service, reader, _item = _fixture(tmp_path)
+    moments = iter(
+        datetime(2026, 9, 5, 0, minute, tzinfo=UTC) for minute in range(1, 60)
+    )
+    sync = ManagedRecipeCatalogSyncService(
+        sessions, catalog=service, reader=reader, clock=lambda: next(moments)
+    )
+    applied = sync.automatic()
+    assert applied.state == "current"
+    assert sync.latest().last_error is None  # type: ignore[union-attr]
+
+    failing = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=service,
+        reader=FailingListReader(reader.snapshot),
+        clock=lambda: next(moments),
+    )
+    for _attempt in range(3):
+        with pytest.raises(RecipeLibraryError):
+            failing.automatic()
+
+    status = failing.latest()
+    assert status is not None
+    # The applied catalog stays the reported run; the failure rides along.
+    assert (status.id, status.state, status.commit) == (
+        applied.id,
+        "current",
+        reader.snapshot.commit,
+    )
+    assert status.last_error is not None
+    assert status.last_error.code == "recipe_library.unavailable"
+    assert status.last_error.detail == "transient recipe index failure"
+    assert status.last_error.occurred_at > applied.completed_at  # type: ignore[operator]
+    response = ManagedCatalogSyncResponse.model_validate(_managed_sync(status))
+    assert response.last_error is not None
+    assert response.last_error.code == "recipe_library.unavailable"
+    assert response.last_error.occurred_at == status.last_error.occurred_at.isoformat()
+    with sessions() as session:
+        failures = session.scalars(
+            select(RecipeLibrarySyncRun).where(RecipeLibrarySyncRun.state == "failed")
+        ).all()
+    # Repeating the same failure refreshes one record instead of adding rows.
+    assert len(failures) == 1
+
+    reader.snapshot = replace(reader.snapshot, commit="c" * 40)
+    recovered = sync.automatic()
+    assert recovered.state == "current"
+    status = sync.latest()
+    assert status is not None
+    assert status.id == recovered.id
+    assert status.last_error is None
