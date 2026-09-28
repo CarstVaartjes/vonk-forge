@@ -155,7 +155,6 @@ from .run_switch_contract import (
     ArtifactStorageImpact,
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
-    CapabilityEvidence,
     ConditionalPostStopMemoryCheck,
     EffectiveParallelism,
     EffectiveSettingsSelection,
@@ -171,7 +170,6 @@ from .run_switch_contract import (
     RunSwitchBuildEvidence,
     RunSwitchBuildEvidenceState,
     RunSwitchCancellation,
-    RunSwitchCapabilityEvidenceState,
     RunSwitchChangeEffect,
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
@@ -230,7 +228,6 @@ class PublishedImageReceiptLookup(Protocol):
 # contract's closed value sets are read back through the declared alias instead
 # of a hand-written membership test that could drift from it.
 _CHANGE_EFFECTS_ADAPTER = TypeAdapter(dict[str, RunSwitchChangeEffect])
-_CAPABILITY_EVIDENCE_ADAPTER = TypeAdapter(RunSwitchCapabilityEvidenceState)
 _CONTAINER_BUILD_STATE_ADAPTER = TypeAdapter(RunSwitchContainerBuildState)
 _BUILD_EVIDENCE_STATE_ADAPTER = TypeAdapter(RunSwitchBuildEvidenceState)
 _OPERATION_KIND_ADAPTER = TypeAdapter(RunSwitchOperationKind)
@@ -693,172 +690,6 @@ def _resource_evidence_digest(revision_digest: str | None) -> str | None:
         if isinstance(revision_digest, str) and len(revision_digest) == 64
         else None
     )
-
-
-def _capability_evidence_state(
-    value: object,
-) -> RunSwitchCapabilityEvidenceState | None:
-    """Read one capability evidence label, or ``None`` when it is not declared."""
-
-    try:
-        return _CAPABILITY_EVIDENCE_ADAPTER.validate_python(value, strict=True)
-    except ValidationError:
-        return None
-
-
-def _capability_facts(
-    document: Mapping[str, object] | None,
-) -> list[CapabilityEvidence]:
-    """Read only explicit capability metadata from one immutable document."""
-
-    if document is None:
-        return []
-    raw = document.get("capabilities")
-    facts: list[CapabilityEvidence] = []
-    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
-        for value in raw:
-            if isinstance(value, str) and value:
-                facts.append(
-                    CapabilityEvidence(
-                        name=value,
-                        declared=True,
-                        evidence="unknown",
-                        support="supported",
-                    )
-                )
-        return facts
-    if not isinstance(raw, Mapping):
-        return facts
-    raw_evidence = document.get("capability_evidence")
-    evidence_by_name = raw_evidence if isinstance(raw_evidence, Mapping) else {}
-    for name in sorted(str(key) for key in raw):
-        value = raw.get(name)
-        declared: bool | None
-        evidence: RunSwitchCapabilityEvidenceState = "unknown"
-        detail: str | None = None
-        evidence_digest: str | None = None
-        if isinstance(value, bool):
-            declared = value
-        elif isinstance(value, Mapping):
-            candidate = value.get("declared", value.get("supported"))
-            declared = candidate if isinstance(candidate, bool) else None
-            candidate_evidence = _capability_evidence_state(value.get("evidence"))
-            if candidate_evidence is not None:
-                evidence = candidate_evidence
-            if isinstance(value.get("detail"), str):
-                detail = str(value["detail"])[:256]
-            if isinstance(value.get("evidence_digest"), str):
-                evidence_digest = str(value["evidence_digest"])
-        else:
-            declared = None
-        evidence_value = evidence_by_name.get(name)
-        if isinstance(evidence_value, Mapping):
-            candidate_evidence = _capability_evidence_state(
-                evidence_value.get("state", evidence_value.get("evidence"))
-            )
-            if candidate_evidence is not None:
-                evidence = candidate_evidence
-            candidate_digest = evidence_value.get(
-                "digest", evidence_value.get("evidence_digest")
-            )
-            if isinstance(candidate_digest, str):
-                evidence_digest = candidate_digest
-        else:
-            candidate_evidence = _capability_evidence_state(evidence_value)
-            if candidate_evidence is not None:
-                evidence = candidate_evidence
-        support = (
-            "unknown"
-            if declared is None
-            else "supported"
-            if declared
-            else "unsupported"
-        )
-        facts.append(
-            CapabilityEvidence(
-                name=name,
-                declared=declared,
-                evidence=evidence,
-                support=support,
-                evidence_digest=evidence_digest,
-                detail=detail,
-            )
-        )
-    return facts
-
-
-def _recipe_capability_facts(
-    document: Mapping[str, object] | None,
-) -> list[CapabilityEvidence]:
-    """Expose recipe interfaces as recipe-owned capability declarations."""
-
-    if document is None:
-        return []
-    facts = _capability_facts(document)
-    interfaces = document.get("interfaces")
-    if not isinstance(interfaces, list):
-        return facts
-    names = {
-        str(item.get("adapter"))
-        for item in interfaces
-        if isinstance(item, Mapping)
-        and isinstance(item.get("adapter"), str)
-        and item.get("adapter")
-    }
-    known = {fact.name for fact in facts}
-    facts.extend(
-        CapabilityEvidence(
-            name=name,
-            declared=True,
-            evidence="not-tested",
-            support="supported",
-            detail="Declared by the immutable recipe interface; runtime acceptance is separate evidence.",
-        )
-        for name in sorted(names - known)
-    )
-    return facts
-
-
-def _summary_capability_facts(summary: object) -> list[CapabilityEvidence]:
-    """Adapt the shared model capability summary without importing its owner."""
-
-    raw_facts = getattr(summary, "facts", None)
-    if raw_facts is None and isinstance(summary, Mapping):
-        raw_facts = summary.get("facts")
-    if not isinstance(raw_facts, Sequence) or isinstance(raw_facts, (str, bytes)):
-        return []
-    facts: list[CapabilityEvidence] = []
-    for raw in raw_facts:
-        name = getattr(raw, "capability", None)
-        support = getattr(raw, "support", None)
-        evidence = getattr(raw, "evidence_status", None)
-        digest = getattr(raw, "evidence_digest", None)
-        if isinstance(raw, Mapping):
-            name = raw.get("capability", raw.get("name"))
-            support = raw.get("support", raw.get("status"))
-            evidence = raw.get("evidence_status", raw.get("evidence"))
-            digest = raw.get("evidence_digest")
-        if not isinstance(name, str) or not name:
-            continue
-        if support not in {"supported", "unsupported", "unknown"}:
-            support = "unknown"
-        evidence_map: dict[str, RunSwitchCapabilityEvidenceState] = {
-            "declared": "observed",
-            "tested": "tested",
-            "contradicted": "observed",
-            "unknown": "unknown",
-        }
-        evidence = evidence_map.get(str(evidence), "unknown")
-        facts.append(
-            CapabilityEvidence(
-                name=name,
-                declared=(support != "unknown"),
-                evidence=evidence,
-                support=support,
-                evidence_digest=digest if _is_hex_digest(digest) else None,
-            )
-        )
-    return facts
 
 
 def _latest_inventory(
@@ -2368,7 +2199,6 @@ class RunSwitchOperationService:
         artifacts: RunSwitchArtifactInspector | None = None,
         artifact_phase_executor: RunSwitchArtifactPhaseExecutor | None = None,
         phase_executor: RunSwitchPhaseExecutor | None = None,
-        model_capability_summary: Any | None = None,
         model_cache: ModelCacheService | None = None,
         build_archive_available: Callable[[str, int], bool] | None = None,
         published_image_receipt: PublishedImageReceiptLookup | None = None,
@@ -2385,7 +2215,6 @@ class RunSwitchOperationService:
         self._mappings = mappings or ClusterMappingService(sessions)
         self._artifacts = artifacts or DatabaseRunSwitchArtifactInspector(model_cache)
         self._artifact_phase_executor = artifact_phase_executor
-        self._model_capability_summary = model_capability_summary
         self._build_archive_available = build_archive_available
         self._published_image_receipt = published_image_receipt
         self._custom_phase_executor = phase_executor is not None
@@ -2546,8 +2375,6 @@ class RunSwitchOperationService:
             (
                 _model_document,
                 _model_documents,
-                model_caps,
-                recipe_caps,
                 _document_blockers,
             ) = self._resolve_documents(
                 session,
@@ -2747,8 +2574,6 @@ class RunSwitchOperationService:
                     installation.image_digest if installation is not None else None
                 ),
                 "start_plan_digest": None,
-                "model_capabilities": model_caps,
-                "recipe_capabilities": recipe_caps,
                 "freshness": freshness,
                 "fit_current": fit_current,
                 "fit_after_stop": None,
@@ -2842,8 +2667,6 @@ class RunSwitchOperationService:
             (
                 _model_document,
                 _model_documents,
-                model_caps,
-                recipe_caps,
                 document_warnings,
             ) = self._resolve_documents(
                 session,
@@ -3099,8 +2922,6 @@ class RunSwitchOperationService:
                 "recipe_build_id": installation.recipe_build_id,
                 "image_digest": installation.image_digest,
                 "start_plan_digest": None,
-                "model_capabilities": model_caps,
-                "recipe_capabilities": recipe_caps,
                 "freshness": freshness,
                 "fit_current": fit_current,
                 "fit_after_stop": None,
@@ -3702,8 +3523,6 @@ class RunSwitchOperationService:
             (
                 _model_document,
                 model_documents,
-                model_caps,
-                recipe_caps,
                 document_blockers,
             ) = self._resolve_documents(
                 session,
@@ -3993,24 +3812,6 @@ class RunSwitchOperationService:
                                 node_ids=node_ids,
                             )
                         )
-            if not model_caps:
-                warnings.append(
-                    _as_reason(
-                        "run-switch.model_capabilities_unknown",
-                        "The exact model revision declares no typed capability facts.",
-                        scope="model",
-                        severity="warning",
-                    )
-                )
-            if not recipe_caps:
-                warnings.append(
-                    _as_reason(
-                        "run-switch.recipe_capabilities_unknown",
-                        "The exact recipe revision declares no typed capability facts.",
-                        scope="recipe",
-                        severity="warning",
-                    )
-                )
             stop_before_prepare = resource_fits.stop_before_prepare
             stop_before_transfer = resource_fits.stop_before_transfer
             phases = self._phases(
@@ -4115,8 +3916,6 @@ class RunSwitchOperationService:
                 "recipe_build_id": recipe_build_id,
                 "image_digest": image_digest,
                 "start_plan_digest": start_plan_digest,
-                "model_capabilities": model_caps,
-                "recipe_capabilities": recipe_caps,
                 "freshness": freshness,
                 "fit_current": fit_current,
                 "fit_after_stop": fit_after_stop,
@@ -4152,23 +3951,16 @@ class RunSwitchOperationService:
         model_digest: str | None,
         *,
         requested_recipe_digest: str | None,
-        include_capability_summary: bool = True,
     ) -> tuple[
         Mapping[str, object] | None,
         Mapping[tuple[str, str, str], Mapping[str, object]],
-        list[CapabilityEvidence],
-        list[CapabilityEvidence],
         list[RunSwitchReason],
     ]:
         blockers: list[RunSwitchReason] = []
         model_document: Mapping[str, object] | None = None
         model_documents: dict[tuple[str, str, str], Mapping[str, object]] = {}
-        recipe_caps = _recipe_capability_facts(
-            revision.document if revision is not None else None
-        )
-        model_caps: list[CapabilityEvidence] = []
         if revision is None:
-            return None, {}, [], recipe_caps, blockers
+            return None, {}, blockers
         if (
             requested_recipe_digest is not None
             and revision.content_digest != requested_recipe_digest
@@ -4211,20 +4003,6 @@ class RunSwitchOperationService:
             if isinstance(candidate, Mapping):
                 model_document = candidate
             if (
-                include_capability_summary
-                and self._model_capability_summary is not None
-            ):
-                provider = self._model_capability_summary
-                try:
-                    summary = (
-                        provider(session, model_digest)
-                        if callable(provider)
-                        else provider.get(session, model_digest)
-                    )
-                    model_caps = _summary_capability_facts(summary)
-                except (KeyError, RuntimeError, TypeError, ValueError):
-                    model_caps = []
-            if (
                 model_digest is None
                 or getattr(resolved_model, "content_digest", None) != model_digest
             ):
@@ -4243,7 +4021,7 @@ class RunSwitchOperationService:
                     scope="recipe",
                 )
             )
-        return model_document, model_documents, model_caps, recipe_caps, blockers
+        return model_document, model_documents, blockers
 
     def _resolve_mapping(
         self,
@@ -5556,12 +5334,11 @@ class RunSwitchOperationService:
         revision = _active_recipe_revision(session, request.recipe_revision_id)
         if revision is None:
             raise RunSwitchOperationConflict("run-switch.recipe_unresolved")
-        _, model_documents, _, _, blockers = self._resolve_documents(
+        _, model_documents, blockers = self._resolve_documents(
             session,
             revision,
             request.model_content_sha256,
             requested_recipe_digest=revision.content_digest,
-            include_capability_summary=False,
         )
         resolution = resolve_effective_settings(revision.document)
         blockers.extend(

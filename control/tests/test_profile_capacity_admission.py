@@ -408,7 +408,6 @@ def test_admission_accepts_changed_headroom_without_reopening_storage_or_capabil
             snapshot.disk_free_bytes -= 1
         monkeypatch.setattr(planner._artifacts, "inspect", unexpected)
         monkeypatch.setattr(planner, "_build_archive_available", unexpected)
-        monkeypatch.setattr(planner, "_model_capability_summary", unexpected)
         return original_queue(service, reviewed, **kwargs)
 
     monkeypatch.setattr(FleetProfileService, "_queue_application", change_observation)

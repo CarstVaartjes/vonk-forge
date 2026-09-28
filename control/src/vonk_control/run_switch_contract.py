@@ -65,9 +65,6 @@ RunSwitchReasonScope = Literal[
     "conflict",
     "operation",
 ]
-RunSwitchCapabilityEvidenceState = Literal[
-    "tested", "observed", "not-tested", "unknown"
-]
 RunSwitchChangeEffect = Literal["none", "restart", "reprepare", "rebuild", "reinstall"]
 RunSwitchCoverage = Literal["complete", "partial", "unknown"]
 RunSwitchBuildEvidenceState = Literal[
@@ -350,17 +347,6 @@ class FreshnessEvidence(_StrictModel):
     age_seconds: float | None = Field(default=None, ge=0)
     maximum_age_seconds: int | None = Field(default=None, ge=1, le=86_400)
     evidence_digest: Digest | None = None
-
-
-class CapabilityEvidence(_StrictModel):
-    """One capability's declaration and evidence, kept separate by owner."""
-
-    name: Annotated[str, StringConstraints(min_length=1, max_length=96)]
-    declared: bool | None
-    evidence: RunSwitchCapabilityEvidenceState
-    support: Literal["supported", "unsupported", "unknown"]
-    evidence_digest: Digest | None = None
-    detail: Annotated[str, StringConstraints(max_length=256)] | None = None
 
 
 class ResourceDemandEvidence(_StrictModel):
@@ -681,8 +667,6 @@ class RunSwitchPlan(RunSwitchAssessment):
         Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
     )
     start_plan_digest: Digest | None
-    model_capabilities: list[CapabilityEvidence] = Field(max_length=128)
-    recipe_capabilities: list[CapabilityEvidence] = Field(max_length=128)
     # ``fit`` is the current admission view retained as a compact client
     # affordance; the two named views above make stop-before-prepare decisions
     # explicit for reviewers and profile callers.
@@ -1345,7 +1329,6 @@ __all__ = [
     "ArtifactVerificationEvidence",
     "BuildCompatibilityEvidence",
     "BuildSourceEvidence",
-    "CapabilityEvidence",
     "Digest",
     "FreshnessEvidence",
     "InstallationReconcileRequest",
@@ -1357,7 +1340,6 @@ __all__ = [
     "RunSwitchBuildEvidence",
     "RunSwitchBuildEvidenceState",
     "RunSwitchCachedTransferResult",
-    "RunSwitchCapabilityEvidenceState",
     "RunSwitchChangeEffect",
     "RunSwitchCleanupApplyRequest",
     "RunSwitchCleanupPreviewRequest",
