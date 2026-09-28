@@ -2094,7 +2094,6 @@ class RunNode(Base):
     reserved_memory_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     observed_memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
     endpoint: Mapped[dict[str, object] | None] = mapped_column(JSON)
-    evidence_digest: Mapped[str | None] = mapped_column(String(64))
     observed_run_generation: Mapped[int | None] = mapped_column(BigInteger)
     observation_receipt_sha256: Mapped[str | None] = mapped_column(String(64))
     #: Process presence comes only from the consumed signed helper receipt.

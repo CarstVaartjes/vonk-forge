@@ -4182,11 +4182,6 @@ class RecipeOperationService:
             raw_evidence = result.get("evidence", result)
             if not isinstance(raw_evidence, Mapping):
                 raise RecipeOperationConflict("recipe agent evidence is invalid")
-            if raw_evidence is not result and "evidence_digest" in result:
-                raw_evidence = {
-                    **raw_evidence,
-                    "evidence_digest": result["evidence_digest"],
-                }
         self._project_node_result(
             session,
             job,
@@ -4482,7 +4477,7 @@ class RecipeOperationService:
                 elif node.state != "failed":
                     node.state = "starting"
                 if succeeded:
-                    node.evidence_digest = _validate_rank_launch_evidence(
+                    _validate_rank_launch_evidence(
                         session, owner_id, operation, evidence
                     )
                 node.updated_at = now
@@ -4490,7 +4485,7 @@ class RecipeOperationService:
                 if not succeeded:
                     node.state = "failed"
                 if succeeded:
-                    endpoint, digest = _validate_start_evidence(
+                    endpoint = _validate_start_evidence(
                         session, owner_id, operation, evidence
                     )
                     recorded = _validated_result(job.kind, job.result) or {}
@@ -4519,7 +4514,6 @@ class RecipeOperationService:
                         raise RecipeOperationConflict(
                             "recipe start endpoint evidence is invalid"
                         ) from error
-                    node.evidence_digest = digest
                 node.updated_at = now
             else:
                 node.state = (
@@ -4530,7 +4524,7 @@ class RecipeOperationService:
                     else "failed"
                 )
                 if job.kind == "recipe.start" and succeeded:
-                    endpoint, digest = _validate_start_evidence(
+                    endpoint = _validate_start_evidence(
                         session, owner_id, operation, evidence
                     )
                     try:
@@ -4539,7 +4533,6 @@ class RecipeOperationService:
                         raise RecipeOperationConflict(
                             "recipe start endpoint evidence is invalid"
                         ) from error
-                    node.evidence_digest = digest
                 node.updated_at = now
             if (
                 job.kind == "recipe.start"
@@ -7785,7 +7778,7 @@ def _validate_rank_launch_evidence(
     run_id: str,
     operation: AgentOperation,
     evidence: Mapping[str, object],
-) -> str:
+) -> None:
     run_generation = operation.payload.get("run_generation")
     if type(run_generation) is not int or run_generation < 1:
         raise RecipeOperationConflict("start run generation is invalid")
@@ -7807,7 +7800,6 @@ def _validate_rank_launch_evidence(
         "process_running",
         "fabric_projection_bound",
         "launched",
-        "evidence_digest",
         "run_generation",
         "runtime_arguments_sha256",
     }
@@ -7886,14 +7878,6 @@ def _validate_rank_launch_evidence(
         )
     ):
         raise RecipeOperationConflict("start runtime identity evidence is invalid")
-    digest = evidence.get("evidence_digest")
-    identity = {
-        key: value for key, value in evidence.items() if key != "evidence_digest"
-    }
-    observed_digest = hashlib.sha256(canonical_message(identity)).hexdigest()
-    if not isinstance(digest, str) or digest != observed_digest:
-        raise RecipeOperationConflict("start evidence digest is invalid")
-    return digest
 
 
 def _validate_start_evidence(
@@ -7901,7 +7885,7 @@ def _validate_start_evidence(
     run_id: str,
     operation: AgentOperation,
     evidence: Mapping[str, object],
-) -> tuple[str, str]:
+) -> str:
     run_generation = operation.payload.get("run_generation")
     if type(run_generation) is not int or run_generation < 1:
         raise RecipeOperationConflict("start run generation is invalid")
@@ -7916,7 +7900,6 @@ def _validate_start_evidence(
         "endpoint",
         "memory_reservation_bytes",
         "ready",
-        "evidence_digest",
         "run_generation",
         "runtime_arguments_sha256",
         "local_address",
@@ -8012,14 +7995,7 @@ def _validate_start_evidence(
         )
     ):
         raise RecipeOperationConflict("start runtime identity evidence is invalid")
-    digest = evidence.get("evidence_digest")
-    identity = {
-        key: value for key, value in evidence.items() if key != "evidence_digest"
-    }
-    observed_digest = hashlib.sha256(canonical_message(identity)).hexdigest()
-    if not isinstance(digest, str) or digest != observed_digest:
-        raise RecipeOperationConflict("start evidence digest is invalid")
-    return expected_endpoint, digest
+    return expected_endpoint
 
 
 def _aware(value: datetime) -> datetime:

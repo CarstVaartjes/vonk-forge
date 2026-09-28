@@ -124,7 +124,6 @@ def test_tensor_parallel_start_result_requires_exact_run_identity_fields() -> No
         "rank": 1,
         "world_size": 2,
         "memory_reservation_bytes": 67108864,
-        "evidence_digest": "f" * 64,
         "endpoint": "http://100.100.20.31:8000",
         "ready": True,
         "run_generation": 1,
@@ -137,7 +136,6 @@ def test_tensor_parallel_start_result_requires_exact_run_identity_fields() -> No
         {
             "endpoint": evidence["endpoint"],
             "evidence": evidence,
-            "evidence_digest": evidence["evidence_digest"],
         }
     )
     assert isinstance(result.evidence, TensorParallelStartEvidence)
@@ -149,7 +147,6 @@ def test_tensor_parallel_start_result_requires_exact_run_identity_fields() -> No
                 {
                     "endpoint": evidence["endpoint"],
                     "evidence": missing,
-                    "evidence_digest": evidence["evidence_digest"],
                 }
             )
 

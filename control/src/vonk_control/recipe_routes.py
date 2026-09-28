@@ -121,7 +121,6 @@ class _RecipeEndpoint:
     address: str
     port: int
     observed_at: datetime
-    evidence_digest: str
     operation_id: str
 
     @property
@@ -137,14 +136,12 @@ class _RecipeEndpoint:
     def route_document(self) -> dict[str, object]:
         return {
             "address": self.address,
-            "evidence_digest": self.evidence_digest,
             "node_id": self.node_id,
             "observed_at": self.observed_at.isoformat(),
             "operation_id": self.operation_id,
             "path": "/v1",
             "port": self.port,
             "scheme": "http",
-            "verify_evidence_digest": self.evidence_digest,
         }
 
 
@@ -1111,13 +1108,6 @@ class RecipeRouteService:
                     raise RecipeRouteError(
                         "recipe rank readiness evidence is stale", run_id=run.id
                     )
-                if (
-                    not isinstance(node.evidence_digest, str)
-                    or _DIGEST.fullmatch(node.evidence_digest) is None
-                ):
-                    raise RecipeRouteError(
-                        "recipe rank readiness identity is invalid", run_id=run.id
-                    )
                 evidence_times.append(observed)
             try:
                 endpoint = _endpoint(
@@ -1138,6 +1128,7 @@ class RecipeRouteService:
                     "run_id": run.id,
                     "alias": run.alias,
                     "plan_digest": run.plan_digest,
+                    "run_generation": run.run_generation,
                     "upstream_model": upstream_model,
                     # Observation time bounds the activation lease below;
                     # keeping it out of route identity avoids generating a
@@ -1147,7 +1138,6 @@ class RecipeRouteService:
                             "node_id": node.node_id,
                             "rank": node.rank,
                             "role": node.role,
-                            "evidence_digest": node.evidence_digest,
                         }
                         for node in nodes
                     ],
@@ -1290,13 +1280,11 @@ def _endpoint(
             "entrypoint endpoint is outside management policy"
         ) from error
     assert port is not None
-    assert node.evidence_digest is not None
     return _RecipeEndpoint(
         node_id=node.node_id,
         address=str(address),
         port=port,
         observed_at=_aware(node.updated_at),
-        evidence_digest=node.evidence_digest,
         operation_id=operation_id,
     )
 

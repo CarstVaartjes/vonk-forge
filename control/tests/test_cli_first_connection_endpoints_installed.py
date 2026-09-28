@@ -466,9 +466,6 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
         )
         assert owner is not None
         owner.endpoint = {"url": "http://10.0.0.9:8000"}
-        owner.evidence_digest = hashlib.sha256(
-            b"replacement route evidence"
-        ).hexdigest()
 
     replacement = routes.publish_run(run_id)
     assert replacement.generation > first_generation.generation

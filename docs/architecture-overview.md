@@ -370,7 +370,7 @@ exposed by Caddy.
 
 Routine GPU node work is pull-based. Each GPU node agent opens an outbound mTLS request,
 claims only operations for its certificate-bound node identity and compatible
-protocol/capabilities, heartbeats a fenced attempt, and returns digest-bound
+protocol/capabilities, heartbeats a fenced attempt, and returns typed
 evidence. The control plane does not open SSH, SCP, or an agent connection to a
 GPU node. SSH remains available to trusted administrators for break-glass host maintenance,
 fabric recovery, and explicit break-glass inspection.
@@ -624,8 +624,8 @@ restart-safe sequence:
    health-check, and verify the new workload graph through outbound agent
    operations.
 5. Compensate or enter `waiting-for-operator` when mutation outcome is uncertain.
-6. Publish routes only after every required result and endpoint-evidence digest
-   is accepted, then require an exact LiteLLM supervisor acknowledgement.
+6. Publish routes only after every required result and endpoint readiness is
+   accepted, then require an exact LiteLLM supervisor acknowledgement.
 7. Renew only while the applicable PostgreSQL authority and catalog revisions,
    agent compatibility, certificate state, authenticated presence,
    and publication lease remain valid. Otherwise withdraw fail closed.

@@ -1069,11 +1069,6 @@
           "title": "Downloaded Bytes",
           "type": "integer"
         },
-        "evidence_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Evidence Digest",
-          "type": "string"
-        },
         "imported_image_digest": {
           "pattern": "^sha256:[0-9a-f]{64}$",
           "title": "Imported Image Digest",
@@ -1123,8 +1118,7 @@
         "imported_image_digest",
         "verified_oci_layout_sha256",
         "oci_image_digest",
-        "downloaded_bytes",
-        "evidence_digest"
+        "downloaded_bytes"
       ],
       "title": "ArtifactDistributionResult",
       "type": "object"
@@ -8289,11 +8283,6 @@
           "title": "Endpoint",
           "type": "string"
         },
-        "evidence_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Evidence Digest",
-          "type": "string"
-        },
         "image_digest": {
           "pattern": "^sha256:[0-9a-f]{64}$",
           "title": "Image Digest",
@@ -8419,7 +8408,6 @@
         "rank",
         "world_size",
         "memory_reservation_bytes",
-        "evidence_digest",
         "phase",
         "run_id",
         "run_generation",
@@ -8646,11 +8634,6 @@
           "title": "Artifact Set Digest",
           "type": "string"
         },
-        "evidence_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Evidence Digest",
-          "type": "string"
-        },
         "fabric_projection_bound": {
           "const": true,
           "title": "Fabric Projection Bound",
@@ -8786,7 +8769,6 @@
         "rank",
         "world_size",
         "memory_reservation_bytes",
-        "evidence_digest",
         "phase",
         "run_id",
         "run_generation",
@@ -8832,16 +8814,10 @@
             }
           ],
           "title": "Evidence"
-        },
-        "evidence_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Evidence Digest",
-          "type": "string"
         }
       },
       "required": [
-        "evidence",
-        "evidence_digest"
+        "evidence"
       ],
       "title": "RecipeStartResult",
       "type": "object"
@@ -8856,11 +8832,6 @@
         },
         "endpoint": {
           "title": "Endpoint",
-          "type": "string"
-        },
-        "evidence_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Evidence Digest",
           "type": "string"
         },
         "image_digest": {
@@ -8945,7 +8916,6 @@
         "rank",
         "world_size",
         "memory_reservation_bytes",
-        "evidence_digest",
         "endpoint",
         "ready",
         "run_generation",
@@ -11230,11 +11200,6 @@
           "title": "Endpoint",
           "type": "string"
         },
-        "evidence_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Evidence Digest",
-          "type": "string"
-        },
         "image_digest": {
           "pattern": "^sha256:[0-9a-f]{64}$",
           "title": "Image Digest",
@@ -11319,7 +11284,6 @@
         "rank",
         "world_size",
         "memory_reservation_bytes",
-        "evidence_digest",
         "endpoint",
         "ready",
         "run_generation",

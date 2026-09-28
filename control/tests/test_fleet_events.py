@@ -148,7 +148,6 @@ def _run_node() -> models.RunNode:
         reserved_memory_bytes=2000,
         observed_memory_bytes=None,
         endpoint={"credential": "private endpoint"},
-        evidence_digest="1" * 64,
         updated_at=NOW,
     )
 

@@ -27,7 +27,6 @@ class RecipeStartRankLaunchEvidence:
     """
         Attributes:
             artifact_set_digest (str):
-            evidence_digest (str):
             fabric_projection_bound (bool):
             image_digest (str):
             launched (bool):
@@ -49,7 +48,6 @@ class RecipeStartRankLaunchEvidence:
      """
 
     artifact_set_digest: str
-    evidence_digest: str
     fabric_projection_bound: bool
     image_digest: str
     launched: bool
@@ -75,8 +73,6 @@ class RecipeStartRankLaunchEvidence:
 
     def to_dict(self) -> dict[str, Any]:
         artifact_set_digest = self.artifact_set_digest
-
-        evidence_digest = self.evidence_digest
 
         fabric_projection_bound = self.fabric_projection_bound
 
@@ -129,7 +125,6 @@ class RecipeStartRankLaunchEvidence:
 
         field_dict.update({
             "artifact_set_digest": artifact_set_digest,
-            "evidence_digest": evidence_digest,
             "fabric_projection_bound": fabric_projection_bound,
             "image_digest": image_digest,
             "launched": launched,
@@ -160,8 +155,6 @@ class RecipeStartRankLaunchEvidence:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         artifact_set_digest = d.pop("artifact_set_digest")
-
-        evidence_digest = d.pop("evidence_digest")
 
         fabric_projection_bound = d.pop("fabric_projection_bound")
 
@@ -237,7 +230,6 @@ class RecipeStartRankLaunchEvidence:
 
         recipe_start_rank_launch_evidence = cls(
             artifact_set_digest=artifact_set_digest,
-            evidence_digest=evidence_digest,
             fabric_projection_bound=fabric_projection_bound,
             image_digest=image_digest,
             launched=launched,

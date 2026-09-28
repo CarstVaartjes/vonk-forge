@@ -159,30 +159,6 @@ class FileSupervisorAcknowledger:
         )
 
 
-def endpoint_evidence_digest(
-    *,
-    node_id: str,
-    address: str,
-    observed_at: datetime,
-    operation_id: str,
-    verify_evidence_digest: str,
-) -> str:
-    """Bind authenticated presence to the exact accepted verify evidence."""
-
-    return _sha256(
-        _encoded(
-            {
-                "address": address,
-                "node_id": node_id,
-                "observed_at": observed_at.astimezone(UTC).isoformat(),
-                "operation_id": operation_id,
-                "schema_version": 1,
-                "verify_evidence_digest": verify_evidence_digest,
-            }
-        )
-    )
-
-
 class AtomicRouteBundlePublisher:
     """Stage a complete bundle and replace its sole activation marker last."""
 

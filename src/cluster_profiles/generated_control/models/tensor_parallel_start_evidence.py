@@ -28,7 +28,6 @@ class TensorParallelStartEvidence:
         Attributes:
             artifact_set_digest (str):
             endpoint (str):
-            evidence_digest (str):
             image_digest (str):
             local_address (str):
             master_address (str):
@@ -46,7 +45,6 @@ class TensorParallelStartEvidence:
 
     artifact_set_digest: str
     endpoint: str
-    evidence_digest: str
     image_digest: str
     local_address: str
     master_address: str
@@ -69,8 +67,6 @@ class TensorParallelStartEvidence:
         artifact_set_digest = self.artifact_set_digest
 
         endpoint = self.endpoint
-
-        evidence_digest = self.evidence_digest
 
         image_digest = self.image_digest
 
@@ -108,7 +104,6 @@ class TensorParallelStartEvidence:
         field_dict.update({
             "artifact_set_digest": artifact_set_digest,
             "endpoint": endpoint,
-            "evidence_digest": evidence_digest,
             "image_digest": image_digest,
             "local_address": local_address,
             "master_address": master_address,
@@ -135,8 +130,6 @@ class TensorParallelStartEvidence:
         artifact_set_digest = d.pop("artifact_set_digest")
 
         endpoint = d.pop("endpoint")
-
-        evidence_digest = d.pop("evidence_digest")
 
         image_digest = d.pop("image_digest")
 
@@ -178,7 +171,6 @@ class TensorParallelStartEvidence:
         tensor_parallel_start_evidence = cls(
             artifact_set_digest=artifact_set_digest,
             endpoint=endpoint,
-            evidence_digest=evidence_digest,
             image_digest=image_digest,
             local_address=local_address,
             master_address=master_address,
