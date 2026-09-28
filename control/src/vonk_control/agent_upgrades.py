@@ -12,18 +12,19 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_agent_protocol.package_source import AgentPackageSource
 
-from .agent_jobs import AgentJobService
-from .agent_package_source import load_package_source
-from .agent_upgrade_status import (
-    AGENT_UPGRADE_AWAITING_IDENTITY_REASONS,
-    RECOVERABLE_AGENT_UPGRADE_REASONS,
+from .agent_jobs import (
+    AGENT_UPGRADE_RECOVERY_FENCE,
+    AgentJobService,
+    agent_upgrade_in_flight,
+    schedule_agent_upgrade_retry,
 )
+from .agent_package_source import load_package_source
 from .bounded_json import require_integer
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobAttempt
 
@@ -34,20 +35,28 @@ _SIGNATURE = re.compile(r"[0-9a-f]{128}\Z")
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _ONLINE_WINDOW = timedelta(seconds=150)
 # An ambiguous install result can leave durable apt/dpkg recovery in progress.
-# Both the sole automatic retry and every operator-triggered retry wait through
-# this explicit controller safety window. It is a stable dispatch contract, not
-# a derivation from package-helper implementation timeouts.
-_AGENT_UPGRADE_RECOVERY_FENCE = timedelta(seconds=960)
+# Every automatic retry waits through this controller safety window.
+_AGENT_UPGRADE_RECOVERY_FENCE = AGENT_UPGRADE_RECOVERY_FENCE
 _TARGET_PROTOCOL_VERSION = 3
-_RECOVERABLE_HELPER_BRIDGE_FAILURES = RECOVERABLE_AGENT_UPGRADE_REASONS
-_RETRYABLE_HELPER_BRIDGE_FAILURES = _RECOVERABLE_HELPER_BRIDGE_FAILURES - {
-    *AGENT_UPGRADE_AWAITING_IDENTITY_REASONS,
-    "agent upgrade helper rejected the request: package_preflight_failed",
-    "agent upgrade helper rejected the request: package_verification_failed",
-    "agent upgrade helper rejected the request: package_metadata_failed",
-    "agent upgrade helper rejected the request: package_custody_failed",
-    "agent upgrade helper rejected the request: package_install_failed",
-}
+_ACTIVE_ROLLOUT_STATES = ("queued", "running", "waiting-for-operator")
+_ALREADY_CURRENT = "already runs the requested agent build"
+
+
+def _summary(skipped: Mapping[str, str]) -> str | None:
+    """Explain what a concluded rollout left untouched, never inventing work."""
+
+    if not skipped:
+        return None
+    if all(reason == _ALREADY_CURRENT for reason in skipped.values()):
+        return "selected Sparks already running the requested agent build were left unchanged"
+    passed = sorted(
+        (node_id, reason)
+        for node_id, reason in skipped.items()
+        if reason != _ALREADY_CURRENT
+    )
+    listed = "; ".join(f"Spark {node_id} {reason}" for node_id, reason in passed[:4])
+    more = f" (+{len(passed) - 4} more)" if len(passed) > 4 else ""
+    return f"skipped: {listed}{more}"[:1024]
 
 
 def _aware(value: datetime) -> datetime:
@@ -111,6 +120,10 @@ class AgentUpgradePlan:
     request_intent: dict[str, object]
     strategy: Literal["one-at-a-time"]
     sources: dict[str, dict[str, object]]
+    #: Selected Sparks this rollout will not touch, with the reason.  A Spark
+    #: that already runs the target is a no-op, not a conflict; one that can
+    #: never take this package is reported instead of refusing the fleet.
+    skipped: dict[str, str]
 
 
 class AgentUpgradeService:
@@ -128,6 +141,7 @@ class AgentUpgradeService:
         self._sessions = sessions
         self._operations = operations
         self._clock = clock
+        operations.set_rollout_owner(self._advance, self.advance_node)
         self._current_revision = current_revision
         if channel not in {"dev", "stable"}:
             raise ValueError("agent upgrade channel is invalid")
@@ -229,63 +243,51 @@ class AgentUpgradeService:
                 "agent repair requires exactly its explicit Spark and one-at-a-time rollout"
             )
         authority_revision = self._current_revision()
-        now = self._clock()
-        sources: dict[str, dict[str, object]] = {}
+        requested = None if node_ids is None else tuple(node_ids)
+        if requested is not None and (
+            not requested
+            or len(requested) != len(set(requested))
+            or len(requested) > 64
+        ):
+            raise AgentUpgradeConflict("agent upgrade targets are invalid")
+        skipped: dict[str, str] = {}
+        installed: list[tuple[str, str, str]] = []
         with self._sessions() as session:
-            requested = None if node_ids is None else tuple(node_ids)
-            if requested is not None and (
-                not requested
-                or len(requested) != len(set(requested))
-                or len(requested) > 64
-            ):
-                raise AgentUpgradeConflict("agent upgrade targets are invalid")
-            candidates = list(
-                session.scalars(
+            candidates = {
+                node.node_id: node
+                for node in session.scalars(
                     select(AgentNode)
                     if requested is None
                     else select(AgentNode).where(AgentNode.node_id.in_(requested))
                 )
-            )
-            nodes = {node.node_id: node for node in candidates}
-            targets = (
-                tuple(
-                    sorted(
-                        node.node_id
-                        for node in candidates
-                        if self._eligible(node, payload, now)
-                        and not self._at_target(node, payload)
+            }
+            for node_id in sorted(candidates) if requested is None else requested:
+                node = candidates.get(node_id)
+                if node is None:
+                    skipped[node_id] = "does not exist"
+                elif self._at_target(node, payload):
+                    skipped[node_id] = _ALREADY_CURRENT
+                elif (
+                    reason := self._permanent_ineligible_reason(node, payload)
+                ) is not None:
+                    skipped[node_id] = reason
+                else:
+                    # An offline Spark stays in the rollout: it is deferred and
+                    # upgraded automatically when it reconnects.
+                    installed.append(
+                        (node_id, node.build_digest or "", node.binary_digest or "")
                     )
+        sources: dict[str, dict[str, object]] = {}
+        for node_id, build_digest, binary_digest in installed:
+            try:
+                source = load_package_source(
+                    self._http, self._channel, build_digest, binary_digest
                 )
-                if requested is None
-                else requested
-            )
-            if not targets:
-                raise AgentUpgradeConflict(
-                    "no outdated upgrade-capable Sparks were found"
-                )
-            if requested is not None and set(nodes) != set(targets):
-                raise AgentUpgradeConflict("agent upgrade target does not exist")
-            for node_id in targets:
-                node = nodes[node_id]
-                reason = self._ineligible_reason(node, payload, now)
-                if reason is not None:
-                    raise AgentUpgradeConflict(reason, spark_id=node_id)
-                if self._at_target(node, payload):
-                    raise AgentUpgradeConflict(
-                        "already runs the requested agent build", spark_id=node_id
-                    )
-                try:
-                    source = load_package_source(
-                        self._http,
-                        self._channel,
-                        node.build_digest or "",
-                        node.binary_digest or "",
-                    )
-                except (httpx.HTTPError, ValueError) as error:
-                    raise AgentUpgradeConflict(
-                        "exact signed rollback package is unavailable", spark_id=node_id
-                    ) from error
-                sources[node_id] = source.model_dump(mode="json")
+            except (httpx.HTTPError, ValueError):
+                skipped[node_id] = "has no published signed rollback package"
+                continue
+            sources[node_id] = source.model_dump(mode="json")
+        targets = tuple(node_id for node_id, _, _ in installed if node_id in sources)
         document = {
             "sources": sources,
             "authority_revision": authority_revision,
@@ -304,6 +306,7 @@ class AgentUpgradeService:
             request_intent=intent,
             strategy=strategy,
             sources=sources,
+            skipped=skipped,
         )
 
     def get_request(
@@ -371,13 +374,16 @@ class AgentUpgradeService:
             strategy=strategy,
             request_intent=intent,
         )
-        if plan.plan_digest != plan_digest:
-            raise AgentUpgradeConflict("agent upgrade preview is stale")
+        # The latest request leads: a preview digest that no longer matches is
+        # advisory.  The freshly computed plan for the same intent is applied.
+        del plan_digest
         now = self._clock()
         job = Job(
             request_id=request_id,
             kind="agent-upgrade",
-            state="queued",
+            state="queued" if plan.node_ids else "succeeded",
+            status_reason=None if plan.node_ids else _summary(plan.skipped),
+            result={"skipped": dict(plan.skipped)} if plan.skipped else None,
             actor=actor,
             authority_revision=plan.authority_revision,
             targets=list(plan.node_ids),
@@ -409,7 +415,9 @@ class AgentUpgradeService:
                     return existing
                 session.add(job)
                 session.flush()
-                self._enqueue_next(session, job)
+                self._supersede_older(session, job, now)
+                if plan.node_ids:
+                    self._advance(session, job)
         except IntegrityError:
             existing = self.get_request(request_id, actor=actor, request_intent=intent)
             if existing is not None:
@@ -435,7 +443,7 @@ class AgentUpgradeService:
             )
             stale_dispatch = parent.state == "running"
             if (
-                parent.state != "waiting-for-operator"
+                parent.state not in {"queued", "waiting-for-operator"}
                 and not failed_dispatch
                 and not stale_dispatch
             ):
@@ -581,24 +589,8 @@ class AgentUpgradeService:
                     != hashlib.sha256(canonical_message(operation.payload)).hexdigest()
                 ):
                     raise ValueError("stored agent upgrade operation is invalid")
-            materialized = {
-                operation.node_id: operation for operation in stored_operations
-            }
-            expected_prefix = order[: len(materialized)]
-            if not materialized or set(materialized) != set(expected_prefix):
-                raise ValueError("stored agent upgrade topology is invalid")
-            if any(
-                materialized[node_id].state != "succeeded"
-                for node_id in expected_prefix[:-1]
-            ):
-                raise ValueError("stored agent upgrade topology is invalid")
-            if materialized[expected_prefix[-1]].state not in {
-                "queued",
-                "running",
-                "succeeded",
-                "waiting-for-operator",
-            }:
-                raise ValueError("stored agent upgrade topology is invalid")
+            # Deferred (offline) Sparks are passed over while later ones
+            # upgrade, so materialized operations need not form a prefix.
             for operation in active:
                 if operation.state == "queued":
                     if operation.current_attempt != 0:
@@ -647,29 +639,8 @@ class AgentUpgradeService:
                     attempt.lease_deadline = max(
                         _aware(attempt.lease_deadline), _aware(not_before)
                     )
-            elif not active:
-                if len(stored_operations) == len(order) and all(
-                    operation.state == "succeeded" for operation in stored_operations
-                ):
-                    parent.state = "succeeded"
-                    return
-                before = len(stored_operations)
-                self._enqueue_next(session, parent)
-                if parent.state != "queued":
-                    raise ValueError(
-                        "next agent upgrade target is not currently eligible"
-                    )
-                session.flush()
-                after = int(
-                    session.scalar(
-                        select(func.count())
-                        .select_from(AgentOperation)
-                        .where(AgentOperation.parent_job_id == parent.id)
-                    )
-                    or 0
-                )
-                if after != before + 1:
-                    raise ValueError("agent upgrade has no operation to resume")
+            else:
+                self._advance(session, parent)
         self._operations.notify_available()
 
     def consume_agent_result(
@@ -694,78 +665,231 @@ class AgentUpgradeService:
             .where(AgentNode.node_id == operation.node_id)
             .with_for_update(of=AgentNode)
         )
-        if message.state == "succeeded":
-            if node is None or not self._contact_proves_target(
-                node, operation, package, message
-            ):
-                # A helper acknowledgement or generic health report is not proof
-                # that the newly installed binary restarted successfully.  Keep
-                # the operation reconcilable until a subsequent authenticated
-                # protocol-v3 contact reports the exact published identity.
-                self._wait_for_identity(operation, attempt, now=self._clock())
-                return
-            if parent.state == "waiting-for-operator":
-                parent.state = "queued"
-                parent.status_reason = None
-                parent.updated_at = self._clock()
-        elif (bridge_failure := self._helper_bridge_failure(message)) is not None:
-            # The original signed-helper bridge could reject the first request
-            # before dpkg changed the host.  Permit one subsequent agent poll to
-            # retry that exact request, then leave it waiting for identity-only
-            # reconciliation instead of forming an unbounded retry loop.
-            retry = bool(
-                attempt.attempt == 1
-                and operation.current_attempt == 1
-                and bridge_failure in _RETRYABLE_HELPER_BRIDGE_FAILURES
-                and node is not None
-                and self._safe_to_retry(node, package)
-            )
-            self._wait_for_identity(
-                operation,
-                attempt,
-                now=self._clock(),
-                retry=retry,
-                preserve_failed_attempt=True,
-            )
+        if message.state == "succeeded" and (
+            node is not None
+            and self._contact_proves_target(node, operation, package, message)
+        ):
+            self._advance(session, parent)
             return
+        if message.state not in {"succeeded", "failed", "waiting-for-operator"}:
+            return
+        # A helper acknowledgement without exact fresh identity, and every
+        # failure, is retried automatically behind the dpkg safety fence.  A
+        # later authenticated contact that proves the target completes the
+        # order first; the retry is dispatched only while the Spark still runs
+        # the exact rollback source.  Meanwhile the rollout moves on.
+        if node is None or node.state != "active" or node.revoked_at is not None:
+            operation.state = "failed"
+            operation.status_reason = "Spark is no longer an active enrolled node"
+            operation.updated_at = self._clock()
         else:
-            return
-        self._enqueue_next(session, parent)
+            schedule_agent_upgrade_retry(operation, attempt, self._clock())
+        self._advance(session, parent)
 
-    @staticmethod
-    def _wait_for_identity(
-        operation: AgentOperation,
-        attempt: AgentOperationAttempt,
-        *,
-        now: datetime,
-        retry: bool = False,
-        preserve_failed_attempt: bool = False,
-    ) -> None:
-        operation.state = "waiting-for-operator"
-        operation.updated_at = now
-        if not preserve_failed_attempt:
-            attempt.state = "waiting-for-operator"
-        operation.retry_disposition = "retry" if retry else None
-        operation.retry_disposition_attempt = attempt.attempt if retry else None
-        if preserve_failed_attempt:
-            # Persist the full controller safety window while durable apt/dpkg
-            # recovery may still be settling. AgentOperationAttempt owns this
-            # not-before time across controller restarts; an automatic retry and
-            # every later operator resume must respect it.
-            attempt.lease_deadline = now + _AGENT_UPGRADE_RECOVERY_FENCE
+    def advance_node(self, node_id: str) -> None:
+        """Resume every rollout that includes ``node_id`` when that Spark polls."""
 
-    @staticmethod
-    def _helper_bridge_failure(message: AgentResult) -> str | None:
-        reason = message.result.get("reason")
-        return (
-            reason
-            if (
-                message.state == "failed"
-                and isinstance(reason, str)
-                and reason in _RECOVERABLE_HELPER_BRIDGE_FAILURES
+        now = self._clock()
+        with self._sessions.begin() as session:
+            job_ids = [
+                job_id
+                for job_id, targets in session.execute(
+                    select(Job.id, Job.targets).where(
+                        Job.kind == "agent-upgrade",
+                        Job.state.in_(_ACTIVE_ROLLOUT_STATES),
+                    )
+                )
+                if isinstance(targets, list) and node_id in targets
+            ]
+            for job_id in job_ids:
+                parent = session.scalar(
+                    select(Job).where(Job.id == job_id).with_for_update(of=Job)
+                )
+                if parent is None or parent.state not in _ACTIVE_ROLLOUT_STATES:
+                    continue
+                self._retry_parked(session, parent, now)
+                self._advance(session, parent)
+
+    def _retry_parked(self, session: Session, parent: Job, now: datetime) -> None:
+        """Turn a parked order into an automatic, fenced retry."""
+
+        for operation in session.scalars(
+            select(AgentOperation)
+            .where(
+                AgentOperation.parent_job_id == parent.id,
+                AgentOperation.state == "waiting-for-operator",
+                AgentOperation.retry_disposition.is_(None),
             )
-            else None
+            .with_for_update(of=AgentOperation)
+        ):
+            node = session.get(AgentNode, operation.node_id)
+            if node is None or node.state != "active" or node.revoked_at is not None:
+                operation.state = "failed"
+                operation.status_reason = "Spark is no longer an active enrolled node"
+                operation.updated_at = now
+                continue
+            attempt = session.scalar(
+                select(AgentOperationAttempt)
+                .where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+                .with_for_update(of=AgentOperationAttempt)
+            )
+            schedule_agent_upgrade_retry(operation, attempt, now)
+
+    def _supersede_older(self, session: Session, job: Job, now: datetime) -> None:
+        """The latest fleet upgrade request leads; older rollouts stop advancing.
+
+        An older order already running on a Spark finishes under its own fence;
+        queued and retry-parked orders are withdrawn so they cannot compete with
+        the new request for the same Spark.
+        """
+
+        for older in session.scalars(
+            select(Job)
+            .where(
+                Job.kind == "agent-upgrade",
+                Job.state.in_(_ACTIVE_ROLLOUT_STATES),
+                Job.id != job.id,
+            )
+            .with_for_update(of=Job)
+        ):
+            result = dict(older.result) if isinstance(older.result, Mapping) else {}
+            result["superseded_by"] = job.id
+            older.result = result
+            for operation in session.scalars(
+                select(AgentOperation)
+                .where(
+                    AgentOperation.parent_job_id == older.id,
+                    AgentOperation.state.in_({"queued", "waiting-for-operator"}),
+                )
+                .with_for_update(of=AgentOperation)
+            ):
+                operation.state = "cancelled"
+                operation.status_reason = f"superseded by agent upgrade {job.id}"
+                operation.retry_disposition = None
+                operation.retry_disposition_attempt = None
+                operation.retry_due_at = None
+                operation.updated_at = now
+            self._advance(session, older)
+
+    def _advance(self, session: Session, parent: Job) -> None:
+        """Own the rollout projection: dispatch, defer, or conclude.
+
+        One Spark is upgraded at a time.  A Spark that is offline is deferred
+        and the next one proceeds; the deferred Spark is dispatched when it
+        polls again.  A Spark that already runs the target, or that can never
+        take this package, is skipped.  Failed orders retry automatically, so
+        the rollout concludes only when every target is settled.
+        """
+
+        if parent.state not in _ACTIVE_ROLLOUT_STATES:
+            return
+        now = self._clock()
+        operations = list(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == parent.id)
+                .order_by(AgentOperation.created_at, AgentOperation.id)
+            )
         )
+        if any(
+            operation.state == "queued"
+            or agent_upgrade_in_flight(session, operation, now)
+            for operation in operations
+        ):
+            return
+        result = dict(parent.result) if isinstance(parent.result, Mapping) else {}
+        superseded = result.get("superseded_by")
+        if superseded is not None:
+            parent.state = "cancelled"
+            parent.status_reason = f"superseded by agent upgrade {superseded}"
+            parent.updated_at = now
+            return
+        stored_skipped = result.get("skipped")
+        skipped: dict[str, str] = {
+            str(node_id): str(reason)
+            for node_id, reason in (
+                stored_skipped.items() if isinstance(stored_skipped, Mapping) else ()
+            )
+        }
+        deferred: list[str] = []
+        materialized = {operation.node_id for operation in operations}
+        order = parent.payload.get("node_order")
+        package = parent.payload.get("package")
+        if not isinstance(order, list) or not isinstance(package, dict):
+            parent.state = "failed"
+            parent.status_reason = "stored agent upgrade plan is invalid"
+            parent.updated_at = now
+            return
+        for node_id in order:
+            if not isinstance(node_id, str) or node_id in materialized:
+                continue
+            if node_id in skipped:
+                continue
+            node = session.scalar(
+                select(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .with_for_update(of=AgentNode)
+            )
+            if node is None:
+                skipped[node_id] = "does not exist"
+                continue
+            if self._at_target(node, package):
+                skipped[node_id] = _ALREADY_CURRENT
+                continue
+            reason = self._permanent_ineligible_reason(node, package)
+            if reason is not None:
+                skipped[node_id] = reason
+                continue
+            if self._ineligible_reason(node, package, now) is not None:
+                deferred.append(node_id)
+                continue
+            try:
+                self._enqueue_node(session, parent, node_id)
+            except AgentUpgradeConflict as error:
+                skipped[node_id] = str(error)
+                continue
+            self._record(parent, result, skipped)
+            parent.state = "queued"
+            parent.status_reason = None
+            parent.updated_at = now
+            return
+        self._record(parent, result, skipped)
+        retrying = [
+            operation
+            for operation in operations
+            # A dispatched order whose Spark went dark past its fence no
+            # longer holds the fleet, but it is not settled either.
+            if operation.state in {"waiting-for-operator", "running"}
+        ]
+        parent.updated_at = now
+        if deferred or retrying:
+            parent.state = "queued"
+            parent.status_reason = (
+                f"Spark {deferred[0]} is not currently online; its upgrade resumes "
+                "automatically when it reconnects"
+                if deferred
+                else retrying[0].status_reason
+                or f"Spark {retrying[0].node_id} upgrade retries automatically"
+            )
+            return
+        failed = [operation for operation in operations if operation.state == "failed"]
+        parent.state = "failed" if failed else "succeeded"
+        parent.status_reason = (
+            f"Spark {failed[0].node_id} upgrade failed: "
+            f"{failed[0].status_reason or 'see operation evidence'}"
+            if failed
+            else _summary(skipped)
+        )
+
+    @staticmethod
+    def _record(
+        parent: Job, result: dict[str, object], skipped: dict[str, str]
+    ) -> None:
+        if skipped != (result.get("skipped") or {}):
+            parent.result = {**result, "skipped": skipped}
 
     @classmethod
     def _contact_proves_target(
@@ -821,68 +945,6 @@ class AgentUpgradeService:
             and evidence.get("self_test_passed") is True
             and evidence.get("status") == "upgraded"
         )
-
-    @staticmethod
-    def _safe_to_retry(
-        node: AgentNode,
-        package: Mapping[str, object],
-    ) -> bool:
-        return bool(
-            node.state == "active"
-            and node.revoked_at is None
-            and node.protocol_version == _TARGET_PROTOCOL_VERSION
-            and "agent.upgrade.v1" in set(node.capabilities or ())
-            and node.architecture == package.get("architecture")
-            and node.self_test_passed is True
-            and (
-                node.build_digest != package.get("target_build_digest")
-                or node.binary_digest != package.get("target_binary_digest")
-            )
-        )
-
-    def _enqueue_next(self, session: Session, parent: Job) -> None:
-        package = parent.payload.get("package")
-        order = parent.payload.get("node_order")
-        if not isinstance(package, dict) or not isinstance(order, list):
-            raise AgentUpgradeConflict("stored agent upgrade plan is invalid")
-        existing = set(
-            session.scalars(
-                select(AgentOperation.node_id).where(
-                    AgentOperation.parent_job_id == parent.id
-                )
-            )
-        )
-        next_node = next(
-            (
-                node_id
-                for node_id in order
-                if isinstance(node_id, str) and node_id not in existing
-            ),
-            None,
-        )
-        if next_node is None:
-            return
-        node = session.scalar(
-            select(AgentNode)
-            .where(AgentNode.node_id == next_node)
-            .with_for_update(of=AgentNode)
-        )
-        reason = (
-            "does not exist"
-            if node is None
-            else self._ineligible_reason(node, package, self._clock())
-        )
-        if reason is not None:
-            parent.state = "waiting-for-operator"
-            parent.status_reason = f"Spark {next_node} {reason}"
-            parent.updated_at = self._clock()
-            return
-        try:
-            self._enqueue_node(session, parent, next_node)
-        except AgentUpgradeConflict as error:
-            parent.state = "waiting-for-operator"
-            parent.status_reason = str(error)
-            parent.updated_at = self._clock()
 
     def _enqueue_node(self, session: Session, parent: Job, node_id: str) -> None:
         package = parent.payload.get("package")
@@ -1006,27 +1068,30 @@ class AgentUpgradeService:
             )
         return {**document, "package": manifest_package}
 
-    @classmethod
-    def _eligible(
-        cls,
-        node: AgentNode,
-        package: Mapping[str, object],
-        now: datetime,
-    ) -> bool:
-        return cls._ineligible_reason(node, package, now) is None
-
     @staticmethod
-    def _ineligible_reason(
-        node: AgentNode,
-        package: Mapping[str, object],
-        now: datetime,
+    def _permanent_ineligible_reason(
+        node: AgentNode, package: Mapping[str, object]
     ) -> str | None:
+        """A reason this package can never be dispatched to ``node``."""
+
         if node.state != "active" or node.revoked_at is not None:
             return "is not active"
         if "agent.upgrade.v1" not in set(node.capabilities or ()):
             return "does not support controller upgrades"
         if node.architecture != package["architecture"]:
             return "has an incompatible architecture"
+        return None
+
+    @classmethod
+    def _ineligible_reason(
+        cls,
+        node: AgentNode,
+        package: Mapping[str, object],
+        now: datetime,
+    ) -> str | None:
+        reason = cls._permanent_ineligible_reason(node, package)
+        if reason is not None:
+            return reason
         current = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         last_seen = node.last_seen_at
         if last_seen is None:

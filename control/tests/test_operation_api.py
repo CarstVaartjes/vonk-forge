@@ -15,12 +15,11 @@ from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control import operation_api
-from vonk_control.agent_jobs import (
-    AgentJobService,
-    OperatorRetirementRefused,
-    OperatorRetryExhausted,
+from vonk_control.agent_jobs import AgentJobService, OperatorRetirementRefused
+from vonk_control.agent_upgrade_status import (
+    agent_upgrade_next_action,
+    operator_agent_upgrade_reason,
 )
-from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
@@ -838,31 +837,6 @@ def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
     assert audits.for_request(request_id).action == "job.resume"
 
 
-def test_operator_resume_reports_an_exhausted_retry_budget() -> None:
-    """A spent budget is a loud typed conflict, not a queued no-op."""
-
-    def exhausted(_job_id: str) -> None:
-        raise OperatorRetryExhausted("op-1", "recipe.stop", 5, 5)
-
-    services = OperationApiServices(
-        endpoint=lambda _alias: {},
-        agents=lambda: (),
-        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
-            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
-        ),
-        resume_job=exhausted,
-    )
-    client, operator, *_ = _client(operations=services)
-    job_id = "11111111-1111-4111-8111-111111111111"
-
-    response = client.post(f"/api/jobs/{job_id}/resume", headers=operator)
-
-    assert response.status_code == 409
-    assert response.json()["detail"] == (
-        "operation op-1 (recipe.stop) exhausted its 5-attempt retry budget at attempt 5"
-    )
-
-
 def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
     clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
     sessions, jobs, services, operation, job_id = _parked_stop_services(
@@ -962,37 +936,6 @@ def test_resume_action_disappearing_after_preflight_is_refused(
         assert stored.retry_disposition_attempt is None
 
 
-def test_durable_resume_refuses_exhausted_budget_without_half_transition(
-    tmp_path,
-) -> None:
-    clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
-    sessions, jobs, services, operation, job_id = _parked_stop_services(
-        tmp_path, clock=clock
-    )
-    limit = _exhaust_operator_retry_budget(sessions, jobs, services, operation)
-    client, operator, *_ = _durable_client(sessions, services, clock=clock)
-
-    preflight = client.get(f"/api/jobs/{job_id}", headers=operator)
-    assert preflight.status_code == 200
-    assert "resume" not in preflight.json()["recovery"]["actions"]
-    response = client.post(
-        f"/api/jobs/{job_id}/resume",
-        headers=operator,
-        json={"disposition": "resume"},
-    )
-
-    assert response.status_code == 409
-    assert f"{limit}-attempt retry budget" in response.json()["detail"]
-    with sessions() as session:
-        parent = session.get(Job, job_id)
-        stored = session.get(AgentOperation, operation.id)
-        assert parent is not None and parent.state == "waiting-for-operator"
-        assert stored is not None and stored.state == "waiting-for-operator"
-        assert stored.retry_disposition == "retry"
-        assert stored.retry_disposition_attempt == limit - 1
-        assert stored.current_attempt == limit
-
-
 def test_durable_retire_retains_uncertain_run_capacity(tmp_path) -> None:
     """Ending an exhausted order does not prove its remote effect stopped."""
 
@@ -1038,7 +981,7 @@ def test_durable_retire_retains_uncertain_run_capacity(tmp_path) -> None:
                 created_at=clock.now,
             )
         )
-    limit = _exhaust_operator_retry_budget(sessions, jobs, services, operation)
+    _park_repeatedly(sessions, jobs, services, operation)
 
     _retire_parked(services, job_id)
 
@@ -1053,7 +996,6 @@ def test_durable_retire_retains_uncertain_run_capacity(tmp_path) -> None:
         assert run is not None and reservation is not None
         assert stored.state == "failed"
         assert stored.retry_disposition is None and stored.retry_due_at is None
-        assert f"{limit}-attempt retry budget was spent" in (stored.status_reason or "")
         assert "operator retired" in (stored.status_reason or "")
         assert parent.state == "failed"
         assert parent.status_reason == stored.status_reason
@@ -1070,7 +1012,7 @@ def test_durable_retire_refuses_live_current_attempt_without_transition(
     sessions, jobs, services, operation, job_id = _parked_stop_services(
         tmp_path, clock=clock
     )
-    limit = _exhaust_operator_retry_budget(sessions, jobs, services, operation)
+    limit = _park_repeatedly(sessions, jobs, services, operation)
     with sessions.begin() as session:
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
@@ -1567,13 +1509,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
             }
         ],
         "failure_details_unavailable": True,
-        "next_action": (
-            "Keep the rollout paused and inspect the Spark package-helper and dpkg "
-            "recovery state before resuming. When ready, Resume queues the retry "
-            "behind a new safety delay; it does not dispatch immediately. Do not "
-            "advance to another Spark until this Spark reports the exact target "
-            "identity."
-        ),
+        "next_action": agent_upgrade_next_action(retry_queued=False),
         "operator_summary": operator_agent_upgrade_reason(
             node_id=NODE_ID,
             attempt_count=2,
@@ -1667,7 +1603,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     specific_next_action = specific["next_action"]
     assert specific_next_action is not None
     assert isinstance(specific_next_action, str)
-    assert "Resume queues the retry behind a new safety delay" in specific_next_action
+    assert specific_next_action == agent_upgrade_next_action(retry_queued=False)
 
 
 def test_durable_operation_cursor_rejects_cross_job_replay_and_tampering(
@@ -2076,16 +2012,10 @@ def _claim_parked(jobs):
     )
 
 
-def _exhaust_operator_retry_budget(sessions, jobs, services, operation):
-    """Spend explicit retries on an effect without safe automatic reconciliation.
+def _park_repeatedly(sessions, jobs, services, operation, times: int = 1):
+    """Park an order that needs an authority decision, resuming between parks."""
 
-    Exact restart-safe interruption now retries for as long as intent remains
-    current. An unclassified parked effect still needs one operator decision per
-    claim and retains the bounded operator budget tested by resume/retirement.
-    """
-
-    limit = RecoveryPolicy().max_failures
-    for expected_attempt in range(1, limit + 1):
+    for expected_attempt in range(1, times + 1):
         claim = _claim_parked(jobs)
         assert claim is not None and claim.attempt == expected_attempt
         jobs.wait_for_operator(claim, "effect requires operator inspection")
@@ -2096,9 +2026,9 @@ def _exhaust_operator_retry_budget(sessions, jobs, services, operation):
                 stored.retry_disposition == "retry"
                 and stored.retry_disposition_attempt == stored.current_attempt
             )
-        if expected_attempt < limit:
+        if expected_attempt < times:
             services.resume_job(claim.job_id)
-    return limit
+    return times
 
 
 def test_durable_resume_authorises_the_parked_operation_for_the_next_claim(
@@ -2165,38 +2095,30 @@ def test_durable_resume_refuses_a_job_that_is_not_parked(tmp_path) -> None:
         assert stored is not None and stored.state == "queued"
 
 
-def test_durable_resume_refuses_an_exhausted_operator_retry_budget(tmp_path) -> None:
-    """A spent budget must refuse loudly instead of queueing dead work.
+def test_durable_resume_is_never_refused_for_earlier_failed_attempts(
+    tmp_path,
+) -> None:
+    """Resume bounds the retry rate, never the lifetime of the intent.
 
-    Each attempt needs an explicit resume because its effect cannot be safely
-    retried automatically. Safe ongoing retries are covered separately; they do
-    not consume this operator-only budget.
+    Catches a reintroduced attempt budget that ends in a refusal and leaves the
+    order parked for a human instead of retrying.
     """
 
     clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
     sessions, jobs, services, operation, job_id = _parked_stop_services(
         tmp_path, clock=clock
     )
-    limit = _exhaust_operator_retry_budget(sessions, jobs, services, operation)
-    with sessions() as session:
-        stored = session.get(AgentOperation, operation.id)
-        parent = session.get(Job, job_id)
-        assert stored is not None and parent is not None
-        assert not (
-            stored.retry_disposition == "retry"
-            and stored.retry_disposition_attempt == stored.current_attempt
-        )
-        assert stored.current_attempt == limit
-        assert parent.state == "waiting-for-operator"
+    attempts = _park_repeatedly(
+        sessions, jobs, services, operation, RecoveryPolicy().max_failures + 1
+    )
 
-    with pytest.raises(OperatorRetryExhausted) as refusal:
-        services.resume_job(job_id)
+    services.resume_job(job_id)
 
-    assert refusal.value.operation_id == operation.id
-    assert refusal.value.limit == limit
+    resumed = _claim_parked(jobs)
+    assert resumed is not None and resumed.attempt == attempts + 1
     with sessions() as session:
         parent = session.get(Job, job_id)
-        assert parent is not None and parent.state == "waiting-for-operator"
+        assert parent is not None and parent.state == "queued"
 
 
 def test_operator_retire_is_a_distinct_audited_disposition() -> None:
@@ -2322,7 +2244,7 @@ def test_durable_retire_fails_the_order_but_retains_uncertain_capacity(
                 created_at=clock.now,
             )
         )
-    limit = _exhaust_operator_retry_budget(sessions, jobs, services, operation)
+    _park_repeatedly(sessions, jobs, services, operation)
 
     _retire_parked(services, job_id)
 
@@ -2337,7 +2259,6 @@ def test_durable_retire_fails_the_order_but_retains_uncertain_capacity(
         assert run is not None and reservation is not None
         assert stored.state == "failed"
         assert stored.retry_disposition is None and stored.retry_due_at is None
-        assert f"{limit}-attempt retry budget was spent" in (stored.status_reason or "")
         assert "operator retired" in (stored.status_reason or "")
         assert parent.state == "failed"
         assert parent.status_reason == stored.status_reason
@@ -2347,30 +2268,25 @@ def test_durable_retire_fails_the_order_but_retains_uncertain_capacity(
         assert reservation.released_at is None
 
 
-def test_durable_retire_refuses_a_parked_operation_with_budget_remaining(
+def test_durable_retire_ends_a_parked_operation_without_a_budget_gate(
     tmp_path,
 ) -> None:
-    """An operation that can still progress must never be silently discarded."""
+    """The operator's latest decision leads; no attempt count must be spent first."""
 
     clock = MutableClock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
     sessions, jobs, services, operation, job_id = _parked_stop_services(
         tmp_path, clock=clock
     )
-    first = _claim_parked(jobs)
-    assert first is not None
-    jobs.wait_for_operator(first, "operator must inspect the effect")
+    _park_repeatedly(sessions, jobs, services, operation)
 
-    with pytest.raises(OperatorRetirementRefused) as refusal:
-        _retire_parked(services, job_id)
+    _retire_parked(services, job_id)
 
-    assert refusal.value.operation_id == operation.id
-    assert "retry budget is not spent" in refusal.value.reason
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         parent = session.get(Job, job_id)
         assert stored is not None and parent is not None
-        assert stored.state == "waiting-for-operator"
-        assert parent.state == "waiting-for-operator"
+        assert stored.state == "failed"
+        assert parent.state == "failed"
 
 
 def test_durable_retire_refuses_a_parked_operation_whose_lease_is_live(

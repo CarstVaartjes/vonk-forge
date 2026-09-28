@@ -167,6 +167,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     ensure_startup_identity(
         || active_identity_is_valid(config),
         || rotate_if_due(config, &client),
+        |failures| jittered_backoff(failures, config.poll_min_seconds, config.poll_max_seconds),
     )
     .await?;
     if !matches!(prepare_state_database_reserve(&config.data_dir), Ok(true)) {
@@ -177,8 +178,25 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
             "STATUS=Degraded: state database disk reserve is unavailable; attempting recovery",
         );
     }
-    let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
-    state.recover_interrupted()?;
+    let mut failures = 0_u32;
+    let state = loop {
+        let opened = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)
+            .and_then(|mut state| state.recover_interrupted().map(|()| state));
+        match opened {
+            Ok(state) => break state,
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                let delay =
+                    jittered_backoff(failures, config.poll_min_seconds, config.poll_max_seconds);
+                eprintln!(
+                    "vonk-agent: degraded: local state database unavailable ({error}); retrying in {} seconds",
+                    delay.as_secs()
+                );
+                systemd_notify::progress("Degraded: local state database unavailable; retrying");
+                tokio::time::sleep(delay).await;
+            }
+        }
+    };
     systemd_notify::notify(
         "STATUS=Agent initialized; waiting for Controller and host prerequisites",
     );
@@ -215,6 +233,19 @@ async fn run_control_lane(
     let mut inventory_reported_at = None;
     let mut readiness_published = false;
     loop {
+        if !active_identity_is_valid(config)? {
+            // The rotation lane is renewing it; never present an expired
+            // certificate to the Controller for work in the meantime.
+            failures = failures.saturating_add(1);
+            systemd_notify::progress("Degraded: active certificate expired; control loop idle");
+            tokio::time::sleep(jittered_backoff(
+                failures,
+                config.poll_min_seconds,
+                config.poll_max_seconds,
+            ))
+            .await;
+            continue;
+        }
         if inventory_refresh_due(inventory_reported_at, Instant::now()) {
             let collector = InventoryCollector {
                 runner: &runner,
@@ -249,21 +280,22 @@ async fn run_control_lane(
                     inventory_reported_at = Some(Instant::now());
                     systemd_notify::watchdog();
                 }
-                Err(error) if error.retryable() => {
+                Err(error) if error.fatal() => return Err(error.into()),
+                Err(error) => {
                     failures = failures.saturating_add(1);
-                    let entropy =
-                        SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64;
-                    let delay = backoff_delay(
+                    let delay = jittered_backoff(
                         failures,
-                        entropy,
                         config.poll_min_seconds,
                         config.poll_max_seconds,
+                    );
+                    eprintln!(
+                        "vonk-agent: inventory report failed ({error}); retrying in {} seconds",
+                        delay.as_secs()
                     );
                     systemd_notify::progress("Controller inventory report retrying");
                     tokio::time::sleep(delay).await;
                     continue;
                 }
-                Err(error) => return Err(error.into()),
             }
         }
         match vonk_agent::package_activation::acknowledge(&client, &runtime_identity).await {
@@ -353,30 +385,32 @@ async fn run_control_lane(
                 readiness_published = true;
                 systemd_notify::progress("Agent control loop progressing");
             }
-            Err(error) if matches!(&error, vonk_agent::executor::LoopError::Client(inner) if inner.retryable()) =>
-            {
+            Err(error) if loop_error_is_fatal(&error) => return Err(error.into()),
+            Err(error) => {
                 failures = failures.saturating_add(1);
                 inventory_reported_at = None;
-                let entropy = SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64;
-                let delay = backoff_delay(
-                    failures,
-                    entropy,
-                    config.poll_min_seconds,
-                    config.poll_max_seconds,
+                let delay =
+                    jittered_backoff(failures, config.poll_min_seconds, config.poll_max_seconds);
+                eprintln!(
+                    "vonk-agent: control loop degraded ({error}); retrying in {} seconds",
+                    delay.as_secs()
                 );
-                systemd_notify::progress("Controller unavailable; control loop retrying");
+                systemd_notify::progress("Control loop degraded; retrying");
                 tokio::time::sleep(delay).await;
             }
-            Err(error) => return Err(error.into()),
         }
     }
 }
 
+/// Only a refused agent identity ends the control lane.  Controller
+/// rejections of one request, local state or readiness failures, and protocol
+/// mismatches are logged and retried with backoff.
+fn loop_error_is_fatal(error: &LoopError) -> bool {
+    matches!(error, LoopError::Client(inner) if inner.fatal())
+}
+
 fn inventory_retry_delay(failures: u32, minimum: u64, maximum: u64) -> Duration {
-    let entropy = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |value| value.subsec_nanos() as u64);
-    backoff_delay(failures, entropy, minimum, maximum)
+    jittered_backoff(failures, minimum, maximum)
 }
 
 async fn collect_inventory_until_ready<Collect>(
@@ -408,64 +442,77 @@ where
     }
 }
 
-async fn ensure_startup_identity<IdentityCheck, Rotate, RotateFuture>(
+fn jittered_backoff(failures: u32, minimum: u64, maximum: u64) -> Duration {
+    let entropy = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |value| value.subsec_nanos() as u64);
+    let minimum = minimum.max(1);
+    backoff_delay(failures, entropy, minimum, maximum.max(minimum))
+}
+
+/// Start only once a usable identity exists.  An expired active certificate
+/// is never used for work, but it is not a reason to exit either: renewal is
+/// retried idle until it succeeds or the Controller refuses this identity.
+async fn ensure_startup_identity<IdentityCheck, Rotate, RotateFuture, Delay>(
     mut active_identity_is_valid: IdentityCheck,
-    mut rotate: Rotate,
+    rotate: Rotate,
+    delay: Delay,
 ) -> Result<(), RotationError>
 where
     IdentityCheck: FnMut() -> Result<bool, RotationError>,
     Rotate: FnMut() -> RotateFuture,
     RotateFuture: Future<Output = Result<bool, RotationError>>,
+    Delay: FnMut(u32) -> Duration,
 {
     if active_identity_is_valid()? {
         return Ok(());
     }
-    match rotate().await {
-        Ok(true) => Ok(()),
-        Ok(false) => {
-            eprintln!(
-                "vonk-agent: active certificate has expired and no replacement was activated; exiting fail-closed"
-            );
-            Err(RotationError::ActiveIdentityExpired)
-        }
-        Err(error) if error.retryable() => {
-            eprintln!(
-                "vonk-agent: active certificate has expired and Controller renewal is unavailable; exiting fail-closed"
-            );
-            Err(error)
-        }
-        Err(error) => Err(error),
-    }
+    rotate_until_settled(rotate, active_identity_is_valid, delay)
+        .await
+        .map(|_| ())
 }
 
-async fn retry_rotation_while_valid<Rotate, RotateFuture, IdentityCheck>(
+/// Attempt certificate rotation until it settles: a replacement was
+/// activated, or none was due while the active identity remains valid.  Only
+/// a fatal error (401/403, revocation, unusable or foreign credentials) ends
+/// the loop with an error; everything else backs off and retries.
+async fn rotate_until_settled<Rotate, RotateFuture, IdentityCheck, Delay>(
     mut rotate: Rotate,
     mut active_identity_is_valid: IdentityCheck,
-    retry_delay: Duration,
+    mut delay: Delay,
 ) -> Result<bool, RotationError>
 where
     Rotate: FnMut() -> RotateFuture,
     RotateFuture: Future<Output = Result<bool, RotationError>>,
     IdentityCheck: FnMut() -> Result<bool, RotationError>,
+    Delay: FnMut(u32) -> Duration,
 {
+    let mut failures = 0_u32;
     loop {
-        match rotate().await {
-            Ok(changed) => return Ok(changed),
-            Err(error) if error.retryable() => {
-                if !active_identity_is_valid()? {
-                    eprintln!(
-                        "vonk-agent: active certificate expired during Controller outage; exiting fail-closed"
-                    );
-                    return Err(error);
-                }
-                eprintln!(
-                    "vonk-agent: background certificate renewal unavailable ({error}); retrying in {} seconds while the active certificate remains valid",
-                    retry_delay.as_secs()
-                );
-                tokio::time::sleep(retry_delay).await;
-            }
-            Err(error) => return Err(error),
+        let reason = match rotate().await {
+            Ok(true) => return Ok(true),
+            Ok(false) if active_identity_is_valid()? => return Ok(false),
+            Ok(false) => "no replacement certificate was activated".to_owned(),
+            Err(error) if error.fatal() => return Err(error),
+            Err(error) => error.to_string(),
+        };
+        failures = failures.saturating_add(1);
+        let wait = delay(failures);
+        if active_identity_is_valid()? {
+            eprintln!(
+                "vonk-agent: certificate renewal unavailable ({reason}); retrying in {} seconds while the active certificate remains valid",
+                wait.as_secs()
+            );
+        } else {
+            eprintln!(
+                "vonk-agent: active certificate has expired and is not used; renewal unavailable ({reason}); retrying in {} seconds",
+                wait.as_secs()
+            );
+            systemd_notify::progress(
+                "Degraded: active certificate expired; waiting for Controller renewal",
+            );
         }
+        tokio::time::sleep(wait).await;
     }
 }
 
@@ -482,12 +529,13 @@ async fn run_rotation_lane(
     config: AgentConfig,
     client: AgentHttpClient,
 ) -> Result<(), RotationError> {
-    let interval = std::time::Duration::from_secs(config.poll_min_seconds.clamp(1, 5));
+    let minimum = config.poll_min_seconds.clamp(1, 5);
+    let interval = Duration::from_secs(minimum);
     loop {
-        retry_rotation_while_valid(
+        rotate_until_settled(
             || rotate_if_due(&config, &client),
             || active_identity_is_valid(&config),
-            interval,
+            |failures| jittered_backoff(failures, minimum, config.poll_max_seconds),
         )
         .await?;
         tokio::time::sleep(interval).await;
@@ -572,8 +620,8 @@ mod tests {
     use super::{
         LaneExitWithRotation, claim_wait_seconds, collect_inventory_until_ready,
         ensure_startup_identity, exact_observation_disposition, inventory_refresh_due,
-        inventory_retry_delay, report_ready_after_self_test, retry_rotation_while_valid,
-        supervise_lanes_with_rotation,
+        inventory_retry_delay, loop_error_is_fatal, report_ready_after_self_test,
+        rotate_until_settled, supervise_lanes_with_rotation,
     };
     use std::{
         cell::{Cell, RefCell},
@@ -760,6 +808,7 @@ mod tests {
                 operation_attempts.fetch_add(1, Ordering::SeqCst);
                 future::ready(Err(RotationError::Client(ClientError::Retryable)))
             },
+            |_| Duration::ZERO,
         )
         .await
         .unwrap();
@@ -771,19 +820,22 @@ mod tests {
     async fn background_certificate_rotation_recovers_after_controller_outage() {
         let attempts = Arc::new(AtomicUsize::new(0));
         let operation_attempts = attempts.clone();
-        let rotated = retry_rotation_while_valid(
+        let rotated = rotate_until_settled(
             move || {
                 let attempt = operation_attempts.fetch_add(1, Ordering::SeqCst);
-                future::ready(if attempt < 6 {
-                    Err(RotationError::Client(ClientError::Controller(Box::new(
+                future::ready(match attempt {
+                    0..3 => Err(RotationError::Client(ClientError::Controller(Box::new(
                         ControllerError::from_status(503),
-                    ))))
-                } else {
-                    Ok(true)
+                    )))),
+                    // A request-level rejection is not a reason to exit.
+                    3..6 => Err(RotationError::Client(ClientError::Controller(Box::new(
+                        ControllerError::from_status(422),
+                    )))),
+                    _ => Ok(true),
                 })
             },
             || Ok(true),
-            Duration::ZERO,
+            |_| Duration::ZERO,
         )
         .await
         .unwrap();
@@ -793,43 +845,82 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn expired_startup_identity_fails_closed_on_controller_outage_or_denial() {
-        let expired = ensure_startup_identity(|| Ok(false), || future::ready(Ok(false)))
+    async fn expired_startup_identity_idles_until_renewal_instead_of_exiting() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let operation_attempts = attempts.clone();
+        let renewed = Arc::new(AtomicBool::new(false));
+        let operation_renewed = renewed.clone();
+        let identity_renewed = renewed.clone();
+        ensure_startup_identity(
+            move || Ok(identity_renewed.load(Ordering::SeqCst)),
+            move || {
+                let attempt = operation_attempts.fetch_add(1, Ordering::SeqCst);
+                future::ready(match attempt {
+                    0 => Err(RotationError::Client(ClientError::Retryable)),
+                    1 => Ok(false),
+                    2 => Err(RotationError::ActiveIdentityExpired),
+                    _ => {
+                        operation_renewed.store(true, Ordering::SeqCst);
+                        Ok(true)
+                    }
+                })
+            },
+            |_| Duration::ZERO,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+        assert!(renewed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn expired_startup_identity_exits_when_the_controller_refuses_it() {
+        for status in [401, 403] {
+            let attempts = Arc::new(AtomicUsize::new(0));
+            let operation_attempts = attempts.clone();
+            let denied = ensure_startup_identity(
+                || Ok(false),
+                move || {
+                    operation_attempts.fetch_add(1, Ordering::SeqCst);
+                    future::ready(Err(RotationError::Client(ClientError::Controller(
+                        Box::new(ControllerError::from_status(status)),
+                    ))))
+                },
+                |_| Duration::ZERO,
+            )
             .await
             .unwrap_err();
-        assert!(matches!(expired, RotationError::ActiveIdentityExpired));
 
-        let outage_attempts = Arc::new(AtomicUsize::new(0));
-        let operation_attempts = outage_attempts.clone();
-        let outage = ensure_startup_identity(
-            || Ok(false),
-            move || {
-                operation_attempts.fetch_add(1, Ordering::SeqCst);
-                future::ready(Err(RotationError::Client(ClientError::Retryable)))
-            },
-        )
-        .await
-        .unwrap_err();
+            assert!(denied.fatal());
+            assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        }
+    }
 
-        assert!(outage.retryable());
-        assert_eq!(outage_attempts.load(Ordering::SeqCst), 1);
-
-        let denied_attempts = Arc::new(AtomicUsize::new(0));
-        let operation_attempts = denied_attempts.clone();
-        let denied = ensure_startup_identity(
-            || Ok(false),
-            move || {
-                operation_attempts.fetch_add(1, Ordering::SeqCst);
-                future::ready(Err(RotationError::Client(ClientError::Controller(
-                    Box::new(ControllerError::from_status(403)),
-                ))))
-            },
-        )
-        .await
-        .unwrap_err();
-
-        assert!(!denied.retryable());
-        assert_eq!(denied_attempts.load(Ordering::SeqCst), 1);
+    #[test]
+    fn only_refused_identity_ends_the_control_lane() {
+        use vonk_agent::executor::LoopError;
+        for status in [401, 403] {
+            assert!(loop_error_is_fatal(&LoopError::Client(
+                ClientError::Controller(Box::new(ControllerError::from_status(status)))
+            )));
+        }
+        assert!(loop_error_is_fatal(&LoopError::Client(
+            ClientError::Identity
+        )));
+        assert!(loop_error_is_fatal(&LoopError::Client(ClientError::Pin)));
+        for status in [400, 404, 409, 422] {
+            assert!(!loop_error_is_fatal(&LoopError::Client(
+                ClientError::Controller(Box::new(ControllerError::from_status(status)))
+            )));
+        }
+        assert!(!loop_error_is_fatal(&LoopError::Client(
+            ClientError::Protocol
+        )));
+        assert!(!loop_error_is_fatal(&LoopError::HeartbeatTask));
+        assert!(!loop_error_is_fatal(&LoopError::Readiness(
+            "readiness file unwritable".to_owned()
+        )));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -249,8 +249,10 @@ def test_postgres_upgrade_bypasses_unsupported_work_then_resumes_it(
         (
             "artifact.distribution.v1",
             {"schema_version": 1, "authority_revision": COMMIT, "plan_digest": COMMIT},
+            # Any uncertain effect of a restart-safe order is reconciled by
+            # re-issue, exactly like an expired lease; it is not parked.
             "operation_outcome_uncertain",
-            False,
+            True,
         ),
     ),
 )

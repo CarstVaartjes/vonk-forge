@@ -179,34 +179,36 @@ def _fail_first_target(operations: AgentJobService) -> None:
     operations.fail(first, _FIXTURE_FAILURE)
 
 
-def _assert_first_failure_stops_rollout(
+def _assert_rollout_moves_past_first_failure(
     sessions: sessionmaker[Session],
     operations: AgentJobService,
     request_key: str,
     job_id: str,
 ) -> None:
+    # The failed Spark retries automatically behind its safety fence while the
+    # rollout dispatches the next Spark; nothing waits for an operator.
+    second = operations.claim(
+        NODE_B,
+        "serial-b",
+        30,
+        capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+        runtime_identity=OLD_IDENTITY,
+    )
+    assert second is not None
     with sessions() as session:
         jobs = tuple(session.scalars(select(Job).where(Job.request_id == request_key)))
-        children = tuple(
-            session.scalars(
+        children = {
+            child.node_id: child
+            for child in session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job_id)
             )
-        )
+        }
         assert len(jobs) == 1
-        assert jobs[0].id == job_id and jobs[0].state == "waiting-for-operator"
-        assert len(children) == 1
-        assert children[0].node_id == NODE_A
-        assert children[0].state == "waiting-for-operator"
-    assert (
-        operations.claim(
-            NODE_B,
-            "serial-b",
-            30,
-            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-            runtime_identity=OLD_IDENTITY,
-        )
-        is None
-    )
+        assert jobs[0].id == job_id and jobs[0].state == "queued"
+        assert set(children) == {NODE_A, NODE_B}
+        assert children[NODE_A].state == "waiting-for-operator"
+        assert children[NODE_A].retry_disposition == "retry"
+        assert children[NODE_B].state == "running"
 
 
 def _smoke(
@@ -281,12 +283,13 @@ def _smoke(
     result = _json_line(progress.stdout)
     assert progress.returncode == 0, progress.stdout + progress.stderr
     assert result["id"] == job_id
-    assert result["state"] == "waiting-for-operator"
-    _assert_first_failure_stops_rollout(sessions, operations, request_key, job_id)
+    assert result["state"] == "queued"
+    _assert_rollout_moves_past_first_failure(sessions, operations, request_key, job_id)
     print(
         "U8 upgrade smoke passed: installed CLI refused an unconsented redirected "
         "request before API dispatch, then returned one JSON acceptance receipt; "
-        "the registered PostgreSQL owner stopped after the first fixture failure. "
+        "the registered PostgreSQL owner scheduled a fenced retry for the first "
+        "fixture failure and dispatched the next Spark. "
         "No external package publisher or physical Spark was exercised.",
         flush=True,
     )
@@ -426,7 +429,7 @@ def _walkthrough(
                             raise RuntimeError(
                                 "disposable U8 executor failed"
                             ) from executor.error
-                        _assert_first_failure_stops_rollout(
+                        _assert_rollout_moves_past_first_failure(
                             sessions,
                             operations,
                             job.request_id,

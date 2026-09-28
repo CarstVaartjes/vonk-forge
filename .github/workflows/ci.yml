@@ -549,7 +549,7 @@ jobs:
         run: >-
           uv run --project control --frozen --with-editable . pytest
           tests/control/test_openapi_clients.py
-          tests/scripts/test_generate_control_clients.py -q
+          control/tests/test_generate_control_clients.py -q
       - name: Reject generated drift
         run: >-
           git diff --exit-code -- control/openapi.json

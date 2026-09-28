@@ -114,18 +114,13 @@ def test_pinned_client_generator_round_trips_arbitrary_json_values(
         encoding="utf-8",
     )
 
+    # Use the generator installed in this test environment; resolving another
+    # uv project here would build a fresh venv and download packages mid-test.
+    generator = Path(sys.executable).with_name("openapi-python-client")
+    assert generator.exists(), "openapi-python-client is a locked dev dependency"
     subprocess.run(
         [
-            "uv",
-            "run",
-            "--python",
-            "3.14",
-            "--project",
-            "control",
-            "--frozen",
-            "--group",
-            "dev",
-            "openapi-python-client",
+            str(generator),
             "generate",
             "--path",
             str(schema_path),
