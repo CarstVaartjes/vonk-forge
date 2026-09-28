@@ -108,6 +108,7 @@ flowchart LR
 - [Image transfer and cache](image-transfer-cache.md)
 - [Recipe image archive uploads](image-upload.md)
 - [Runtime writable-path contract](runtime-writable-path-contract.md)
+- [Recipe library package channel](operations/recipe-library-packages.md)
 
 Use each command's documented review and confirmation options. For example,
 `profile load --dry-run` reviews a fleet load, while `update --apply` installs

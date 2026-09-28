@@ -98,6 +98,7 @@ from .host_helper_authority import (
     HostRuntimeAuthorityService,
     RecipeRunObservationPendingError,
     RecipeRunObservationReplayError,
+    recipe_run_known,
 )
 from .inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
@@ -153,6 +154,9 @@ RECIPE_RUN_UNOWNED = "unowned"
 _UUID4_TEXT = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+_CANONICAL_UUID = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z"
 )
 _IDENTIFIER_TEXT = r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
@@ -1713,6 +1717,46 @@ def install_agent_routes(
             observation_identity_sha256=observation_identity,
             grant=SignedHostHelperGrant.parse(grant.to_mapping()),
         )
+
+    @agent.get(
+        "/recipe-runs/{run_id}/disposition",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+        responses={
+            204: {
+                "description": (
+                    "The run is known unless the disposition header names it unowned"
+                ),
+                "headers": {
+                    RECIPE_RUN_DISPOSITION_HEADER: {
+                        "description": "Present only as `unowned`.",
+                        "schema": {"type": "string", "enum": [RECIPE_RUN_UNOWNED]},
+                    }
+                },
+            }
+        },
+    )
+    def recipe_run_disposition(run_id: str, request: Request) -> Response:
+        """Say whether this Controller has any record of one local run.
+
+        A Spark can retain a run directory whose managed metadata this agent
+        can no longer parse (for example one written before an upgrade), so
+        it cannot build the exact binding an observation grant needs.  The
+        run id alone is enough to learn that no owner exists; the agent then
+        retires that unusable lifecycle instead of skipping it forever.  A
+        known run is never named unowned, so its integrity failure stays
+        visible.
+        """
+
+        workload_helper_identity(request)
+        if _CANONICAL_UUID.fullmatch(run_id) is None:
+            raise HTTPException(status_code=422, detail="recipe run id is invalid")
+        with _require_services(services).sessions() as session:
+            known = recipe_run_known(session, run_id)
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        if not known:
+            response.headers[RECIPE_RUN_DISPOSITION_HEADER] = RECIPE_RUN_UNOWNED
+        return response
 
     @agent.get(
         "/source-bundles/{source_sha256}",

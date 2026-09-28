@@ -2242,12 +2242,20 @@ export interface components {
             max_batch_tokens?: number | null;
             parallelism: components["schemas"]["EffectiveParallelism"];
         };
-        /** EndpointResponse */
+        /**
+         * EndpointResponse
+         * @description One published alias: clients use `api_base` with `alias` as the model.
+         *
+         *     `backend_api_base` is the Spark-local serving address LiteLLM routes to.
+         *     It is diagnostic only and usually unreachable from a client.
+         */
         EndpointResponse: {
             /** Alias */
             alias: string;
             /** Api Base */
             api_base: string;
+            /** Backend Api Base */
+            backend_api_base: string;
             /** Expires At */
             expires_at: string;
             /** Generation */

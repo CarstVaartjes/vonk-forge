@@ -142,8 +142,11 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
     assert services["control-api"]["environment"]["VONK_RECIPE_LIBRARY_API_URL"] == (
         "http://caddy:8083"
     )
-    assert services["control-api"]["environment"]["VONK_RECIPE_LIBRARY_ASSET_URL"] == (
-        "http://caddy:8085"
+    # The asset relay is the Controller's built-in default, not configuration.
+    assert "VONK_RECIPE_LIBRARY_ASSET_URL" not in services["control-api"]["environment"]
+    assert (
+        "VONK_RECIPE_LIBRARY_PACKAGE_URL"
+        not in (services["control-api"]["environment"])
     )
     assert services["control-api"]["environment"]["VONK_AGENT_RELEASE_API_URL"] == (
         "http://caddy:8084"

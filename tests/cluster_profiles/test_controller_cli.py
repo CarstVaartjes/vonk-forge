@@ -3018,7 +3018,8 @@ def test_profile_endpoint_uses_scoped_current_controller_projection(
                         "state": "published",
                         "endpoint": {
                             "alias": "example-model",
-                            "api_base": "http://10.0.0.10:8000/v1",
+                            "api_base": "https://vonk-forge.example.ts.net/v1",
+                            "backend_api_base": "http://10.0.0.10:8000/v1",
                             "expires_at": "2026-09-23T13:00:00Z",
                             "generation": 8,
                             "node_id": "spk_" + "a" * 32,
@@ -3050,7 +3051,11 @@ def test_profile_endpoint_uses_scoped_current_controller_projection(
         "Freshness: observed 1 second before this Controller read" in presentation.out
     )
     assert "installed-only" in presentation.out
-    assert "API base: http://10.0.0.10:8000/v1" in presentation.out
+    assert (
+        "API base (inference gateway): https://vonk-forge.example.ts.net/v1"
+        in presentation.out
+    )
+    assert "Spark backend (diagnostic): http://10.0.0.10:8000/v1" in presentation.out
     assert "Authorization" not in presentation.out
     assert client.calls == [("GET", "/api/profile/3/endpoints", None, None)]
 

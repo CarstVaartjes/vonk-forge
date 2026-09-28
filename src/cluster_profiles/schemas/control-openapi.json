@@ -3151,6 +3151,7 @@
       },
       "EndpointResponse": {
         "additionalProperties": false,
+        "description": "One published alias: clients use `api_base` with `alias` as the model.\n\n`backend_api_base` is the Spark-local serving address LiteLLM routes to.\nIt is diagnostic only and usually unreachable from a client.",
         "properties": {
           "alias": {
             "maxLength": 63,
@@ -3162,6 +3163,12 @@
             "maxLength": 512,
             "minLength": 1,
             "title": "Api Base",
+            "type": "string"
+          },
+          "backend_api_base": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Backend Api Base",
             "type": "string"
           },
           "expires_at": {
@@ -3200,6 +3207,7 @@
         "required": [
           "alias",
           "api_base",
+          "backend_api_base",
           "expires_at",
           "generation",
           "node_id",

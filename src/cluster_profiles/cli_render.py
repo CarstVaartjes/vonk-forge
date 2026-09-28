@@ -509,7 +509,7 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         if assignment.get("state") == "published":
             _field("Client model identifier", alias)
             api_base = endpoint.get("api_base")
-            _field("API base", api_base)
+            _field("API base (inference gateway)", api_base)
             _field("Route generation", endpoint.get("generation"))
             _field("Route observed at", _time(endpoint.get("observed_at")))
             _field(
@@ -517,6 +517,7 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
                 _freshness(endpoint.get("observed_at"), payload.get("observed_at")),
             )
             _field("Route expires at", _time(endpoint.get("expires_at")))
+            _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
             if isinstance(api_base, str) and isinstance(alias, str):
                 print("Credential-free configuration example:")
                 print(

@@ -859,6 +859,52 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
     assert item["progress"] == {"phase": "prepare"}
 
 
+def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
+    # Live regression: a loaded profile whose run was serving still listed
+    # its assignment as "Not loaded" because the view never consulted the
+    # loaded application.
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids))
+        ),
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    assert service.get(profile.id).assignments[0].observed_state == "Not loaded"
+
+    preview = service.preview(profile.id)
+    service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(441),
+        actor="admin",
+    )
+    assert service.get(profile.id).assignments[0].observed_state == "Not placed"
+
+    real_state = FleetProfileService._assignment_state.__func__
+
+    def running(cls, session, assignment, **kwargs):
+        state = real_state(cls, session, assignment, **kwargs)
+        state.current_state = "running"
+        return state
+
+    monkeypatch.setattr(FleetProfileService, "_assignment_state", classmethod(running))
+    view = service.get(profile.id)
+    assert view.status == "loaded"
+    assert view.assignments[0].observed_state == "Running"
+
+    # A saved edit the loaded application does not contain is not loaded.
+    with sessions.begin() as session:
+        saved = session.get(FleetProfile, profile.id)
+        assert saved is not None
+        saved.assignments = [{**saved.assignments[0], "spark_ids": [_node_id(2)]}]
+    assert service.get(profile.id).assignments[0].observed_state == "Not loaded"
+
+
 def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)

@@ -20,10 +20,15 @@ T = TypeVar("T", bound="EndpointResponse")
 
 @_attrs_define
 class EndpointResponse:
-    """
+    """ One published alias: clients use `api_base` with `alias` as the model.
+
+    `backend_api_base` is the Spark-local serving address LiteLLM routes to.
+    It is diagnostic only and usually unreachable from a client.
+
         Attributes:
             alias (str):
             api_base (str):
+            backend_api_base (str):
             expires_at (str):
             generation (int):
             node_id (str):
@@ -34,6 +39,7 @@ class EndpointResponse:
 
     alias: str
     api_base: str
+    backend_api_base: str
     expires_at: str
     generation: int
     node_id: str
@@ -49,6 +55,8 @@ class EndpointResponse:
         alias = self.alias
 
         api_base = self.api_base
+
+        backend_api_base = self.backend_api_base
 
         expires_at = self.expires_at
 
@@ -68,6 +76,7 @@ class EndpointResponse:
         field_dict.update({
             "alias": alias,
             "api_base": api_base,
+            "backend_api_base": backend_api_base,
             "expires_at": expires_at,
             "generation": generation,
             "node_id": node_id,
@@ -87,6 +96,8 @@ class EndpointResponse:
 
         api_base = d.pop("api_base")
 
+        backend_api_base = d.pop("backend_api_base")
+
         expires_at = d.pop("expires_at")
 
         generation = d.pop("generation")
@@ -102,6 +113,7 @@ class EndpointResponse:
         endpoint_response = cls(
             alias=alias,
             api_base=api_base,
+            backend_api_base=backend_api_base,
             expires_at=expires_at,
             generation=generation,
             node_id=node_id,
