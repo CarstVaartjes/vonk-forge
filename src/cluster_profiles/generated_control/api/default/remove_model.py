@@ -119,8 +119,11 @@ def sync_detailed(
 
     Args:
         selector (str):
-        body (ModelCacheRemovalRequest): Exact content identity and request key for a model cache
-            removal.
+        body (ModelCacheRemovalRequest): Request key for removing the named model against current
+            state.
+
+            ``model_content_sha256`` and ``review_digest`` are accepted for clients
+            that show a prior review; they are advisory and never refuse the request.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -154,8 +157,11 @@ def sync(
 
     Args:
         selector (str):
-        body (ModelCacheRemovalRequest): Exact content identity and request key for a model cache
-            removal.
+        body (ModelCacheRemovalRequest): Request key for removing the named model against current
+            state.
+
+            ``model_content_sha256`` and ``review_digest`` are accepted for clients
+            that show a prior review; they are advisory and never refuse the request.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -184,8 +190,11 @@ async def asyncio_detailed(
 
     Args:
         selector (str):
-        body (ModelCacheRemovalRequest): Exact content identity and request key for a model cache
-            removal.
+        body (ModelCacheRemovalRequest): Request key for removing the named model against current
+            state.
+
+            ``model_content_sha256`` and ``review_digest`` are accepted for clients
+            that show a prior review; they are advisory and never refuse the request.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -219,8 +228,11 @@ async def asyncio(
 
     Args:
         selector (str):
-        body (ModelCacheRemovalRequest): Exact content identity and request key for a model cache
-            removal.
+        body (ModelCacheRemovalRequest): Request key for removing the named model against current
+            state.
+
+            ``model_content_sha256`` and ``review_digest`` are accepted for clients
+            that show a prior review; they are advisory and never refuse the request.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

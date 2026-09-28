@@ -93,8 +93,13 @@ def test_remove_is_the_current_model_eviction_boundary():
         model_content_sha256=MODEL_CONTENT_SHA256,
         review_digest=REVIEW_DIGEST,
     )
+    minimal = _client(service).post(
+        "/api/model/model/remove",
+        json={"schema_version": 2, "request_key": REQUEST_KEY},
+    )
+    assert minimal.status_code == 202, minimal.text
     for body in (
-        {"schema_version": 2, "request_key": REQUEST_KEY},
+        {"schema_version": 2},
         {
             "schema_version": 2,
             "request_key": REQUEST_KEY,
@@ -104,7 +109,7 @@ def test_remove_is_the_current_model_eviction_boundary():
     ):
         refused = _client(service).post("/api/model/model/remove", json=body)
         assert refused.status_code == 422
-    assert service.remove_model_selector.call_count == 1
+    assert service.remove_model_selector.call_count == 2
 
 
 def test_remove_review_is_read_only_and_requires_operator_role():

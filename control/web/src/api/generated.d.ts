@@ -4718,15 +4718,18 @@ export interface components {
         };
         /**
          * ModelCacheRemovalRequest
-         * @description Exact content identity and request key for a model cache removal.
+         * @description Request key for removing the named model against current state.
+         *
+         *     ``model_content_sha256`` and ``review_digest`` are accepted for clients
+         *     that show a prior review; they are advisory and never refuse the request.
          */
         ModelCacheRemovalRequest: {
             /** Model Content Sha256 */
-            model_content_sha256: string;
+            model_content_sha256?: string | null;
             /** Request Key */
             request_key: string;
             /** Review Digest */
-            review_digest: string;
+            review_digest?: string | null;
             /**
              * Schema Version
              * @default 2
@@ -6211,7 +6214,7 @@ export interface components {
             /** Request Key */
             request_key: string;
             /** Review Digest */
-            review_digest: string;
+            review_digest?: string | null;
             /**
              * Schema Version
              * @default 2

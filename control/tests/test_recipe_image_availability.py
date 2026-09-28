@@ -138,11 +138,14 @@ def _progress_members(value: object) -> list[Mapping[str, object]]:
     ("code", "explicit_retryable", "detail", "expected"),
     [
         ("runtime_image.cache_missing", False, "network timeout", False),
-        ("recipe_image.identity_conflict", True, "network timeout", False),
-        ("recipe_image.other_failure", None, "network timeout", True),
+        ("recipe_image.identity_conflict", True, "identity changed", True),
+        ("recipe_image.metadata_stale", None, "stale metadata", True),
+        ("runtime_image.archive_mismatch", None, "digest mismatch", True),
+        ("recipe_image.other_failure", None, "permission denied", True),
+        ("recipe_image.recipe_invalid", True, "network timeout", False),
     ],
 )
-def test_explicit_retry_decision_precedes_fallback_classification(
+def test_job_retry_classification_uses_typed_codes(
     code: str,
     explicit_retryable: bool | None,
     detail: str,
@@ -155,7 +158,6 @@ def test_explicit_retry_decision_precedes_fallback_classification(
     )
 
     assert _retryable(error) is expected
-    assert _recipe_error(error).status_code == (503 if expected else 409)
 
 
 @pytest.mark.parametrize(
@@ -613,7 +615,6 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
         transport=transport,
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
         clock=lambda: datetime.now(UTC),
-        automatic_attempt_limit=1,
     )
     first = service.start_selector(
         recipe.identity.slug, actor="operator", request_id="1" * 36
@@ -656,7 +657,6 @@ def test_download_after_cache_removal_restores_only_unrevoked_authority(
         transport=transport,
         authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
         clock=lambda: datetime.now(UTC),
-        automatic_attempt_limit=1,
     )
     download = restarted.start_selector(
         recipe.identity.slug, actor="operator", request_id="3" * 36
@@ -714,7 +714,7 @@ def test_forced_digest_failure_does_not_replace_valid_archive(tmp_path: Path) ->
     assert Path(first.archive_path).read_bytes() == ARCHIVE
 
 
-def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(
+def test_build_failure_waits_for_retry_and_exposes_step_contract(
     tmp_path: Path,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
@@ -745,7 +745,6 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(
         authority=authority,
         builder=builder,
         clock=lambda: datetime.now(UTC),
-        automatic_attempt_limit=1,
     )
     queued = service.start(
         "revision-source",
@@ -756,32 +755,17 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(
     assert queued.state == "queued"
     assert service.run_pending() == 1
     failed = service.get(queued.id)
-    assert failed.state == "failed"
+    # A retryable failure stays queued for its next automatic attempt.
+    assert failed.state == "queued"
     assert failed.failure is not None
     assert failed.result is None
     assert failed.failure["code"] == "recipe_image.build_failed"
     assert failed.failure["retryable"] is True
+    assert failed.failure["retry_time"] is not None
     assert failed.failure["log_excerpt"] == "Step 4: compiler failed"
-    assert failed.supported_actions == ("retry",)
     response = _view_document(failed)
     assert response.failure is not None
     assert response.failure.code == "recipe_image.build_failed"
-    with sessions.begin() as session:
-        row = session.get(Job, queued.id)
-        assert row is not None
-        row.payload = {
-            key: value for key, value in row.payload.items() if key != "failure"
-        }
-    restarted = RecipeImageAvailabilityService(
-        sessions,
-        storage=FilesystemRuntimeImageStorage(tmp_path),
-        authority=authority,
-        builder=builder,
-        clock=lambda: datetime.now(UTC),
-        automatic_attempt_limit=1,
-    )
-    with pytest.raises(ValueError, match="requires failure evidence"):
-        restarted.get(queued.id)
 
 
 def test_database_integrity_failure_names_the_violated_constraint(
@@ -886,7 +870,6 @@ def test_database_integrity_failure_names_the_violated_constraint(
         builder=builder,
         receipt_writer=receipt_writer,
         clock=lambda: datetime.now(UTC),
-        automatic_attempt_limit=1,
     )
     queued = service.start(
         "revision-integrity-failure",
@@ -895,7 +878,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
     )
     assert service.run_pending() == 1
     failed = service.get(queued.id)
-    assert failed.state == "failed"
+    assert failed.state == "queued"
     failure = require_mapping(failed.failure, "failure")
     assert failure["code"] != "gkpj"
     assert failure["code"] == "integrityerror"
@@ -1006,7 +989,6 @@ def test_build_mode_dispatches_when_no_verified_build_receipt_exists(
         builder=builder,
         receipt_writer=lambda *_args: None,
         clock=lambda: datetime.now(UTC),
-        automatic_attempt_limit=1,
     )
     queued = service.start(
         "revision-missing-build-archive",
@@ -1529,7 +1511,9 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
             with_model=False,
             review_digest=before.review_digest,
         )
-    assert stale.value.code == "recipe_image.review_stale"
+    # The in-flight removal owns the assets; a second request waits for it.
+    assert stale.value.code == "artifact.deletion_in_progress"
+    assert stale.value.retryable is True
     with sessions() as session:
         assert session.scalar(select(Job).where(Job.request_id == changed_key)) is None
         existing = session.scalar(select(Job).where(Job.request_id == request_key))
@@ -1956,7 +1940,6 @@ def test_builder_dependency_wait_remains_durable_queue_after_automatic_limit(
         authority=lambda recipe_revision_id, *, force=False: (recipe, _build_runtime()),
         builder=builder,
         clock=lambda: datetime.now(UTC),
-        automatic_attempt_limit=1,
     )
     queued = service.start(
         "revision-capacity-wait", actor="operator", request_id="w" * 36
@@ -2015,7 +1998,6 @@ def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> N
         authority=lambda recipe_revision_id, *, force=False: (recipe, _build_runtime()),
         builder=builder,
         clock=lambda: datetime.now(UTC),
-        automatic_attempt_limit=1,
     )
     queued = service.start("revision-no-step", actor="operator", request_id="n" * 36)
     assert service.run_pending() == 1
@@ -3685,3 +3667,96 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
     assert total == 1
     assert len(rows) == 1
     assert cursor is None
+
+
+def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_head(session, _add_revision(session, "revision-flaky", recipe))
+    now = [datetime(2026, 9, 6, 12, tzinfo=UTC)]
+    failures = 12
+
+    class FlakyTransport(Transport):
+        def pull_and_export(self, reference, destination, **kwargs):
+            if self.calls < failures:
+                self.calls += 1
+                raise RuntimeError("registry says permission denied, digest unknown")
+            return super().pull_and_export(reference, destination, **kwargs)
+
+    transport = FlakyTransport()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        transport=transport,
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        clock=lambda: now[0],
+    )
+    accepted = service.start_selector(
+        recipe.identity.slug, actor="operator", request_id="2" * 36
+    )
+    delays = []
+    for _ in range(failures):
+        assert service.run_pending() == 1
+        waiting = service.get(accepted.id)
+        assert waiting.state == "queued"
+        assert waiting.failure is not None and waiting.failure["retryable"] is True
+        delays.append(waiting.failure["retry_after_seconds"])
+        now[0] += timedelta(hours=1)
+    assert delays == sorted(delays)
+    assert max(delays) <= 900
+    assert service.run_pending() == 1
+    assert service.get(accepted.id).state == "succeeded"
+
+
+def test_archive_integrity_failure_downloads_the_image_again(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_head(session, _add_revision(session, "revision-integrity", recipe))
+    now = [datetime(2026, 9, 6, 12, tzinfo=UTC)]
+    transport = Transport()
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    original = storage.verify_existing
+    corrupt = [True]
+
+    def verify_once(archive_sha256: str, expected_bytes: int) -> Path:
+        if corrupt[0]:
+            corrupt[0] = False
+            raise RuntimeImagePreparationError(
+                "runtime_image.archive_mismatch", "stored archive failed verification"
+            )
+        return original(archive_sha256, expected_bytes)
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=storage,
+        transport=transport,
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        clock=lambda: now[0],
+    )
+    first = service.start_selector(
+        recipe.identity.slug, actor="operator", request_id="3" * 36
+    )
+    service.run_pending()
+    assert service.get(first.id).state == "succeeded"
+    storage.verify_existing = verify_once  # type: ignore[method-assign]
+    again = service.start_selector(
+        recipe.identity.slug, actor="operator", request_id="4" * 36
+    )
+    for _ in range(5):
+        if service.get(again.id).state == "succeeded":
+            break
+        service.run_pending()
+        now[0] += timedelta(hours=1)
+    assert service.get(again.id).state == "succeeded"
+    # The mismatch was observed and the image was pulled again, not reused.
+    assert corrupt == [False]
+    assert transport.calls == 2
+    assert storage.read_receipt(ARCHIVE_SHA).oci_archive_sha256 == ARCHIVE_SHA

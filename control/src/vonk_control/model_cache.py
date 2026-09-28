@@ -122,8 +122,6 @@ _CHUNK_BYTES = 1024 * 1024
 _PARALLEL_RANGE_MIN_BYTES = 64 * 1024 * 1024
 _PARALLEL_RANGE_WORKERS = 4
 _MAX_HTTP_REDIRECTS = 3
-_MAX_OPERATION_ATTEMPTS = 3
-_MAX_OPERATOR_RETRIES = 3
 _DEFAULT_MAX_PARALLEL_DOWNLOADS = 8
 _MAX_PARALLEL_DOWNLOADS = 16
 _RETRY_BASE_SECONDS = 5
@@ -193,61 +191,48 @@ class _ArtifactWriterBusy(ModelCacheError):
         )
 
 
-_TERMINAL_FAILURE_MARKERS = (
-    "digest",
-    "integrity",
-    "credential",
-    "auth",
-    "permission",
-    "denied",
-    "revoked",
-    "identity_conflict",
+# Authorization failures wait for the configured credential to change; the
+# worker then retries them automatically. Source-policy failures describe an
+# untrusted or invalid pin and only a new request can change them. Every other
+# failure, including an integrity mismatch whose bytes were discarded, retries
+# with capped backoff while the operation remains the current intent.
+_CREDENTIAL_FAILURE_CODES = frozenset(
+    {
+        "model_cache.credentials_missing",
+        "model_cache.credentials_denied",
+        "model_cache.credentials_invalid",
+    }
+)
+_CREDENTIAL_FAILURE_PUBLIC_CODES = frozenset(
+    {"access_required", "access_denied", "credentials_invalid"}
+)
+_TERMINAL_FAILURE_CODES = _CREDENTIAL_FAILURE_CODES | frozenset(
+    {
+        "model_cache.source_access_denied",
+        "model_cache.source_invalid",
+        "model_cache.source_unsupported",
+        "model_cache.source_untrusted",
+        "model_cache.redirect_forbidden",
+        "model_cache.release_asset_identity_conflict",
+    }
 )
 
 
-def _retryable_failure(error: BaseException | str) -> bool:
-    """Classify transport uncertainty without retrying identity failures."""
+def model_cache_failure_is_terminal(code: object) -> bool:
+    """Whether a typed model-cache failure waits for a changed credential or request."""
 
-    code = getattr(error, "code", "")
-    detail = getattr(error, "detail", str(error))
-    text = f"{code} {detail}".casefold()
-    if any(marker in text for marker in _TERMINAL_FAILURE_MARKERS):
-        return False
-    if code in {
-        "model_cache.rate_limited",
-        "model_cache.source_truncated",
-        "model_cache.source_unavailable",
-    }:
-        return True
-    if isinstance(error, httpx.HTTPError):
-        response = getattr(error, "response", None)
-        status = getattr(response, "status_code", None)
-        if type(status) is int:
-            return status == 429 or status >= 500
-        return isinstance(error, (httpx.TimeoutException, httpx.ConnectError))
-    if isinstance(error, OSError):
-        return error.errno in {
-            errno.ECONNRESET,
-            errno.ECONNREFUSED,
-            errno.EHOSTUNREACH,
-            errno.ENETUNREACH,
-            errno.ETIMEDOUT,
-            errno.EPIPE,
-        }
-    return any(
-        marker in text
-        for marker in (
-            "source_unavailable",
-            "source_truncated",
-            "timeout",
-            "timed out",
-            "connection",
-            "network",
-            "temporarily",
-            "transport",
-            "copy",
-            "uncertain",
-        )
+    return code in _TERMINAL_FAILURE_CODES
+
+
+def _retryable_failure(error: BaseException) -> bool:
+    """Classify by typed code: only authorization and source policy are terminal."""
+
+    return getattr(error, "code", None) not in _TERMINAL_FAILURE_CODES
+
+
+def _retry_delay_seconds(attempts: int) -> int:
+    return min(
+        _RETRY_MAX_SECONDS, _RETRY_BASE_SECONDS * (2 ** min(16, max(0, attempts - 1)))
     )
 
 
@@ -425,31 +410,6 @@ class ModelCacheRemovalScope:
     selected_objects: tuple[str, ...]
     delete_objects: tuple[str, ...]
     shared_memberships: tuple[tuple[str, str, str], ...]
-
-
-def _scope_matches_review(
-    scope: ModelCacheRemovalScope, review: CacheRemovalReview
-) -> bool:
-    """Compare the reviewed artifact identities with the current SQL scope."""
-
-    sets = {asset.sha256 for asset in review.assets if asset.kind == "model-set"}
-    objects = {asset.sha256 for asset in review.assets if asset.kind == "model-object"}
-    delete_objects = {
-        asset.sha256
-        for asset in review.assets
-        if asset.kind == "model-object" and asset.disposition == "remove"
-    }
-    shared_memberships = {
-        (item.asset_sha256, item.owner_id, item.state)
-        for item in review.references
-        if item.owner_kind == "model-cache-set-membership"
-    }
-    return (
-        sets == set(scope.selected_sets)
-        and objects == set(scope.selected_objects)
-        and delete_objects == set(scope.delete_objects)
-        and shared_memberships == set(scope.shared_memberships)
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1353,6 +1313,7 @@ class ModelCacheService:
         self._background_operations: dict[str, dict[str, object]] = {}
         self._active_digests: set[str] = set()
         self._hf_cooldown_until: datetime | None = None
+        self._observed_credential_fingerprint: str | None = None
         self._progress_checkpoint_at: dict[str, datetime] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._range_reserved_bytes = 0
@@ -1974,25 +1935,19 @@ class ModelCacheService:
         *,
         actor: str,
         request_key: str,
-        model_content_sha256: str,
-        review_digest: str,
+        model_content_sha256: str | None = None,
+        review_digest: str | None = None,
     ) -> CacheOperationView:
-        """Accept one exact durable removal without cancelling active work."""
+        """Accept a durable removal of the named model against current state.
 
+        A previously reviewed digest is advisory: the removal always applies to
+        what the selector resolves to now. Sets still in use are fenced against
+        new consumers and the removal waits for their current owners.
+        """
+
+        del model_content_sha256, review_digest
         request_key = _request_key(request_key)
         normalized_selector = _model_selector(selector).casefold()
-        digest = _optional_digest(model_content_sha256)
-        if digest is None:
-            raise ModelCacheResolutionError(
-                "model_cache.digest_invalid",
-                "model removal requires an exact model content SHA-256",
-            )
-        supplied_review_digest = _optional_digest(review_digest)
-        if supplied_review_digest is None:
-            raise ModelCacheResolutionError(
-                "model_cache.review_digest_invalid",
-                "model removal requires the exact current review digest",
-            )
         with self._session() as session:
             existing = session.scalar(
                 select(ModelCacheOperation).where(
@@ -2001,28 +1956,22 @@ class ModelCacheService:
             )
             if existing is not None:
                 return self._replay_model_removal(
-                    existing,
-                    actor=actor,
-                    selector=normalized_selector,
-                    model_content_sha256=digest,
-                    selected_sets=None,
-                    review_digest=supplied_review_digest,
+                    existing, actor=actor, selector=normalized_selector
                 )
 
         reviewed = self.review_model_removal(normalized_selector)
-        if reviewed.target_identity != digest:
+        blockers = [
+            item
+            for item in reviewed.blockers
+            if item.code != "model_cache.removal_referenced"
+        ]
+        if blockers:
+            first = blockers[0]
             raise ModelCacheConflict(
-                "model_cache.removal_identity_mismatch",
-                "model selector no longer resolves to the reviewed content digest",
+                first.code,
+                first.detail,
+                recovery="retry" if first.retryable else None,
             )
-        if reviewed.review_digest != supplied_review_digest:
-            raise ModelCacheConflict(
-                "model_cache.removal_review_stale",
-                "model cache removal effects changed after review; review them again",
-            )
-        if reviewed.blockers:
-            first = reviewed.blockers[0]
-            raise ModelCacheConflict(first.code, first.detail)
 
         try:
             with self._lock, self._session(write=True) as session:
@@ -2033,36 +1982,11 @@ class ModelCacheService:
                 )
                 if existing is not None:
                     return self._replay_model_removal(
-                        existing,
-                        actor=actor,
-                        selector=normalized_selector,
-                        model_content_sha256=digest,
-                        selected_sets=None,
-                        review_digest=supplied_review_digest,
+                        existing, actor=actor, selector=normalized_selector
                     )
-                resolved_digest = self._resolve_model_selector_in_session(
+                digest = self._resolve_model_selector_in_session(
                     session, normalized_selector
                 )
-                if resolved_digest != digest:
-                    raise ModelCacheConflict(
-                        "model_cache.removal_identity_mismatch",
-                        "model selector no longer resolves to the reviewed content digest",
-                    )
-                selected_sets = tuple(
-                    session.scalars(
-                        select(ModelCacheSet.artifact_set_sha256)
-                        .where(ModelCacheSet.model_content_sha256 == digest)
-                        .order_by(ModelCacheSet.artifact_set_sha256)
-                    )
-                )
-                expected_scope = self._model_removal_scope_for_sets(
-                    session, selected_sets
-                )
-                if not _scope_matches_review(expected_scope, reviewed):
-                    raise ModelCacheConflict(
-                        "model_cache.removal_review_stale",
-                        "model cache removal effects changed after review; review them again",
-                    )
                 operation = self._accept_model_removal(
                     session,
                     actor=actor,
@@ -2070,25 +1994,59 @@ class ModelCacheService:
                     selector=normalized_selector,
                     model_content_sha256=digest,
                     selected_sets=None,
-                    review_digest=supplied_review_digest,
-                    expected_scope=expected_scope,
+                    review_digest=reviewed.review_digest,
                 )
                 operation_id = operation.id
+                superseded = self._cancel_superseded_downloads(
+                    session,
+                    _removal_document(_validated_operation_payload(operation)).selected,
+                    actor=actor,
+                    request_key=request_key,
+                )
         except IntegrityError:
             # The unique request key arbitrates first submission across
             # Controller processes.  Resolve the winner only after rollback.
             replay = self._model_removal_by_request(
-                request_key,
-                actor=actor,
-                selector=normalized_selector,
-                model_content_sha256=digest,
-                selected_sets=None,
-                review_digest=supplied_review_digest,
+                request_key, actor=actor, selector=normalized_selector
             )
             if replay is None:
                 raise
             return replay
+        for superseded_id in superseded:
+            self.signal_cancelled_operation(superseded_id)
         return self.get_operation(operation_id)
+
+    def _cancel_superseded_downloads(
+        self,
+        session: Session,
+        selected_sets: Sequence[str],
+        *,
+        actor: str,
+        request_key: str,
+    ) -> tuple[str, ...]:
+        """The newer removal intent supersedes older downloads of its sets."""
+
+        if not selected_sets:
+            return ()
+        cancelled: list[str] = []
+        for operation_id in session.scalars(
+            select(ModelCacheOperation.id)
+            .where(
+                ModelCacheOperation.kind == "download",
+                ModelCacheOperation.state.in_(("queued", "running", "partial")),
+                ModelCacheOperation.artifact_set_sha256.in_(list(selected_sets)),
+            )
+            .order_by(ModelCacheOperation.id)
+        ):
+            if self.cancel_operation_in_session(
+                session,
+                operation_id,
+                actor=actor,
+                request_key=str(uuid.uuid5(uuid.UUID(request_key), operation_id)),
+                reason="superseded by a newer model removal request",
+            ):
+                cancelled.append(operation_id)
+        return tuple(cancelled)
 
     def review_model_removal(self, selector: str) -> CacheRemovalReview:
         """Return the current owner-derived model removal impact without writes."""
@@ -2652,14 +2610,7 @@ class ModelCacheService:
         return tuple(assets)
 
     def _model_removal_by_request(
-        self,
-        request_key: str,
-        *,
-        actor: str,
-        selector: str,
-        model_content_sha256: str | None,
-        review_digest: str | None,
-        selected_sets: Sequence[str] | None,
+        self, request_key: str, *, actor: str, selector: str
     ) -> CacheOperationView | None:
         with self._session() as session:
             operation = session.scalar(
@@ -2669,24 +2620,10 @@ class ModelCacheService:
             )
             if operation is None:
                 return None
-            return self._replay_model_removal(
-                operation,
-                actor=actor,
-                selector=selector,
-                model_content_sha256=model_content_sha256,
-                review_digest=review_digest,
-                selected_sets=selected_sets,
-            )
+            return self._replay_model_removal(operation, actor=actor, selector=selector)
 
     def _replay_model_removal(
-        self,
-        operation: ModelCacheOperation,
-        *,
-        actor: str,
-        selector: str,
-        model_content_sha256: str | None,
-        review_digest: str | None,
-        selected_sets: Sequence[str] | None,
+        self, operation: ModelCacheOperation, *, actor: str, selector: str
     ) -> CacheOperationView:
         if operation.kind != "remove" or operation.actor != actor:
             raise ModelCacheConflict(
@@ -2694,15 +2631,7 @@ class ModelCacheService:
                 "request key was already used for another cache operation",
             )
         payload = _validated_operation_payload(operation)
-        if (
-            payload.get("selector") != selector
-            or payload.get("model_content_sha256") != model_content_sha256
-            or payload.get("review_digest") != review_digest
-            or (
-                selected_sets is not None
-                and payload.get("selected") != list(selected_sets)
-            )
-        ):
+        if payload.get("selector") != selector:
             raise ModelCacheConflict(
                 "model_cache.request_key_reused",
                 "request key was already used for another model removal intent",
@@ -2730,22 +2659,10 @@ class ModelCacheService:
             )
         )
         if existing is not None:
-            self._replay_model_removal(
-                existing,
-                actor=actor,
-                selector=selector,
-                model_content_sha256=model_content_sha256,
-                review_digest=review_digest,
-                selected_sets=selected_sets,
-            )
+            self._replay_model_removal(existing, actor=actor, selector=selector)
             return existing
 
         if selected_sets is None:
-            if review_digest is None:
-                raise ModelCacheResolutionError(
-                    "model_cache.review_digest_invalid",
-                    "direct model removal requires its reviewed effect digest",
-                )
             selected = tuple(
                 session.scalars(
                     select(ModelCacheSet.artifact_set_sha256)
@@ -2809,16 +2726,9 @@ class ModelCacheService:
                     "artifact.reference_identity_mismatch",
                     "model-set membership changed while removal ownership was reserved",
                 )
-            reasons = model_set_reference_reasons(session, scope.selected_sets)
-            blocked = {digest: owners for digest, owners in reasons.items() if owners}
-            if blocked:
-                first_digest = min(blocked)
-                raise ModelCacheConflict(
-                    "model_cache.removal_referenced",
-                    f"model cache set {first_digest} is still referenced: "
-                    + ", ".join(blocked[first_digest][:4]),
-                    recovery="retry",
-                )
+            # Sets still in use do not refuse the request: the accepted fence
+            # stops new consumers and each destructive step waits until the
+            # current owners have released the set.
         except ArtifactLifecycleError as error:
             raise ModelCacheConflict(
                 error.code,
@@ -3370,6 +3280,33 @@ class ModelCacheService:
             set_index = checkpoint.set_index
             delete_objects = checkpoint.delete_objects
             selected_sets = checkpoint.selected
+            in_use = (
+                {
+                    digest: owners
+                    for digest, owners in model_set_reference_reasons(
+                        session,
+                        session.scalars(
+                            select(ModelCacheSet.artifact_set_sha256).where(
+                                ModelCacheSet.artifact_set_sha256.in_(
+                                    [str(item) for item in selected_sets]
+                                )
+                            )
+                        ).all(),
+                    ).items()
+                    if owners
+                }
+                if object_index < len(delete_objects) or set_index < len(selected_sets)
+                else {}
+            )
+        if in_use:
+            first_digest = min(in_use)
+            self._defer_model_removal(
+                operation_id,
+                detail=f"waiting for model cache set {first_digest} to be released by: "
+                + ", ".join(in_use[first_digest][:4]),
+                retry_after_seconds=_RETRY_BASE_SECONDS,
+            )
+            return False
         if object_index < len(delete_objects):
             digest = str(delete_objects[object_index])
             identity = ArtifactIdentity("model-object", digest)
@@ -4640,7 +4577,12 @@ class ModelCacheService:
                 spec, set_digest, part, operation_id, completed_artifacts
             )
             return
-        stream, effective_offset, close = self._open_source(spec, offset)
+        try:
+            stream, effective_offset, close = self._open_source(spec, offset)
+        except ModelCacheStorageError as error:
+            if error.code == "model_cache.source_size_mismatch":
+                part.unlink(missing_ok=True)
+            raise
         if effective_offset != offset:
             received = effective_offset
         durable_received = received
@@ -4675,7 +4617,7 @@ class ModelCacheService:
                             raise ModelCacheStorageError(
                                 "model_cache.source_size_mismatch",
                                 "source returned more bytes than the immutable artifact pin",
-                                recovery="download_again",
+                                recovery="resume",
                             )
                         output.write(chunk)
                         received = next_received
@@ -4699,6 +4641,11 @@ class ModelCacheService:
                 if received > durable_received:
                     sync_received()
         except (OSError, httpx.HTTPError, ModelCacheError) as error:
+            if getattr(error, "code", None) == "model_cache.source_size_mismatch":
+                # The source disagrees with the pin; retained bytes are
+                # untrusted, so the retry starts again from byte zero.
+                part.unlink(missing_ok=True)
+                durable_received = 0
             self._checkpoint_artifact(
                 spec,
                 operation_id=operation_id,
@@ -4755,17 +4702,20 @@ class ModelCacheService:
             completed_artifacts=completed_artifacts,
         )
         if not self._verify_file(part, spec):
+            # Never keep bytes that failed the pin: discard them so the
+            # automatic retry downloads the artifact again from byte zero.
+            part.unlink(missing_ok=True)
             self._checkpoint_artifact(
                 spec,
                 operation_id=operation_id,
                 set_digest=set_digest,
-                actual_bytes=received,
+                actual_bytes=0,
                 state="corrupt",
             )
             raise ModelCacheStorageError(
                 "model_cache.digest_mismatch",
-                "downloaded artifact failed SHA-256 verification",
-                recovery="download_again",
+                "downloaded artifact failed SHA-256 verification; the bytes were discarded and the download restarts",
+                recovery="resume",
             )
         if (
             self._transfer_stop(operation_id).is_set()
@@ -5398,13 +5348,13 @@ class ModelCacheService:
                     raise ModelCacheStorageError(
                         "model_cache.credentials_denied",
                         "Hugging Face could not authorize this download; verify account access and token scope at "
-                        f"{_huggingface_access_url(source)}; then use Check access and resume",
+                        f"{_huggingface_access_url(source)}; the download resumes automatically when the token changes",
                         recovery="access_denied",
                     )
                 raise ModelCacheStorageError(
                     "model_cache.credentials_missing",
                     "Hugging Face access is required; request access at "
-                    f"{_huggingface_access_url(source)} and configure HF_TOKEN_FILE, then use Check access and resume",
+                    f"{_huggingface_access_url(source)} and configure HF_TOKEN_FILE; the download resumes automatically when the token changes",
                     recovery="access_required",
                 )
             if status_code in {301, 302, 303, 307, 308}:
@@ -5436,6 +5386,83 @@ class ModelCacheService:
             "model_cache.redirect_forbidden",
             "cache source exceeded the trusted Hugging Face redirect limit",
         )
+
+    def _huggingface_credential_fingerprint(self) -> str:
+        """Identify the configured credential file without reading the secret."""
+
+        path = self._huggingface_token_path
+        if path is None:
+            return "unconfigured"
+        try:
+            stat = path.lstat()
+        except FileNotFoundError:
+            return "absent"
+        except OSError:
+            return "unreadable"
+        return f"{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}"
+
+    def _resume_after_credential_change(self) -> int:
+        """Requeue authorization failures once the credential file changed."""
+
+        current = self._huggingface_credential_fingerprint()
+        if current == self._observed_credential_fingerprint:
+            return 0
+        now = self._clock()
+        resumed = 0
+        with self._lock, self._session(write=True) as session:
+            rows = list(
+                session.scalars(
+                    select(ModelCacheOperation)
+                    .where(ModelCacheOperation.kind.in_(["download", "repair"]))
+                    .where(ModelCacheOperation.state == "failed")
+                    .order_by(ModelCacheOperation.updated_at.desc())
+                    .limit(256)
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            for operation in rows:
+                failure = self._canonical_failure(operation)
+                if (
+                    failure is None
+                    or failure.get("code") not in _CREDENTIAL_FAILURE_PUBLIC_CODES
+                ):
+                    continue
+                payload = _validated_operation_payload(operation)
+                if payload.get("cancellation") is not None:
+                    continue
+                retry = dict(require_mapping(payload["retry"], "cache retry"))
+                if retry.get("credential_fingerprint") == current:
+                    continue
+                newer = session.scalar(
+                    select(func.count())
+                    .select_from(ModelCacheOperation)
+                    .where(
+                        ModelCacheOperation.artifact_set_sha256
+                        == operation.artifact_set_sha256,
+                        ModelCacheOperation.kind.in_(["download", "repair"]),
+                        ModelCacheOperation.created_at > operation.created_at,
+                    )
+                )
+                if newer:
+                    # A later request owns this artifact set now.
+                    continue
+                retry.update(next_retry_at=None, retry_after_seconds=None)
+                retry.pop("credential_fingerprint", None)
+                payload["retry"] = retry
+                payload.pop("claim", None)
+                operation.payload = _write_operation_payload(operation.kind, payload)
+                operation.state = "queued"
+                operation.completed_at = None
+                operation.attempt = int(operation.attempt) + 1
+                operation.progress = cache_phase(
+                    _validated_operation_progress(operation).model_dump(mode="json"),
+                    "queued",
+                    now,
+                )
+                operation.updated_at = now
+                resumed += 1
+        self._observed_credential_fingerprint = current
+        return resumed
 
     def _load_huggingface_token(self) -> str | None:
         path = self._huggingface_token_path
@@ -5493,10 +5520,11 @@ class ModelCacheService:
 
     def _publish_object(self, spec: ArtifactSpec, part: Path) -> None:
         if not self._verify_file(part, spec):
+            part.unlink(missing_ok=True)
             raise ModelCacheStorageError(
                 "model_cache.digest_mismatch",
-                "cache artifact failed verification",
-                recovery="download_again",
+                "cache artifact failed verification; the bytes were discarded and the download restarts",
+                recovery="resume",
             )
         target = self._object_path(spec.sha256)
         target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
@@ -5896,17 +5924,12 @@ class ModelCacheService:
                     if type(operator_retries) is int and operator_retries >= 0
                     else 0
                 )
-                bounded_retry = (
-                    retryable and automatic_attempts < _MAX_OPERATION_ATTEMPTS
-                )
+                bounded_retry = retryable
                 operation.state = "queued" if bounded_retry else "failed"
                 operation.last_error = detail[:512]
                 retry_delay = getattr(error, "retry_after_seconds", None)
                 if type(retry_delay) is not int or retry_delay < 0:
-                    retry_delay = min(
-                        _RETRY_MAX_SECONDS,
-                        _RETRY_BASE_SECONDS * (2 ** max(0, automatic_attempts - 1)),
-                    )
+                    retry_delay = _retry_delay_seconds(automatic_attempts)
                 next_retry = now + timedelta(seconds=retry_delay)
                 retry.update(
                     automatic_attempts=automatic_attempts,
@@ -5914,6 +5937,12 @@ class ModelCacheService:
                     next_retry_at=_iso(next_retry) if bounded_retry else None,
                     retry_after_seconds=retry_delay if bounded_retry else None,
                 )
+                if failure_code in _CREDENTIAL_FAILURE_CODES:
+                    # The worker resumes this exact transfer once the
+                    # configured credential file changes.
+                    retry["credential_fingerprint"] = (
+                        self._huggingface_credential_fingerprint()
+                    )
                 provider_rate_limited = (
                     getattr(error, "code", None) == "model_cache.rate_limited"
                 )
@@ -5999,10 +6028,6 @@ class ModelCacheService:
                         "request key was already used for another cache operation",
                     )
                 return self._operation_view(existing)
-            failure = self._canonical_failure(previous)
-            retryable = (
-                isinstance(failure, Mapping) and failure.get("retryable") is True
-            )
             previous_payload = _validated_operation_payload(previous)
             raw_retry = previous_payload["retry"]
             retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
@@ -6015,8 +6040,6 @@ class ModelCacheService:
             if (
                 previous.kind not in {"download", "repair"}
                 or previous.state != "failed"
-                or not retryable
-                or operator_retries >= _MAX_OPERATOR_RETRIES
             ):
                 raise ModelCacheConflict(
                     "model_cache.operation_not_retryable",
@@ -6890,6 +6913,7 @@ class ModelCacheService:
         if not 1 <= limit <= 16:
             raise ValueError("cache worker batch limit is invalid")
         self._reconcile_pending_cancellations()
+        self._resume_after_credential_change()
         rows = self._claim_operations(limit=limit, respect_backoff=False)
         for operation_id, kind in rows:
             with self._session() as session:
@@ -6917,6 +6941,7 @@ class ModelCacheService:
         if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
             raise ValueError("cache worker batch limit is invalid")
         self._reconcile_pending_cancellations()
+        self._resume_after_credential_change()
         # Removal steps use the same Controller model-cache worker boundary,
         # but never occupy a transfer slot while waiting: each artifact lock
         # and SQL ownership check is nonblocking and a contended step is

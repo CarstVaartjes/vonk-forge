@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import stat
 import subprocess
 import time
@@ -768,6 +769,37 @@ def _log_rejected_receipt(path: Path, rejection: _ReceiptDocumentRejected) -> No
     )
 
 
+def _stored_archive_is_bad(
+    final: Path,
+    final_stat: os.stat_result,
+    staged: Path,
+    receipt: RuntimeImageReceipt,
+    *,
+    preserve_stage: bool,
+) -> bool:
+    """Whether stored bytes at a content address disagree with that address."""
+
+    if stat.S_ISDIR(final_stat.st_mode):
+        raise RuntimeImagePreparationError(
+            "runtime_image.archive_conflict",
+            "content-addressed OCI archive path is a directory",
+        )
+    if not stat.S_ISREG(final_stat.st_mode):
+        return True
+    if final_stat.st_size != receipt.image_bytes:
+        return True
+    if not preserve_stage:
+        return False
+    try:
+        if os.path.samefile(final, staged):
+            return False
+    except OSError:
+        pass
+    return not verified_files.verify_path(
+        final, receipt.oci_archive_sha256, receipt.image_bytes
+    )
+
+
 def prefixed_image_digest(value: str | None) -> str | None:
     """Return a ``sha256:``-prefixed image digest.
 
@@ -1076,10 +1108,14 @@ def _authorize_current_revision(
             )
         existing = {key: getattr(authorization, key) for key in values}
         if existing != values:
-            raise RuntimeImagePreparationError(
-                "runtime_image.receipt_identity_conflict",
-                "durable runtime image receipt identity changed for the same bytes",
+            # The archive digest is unchanged; our own record of its receipt
+            # identity is refreshed from the newly verified receipt.
+            _LOGGER.warning(
+                "refreshing runtime image authorization identity for archive %s",
+                receipt.oci_archive_sha256,
             )
+            for key, value in values.items():
+                setattr(authorization, key, value)
         authorization.authorized_at = authorized_at
         authorization.state = "authorized"
     session.flush()
@@ -1279,8 +1315,56 @@ class FilesystemRuntimeImageStorage:
         expected_architecture: str,
         expected_runtime_interface: str,
     ) -> tuple[RuntimeImagePublishedStageCheckpoint, Path] | None:
-        """Return an exact verified checkpoint while the caller owns its source lock."""
+        """Return an exact verified checkpoint while the caller owns its source lock.
 
+        The checkpoint is this Controller's own resumable record. One that is
+        malformed or names another source is discarded so the caller pulls and
+        exports again instead of failing the preparation.
+        """
+
+        try:
+            return self._read_published_stage(
+                registry_reference,
+                expected_architecture=expected_architecture,
+                expected_runtime_interface=expected_runtime_interface,
+            )
+        except RuntimeImagePreparationError as error:
+            if error.code not in {
+                "runtime_image.stage_checkpoint_invalid",
+                "runtime_image.stage_checkpoint_identity_conflict",
+                "runtime_image.archive_mismatch",
+            }:
+                raise
+            checkpoint_path = self.published_stage_checkpoint_path(
+                registry_reference,
+                expected_architecture=expected_architecture,
+                expected_runtime_interface=expected_runtime_interface,
+            )
+            _LOGGER.warning(
+                "discarding published runtime image checkpoint %s rejected by %s",
+                checkpoint_path.name,
+                error.code,
+            )
+            try:
+                if checkpoint_path.is_dir() and not checkpoint_path.is_symlink():
+                    shutil.rmtree(checkpoint_path)
+                else:
+                    checkpoint_path.unlink(missing_ok=True)
+            except OSError as unlink_error:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.stage_checkpoint_unavailable",
+                    "published runtime image checkpoint could not be discarded",
+                    retryable=True,
+                ) from unlink_error
+            return None
+
+    def _read_published_stage(
+        self,
+        registry_reference: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> tuple[RuntimeImagePublishedStageCheckpoint, Path] | None:
         checkpoint_path = self.published_stage_checkpoint_path(
             registry_reference,
             expected_architecture=expected_architecture,
@@ -1607,32 +1691,28 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.archive_unavailable",
                 "content-addressed OCI archive could not be inspected",
             ) from error
+        receipt_path = self.root / f"{receipt.oci_archive_sha256}.receipt.json"
+        if final_stat is not None and _stored_archive_is_bad(
+            final, final_stat, staged, receipt, preserve_stage=preserve_stage
+        ):
+            # Never keep bytes that disagree with their content address: the
+            # verified staged bytes replace them, with a freshly derived receipt.
+            _LOGGER.warning(
+                "replacing corrupt runtime image archive %s",
+                receipt.oci_archive_sha256,
+            )
+            try:
+                final.unlink()
+                receipt_path.unlink(missing_ok=True)
+            except OSError as error:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.archive_conflict",
+                    "corrupt content-addressed OCI archive could not be discarded",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                ) from error
+            final_stat = None
         if final_stat is not None:
-            if preserve_stage and not stat.S_ISREG(final_stat.st_mode):
-                raise RuntimeImagePreparationError(
-                    "runtime_image.archive_conflict",
-                    "content-addressed OCI archive is not a regular file",
-                )
-            existing_size = final_stat.st_size
-            if existing_size != size:
-                raise RuntimeImagePreparationError(
-                    "runtime_image.archive_conflict",
-                    "content-addressed OCI archive conflicts",
-                )
-            same_verified_file = False
-            if preserve_stage:
-                try:
-                    same_verified_file = os.path.samefile(final, staged)
-                except OSError:
-                    same_verified_file = False
-                if not same_verified_file and not verified_files.verify_path(
-                    final, receipt.oci_archive_sha256, receipt.image_bytes
-                ):
-                    raise RuntimeImagePreparationError(
-                        "runtime_image.archive_conflict",
-                        "content-addressed OCI archive failed exact digest verification",
-                    )
-            receipt_path = self.root / f"{receipt.oci_archive_sha256}.receipt.json"
             if receipt_path.exists():
                 try:
                     existing_receipt = _load_receipt_document(receipt_path)
@@ -1642,65 +1722,57 @@ class FilesystemRuntimeImageStorage:
                     # the current contract cannot parse is stale metadata about
                     # those exact bytes -- not a conflicting identity.  Replace
                     # it below from the freshly validated receipt and record
-                    # the rule that rejected the old file.  A read failure is
-                    # not a parse failure and stays a conflict.
+                    # the rule that rejected the old file.
                     _log_rejected_receipt(receipt_path, rejection)
                     existing_receipt = None
-                except RuntimeImagePreparationError as error:
-                    raise RuntimeImagePreparationError(
-                        "runtime_image.archive_conflict",
-                        "content-addressed OCI archive has no valid immutable receipt",
-                    ) from error
-            if existing_receipt is not None and any(
-                getattr(existing_receipt, field) != getattr(receipt, field)
-                for field in (
-                    "source",
-                    "registry_manifest_digest",
-                    "platform_manifest_digest",
-                    "image_digest",
-                    "oci_archive_sha256",
-                    "image_bytes",
-                    "local_image_config_id",
-                    "architecture",
-                    "runtime_interface",
-                    "runtime_interface_label",
-                    "build_id",
-                    "runtime_adapter",
-                    "runtime_adapter_sha256",
+            if existing_receipt is not None and (
+                any(
+                    getattr(existing_receipt, field) != getattr(receipt, field)
+                    for field in (
+                        "source",
+                        "registry_manifest_digest",
+                        "platform_manifest_digest",
+                        "image_digest",
+                        "oci_archive_sha256",
+                        "image_bytes",
+                        "local_image_config_id",
+                        "architecture",
+                        "runtime_interface",
+                        "runtime_interface_label",
+                        "build_id",
+                        "runtime_adapter",
+                        "runtime_adapter_sha256",
+                    )
                 )
-            ):
-                raise RuntimeImagePreparationError(
-                    "runtime_image.archive_conflict",
-                    "content-addressed OCI archive has a different immutable identity",
-                )
-            if existing_receipt is not None:
-                if (
+                or (
                     receipt.build_input_sha256 is not None
                     and existing_receipt.build_input_sha256
-                    not in {
-                        None,
-                        receipt.build_input_sha256,
+                    not in {None, receipt.build_input_sha256}
+                )
+            ):
+                # Our own receipt describes these verified bytes differently
+                # from the evidence just produced; the latest evidence leads.
+                _LOGGER.warning(
+                    "replacing runtime image receipt %s with a different identity",
+                    receipt.oci_archive_sha256,
+                )
+                existing_receipt = None
+            if (
+                existing_receipt is not None
+                and existing_receipt.build_input_sha256 is None
+                and receipt.build_input_sha256 is not None
+            ):
+                # Repair an incomplete receipt from the exact build evidence
+                # that produced these verified bytes. The archive does not
+                # change, so this only completes its metadata.
+                backfilled = RuntimeImageReceipt(
+                    **{
+                        **existing_receipt.to_mapping(),
+                        "build_input_sha256": receipt.build_input_sha256,
                     }
-                ):
-                    raise RuntimeImagePreparationError(
-                        "runtime_image.archive_conflict",
-                        "content-addressed OCI archive has a different build input identity",
-                    )
-                if (
-                    existing_receipt.build_input_sha256 is None
-                    and receipt.build_input_sha256 is not None
-                ):
-                    # Repair an incomplete receipt from the exact build evidence
-                    # that produced these verified bytes. The archive does not
-                    # change, so this only completes its metadata.
-                    backfilled = RuntimeImageReceipt(
-                        **{
-                            **existing_receipt.to_mapping(),
-                            "build_input_sha256": receipt.build_input_sha256,
-                        }
-                    )
-                    _atomic_json_replace(receipt_path, backfilled.to_mapping())
-                    existing_receipt = backfilled
+                )
+                _atomic_json_replace(receipt_path, backfilled.to_mapping())
+                existing_receipt = backfilled
             if staged != final and not preserve_stage:
                 staged.unlink()
         else:
@@ -1939,10 +2011,9 @@ class FilesystemRuntimeImageStorage:
                 or receipt.platform_manifest_digest != receipt.image_digest
                 or _IMAGE_DIGEST.fullmatch(receipt.local_image_config_id or "") is None
             ):
-                raise RuntimeImagePreparationError(
-                    "runtime_image.receipt_invalid",
-                    "published runtime image receipt identity is malformed",
-                )
+                # Not a proof of the requested identity: a miss, so the
+                # caller prepares the image again.
+                continue
             if not self._archive_is_present(receipt):
                 continue
             return receipt
@@ -1989,10 +2060,9 @@ class FilesystemRuntimeImageStorage:
                 or receipt.platform_manifest_digest != receipt.image_digest
                 or _IMAGE_DIGEST.fullmatch(receipt.local_image_config_id or "") is None
             ):
-                raise RuntimeImagePreparationError(
-                    "runtime_image.receipt_invalid",
-                    "runtime image receipt does not prove the requested platform identity",
-                )
+                # Not a proof of the requested identity: a miss, so the
+                # caller prepares the image again.
+                continue
             if not self._archive_is_present(receipt):
                 continue
             return receipt
@@ -2039,10 +2109,9 @@ class FilesystemRuntimeImageStorage:
                 or receipt.platform_manifest_digest != receipt.image_digest
                 or _IMAGE_DIGEST.fullmatch(receipt.local_image_config_id or "") is None
             ):
-                raise RuntimeImagePreparationError(
-                    "runtime_image.receipt_invalid",
-                    "Controller build receipt does not prove the requested identity",
-                )
+                # Not a proof of the requested identity: a miss, so the
+                # caller prepares the image again.
+                continue
             if not self._archive_is_present(receipt):
                 continue
             return receipt
@@ -2062,7 +2131,40 @@ class FilesystemRuntimeImageStorage:
             try:
                 yield _load_receipt_document(receipt_path)
             except _ReceiptDocumentRejected as rejection:
-                _log_rejected_receipt(receipt_path, rejection)
+                self._discard_rejected_receipt(receipt_path, rejection)
+
+    def _discard_rejected_receipt(
+        self, receipt_path: Path, rejection: _ReceiptDocumentRejected
+    ) -> None:
+        """Delete one of our own receipts that the current contract rejects.
+
+        The receipt is derived metadata about content-addressed bytes; without
+        it the next preparation re-derives a current receipt (or rebuilds), so
+        a stale document is removed once instead of being logged on every scan.
+        A receipt being published concurrently is left for a later scan.
+        """
+
+        archive_sha256 = receipt_path.name.removesuffix(".receipt.json")
+        if _SHA256.fullmatch(archive_sha256) is None:
+            _log_rejected_receipt(receipt_path, rejection)
+            return
+        try:
+            with self.publication_lock(archive_sha256):
+                try:
+                    _load_receipt_document(receipt_path)
+                    return
+                except _ReceiptDocumentRejected:
+                    pass
+                receipt_path.unlink(missing_ok=True)
+        except (RuntimeImagePreparationError, OSError):
+            _log_rejected_receipt(receipt_path, rejection)
+            return
+        _LOGGER.warning(
+            "discarded runtime image receipt %s rejected by %s: %s",
+            archive_sha256,
+            rejection.code,
+            rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
+        )
 
     def _archive_is_present(self, receipt: RuntimeImageReceipt) -> bool:
         """Report archive presence; clean absence is a miss, not a failure."""
@@ -2373,7 +2475,10 @@ def _prepare_from_registry(
         if staged is not None and not persistent_stage:
             _unlink_quietly(staged)
         raise RuntimeImagePreparationError(
-            "runtime_image.transport_failed", "OCI pull/export failed"
+            "runtime_image.transport_failed",
+            "OCI pull/export failed",
+            retryable=True,
+            recovery_actions=("retry",),
         ) from error
 
 

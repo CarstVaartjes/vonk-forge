@@ -10677,12 +10677,19 @@
       },
       "ModelCacheRemovalRequest": {
         "additionalProperties": false,
-        "description": "Exact content identity and request key for a model cache removal.",
+        "description": "Request key for removing the named model against current state.\n\n``model_content_sha256`` and ``review_digest`` are accepted for clients\nthat show a prior review; they are advisory and never refuse the request.",
         "properties": {
           "model_content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Content Sha256",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Content Sha256"
           },
           "request_key": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -10690,9 +10697,16 @@
             "type": "string"
           },
           "review_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Review Digest",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Digest"
           },
           "schema_version": {
             "const": 2,
@@ -10702,9 +10716,7 @@
           }
         },
         "required": [
-          "request_key",
-          "model_content_sha256",
-          "review_digest"
+          "request_key"
         ],
         "title": "ModelCacheRemovalRequest",
         "type": "object"
@@ -15624,9 +15636,16 @@
             "type": "string"
           },
           "review_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Review Digest",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Digest"
           },
           "schema_version": {
             "const": 2,
@@ -15641,8 +15660,7 @@
         },
         "required": [
           "request_key",
-          "with_model",
-          "review_digest"
+          "with_model"
         ],
         "title": "RecipeOperatorRequest",
         "type": "object"

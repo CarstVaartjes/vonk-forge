@@ -632,16 +632,17 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(
     for _ in range(3):
         assert cache.run_pending() == 1
     failed = cache.get_operation(operation.id)
-    assert failed.state == "failed"
-    assert failed.attempt == 3
-    assert failed.retryable is True
+    # The short source never publishes; the download keeps retrying.
+    assert failed.state == "queued"
+    assert failed.attempt == 4
+    assert failed.failure is not None and failed.failure["retryable"] is True
     assert (
         failed.last_error and "before the immutable artifact size" in failed.last_error
     )
     assert failed.result is None
     expected_progress = {
         "schema_version": 2,
-        "phase": "failed",
+        "phase": "queued",
         "completed_artifacts": 0,
         "total_artifacts": 1,
         "downloaded_bytes": 0,

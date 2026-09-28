@@ -706,6 +706,8 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
             False,
             "operation_outcome_uncertain",
         ),
+        # A failed build whose receipt carries no usable typed evidence is
+        # rebuilt with backoff rather than left failed.
         (
             None,
             False,
@@ -713,8 +715,8 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
             None,
             False,
             False,
-            "failed",
-            False,
+            "queued",
+            True,
             "recipe_image.build_invalid",
         ),
         (
@@ -724,8 +726,8 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
             "permission_denied",
             True,
             True,
-            "failed",
-            False,
+            "queued",
+            True,
             "recipe_image.build_invalid",
         ),
     ],

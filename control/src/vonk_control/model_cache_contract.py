@@ -134,6 +134,9 @@ class ModelCacheRetry(StrictModel):
     operator_retries: int = Field(ge=0)
     next_retry_at: str | None = None
     retry_after_seconds: int | None = Field(default=None, ge=0)
+    # Stat identity of the credential file observed at an authorization
+    # failure; a different value lets the worker resume automatically.
+    credential_fingerprint: str | None = Field(default=None, max_length=128)
 
 
 class ModelCacheClaim(StrictModel):
@@ -348,12 +351,16 @@ class ModelCacheOperatorRequest(StrictModel):
 
 
 class ModelCacheRemovalRequest(StrictModel):
-    """Exact content identity and request key for a model cache removal."""
+    """Request key for removing the named model against current state.
+
+    ``model_content_sha256`` and ``review_digest`` are accepted for clients
+    that show a prior review; they are advisory and never refuse the request.
+    """
 
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
-    model_content_sha256: Digest
-    review_digest: Digest
+    model_content_sha256: Digest | None = None
+    review_digest: Digest | None = None
 
 
 class ModelCacheCancellationRequest(StrictModel):
