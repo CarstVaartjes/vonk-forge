@@ -6,18 +6,16 @@ import hashlib
 import json
 import multiprocessing
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control.model_cache import ModelCacheConflict, ModelCacheService
+from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     Base,
     CatalogDocument,
-    ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
     User,
@@ -309,7 +307,9 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
     restarted: ModelCacheService | None = None
     try:
         worker.start()
-        assert reached.wait(25), f"model worker missed transfer barrier: {worker.exitcode}"
+        assert reached.wait(25), (
+            f"model worker missed transfer barrier: {worker.exitcode}"
+        )
         assert partial_path.read_bytes() == partial_bytes
 
         cancelling = availability.cancel(
@@ -334,31 +334,35 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
         )
         assert pending_review.blockers
 
-        with pytest.raises(ModelCacheConflict) as refused:
-            cache.remove_model_selector(
-                selector,
-                actor="operator",
-                request_key=removal_request_id,
-                model_content_sha256=model_digest,
-                review_digest=pending_review.review_digest,
-            )
-        assert refused.value.code == pending_review.blockers[0].code
+        # Pending work does not refuse the newer removal: it is accepted,
+        # fenced, and waits for the live owner without touching any bytes.
+        accepted = cache.remove_model_selector(
+            selector,
+            actor="operator",
+            request_key=removal_request_id,
+            model_content_sha256=model_digest,
+            review_digest=pending_review.review_digest,
+        )
+        for _ in range(4):
+            cache.advance_removals(limit=1)
+        waiting = cache.get_operation(accepted.id)
+        assert waiting.state in {"queued", "running", "partial"}, waiting
         with sessions() as session:
-            assert session.scalar(
-                select(ModelCacheOperation).where(
-                    ModelCacheOperation.request_key == removal_request_id
-                )
-            ) is None
             assert session.get(ModelCacheSet, target_set_digest) is not None
             assert session.get(ModelCacheSet, peer_set_digest) is not None
-            assert session.scalar(
-                select(ModelCacheSetArtifact).where(
-                    ModelCacheSetArtifact.artifact_set_sha256 == peer_set_digest,
-                    ModelCacheSetArtifact.artifact_sha256 == shared_digest,
+            assert (
+                session.scalar(
+                    select(ModelCacheSetArtifact).where(
+                        ModelCacheSetArtifact.artifact_set_sha256 == peer_set_digest,
+                        ModelCacheSetArtifact.artifact_sha256 == shared_digest,
+                    )
                 )
-            ) is not None
+                is not None
+            )
         assert shared_object.read_bytes() == shared_bytes
-        assert cache._stored_object(shared_digest, len(shared_bytes)) == len(shared_bytes)
+        assert cache._stored_object(shared_digest, len(shared_bytes)) == len(
+            shared_bytes
+        )
         assert partial_path.read_bytes() == partial_bytes
 
         # The verified partial is still owned by the pending child. Process
@@ -372,6 +376,8 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
             cache_root,
             reserve_bytes=0,
             fixture_sources=True,
+            # Past the waiting removal's backoff.
+            clock=lambda: datetime.now(UTC) + timedelta(minutes=5),
         )
         restarted_availability = _service(
             sessions,
@@ -389,20 +395,8 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
         assert restarted_availability.get(parent.id).state == "cancelled"
         assert partial_path.read_bytes() == partial_bytes
 
-        # A fresh review after cancellation settles permits a new explicit
-        # removal, while object ownership retains the peer's verified bytes.
-        settled_review = restarted.review_model_removal(selector)
-        assert settled_review.target_identity == model_digest
-        assert not settled_review.active_work
-        assert not settled_review.blockers
-        assert settled_review.review_digest != pending_review.review_digest
-        accepted = restarted.remove_model_selector(
-            selector,
-            actor="operator",
-            request_key=str(uuid.uuid4()),
-            model_content_sha256=model_digest,
-            review_digest=settled_review.review_digest,
-        )
+        # Once cancellation settled the accepted removal proceeds on its own,
+        # while object ownership retains the peer's verified bytes.
         for _ in range(16):
             current = restarted.get_operation(accepted.id)
             if current.state in {"succeeded", "failed", "cancelled"}:

@@ -250,11 +250,19 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(
     service.tick()
     assert service.get_operation(operation.id).state == "running"
     release_sibling.set()
-    _drain(service, operation.id)
-    final = service.get_operation(operation.id)
-    assert final.state == "failed"
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        service.tick()
+        final = service.get_operation(operation.id)
+        if final.state == "queued" and final.failure is not None:
+            break
+        time.sleep(0.01)
+    # The integrity failure settles only after the sibling finished; the bad
+    # bytes were discarded and the operation waits for its automatic retry.
+    assert final.state == "queued"
     assert final.failure is not None
     assert final.failure["code"] == "integrity_mismatch"
+    assert final.failure["retryable"] is True
     downloaded_bytes = require_integer(
         final.progress["downloaded_bytes"], "cache progress downloaded_bytes"
     )
@@ -660,7 +668,7 @@ def test_close_checkpoints_active_transfer_and_fresh_service_resumes(
     fresh_client.close()
 
 
-def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
+def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     tmp_path: Path,
 ) -> None:
     sessions = _database(tmp_path)
@@ -1106,3 +1114,98 @@ def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypat
     finally:
         release.set()
         service.close()
+
+
+def _drain_until(service, operation_id: str, now: list[datetime], states: set[str]):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        now[0] += timedelta(seconds=600)
+        service.tick()
+        observed = service.get_operation(operation_id)
+        if observed.state in states:
+            return observed
+        time.sleep(0.01)
+    raise AssertionError(f"operation did not reach {states}: {observed.state}")
+
+
+def test_hf_access_failure_resumes_automatically_after_token_change(
+    tmp_path: Path,
+) -> None:
+    sessions = _database(tmp_path)
+    token_path = tmp_path / "hf-token"
+    token_path.write_text("bad-token\n")
+    data = b"gated model"
+    requests: list[httpx.Request] = []
+    now = [NOW]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.headers.get("authorization") != "Bearer replacement-token":
+            return httpx.Response(403, request=request)
+        return httpx.Response(200, request=request, content=data)
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler), follow_redirects=False
+    )
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "cache",
+        reserve_bytes=0,
+        max_parallel_downloads=1,
+        fixture_sources=True,
+        http_client=client,
+        huggingface_token_path=token_path,
+        clock=lambda: now[0],
+    )
+    artifact = _artifact("gated", data, host="huggingface.co") | {
+        "source": "https://huggingface.co/acme/private/resolve/"
+        + "a" * 40
+        + "/weights-gated"
+    }
+    operation = _start(service, [artifact], "00000000-0000-4000-8000-000000000451")
+    failed = _drain_until(service, operation.id, now, {"failed", "succeeded"})
+    assert failed.state == "failed"
+    assert failed.failure is not None and failed.failure["code"] == "access_denied"
+    attempts = len(requests)
+
+    # An unchanged credential is not retried, however long the worker runs.
+    for _ in range(3):
+        now[0] += timedelta(hours=1)
+        service.tick()
+    assert len(requests) == attempts
+    assert service.get_operation(operation.id).state == "failed"
+
+    token_path.write_text("replacement-token\n")
+    resumed = _drain_until(service, operation.id, now, {"succeeded"})
+    assert resumed.id == operation.id
+    service.close()
+    client.close()
+
+
+def test_digest_mismatch_discards_bytes_and_downloads_again(tmp_path: Path) -> None:
+    sessions = _database(tmp_path)
+    data = b"pinned model bytes"
+    requests: list[httpx.Request] = []
+    now = [NOW]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) <= 2:
+            return httpx.Response(200, request=request, content=b"X" * len(data))
+        return httpx.Response(200, request=request, content=data)
+
+    service, client = _service(
+        tmp_path, sessions, maximum=1, handler=handler, clock=lambda: now[0]
+    )
+    artifact = _artifact("integrity", data)
+    operation = _start(service, [artifact], "00000000-0000-4000-8000-000000000452")
+    completed = _drain_until(service, operation.id, now, {"succeeded", "failed"})
+    assert completed.state == "succeeded"
+    assert len(requests) == 3
+    # Every retry restarted from byte zero instead of resuming bad bytes.
+    assert all("range" not in request.headers for request in requests)
+    stored = service.root / "objects" / str(artifact["sha256"])[0:2]
+    assert (stored / str(artifact["sha256"])).read_bytes() == data
+    service.close()
+    assert client is not None
+    client.close()
