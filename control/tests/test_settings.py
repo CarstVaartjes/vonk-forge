@@ -11,7 +11,7 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     settings = Settings.from_env_and_secrets()
     assert settings.database_host == "postgres"
     assert settings.recipe_library_api_url == "https://api.github.com"
-    assert settings.recipe_library_asset_url is None
+    assert settings.recipe_library_asset_url == "http://caddy:8085"
     assert settings.recipe_library_release == "latest"
     assert settings.recipe_library_sync_interval_seconds == 900
     assert settings.agent_release_api_url == "https://install.vonkforge.ai"
@@ -70,19 +70,17 @@ def test_recipe_library_api_uses_only_github_or_the_internal_relay(monkeypatch) 
             Settings.from_env_and_secrets()
 
 
-def test_recipe_library_asset_url_is_direct_or_the_internal_relay(
+def test_recipe_library_asset_relay_is_built_in_and_retired_variables_are_ignored(
     monkeypatch,
 ) -> None:
+    # Existing .env files may still name retired variables; startup ignores
+    # them and the asset relay stays the in-project Caddy relay.
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_RECIPE_LIBRARY_ASSET_URL", "http://caddy:8085/")
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_ASSET_URL", "https://github.example")
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_RAW_URL", "https://raw.example")
     assert (
         Settings.from_env_and_secrets().recipe_library_asset_url == "http://caddy:8085"
     )
-
-    for invalid in ("http://github.com", "https://github.example"):
-        monkeypatch.setenv("VONK_RECIPE_LIBRARY_ASSET_URL", invalid)
-        with pytest.raises(SettingsError, match="recipe library asset URL"):
-            Settings.from_env_and_secrets()
 
 
 def test_recipe_library_release_is_latest_or_an_exact_tag(monkeypatch) -> None:

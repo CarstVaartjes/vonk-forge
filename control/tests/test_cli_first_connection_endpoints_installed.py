@@ -490,7 +490,8 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
     refreshed_endpoint = refreshed_view.assignments[0].endpoint
     assert refreshed_endpoint is not None
     assert refreshed_endpoint.generation == replacement.generation
-    assert refreshed_endpoint.api_base == "http://10.0.0.9:8000/v1"
+    assert refreshed_endpoint.api_base == "https://testserver/v1"
+    assert refreshed_endpoint.backend_api_base == "http://10.0.0.9:8000/v1"
 
     with sessions() as session:
         publication = session.scalar(select(RoutePublication).limit(1))
@@ -612,9 +613,12 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
             (item["assignment_id"], item["alias"], item["state"])
             for item in endpoint_view["assignments"]
         ] == [(assignment_id, "qwen", "published")]
-        assert endpoint_view["assignments"][0]["endpoint"]["api_base"] == (
-            "http://10.0.0.2:8000/v1"
-        )
+        published = endpoint_view["assignments"][0]["endpoint"]
+        # Clients get the Controller's HTTPS inference gateway; the Spark
+        # serving address stays a diagnostic field.
+        assert published["api_base"].startswith("https://")
+        assert published["api_base"].endswith("/v1")
+        assert published["backend_api_base"] == "http://10.0.0.2:8000/v1"
         assert peer.calls == [("GET", "/api/profile/1/endpoints", None)]
 
         human = _run_json(

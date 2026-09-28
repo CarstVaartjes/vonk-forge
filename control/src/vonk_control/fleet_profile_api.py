@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
+from .endpoint_contract import inference_gateway_api_base
 from .fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfileDefinitionView,
@@ -130,6 +131,7 @@ def install_fleet_profile_routes(
         operation_id="getProfileEndpoints",
     )
     def profile_endpoints(
+        request: Request,
         number: Annotated[int, Path(ge=1)],
         alias: str | None = Query(
             default=None,
@@ -144,7 +146,10 @@ def install_fleet_profile_routes(
                 status_code=503, detail="Profile endpoint projection unavailable"
             )
         try:
-            return FleetProfileEndpointsView.model_validate(projection(number, alias))
+            gateway = inference_gateway_api_base(request.headers.get("host"))
+            return FleetProfileEndpointsView.model_validate(
+                projection(number, alias, gateway)
+            )
         except KeyError:
             raise HTTPException(
                 status_code=404,

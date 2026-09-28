@@ -86,3 +86,18 @@ test("refreshes and resumes a profile load after the plan changes", async () => 
   expect(loadProfile).toHaveBeenCalledTimes(2);
   expect(api.previewProfile).toHaveBeenCalledTimes(2);
 });
+
+test("a loaded profile names the inference gateway and alias as its client endpoint", async () => {
+  const loaded = {...profile, status: "loaded", loaded_revision: 4} as unknown as FleetProfile;
+  const profileEndpoints = vi.fn(async () => ({
+    number: 2, profile_id: profile.id, application_id: "22222222-2222-4222-8222-222222222222", application_state: "succeeded", observed_at: "2026-09-10T00:00:00Z",
+    assignments: [{assignment_id: "33333333-3333-4333-8333-333333333333", recipe_title: "Qwen Code", desired_state: "running", alias: "qwen-code", state: "published", endpoint: {alias: "qwen-code", api_base: "https://vonk-forge.example.ts.net/v1", backend_api_base: "http://192.168.1.211:8888/v1", expires_at: "2026-09-10T00:03:00Z", generation: 3, node_id: nodeA, observed_at: "2026-09-10T00:00:00Z", plan_digest: "c".repeat(64), state: "published"}}],
+  })) as unknown as ControlApi["profileEndpoints"];
+  const api = apiFor({profiles: vi.fn(async () => ({schema_version: 2 as const, generated_at: "2026-09-10T00:00:00Z", profiles: [loaded]})), profileEndpoints});
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
+  const endpoint = await screen.findByRole("region", {name: "Qwen Code client endpoint"});
+  expect(within(endpoint).getByText("https://vonk-forge.example.ts.net/v1")).toBeVisible();
+  expect(within(endpoint).getByText("qwen-code")).toBeVisible();
+  expect(within(endpoint).getByText("Spark backend (diagnostic)")).toBeVisible();
+  expect(profileEndpoints).toHaveBeenCalledWith(2, expect.any(AbortSignal));
+});

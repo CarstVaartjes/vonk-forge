@@ -58,6 +58,7 @@ from vonk_control.route_runtime import (
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
+GATEWAY = "https://control.test.example/v1"
 
 
 def _recipe_run(session: Session, run_id: str) -> RecipeRun:
@@ -1294,17 +1295,20 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         profile_endpoint_intent=profile_endpoint_intent,
     )
     assert projection.profile_endpoint is not None
-    endpoint = projection.endpoint("qwen")
-    assert endpoint["api_base"] == "http://10.0.0.2:8000/v1"
+    endpoint = projection.endpoint("qwen", GATEWAY)
+    # Clients use the Controller's inference gateway; the Spark-local
+    # serving address is only a diagnostic.
+    assert endpoint["api_base"] == GATEWAY
+    assert endpoint["backend_api_base"] == "http://10.0.0.2:8000/v1"
     assert endpoint["node_id"] == "spk_" + "1".zfill(32)
 
-    profile_endpoint = projection.profile_endpoint(3, None)
+    profile_endpoint = projection.profile_endpoint(3, None, GATEWAY)
     assert profile_endpoint.assignments is not None
     assert profile_endpoint.assignments[0].state == "published"
     assert profile_endpoint.assignments[0].endpoint is not None
     assert profile_endpoint.assignments[0].endpoint.generation == 1
     with pytest.raises(KeyError, match="other-profile"):
-        projection.profile_endpoint(3, "other-profile")
+        projection.profile_endpoint(3, "other-profile", GATEWAY)
 
     wrong_owner = durable_operation_services(
         service.sessions,
@@ -1329,7 +1333,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         ),
     )
     assert wrong_owner.profile_endpoint is not None
-    wrong_owner_endpoint = wrong_owner.profile_endpoint(3, "qwen")
+    wrong_owner_endpoint = wrong_owner.profile_endpoint(3, "qwen", GATEWAY)
     assert wrong_owner_endpoint.assignments is not None
     assert wrong_owner_endpoint.assignments[0].state == "withdrawn"
     assert wrong_owner_endpoint.assignments[0].endpoint is None
@@ -1342,7 +1346,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         profile_endpoint_intent=profile_endpoint_intent,
     )
     assert expired.profile_endpoint is not None
-    expired_endpoint = expired.profile_endpoint(3, "qwen")
+    expired_endpoint = expired.profile_endpoint(3, "qwen", GATEWAY)
     assert expired_endpoint.assignments is not None
     assert expired_endpoint.assignments[0].state == "expired"
     assert expired_endpoint.assignments[0].endpoint is None
@@ -1373,11 +1377,11 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
             operation_api, "verify_active_route_bundle", renew_after_bundle_verification
         )
         with pytest.raises(RuntimeError, match="ownership changed during projection"):
-            projection.profile_endpoint(3, "qwen")
+            projection.profile_endpoint(3, "qwen", GATEWAY)
     assert renewed_during_verification
     assert replacement_generation is not None
     assert replacement_generation > generation.generation
-    current_endpoint = projection.profile_endpoint(3, "qwen")
+    current_endpoint = projection.profile_endpoint(3, "qwen", GATEWAY)
     assert current_endpoint.assignments is not None
     assert current_endpoint.assignments[0].state == "published"
     assert current_endpoint.assignments[0].endpoint is not None
@@ -1403,10 +1407,10 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
             RuntimeError,
             match="active publication is unavailable|ownership changed during projection",
         ):
-            projection.profile_endpoint(3, "qwen")
+            projection.profile_endpoint(3, "qwen", GATEWAY)
     assert withdrew_during_verification
 
-    withdrawn = projection.profile_endpoint(3, "qwen")
+    withdrawn = projection.profile_endpoint(3, "qwen", GATEWAY)
     assert withdrawn.assignments is not None
     assert withdrawn.assignments[0].state == "withdrawn"
     assert withdrawn.assignments[0].endpoint is None
@@ -1684,9 +1688,7 @@ def test_postgres_expired_empty_route_renews_once_and_restores_supervisor_access
         RecipeOperationWorker(second_routes.sessions, second_routes, clock=clock),
     )
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(
-            pool.map(lambda worker: worker.tick(), workers)
-        )
+        results = list(pool.map(lambda worker: worker.tick(), workers))
     assert sorted(results) == [False, True]
 
     renewed = verify_active_route_bundle(root, clock=clock)

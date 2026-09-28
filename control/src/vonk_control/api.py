@@ -78,7 +78,7 @@ from .cluster_mappings import ClusterMappingService
 from .deployment_provenance import DeploymentProvenanceService
 from .distribution_executor import CompositeDistributionPhaseExecutor
 from .download_contract import download_responses
-from .endpoint_contract import EndpointResponse
+from .endpoint_contract import EndpointResponse, inference_gateway_api_base
 from .failure_evidence import FailureEvidenceService
 from .failure_evidence_api import install_failure_evidence_routes
 from .fleet_profile_api import install_fleet_profile_routes
@@ -993,6 +993,7 @@ def create_app(
         operation_id="getPublishedEndpoint",
     )
     def endpoint_view(
+        request: Request,
         alias: str = ApiPath(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$"),
         _actor: Actor = authenticated_actor,
     ) -> EndpointResponse:
@@ -1001,10 +1002,11 @@ def create_app(
                 status_code=503, detail="endpoint publication unavailable"
             )
         try:
-            return EndpointResponse.model_validate(operations.endpoint(alias))
+            gateway = inference_gateway_api_base(request.headers.get("host"))
+            return EndpointResponse.model_validate(operations.endpoint(alias, gateway))
         except KeyError:
             raise HTTPException(status_code=404, detail="endpoint not found") from None
-        except RuntimeError:
+        except (RuntimeError, ValueError):
             raise HTTPException(
                 status_code=503, detail="endpoint publication unavailable"
             ) from None
