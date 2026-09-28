@@ -1443,24 +1443,22 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
 
     render_payload(snapshot.model_dump(mode="json"), "fleet")
     rendered = capsys.readouterr()
-    assert "Workloads: 3 distinct runs" in rendered.out
-    assert rendered.out.count("Workload: Pair Recipe") == 3
-    assert "Controller run state: running" in rendered.out
-    assert "Observed group: degraded" in rendered.out
-    assert "rank-stale" in rendered.err
-    assert "route-not-published" in rendered.err
-    assert NODE_A in rendered.out and NODE_B in rendered.out
+    assert "3 workloads running" in rendered.out
+    assert rendered.out.count("Recipe: Pair Recipe") == 3
+    attention = rendered.out[rendered.out.index("Needs attention") :]
+    assert "pair-healthy" not in attention
+    assert "pair-stale" in attention and "rank-stale" in attention
+    assert "pair-route-failed" in attention and "route-not-published" in attention
+    assert "incomplete" in attention
     render_payload(snapshot.model_dump(mode="json"), "fleet", wide=True)
     rendered = capsys.readouterr()
-    assert "Installations: 2 distinct placements" in rendered.out
-    assert rendered.out.count("Installed recipe: Pair Recipe") == 2
-    assert "Complete: no" in rendered.out
+    assert NODE_A in rendered.out and NODE_B in rendered.out
+    assert str(partial_installation_id) in rendered.out
     selected = snapshot.model_copy(update={"nodes": snapshot.nodes[:1]})
     render_payload(selected.model_dump(mode="json"), "fleet")
     rendered = capsys.readouterr()
-    assert "other reported members are outside this view" in rendered.out
+    # Members outside the selection stay named rather than dropped.
     assert NODE_B in rendered.out
-    assert "Observed group: degraded" in rendered.out
     alpha, beta = snapshot.nodes
     complete = next(
         value

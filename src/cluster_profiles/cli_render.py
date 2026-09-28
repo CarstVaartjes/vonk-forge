@@ -335,8 +335,6 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
             inventory = _optional(node.get("inventory"), "inventory").get("freshness")
             if inventory not in {None, "fresh"}:
                 notes.append(f"{name} inventory is {_text(inventory)}")
-        if node.get("lifecycle") not in {None, "ready"}:
-            notes.append(f"{name} is {_text(node.get('lifecycle'))}")
         warnings = node.get("warnings")
         if not isinstance(warnings, list):
             warnings = []
@@ -368,7 +366,8 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
     for identifier, members in sorted(runs.items()):
         members.sort(key=lambda member: str(member[1].get("rank")))
         first = members[0][1]
-        title = _text(first.get("title"))
+        # The alias is the run's name for clients and tells same-recipe runs apart.
+        title = _text(first.get("alias") or first.get("title"))
         expected = first.get("expected_rank_count")
         present = first.get("present_ranks")
         ranks = (
@@ -381,7 +380,7 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
             f"    {_text(first.get('run_state'))}, group {_text(first.get('group_state'))}, "
             f"route {_text(first.get('route_state'))}, {ranks}"
         )
-        print(f"    Model name: {_text(first.get('alias'))}")
+        print(f"    Recipe: {_text(first.get('title'))}")
         sparks = ", ".join(
             f"{name} (rank {_text(member.get('rank'))}, {_text(member.get('role'))})"
             for name, member in members
