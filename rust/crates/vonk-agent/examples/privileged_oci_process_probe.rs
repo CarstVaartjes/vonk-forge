@@ -262,21 +262,13 @@ fn production_start_arguments() -> (Vec<String>, RecipeStartRequest) {
     ]);
     let archive_sha = env_required("VONK_HELPER_ARCHIVE_SHA");
     let archive_bytes: u64 = env_required("VONK_HELPER_ARCHIVE_BYTES").parse().unwrap();
-    let registry_digest = env_required("VONK_HELPER_REGISTRY_DIGEST");
     let platform_digest = env_required("VONK_HELPER_PLATFORM_DIGEST");
     let config_id = env_required("VONK_HELPER_CONFIG_ID");
-    let image_ref = env_required("VONK_HELPER_IMAGE_REF");
-    value["runtime"]["image_digest"] = json!(platform_digest);
-    value["security"]["devices"] = json!([]);
+    value["security"]["gpu"] = json!(false);
     value["runtime_image"]["image_digest"] = json!(platform_digest);
-    value["runtime_image"]["registry_manifest_digest"] = json!(registry_digest);
-    value["runtime_image"]["platform_manifest_digest"] = json!(platform_digest);
     value["runtime_image"]["local_image_config_id"] = json!(config_id);
-    value["runtime_image"]["local_image_reference"] = json!(image_ref);
     value["runtime_image"]["oci_layout_sha256"] = json!(archive_sha);
     value["runtime_image"]["image_bytes"] = json!(archive_bytes);
-    value["runtime_image"]["distribution_object"]["sha256"] = json!(archive_sha);
-    value["runtime_image"]["distribution_object"]["bytes"] = json!(archive_bytes);
     value["runtime_image"]["runtime_interface_label"] = json!("v1");
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     let paths = CompiledOciPaths {
@@ -312,15 +304,15 @@ fn typed_start_plan(plan: &CompiledExecutionPlan) -> RecipeStartRequest {
         "recipe_content_sha256": plan.identity.recipe_revision_sha256,
         "mapping_id": "40000000-0000-4000-8000-000000000007",
         "mapping_generation": 1,
-        "image_digest": plan.runtime.image_digest,
-        "plan_digest": plan.identity.execution_sha256,
+        "image_digest": plan.runtime_image.image_digest,
+        "plan_digest": plan.identity.model_artifact_set_sha256,
         "alias": "helper-process-proof",
         "rank": placement.rank,
         "role": placement.role,
         "port": placement.port,
         "reserved_memory_bytes": placement.reserved_memory_bytes,
         "memory_floor_bytes": placement.memory_floor_bytes,
-        "memory_kind": placement.memory_kind.to_string(),
+        "memory_kind": "unified",
         "endpoint_address": placement.endpoint_address,
         "world_size": placement.world_size,
         "compiled_execution_plan": plan,

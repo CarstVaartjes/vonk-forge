@@ -9,7 +9,6 @@ use vonk_agent_protocol::RecipeBuildCleanupRequest;
 
 fn request() -> RecipeBuildCleanupRequest {
     serde_json::from_value(serde_json::json!({
-        "schema_version": 1,
         "build_id": Uuid::new_v4(),
         "operation_id": Uuid::new_v4(),
     }))
@@ -109,8 +108,7 @@ fn cleanup_stops_only_its_real_transient_service() {
             String::from_utf8_lossy(&result.stderr)
         );
     }
-    let evidence = cleanup_build(&runner, &selected).unwrap();
-    assert!(evidence.stopped);
+    cleanup_build(&runner, &selected).unwrap();
     let retained = runner
         .run(
             Program::Systemctl,

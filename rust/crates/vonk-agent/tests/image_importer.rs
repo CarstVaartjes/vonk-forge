@@ -19,20 +19,16 @@ fn exact_layout_is_verified_before_requesting_host_import() {
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
         image_bytes: 16,
         image_digest: format!("sha256:{}", "d".repeat(64)),
-        kind: "recipe.image.import.v1".to_owned(),
         mapping_generation: 1,
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
         oci_layout_sha256: hex_sha256(b"exact oci layout"),
-        schema_version: 1,
         source_node_id: format!("spk_{}", "1".repeat(32)),
     };
-    let evidence = ImageImporter {
+    ImageImporter {
         data_root: root.path(),
     }
     .verify(&request, &archive)
     .unwrap();
-
-    assert_eq!(evidence.oci_layout_sha256, request.oci_layout_sha256);
     assert_eq!(
         ImageImporter {
             data_root: root.path()
@@ -78,11 +74,9 @@ fn changed_archive_is_rejected_before_host_authority() {
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
         image_bytes: 7,
         image_digest: format!("sha256:{}", "d".repeat(64)),
-        kind: "recipe.image.import.v1".to_owned(),
         mapping_generation: 1,
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
         oci_layout_sha256: "e".repeat(64),
-        schema_version: 1,
         source_node_id: format!("spk_{}", "1".repeat(32)),
     };
     assert!(
@@ -104,11 +98,9 @@ fn verified_archive_is_reused_by_its_immutable_digest() {
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
         image_bytes: payload.len() as u64,
         image_digest: format!("sha256:{}", "d".repeat(64)),
-        kind: "recipe.image.import.v1".to_owned(),
         mapping_generation: 1,
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
         oci_layout_sha256: hex_sha256(payload),
-        schema_version: 1,
         source_node_id: format!("spk_{}", "1".repeat(32)),
     };
     let importer = ImageImporter {
@@ -141,11 +133,9 @@ fn external_retention_verifies_before_publishing_cache() {
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
         image_bytes: payload.len() as u64,
         image_digest: format!("sha256:{}", "d".repeat(64)),
-        kind: "recipe.image.import.v1".to_owned(),
         mapping_generation: 1,
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
         oci_layout_sha256: "e".repeat(64),
-        schema_version: 1,
         source_node_id: format!("spk_{}", "1".repeat(32)),
     };
     let importer = ImageImporter {

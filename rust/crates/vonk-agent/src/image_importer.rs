@@ -198,12 +198,7 @@ impl ImageImporter<'_> {
         if sha256_file(archive)? != request.oci_layout_sha256 {
             return Err(ImageImportError::Digest);
         }
-        Ok(RecipeImageImportEvidence {
-            build_id: request.build_id,
-            image_bytes: request.image_bytes,
-            image_digest: request.image_digest.clone(),
-            oci_layout_sha256: request.oci_layout_sha256.clone(),
-        })
+        Ok(RecipeImageImportEvidence {})
     }
 
     pub fn runtime_arguments(

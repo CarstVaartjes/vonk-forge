@@ -1413,7 +1413,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         .start_plan_sha256
                         .is_some_and(|digest| lower_hex(digest, 64) && hex_sha256(&plan) == digest)
                     || !valid_oci_digest(&compiled.runtime_image.image_digest)
-                    || !compiled.lifecycle.pre_start.is_empty()
                 {
                     return Err(OperationError::InvalidOperation);
                 }
@@ -1470,7 +1469,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     || plan.node_id != node_id.ok_or(OperationError::InvalidOperation)?
                     || (plan.compiled_execution_plan.job.is_none()
                         && plan.target_runtime_id != plan.run_id)
-                    || !plan.compiled_execution_plan.lifecycle.post_stop.is_empty()
                 {
                     return Err(OperationError::InvalidOperation);
                 }
@@ -4128,7 +4126,6 @@ fn validate_runtime_start_plan(plan: &RecipeStartPayload) -> Result<(), Operatio
         || compiled.job.is_some()
         || compiled.endpoint.is_none()
         || compiled.identity.recipe_revision_sha256 != plan.recipe_content_sha256
-        || compiled.runtime.image_digest != plan.image_digest
         || compiled.runtime_image.image_digest != plan.image_digest
         || plan.rank != placement.rank
         || plan.role != placement.role
@@ -4140,7 +4137,6 @@ fn validate_runtime_start_plan(plan: &RecipeStartPayload) -> Result<(), Operatio
         || plan.master_port != placement.master_port
         || plan.reserved_memory_bytes != placement.reserved_memory_bytes
         || plan.memory_floor_bytes != placement.memory_floor_bytes
-        || plan.memory_kind.to_string() != placement.memory_kind.to_string()
         || (plan.world_size == 1
             && (plan.rank != 0
                 || plan.local_address.is_some()
@@ -4183,7 +4179,6 @@ fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<(), Operation
         || !lower_hex(&plan.contract_sha256, 64)
         || !valid_oci_digest(&plan.image_digest)
         || plan.recipe_content_sha256 != compiled.identity.recipe_revision_sha256
-        || plan.image_digest != compiled.runtime.image_digest
         || plan.image_digest != compiled.runtime_image.image_digest
         || job.interface.to_string() != plan.interface.to_string()
         || job.timeout_seconds != plan.timeout_seconds
@@ -4194,7 +4189,6 @@ fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<(), Operation
         || plan.role != placement.role
         || plan.reserved_memory_bytes != placement.reserved_memory_bytes
         || plan.memory_floor_bytes != placement.memory_floor_bytes
-        || plan.memory_kind.to_string() != placement.memory_kind.to_string()
         || plan.input_total_bytes > 1024 * 1024 * 1024
         || plan.inputs.iter().try_fold(0_u64, |total, file| {
             total.checked_add(u64::from(file.size_bytes))
@@ -4262,14 +4256,14 @@ fn valid_recipe_alias(value: &str) -> bool {
 }
 
 fn runtime_plan_prefix(plan: &CompiledExecutionPlan, command: Vec<String>) -> Vec<String> {
+    // The helper request names the archive, the image digest in both the
+    // registry and platform slots (Controller-built images have no separate
+    // registry index), and the local reference.
     let mut arguments = vec![
         plan.runtime_image.oci_layout_sha256.clone(),
-        plan.runtime_image
-            .registry_manifest_digest
-            .clone()
-            .unwrap_or_else(|| plan.runtime_image.platform_manifest_digest.clone()),
-        plan.runtime_image.platform_manifest_digest.clone(),
-        plan.runtime_image.local_image_reference.clone(),
+        plan.runtime_image.image_digest.clone(),
+        plan.runtime_image.image_digest.clone(),
+        plan.runtime_image.local_image_reference(),
     ];
     arguments.extend(command);
     arguments
@@ -5592,17 +5586,12 @@ mod tests {
     fn recipe_start_plan_for_authority(run_generation: u32) -> RecipeStartPayload {
         let compiled = compiled_plan_for_runtime_authority();
         let placement = &compiled.runtime.placement;
-        let memory_kind = match placement.memory_kind.to_string().as_str() {
-            "unified" => RecipeStartPayloadMemoryKind::Unified,
-            "host" => RecipeStartPayloadMemoryKind::Host,
-            "accelerator" => RecipeStartPayloadMemoryKind::Accelerator,
-            other => panic!("unexpected compiled memory kind {other}"),
-        };
+        let memory_kind = RecipeStartPayloadMemoryKind::Unified;
         RecipeStartPayload {
             alias: "test-model".to_owned(),
             compiled_execution_plan: compiled.clone(),
             endpoint_address: "100.100.20.30".parse().unwrap(),
-            image_digest: compiled.runtime.image_digest.clone(),
+            image_digest: compiled.runtime_image.image_digest.clone(),
             installation_id: runtime_effect_identity(run_generation).installation_id,
             local_address: placement.local_address,
             mapping_generation: 1,
@@ -5779,41 +5768,6 @@ mod tests {
             executor.authorize_runtime_effect(&mutated_plan, grant, None),
             Err(OperationError::InvalidOperation)
         ));
-
-        let mut hook_plan = start_plan.clone();
-        hook_plan
-            .compiled_execution_plan
-            .lifecycle
-            .pre_start
-            .push(vec!["/usr/bin/true".to_owned()]);
-        let hook_arguments = executor
-            .projected_runtime_arguments(
-                &hook_plan.compiled_execution_plan,
-                hook_plan.installation_id,
-                hook_plan.run_id,
-            )
-            .unwrap();
-        let hook_request = runtime_request_identity(
-            &job_id,
-            &operation_id,
-            &fence,
-            RuntimeRequestTestParts {
-                action: HostRuntimeAction::Start,
-                arguments: hook_arguments,
-                run_generation: hook_plan.run_generation,
-                start_plan: Some(hook_plan.clone()),
-                stop_plan: None,
-            },
-        );
-        let hook_sha256 = hex_sha256(&canonical_json(&hook_plan).unwrap());
-        let hook_grant = RuntimeRequestGrantBinding {
-            start_plan_sha256: Some(&hook_sha256),
-            ..grant
-        };
-        assert!(matches!(
-            executor.authorize_runtime_effect(&hook_request, hook_grant, None),
-            Err(OperationError::InvalidOperation)
-        ));
     }
 
     #[test]
@@ -5911,34 +5865,6 @@ mod tests {
             .target_runtime_id = uuid::Uuid::new_v4();
         assert!(matches!(
             executor.authorize_runtime_effect(&different_target, grant, Some(&stop_plan.node_id)),
-            Err(OperationError::InvalidOperation)
-        ));
-
-        let mut hook_plan = stop_plan.clone();
-        hook_plan
-            .compiled_execution_plan
-            .lifecycle
-            .post_stop
-            .push(vec!["/usr/bin/true".to_owned()]);
-        let hook_request = runtime_request_identity(
-            &job_id,
-            &operation_id,
-            &fence,
-            RuntimeRequestTestParts {
-                action: HostRuntimeAction::Stop,
-                arguments: Vec::new(),
-                run_generation: hook_plan.run_generation,
-                start_plan: None,
-                stop_plan: Some(hook_plan.clone()),
-            },
-        );
-        let hook_sha256 = hex_sha256(&canonical_json(&hook_plan).unwrap());
-        let hook_grant = RuntimeRequestGrantBinding {
-            stop_plan_sha256: Some(&hook_sha256),
-            ..grant
-        };
-        assert!(matches!(
-            executor.authorize_runtime_effect(&hook_request, hook_grant, Some(&hook_plan.node_id)),
             Err(OperationError::InvalidOperation)
         ));
     }
@@ -6627,10 +6553,8 @@ mod tests {
             serde_json::from_str(include_str!("../tests/fixtures/compiled_workload_v2.json"))
                 .unwrap();
         plan.validate().unwrap();
-        assert_eq!(plan.schema_version, 2);
         assert_eq!(plan.runtime.executable, "/opt/vonk/bin/vllm");
-        assert_eq!(plan.runtime_image.distribution_object.kind, "oci-archive");
-        assert!(!plan.security.host_network);
+        assert!(!plan.security.host_network());
 
         let (_temp, roots) = runtime_fixture();
         let model_set = runtime_models(&roots).join(&plan.identity.model_artifact_set_sha256);
@@ -6661,7 +6585,7 @@ mod tests {
         assert_eq!(validated.models.len(), 2);
         assert_eq!(
             validated.platform_manifest_digest,
-            plan.runtime.image_digest
+            plan.runtime_image.image_digest
         );
         assert_eq!(validated.arguments.last().unwrap(), "/opt/vonk/bin/vllm");
     }

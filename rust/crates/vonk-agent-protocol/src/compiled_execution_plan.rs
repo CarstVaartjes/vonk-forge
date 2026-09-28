@@ -68,24 +68,14 @@ pub fn same_installed_workload(
         && installed.runtime.argv == requested.runtime.argv
         && installed.runtime.env == requested.runtime.env
         && installed.runtime.telemetry == requested.runtime.telemetry
-        && installed.runtime.image_digest == requested.runtime.image_digest
-        && installed.runtime.placement.memory_kind
-            == requested.runtime.placement.memory_kind
         && installed.runtime_image == requested.runtime_image
-        && installed.security.devices == requested.security.devices
-        && installed.security.capabilities == requested.security.capabilities
-        && installed.security.privileged == requested.security.privileged
+        && installed.security.gpu == requested.security.gpu
         && installed.security.user == requested.security.user
         && installed.security.mounts == requested.security.mounts
-        && installed.security.read_only_root == requested.security.read_only_root
-        && installed.security.no_new_privileges == requested.security.no_new_privileges
         && installed.lifecycle == requested.lifecycle
         && installed.endpoint == requested.endpoint
         && installed.job == requested.job
-        && installed.topology.name == requested.topology.name
-        && installed.topology.mode == requested.topology.mode
-        && installed.topology.backend == requested.topology.backend
-        && installed.topology.node_count == requested.topology.node_count
+        && installed.topology == requested.topology
 }
 
 /// A signed job invocation may bind different settings and a shorter timeout,
@@ -101,7 +91,6 @@ pub fn same_job_workload(
         return false;
     }
     let mut identity = invocation.clone();
-    identity.identity.execution_sha256 = installed.identity.execution_sha256.clone();
     identity.runtime.argv = installed.runtime.argv.clone();
     identity.job.as_mut().unwrap().timeout_seconds = installed_job.timeout_seconds;
     same_installed_workload(installed, &identity)
@@ -118,26 +107,15 @@ impl CompiledExecutionPlan {
             .map_err(|_| WorkloadError::Invalid("compiled wire document"))?;
         crate::wire_schema::validate_and_materialize("CompiledExecutionPlan", &mut value)
             .map_err(|_| WorkloadError::Invalid("compiled wire document"))?;
-        if self.schema_version != 2
-            || !lower_hex(&self.identity.recipe_revision_sha256, 64)
-            || !lower_hex(&self.identity.harness_sha256, 64)
-            || !lower_hex(&self.identity.execution_sha256, 64)
-            || self
-                .identity
-                .build_input_sha256
-                .as_ref()
-                .is_some_and(|value| !lower_hex(value, 64))
+        let placement = &self.runtime.placement;
+        if !lower_hex(&self.identity.recipe_revision_sha256, 64)
             || !lower_hex(&self.identity.model_artifact_set_sha256, 64)
             || self.artifacts.is_empty()
             || self.artifacts.len() > MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS
-            || self.runtime.image_digest != self.runtime_image.image_digest
-            || self.runtime.placement.rank != self.topology.rank
-            || self.runtime.placement.role != self.topology.role
-            || self.runtime.placement.world_size != self.topology.world_size
-            || self.topology.world_size == 0
-            || self.topology.rank >= self.topology.world_size
+            || placement.world_size == 0
+            || placement.rank >= placement.world_size
             || self.topology.node_count == 0
-            || self.topology.world_size < self.topology.node_count
+            || placement.world_size < self.topology.node_count
             || self.endpoint.is_some() == self.job.is_some()
             || self.endpoint.is_some() != self.runtime.placement.port.is_some()
         {
@@ -156,10 +134,6 @@ impl CompiledExecutionPlan {
                 artifact.model.publisher.as_str(),
                 artifact.model.slug.as_str(),
                 artifact.model.content_sha256.as_str(),
-                artifact.distribution_object.name.as_str(),
-                artifact.distribution_object.sha256.as_str(),
-                artifact.distribution_object.bytes,
-                artifact.distribution_object.kind.as_str(),
             );
             let physical_key = (artifact.selection_id.as_str(), artifact.path.as_str());
             if let Some(previous) = physical_by_path.insert(physical_key, physical)
@@ -187,14 +161,6 @@ impl CompiledExecutionPlan {
                 ));
             }
         }
-        let total = by_digest
-            .values()
-            .copied()
-            .try_fold(0_u64, |sum, value| sum.checked_add(value))
-            .ok_or(WorkloadError::Invalid("compiled model artifact bytes"))?;
-        if total != self.identity.model_artifact_bytes {
-            return Err(WorkloadError::Invalid("compiled model artifact-set bytes"));
-        }
         Ok(())
     }
 
@@ -209,13 +175,15 @@ impl CompiledExecutionPlan {
                 || placement.local_address.is_none()
                 || placement.master_address.is_none()
                 || self.endpoint.is_none()
-                || self.security.devices != ["nvidia.com/gpu=all"])
+                || !self.security.gpu)
         {
             return Err(WorkloadError::Invalid("native fabric placement is incomplete"));
         }
         self.security.validate(&self.runtime.placement)?;
         self.topology.validate()?;
-        self.lifecycle.validate()?;
+        if !(1..=600).contains(&self.lifecycle.stop_timeout_seconds) {
+            return Err(WorkloadError::Invalid("compiled lifecycle"));
+        }
         match (&self.endpoint, &self.job) {
             (Some(endpoint), None) => endpoint.validate()?,
             (None, Some(job)) => job.validate()?,
@@ -238,12 +206,7 @@ impl CompiledModelArtifact {
             || !valid_model_publisher(&self.model.publisher)
             || !valid_name(&self.model.slug)
             || !lower_hex(&self.model.content_sha256, 64)
-            || self.distribution_object.kind.as_str() != "model"
-            || self.distribution_object.name != self.path
-            || self.distribution_object.sha256 != self.sha256
-            || self.distribution_object.bytes != self.size_bytes
             || !(self.mount.target == "/models" || self.mount.target.starts_with("/models/"))
-            || !self.mount.read_only
             || (self.size_bytes == 0
                 && self
                     .roles
@@ -256,9 +219,19 @@ impl CompiledModelArtifact {
             return Err(WorkloadError::Invalid("compiled model artifact roles"));
         }
         if self.size_bytes > 0 {
-            validate_distribution_object(&self.distribution_object)?;
+            validate_distribution_object(&self.distribution_object())?;
         }
         Ok(())
+    }
+
+    /// The Controller distribution object that delivers this model file.
+    pub fn distribution_object(&self) -> crate::generated::DistributionObject {
+        crate::generated::DistributionObject {
+            name: self.path.clone(),
+            sha256: self.sha256.clone(),
+            bytes: self.size_bytes,
+            kind: crate::generated::DistributionObjectKind::Model,
+        }
     }
 }
 
@@ -333,17 +306,7 @@ impl CompiledSecurity {
         } else {
             "none"
         };
-        if self.privileged
-            || !self.no_new_privileges
-            || !self.read_only_root
-            || self.network_mode.as_str() != expected_network_mode
-            || self.host_network != native_fabric
-            || !self.capabilities.is_empty()
-            || self.devices.len() > 1
-            || self
-                .devices
-                .iter()
-                .any(|value| value != "nvidia.com/gpu=all")
+        if self.network_mode.as_str() != expected_network_mode
             || !numeric_non_root_user(&self.user)
             || self.mounts.len() > MAX_COMPILED_EXECUTION_PLAN_MOUNTS
             || self.mounts.iter().any(|mount| !valid_mount_policy(mount))
@@ -363,47 +326,33 @@ impl CompiledSecurity {
         }
         Ok(())
     }
+
+    /// Host networking is only used by native-fabric ranks.
+    pub fn host_network(&self) -> bool {
+        self.network_mode.as_str() == "host"
+    }
+
+    /// The CDI devices the workload receives.
+    pub fn devices(&self) -> Vec<String> {
+        if self.gpu {
+            vec!["nvidia.com/gpu=all".to_owned()]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+impl MountSpec {
+    /// Model and input mounts are read-only; only the output mount is writable.
+    pub fn read_only(&self) -> bool {
+        self.source.as_str() != "outputs"
+    }
 }
 
 impl CompiledTopology {
     fn validate(&self) -> Result<(), WorkloadError> {
-        if !valid_name(&self.name)
-            || !matches!(
-                self.mode.as_str(),
-                "single"
-                    | "distributed"
-                    | "tensor_parallel"
-                    | "pipeline_parallel"
-                    | "data_parallel"
-                    | "hybrid"
-                    | "ray"
-                    | "mpi"
-            )
-            || self.backend.is_empty()
-            || self.backend.chars().count() > 64
-            || self.node_count == 0
-            || self.world_size == 0
-            || self.rank >= self.world_size
-            || !valid_role(&self.role)
-        {
+        if !valid_name(&self.name) || self.node_count == 0 {
             return Err(WorkloadError::Invalid("compiled topology"));
-        }
-        Ok(())
-    }
-}
-
-impl CompiledLifecycle {
-    fn validate(&self) -> Result<(), WorkloadError> {
-        if self.pre_start.len() > 16
-            || self.post_stop.len() > 16
-            || !(1..=600).contains(&self.stop_timeout_seconds)
-            || self
-                .pre_start
-                .iter()
-                .chain(&self.post_stop)
-                .any(|argv| !valid_argv(argv))
-        {
-            return Err(WorkloadError::Invalid("compiled lifecycle"));
         }
         Ok(())
     }
@@ -411,8 +360,7 @@ impl CompiledLifecycle {
 
 impl CompiledEndpoint {
     fn validate(&self) -> Result<(), WorkloadError> {
-        if self.protocol != "openai"
-            || self.port < 1024
+        if self.port < 1024
             || self.model_aliases.is_empty()
             || self.health_path.len() > 256
             || !self.health_path.starts_with('/')
@@ -460,8 +408,7 @@ impl CompiledJobInput {
             .iter()
             .map(String::as_str)
             .collect::<BTreeSet<_>>();
-        if self.path != "/inputs"
-            || !(1..=16).contains(&self.media_types.len())
+        if !(1..=16).contains(&self.media_types.len())
             || media_types.len() != self.media_types.len()
             || self
                 .media_types
@@ -493,8 +440,7 @@ impl CompiledJob {
         if !matches!(
             self.interface.as_str(),
             "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job"
-        ) || self.output_path != "/outputs"
-            || !(1..=3600).contains(&self.timeout_seconds)
+        ) || !(1..=3600).contains(&self.timeout_seconds)
         {
             return Err(WorkloadError::Invalid("compiled job"));
         }
@@ -506,59 +452,37 @@ impl CompiledJob {
 }
 
 impl CompiledRuntimeImage {
-    /// The local imported reference for this exact archive and
-    /// registry/platform identity.
-    ///
-    /// The Controller owns and sends its own derivation in the transported
-    /// `local_image_reference` field, and `validate()` requires that field to
-    /// equal this derivation. The accessor therefore answers with the
-    /// derivation itself: a Controller transport path can never become a
-    /// container-engine image argument, even if a caller reads the reference
-    /// before validation.
+    /// The local imported reference for this exact Controller archive and
+    /// image identity; the Controller does not transport it.
     pub fn local_image_reference(&self) -> String {
-        self.expected_local_image_reference()
+        format!(
+            "localhost/vonk/compiled-runtime-{}@{}",
+            self.oci_layout_sha256, self.image_digest
+        )
+    }
+
+    /// The Controller distribution object that delivers this image archive.
+    pub fn distribution_object(&self) -> crate::generated::DistributionObject {
+        crate::generated::DistributionObject {
+            name: "image.oci.tar".to_owned(),
+            sha256: self.oci_layout_sha256.clone(),
+            bytes: self.image_bytes,
+            kind: crate::generated::DistributionObjectKind::OciArchive,
+        }
     }
 
     fn validate(&self) -> Result<(), WorkloadError> {
-        if !self.image_digest.starts_with("sha256:")
-            || !lower_hex(&self.image_digest[7..], 64)
-            || self
-                .registry_manifest_digest
-                .as_ref()
-                .is_some_and(|value| !valid_sha256_prefixed(value))
-            || !valid_sha256_prefixed(&self.platform_manifest_digest)
+        if !valid_sha256_prefixed(&self.image_digest)
             || !valid_sha256_prefixed(&self.local_image_config_id)
-            || self.local_image_reference != self.expected_local_image_reference()
-            || self.platform_manifest_digest != self.image_digest
             || self.runtime_interface_label.is_empty()
             || self.runtime_interface_label.len() > 128
             || !lower_hex(&self.oci_layout_sha256, 64)
             || self.image_bytes == 0
-            || self.architecture != "linux-arm64"
-            || self.runtime_interface != "vonk.runtime.v1"
-            || !matches!(self.source.as_str(), "published" | "controller-build")
-            || (self.source.as_str() == "published" && self.build_id.is_some())
-            || (self.source.as_str() == "published" && self.registry_manifest_digest.is_none())
-            || (self.source.as_str() == "controller-build"
-                && self.build_id.as_deref().is_none_or(str::is_empty))
-            || (self.source.as_str() == "controller-build"
-                && self.registry_manifest_digest.is_some())
-            || self.distribution_object.kind.as_str() != "oci-archive"
-            || self.distribution_object.name != "image.oci.tar"
-            || self.distribution_object.sha256 != self.oci_layout_sha256
-            || self.distribution_object.bytes != self.image_bytes
+            || self.build_id.is_empty()
         {
             return Err(WorkloadError::Invalid("compiled runtime image"));
         }
-        validate_distribution_object(&self.distribution_object)
-    }
-
-    fn expected_local_image_reference(&self) -> String {
-        let parent = &self.platform_manifest_digest;
-        format!(
-            "localhost/vonk/compiled-runtime-{}@{}",
-            self.oci_layout_sha256, parent
-        )
+        validate_distribution_object(&self.distribution_object())
     }
 }
 
@@ -603,11 +527,9 @@ fn valid_mount_target(value: &str) -> bool {
 
 fn valid_mount_policy(mount: &MountSpec) -> bool {
     match mount.source.as_str() {
-        "model" => {
-            mount.read_only && (mount.target == "/models" || mount.target.starts_with("/models/"))
-        }
-        "inputs" => mount.read_only && mount.target == "/inputs",
-        "outputs" => !mount.read_only && mount.target == "/outputs",
+        "model" => mount.target == "/models" || mount.target.starts_with("/models/"),
+        "inputs" => mount.target == "/inputs",
+        "outputs" => mount.target == "/outputs",
         _ => false,
     }
 }
@@ -733,19 +655,6 @@ fn valid_model_publisher(value: &str) -> bool {
     !value.is_empty() && value.chars().count() <= 128 && !value.contains('\0')
 }
 
-fn valid_argv(value: &[String]) -> bool {
-    !value.is_empty()
-        && value.len() <= MAX_ARGV_ITEMS
-        && !value[0].is_empty()
-        && value
-            .iter()
-            .all(|item| item.len() <= MAX_ARGV_ITEM_BYTES && !item.contains('\0'))
-        && value
-            .iter()
-            .try_fold(0_usize, |total, item| total.checked_add(item.len()))
-            .is_some_and(|bytes| bytes <= MAX_ARGV_BYTES)
-}
-
 fn valid_opaque_argv(value: &[String]) -> bool {
     value.len() <= MAX_ARGV_ITEMS
         && value
@@ -768,11 +677,11 @@ fn numeric_non_root_user(value: &str) -> bool {
 }
 
 fn validate_distribution_object(
-    value: &crate::generated::CompiledDistributionObject,
+    value: &crate::generated::DistributionObject,
 ) -> Result<(), WorkloadError> {
     let mut document = serde_json::to_value(value)
         .map_err(|_| WorkloadError::Invalid("compiled distribution object"))?;
-    crate::wire_schema::validate_and_materialize("CompiledDistributionObject", &mut document)
+    crate::wire_schema::validate_and_materialize("DistributionObject", &mut document)
         .map_err(|_| WorkloadError::Invalid("compiled distribution object"))
 }
 
@@ -780,8 +689,7 @@ fn validate_distribution_object(
 #[cfg(test)]
 mod argv_bound_tests {
     use super::{
-        CompiledExecutionPlan, MAX_ARGV_BYTES, MAX_ARGV_ITEM_BYTES, MAX_ARGV_ITEMS,
-        same_installed_workload, valid_argv, valid_opaque_argv,
+        MAX_ARGV_BYTES, MAX_ARGV_ITEM_BYTES, MAX_ARGV_ITEMS, valid_opaque_argv,
     };
 
     #[test]
@@ -790,9 +698,6 @@ mod argv_bound_tests {
         // engine command while the derived argv byte ceiling was nowhere near.
         let long: Vec<String> = (0..600).map(|index| format!("--flag-{index}")).collect();
         assert!(valid_opaque_argv(&long));
-        let mut with_executable = vec!["/opt/vonk/bin/vllm".to_owned()];
-        with_executable.extend(long);
-        assert!(valid_argv(&with_executable));
 
         let absurd: Vec<String> = (0..MAX_ARGV_ITEMS + 1)
             .map(|index| format!("--flag-{index}"))
@@ -815,16 +720,5 @@ mod argv_bound_tests {
         assert!(valid_opaque_argv(&exact));
         exact.push("x".to_owned());
         assert!(!valid_opaque_argv(&exact));
-    }
-
-    #[test]
-    fn installed_workload_identity_binds_the_physical_memory_pool() {
-        let installed: CompiledExecutionPlan = serde_json::from_str(include_str!(
-            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
-        ))
-        .unwrap();
-        let mut requested = installed.clone();
-        requested.runtime.placement.memory_kind = "host".parse().unwrap();
-        assert!(!same_installed_workload(&installed, &requested));
     }
 }

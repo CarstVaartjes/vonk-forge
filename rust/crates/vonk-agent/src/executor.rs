@@ -67,7 +67,7 @@ pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionP
 }
 
 pub fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
-    let image_digest = spec.runtime.image_digest.clone();
+    let image_digest = spec.runtime_image.image_digest.clone();
     let model_identity = spec
         .artifacts
         .first()
@@ -824,9 +824,7 @@ where
     }
 }
 
-/// Build the exact runtime argument vector used for start, inspection, and a
-/// pre-start hook. The caller supplies the complete command slice because
-/// `RuntimeStartPlan::pre_start` already contains a complete hook invocation.
+/// Build the exact runtime argument vector used for start and inspection.
 pub fn runtime_arguments_for_plan(
     plan: &crate::oci::RuntimeStartPlan,
     command: &[String],
@@ -1265,8 +1263,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 result
                     .findings
                     .push(finding("signed_helper_run", passed, &code));
-                result.duration_ms = started.elapsed().as_millis() as u64;
-                if result.validate().is_err() {
+                if started.elapsed() >= Duration::from_secs(60) || result.validate().is_err() {
                     return failed("runtime preflight exceeded the bounded deadline");
                 }
                 ExecutionResult {
@@ -1639,32 +1636,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 };
-                if plan.pre_start != request.compiled_execution_plan.lifecycle.pre_start {
-                    let _ = self.runtime.cleanup_job_scope(&job_scope);
-                    return failed_job(
-                        &request,
-                        1,
-                        started,
-                        "job pre-start plan does not match the signed execution plan",
-                    );
-                }
-                for hook in &plan.pre_start {
-                    let arguments = runtime_arguments_for_plan(&plan, hook);
-                    if self
-                        .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
-                        .await
-                        .is_err()
-                    {
-                        let _ = self.runtime.complete_stop(&job_scope);
-                        let _ = self.runtime.cleanup_job_scope(&job_scope);
-                        return failed_job(
-                            &request,
-                            1,
-                            started,
-                            "container runtime pre-start hook failed",
-                        );
-                    }
-                }
                 let mut arguments = vec![
                     plan.archive_sha256,
                     plan.registry_index_digest,
@@ -1892,13 +1863,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Err(_) => return failed("digest-bound recipe specification is unavailable"),
                 };
                 if spec != inline_spec
-                    || spec.topology.role != request.role
-                    || spec.topology.rank != request.rank
+                    || spec.runtime.placement.role != request.role
+                    || spec.runtime.placement.rank != request.rank
                 {
                     return failed("compiled execution plan does not match the accepted install");
                 }
                 if spec.identity.recipe_revision_sha256.is_empty()
-                    || spec.topology.role != request.role
+                    || spec.runtime.placement.role != request.role
                 {
                     return failed("recipe specification does not match the accepted install");
                 }
@@ -1908,13 +1879,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         HostRuntimeAction::ImageInspect,
                         vec![
                             spec.runtime_image.oci_layout_sha256.clone(),
-                            spec.runtime_image
-                                .registry_manifest_digest
-                                .clone()
-                                .unwrap_or_else(|| {
-                                    spec.runtime_image.platform_manifest_digest.clone()
-                                }),
-                            spec.runtime_image.platform_manifest_digest.clone(),
+                            spec.runtime_image.image_digest.clone(),
+                            spec.runtime_image.image_digest.clone(),
                             spec.runtime_image.local_image_reference(),
                             spec.security.user.clone(),
                         ],
@@ -2114,18 +2080,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     return failed("compiled execution plan is invalid");
                 }
                 if spec.identity.recipe_revision_sha256 != request.recipe_content_sha256
-                    || spec.runtime.image_digest != request.image_digest
-                    || spec.topology.rank != request.rank
-                    || spec.topology.role != request.role
-                    || spec.topology.world_size != request.world_size
+                    || spec.runtime_image.image_digest != request.image_digest
                     || spec.runtime.placement.rank != request.rank
                     || spec.runtime.placement.role != request.role
                     || spec.runtime.placement.world_size != request.world_size
                     || spec.runtime.placement.port != Some(request.port)
                     || spec.runtime.placement.reserved_memory_bytes != request.reserved_memory_bytes
                     || spec.runtime.placement.memory_floor_bytes != request.memory_floor_bytes
-                    || spec.runtime.placement.memory_kind.to_string()
-                        != request.memory_kind.to_string()
                     || spec.runtime.placement.local_address != request.local_address
                     || spec.runtime.placement.master_address != request.master_address
                     || spec.runtime.placement.master_port != request.master_port
@@ -2173,7 +2134,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
                 // A previous agent may have completed the Docker start before
                 // its result was acknowledged. Retained lifecycle identity is
-                // read without resetting writable state or replaying hooks.
+                // read without resetting writable state.
                 let retained_plan = if collective_readiness {
                     None
                 } else {
@@ -2262,53 +2223,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         }
                     }
                 };
-                if collective_readiness && !plan.pre_start.is_empty() {
-                    return failed("retained workload unexpectedly contains start hooks");
-                }
-                if plan.pre_start != request.compiled_execution_plan.lifecycle.pre_start {
-                    return failed("local pre-start plan does not match the signed execution plan");
-                }
                 if *cancellation.borrow() {
                     return self
                         .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
                         .await;
-                }
-                for hook in &plan.pre_start {
-                    let arguments = runtime_arguments_for_plan(&plan, hook);
-                    let mut cancellation_observer = cancellation.clone();
-                    match run_until_cancelled(
-                        self.execute_host_runtime(claim, HostRuntimeAction::Start, arguments),
-                        &mut cancellation_observer,
-                    )
-                    .await
-                    {
-                        None => {
-                            return self
-                                .cancel_start_run(
-                                    claim,
-                                    &run_id,
-                                    spec.lifecycle.stop_timeout_seconds,
-                                )
-                                .await;
-                        }
-                        Some(Err(error)) => {
-                            if *cancellation.borrow() {
-                                return self
-                                    .cancel_start_run(
-                                        claim,
-                                        &run_id,
-                                        spec.lifecycle.stop_timeout_seconds,
-                                    )
-                                    .await;
-                            }
-                            let _ = self.runtime.complete_stop(&run_id);
-                            return runtime_failure(
-                                "container runtime pre-start hook failed",
-                                &error,
-                            );
-                        }
-                        Some(Ok(())) => {}
-                    }
                 }
                 let arguments = runtime_arguments_for_plan(&plan, &plan.main);
                 let runtime_guard_arguments = arguments.clone();
@@ -2359,11 +2277,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         Some(Err(crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }))
                             if code == "runtime_run_missing"
                     )
-                    && spec.lifecycle.pre_start.is_empty()
                 {
                     // The retained plan and an independent Docker listing prove
-                    // this exact run never reached a running container. With no
-                    // pre-start hooks there is no ambiguous one-shot effect.
+                    // this exact run never reached a running container.
                     if self
                         .runtime
                         .ensure_memory_available(
@@ -2442,8 +2358,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             if temporary_observation_error(&error) {
                                 return temporary_runtime_observation_failure();
                             }
-                            // A foreign or uninspectable exact container, or
-                            // ambiguous pre-start hook, requires reconciliation.
+                            // A foreign or uninspectable exact container
+                            // requires reconciliation.
                             return waiting_for_operator(
                                 "retained workload runtime effect could not be confirmed",
                             );
@@ -2730,20 +2646,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             RecipeOperationRequest::Stop(request) => {
                 self.report_phase(claim, "stopping").await;
                 let run_id = request.run_id.to_string();
-                let plan = match self.runtime.prepare_stop(&run_id) {
-                    Ok(plan) => plan,
-                    Err(_) => return failed("container runtime could not prepare workload stop"),
-                };
-                if !plan.post_stop.is_empty()
-                    || !request
-                        .compiled_execution_plan
-                        .lifecycle
-                        .post_stop
-                        .is_empty()
-                {
-                    return waiting_for_operator(
-                        "container runtime stop cannot authorize post-stop hooks",
-                    );
+                if self.runtime.prepare_stop(&run_id).is_err() {
+                    return failed("container runtime could not prepare workload stop");
                 }
                 if self
                     .execute_host_runtime_plan(
@@ -2756,51 +2660,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     waiting_for_operator("container runtime stop remains unconfirmed")
                 } else {
-                    if !plan.post_stop.is_empty() {
-                        match self.runtime.begin_post_stop_hooks(&run_id) {
-                            Ok(()) => {}
-                            Err(crate::oci::OciError::PostStopHooksStarted) => {
-                                return waiting_for_operator(
-                                    "post-stop hook effect may already have been applied",
-                                );
-                            }
-                            Err(crate::oci::OciError::Io(_)) => {
-                                return failed("post-stop hook marker could not be persisted");
-                            }
-                            Err(_) => return failed("post-stop hook metadata is invalid"),
-                        }
-                    }
-                    if let (
-                        Some(archive_sha256),
-                        Some(registry_index_digest),
-                        Some(platform_manifest_digest),
-                        Some(image_reference),
-                    ) = (
-                        plan.archive_sha256,
-                        plan.registry_index_digest,
-                        plan.platform_manifest_digest,
-                        plan.image_reference,
-                    ) {
-                        for hook in plan.post_stop {
-                            if *cancellation.borrow() {
-                                break;
-                            }
-                            let mut arguments = vec![
-                                archive_sha256.clone(),
-                                registry_index_digest.clone(),
-                                platform_manifest_digest.clone(),
-                                image_reference.clone(),
-                            ];
-                            arguments.extend(hook);
-                            if self
-                                .execute_host_runtime(claim, HostRuntimeAction::Stop, arguments)
-                                .await
-                                .is_err()
-                            {
-                                return failed("container runtime post-stop hook failed");
-                            }
-                        }
-                    }
                     if self.runtime.complete_stop(&run_id).is_err() {
                         return waiting_for_operator(
                             "container runtime stop metadata remains unconfirmed",
@@ -3251,7 +3110,6 @@ fn job_placement(
         || placement.port.is_some()
         || placement.reserved_memory_bytes != request.reserved_memory_bytes
         || placement.memory_floor_bytes != request.memory_floor_bytes
-        || placement.memory_kind.to_string() != request.memory_kind.to_string()
     {
         return Err(WorkloadError::Invalid("job placement"));
     }
@@ -3280,7 +3138,7 @@ pub fn prepare_job_invocation(
     };
     if job.interface.as_str() != request.interface.as_str()
         || job.timeout_seconds != request.timeout_seconds
-        || plan.runtime.image_digest != request.image_digest
+        || plan.runtime_image.image_digest != request.image_digest
         || plan.identity.recipe_revision_sha256 != request.recipe_content_sha256
         || !crate::workloads::same_job_workload(installed, &plan)
     {
@@ -4171,7 +4029,7 @@ mod tests {
         .unwrap();
         let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let (image_digest, model_identity) = readiness_identity(&plan);
-        assert_eq!(image_digest, plan.runtime.image_digest);
+        assert_eq!(image_digest, plan.runtime_image.image_digest);
         let artifact = &plan.artifacts[0];
         assert_eq!(
             model_identity,

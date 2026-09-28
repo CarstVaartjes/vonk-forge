@@ -28,12 +28,12 @@ fn direct_deserialization_validates_bounds_and_unknown_fields() {
 
 #[test]
 fn literal_integers_do_not_accept_boolean_or_float_equivalents() {
-    let value = json!({"schema_version":1,"architecture":"linux-arm64","source_build":false,
-        "minimum_free_bytes":0,"fabric_connectivity":"none","fabric_minimum_mbps":0,"mandatory_capabilities":[]});
+    let value = json!({"source_build":false,
+        "minimum_free_bytes":0,"fabric_connectivity":"none","fabric_minimum_mbps":0});
     assert!(serde_json::from_value::<RuntimePreflightRequest>(value.clone()).is_ok());
-    for invalid in [json!(true), json!(1.0), json!(2)] {
+    for invalid in [json!(true), json!(1.5), json!(-1)] {
         let mut value = value.clone();
-        value["schema_version"] = invalid;
+        value["fabric_minimum_mbps"] = invalid;
         assert!(serde_json::from_value::<RuntimePreflightRequest>(value).is_err());
     }
 }

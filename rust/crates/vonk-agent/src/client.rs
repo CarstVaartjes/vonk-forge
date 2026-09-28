@@ -3810,25 +3810,13 @@ mod tests {
         .unwrap();
         let model_sha256 = hex_sha256(&model);
         let archive_sha256 = hex_sha256(&archive);
-        plan_value["identity"]["execution_sha256"] = json!("e".repeat(64));
         plan_value["identity"]["model_artifact_set_sha256"] =
             json!(assignment.model_artifact_set_sha256.clone());
-        plan_value["identity"]["model_artifact_bytes"] = json!(model.len());
         plan_value["artifacts"][0]["sha256"] = json!(model_sha256.clone());
         plan_value["artifacts"][0]["size_bytes"] = json!(model.len());
-        plan_value["artifacts"][0]["distribution_object"]["sha256"] = json!(model_sha256);
-        plan_value["artifacts"][0]["distribution_object"]["bytes"] = json!(model.len());
-        plan_value["runtime"]["image_digest"] = json!(format!("sha256:{image_digest}"));
         plan_value["runtime_image"]["image_digest"] = json!(format!("sha256:{image_digest}"));
-        plan_value["runtime_image"]["platform_manifest_digest"] =
-            json!(format!("sha256:{image_digest}"));
         plan_value["runtime_image"]["oci_layout_sha256"] = json!(archive_sha256.clone());
         plan_value["runtime_image"]["image_bytes"] = json!(archive.len());
-        plan_value["runtime_image"]["local_image_reference"] = json!(format!(
-            "localhost/vonk/compiled-runtime-{archive_sha256}@sha256:{image_digest}"
-        ));
-        plan_value["runtime_image"]["distribution_object"]["sha256"] = json!(archive_sha256);
-        plan_value["runtime_image"]["distribution_object"]["bytes"] = json!(archive.len());
         let plan: CompiledExecutionPlan = serde_json::from_value(plan_value).unwrap();
         plan.validate().unwrap();
 
@@ -3906,7 +3894,6 @@ mod tests {
         assert_eq!(second_server.join().unwrap().len(), 1);
 
         let mut second_plan = plan.clone();
-        second_plan.identity.execution_sha256 = "f".repeat(64);
         second_plan.identity.model_artifact_set_sha256 =
             second_assignment.model_artifact_set_sha256.clone();
         let second_installation = "cb555393-764b-4eb6-8f15-b416d2894290";
@@ -4727,11 +4714,9 @@ mod tests {
             build_id: Uuid::new_v4(),
             image_bytes: 1,
             image_digest: format!("sha256:{}", "b".repeat(64)),
-            kind: "image.import".to_owned(),
             mapping_generation: 1,
             mapping_id: Uuid::new_v4(),
             oci_layout_sha256: "c".repeat(64),
-            schema_version: 1,
             source_node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
         };
         let payload_digest = hex_sha256(&canonical_json(&payload).unwrap());

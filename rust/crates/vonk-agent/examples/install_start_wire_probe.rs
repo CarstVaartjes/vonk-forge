@@ -61,15 +61,10 @@ fn runtime_plan(
     .map_err(|_| "compiled OCI projection is invalid".to_owned())?;
     Ok(RuntimeStartPlan {
         image_digest: spec.runtime_image.image_digest.clone(),
-        registry_index_digest: spec
-            .runtime_image
-            .registry_manifest_digest
-            .clone()
-            .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone()),
-        platform_manifest_digest: spec.runtime_image.platform_manifest_digest.clone(),
+        registry_index_digest: spec.runtime_image.image_digest.clone(),
+        platform_manifest_digest: spec.runtime_image.image_digest.clone(),
         archive_sha256: spec.runtime_image.oci_layout_sha256.clone(),
         image_reference: spec.runtime_image.local_image_reference(),
-        pre_start: Vec::new(),
         main,
     })
 }

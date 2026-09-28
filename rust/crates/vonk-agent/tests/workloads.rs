@@ -44,9 +44,9 @@ fn retired_authorities_and_unknown_fields_are_rejected() {
 }
 
 #[test]
-fn repeated_identity_and_receipt_tampering_is_rejected() {
+fn identity_and_receipt_tampering_is_rejected() {
     let mut value = fixture();
-    value["runtime"]["image_digest"] = json!(format!("sha256:{}", "9".repeat(64)));
+    value["runtime"]["placement"]["rank"] = json!(1);
     let parsed = plan(value);
     assert!(matches!(
         parsed.validate(),
@@ -54,7 +54,7 @@ fn repeated_identity_and_receipt_tampering_is_rejected() {
     ));
 
     let mut value = fixture();
-    value["artifacts"][0]["distribution_object"]["bytes"] = json!(8);
+    value["artifacts"][0]["model"]["publisher"] = json!("publisher\u{0}");
     let parsed = plan(value);
     assert!(matches!(
         parsed.validate(),
@@ -63,18 +63,14 @@ fn repeated_identity_and_receipt_tampering_is_rejected() {
 }
 
 #[test]
-fn security_and_rank_topology_are_bound_to_the_compiled_plan() {
+fn root_user_and_unplaced_host_network_are_rejected() {
     let mut value = fixture();
-    value["security"]["privileged"] = json!(true);
+    value["security"]["user"] = json!("0");
     assert!(plan(value).validate().is_err());
 
     let mut value = fixture();
-    value["topology"]["rank"] = json!(1);
-    let parsed = plan(value);
-    assert!(matches!(
-        parsed.validate(),
-        Err(WorkloadError::Invalid("compiled execution identity"))
-    ));
+    value["security"]["network_mode"] = json!("host");
+    assert!(plan(value).validate().is_err());
 }
 
 #[test]
@@ -95,19 +91,12 @@ fn model_materialization_keeps_nested_paths_selection_scoped() {
 #[test]
 fn empty_support_file_is_valid_but_empty_weights_are_rejected() {
     let mut value = fixture();
-    value["identity"]["model_artifact_bytes"] = json!(2448);
     let artifact = &mut value["artifacts"][0];
     artifact["file_id"] = json!("tokenizer-config");
     artifact["path"] = json!("tokenizer_config.json");
     artifact["sha256"] = json!(vonk_agent::workloads::EMPTY_SHA256);
     artifact["size_bytes"] = json!(0);
     artifact["roles"] = json!(["tokenizer"]);
-    artifact["distribution_object"] = json!({
-        "name": "tokenizer_config.json",
-        "sha256": vonk_agent::workloads::EMPTY_SHA256,
-        "bytes": 0,
-        "kind": "model"
-    });
     let parsed = plan(value.clone());
     parsed.validate().unwrap();
     value["artifacts"][0]["roles"] = json!(["weights"]);

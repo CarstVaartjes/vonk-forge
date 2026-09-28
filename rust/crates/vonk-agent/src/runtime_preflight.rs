@@ -135,20 +135,13 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
         observed_fabric: Option<(&str, u64)>,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<RuntimePreflightResult, ProcessError> {
-        request
-            .validate()
-            .map_err(|_| std::io::Error::other("preflight request invalid"))?;
         let started = Instant::now();
         let deadline = started + Duration::from_secs(40);
         let mut findings = vec![
+            // Recipe runtimes are always linux/arm64.
             finding(
                 "architecture",
-                request.architecture
-                    == if cfg!(target_arch = "aarch64") {
-                        "linux-arm64"
-                    } else {
-                        "linux-amd64"
-                    },
+                cfg!(target_arch = "aarch64"),
                 "architecture_mismatch",
             ),
             finding("controller_reachable", true, "controller_unreachable"),
@@ -170,17 +163,12 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
             disk_ok,
             "disk_reserve_insufficient",
         ));
+        let fabric_required = request.fabric_connectivity != "none";
         let fabric_ok = observed_fabric.is_some_and(|(kind, speed)| {
             speed >= request.fabric_minimum_mbps
-                && match request.fabric_connectivity.as_str() {
-                    "connected" => matches!(kind, "connected" | "full_mesh" | "switch"),
-                    "full_mesh" => matches!(kind, "full_mesh" | "switch"),
-                    "switch" => kind == "switch",
-                    "none" => true,
-                    _ => false,
-                }
+                && (!fabric_required || matches!(kind, "connected" | "full_mesh" | "switch"))
         });
-        if request.fabric_connectivity != "none" {
+        if fabric_required {
             findings.push(Finding {
                 capability: "fabric".into(),
                 status: if observed_fabric.is_none() {
@@ -213,19 +201,17 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
                 {
                     return Err(std::io::Error::other("unsafe preflight cache").into());
                 }
-                let result: RuntimePreflightResult =
-                    vonk_agent_protocol::parse_strict(&fs::read(&cache_path)?)
-                        .map_err(|_| std::io::Error::other("invalid preflight cache"))?;
-                result
-                    .validate()
-                    .map_err(|_| std::io::Error::other("invalid preflight cache"))?;
-                Some(result)
+                // An unreadable or older-shape cache is a miss; the probe
+                // runs again and rewrites it.
+                vonk_agent_protocol::parse_strict::<RuntimePreflightResult>(&fs::read(&cache_path)?)
+                    .ok()
+                    .filter(|result| result.validate().is_ok())
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
         };
         let reused = previous.as_ref().map_or_else(Vec::new, |result| {
-            reusable_build_findings(result, &fingerprint, request, now)
+            reusable_build_findings(result, &fingerprint, now)
         });
         let cached = request.source_build && disk_ok && !reused.is_empty();
         if cached {
@@ -248,27 +234,12 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
             status: Status::Unknown,
             code: "signed_helper_probe_required".into(),
         });
-        for capability in &request.mandatory_capabilities {
-            if !findings.iter().any(|value| &value.capability == capability) {
-                findings.push(Finding {
-                    capability: capability.clone(),
-                    status: Status::Unknown,
-                    code: "mandatory_capability_unknown".into(),
-                });
-            }
-        }
         let result = RuntimePreflightResult {
-            schema_version: 1,
             fingerprint,
-            request_sha256: request
-                .digest()
-                .map_err(|_| std::io::Error::other("request digest invalid"))?,
             observed_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|_| std::io::Error::other("clock invalid"))?
                 .as_secs(),
-            duration_ms: started.elapsed().as_millis() as u64,
-            cached,
             findings,
         };
         // Never extend the observed age when reusing a successful build result.
@@ -471,17 +442,15 @@ fn user_service_arguments(xdg: &Path, tmp: &Path) -> Vec<String> {
     ]
 }
 
-/// Cache identity includes the request and host fingerprint; dynamic resources
-/// (disk, reachability, fabric) must still be observed on every new claim.
+/// Cache identity is the host fingerprint; dynamic resources (disk,
+/// reachability, fabric) must still be observed on every new claim.
 pub fn reusable_build_findings(
     result: &RuntimePreflightResult,
     fingerprint: &str,
-    request: &RuntimePreflightRequest,
     now: u64,
 ) -> Vec<Finding> {
     if result.validate().is_err()
         || result.fingerprint != fingerprint
-        || request.digest().ok().as_deref() != Some(result.request_sha256.as_str())
         || now < result.observed_at
         || now - result.observed_at > 300
     {
@@ -535,19 +504,10 @@ mod tests {
     }
     fn request() -> RuntimePreflightRequest {
         RuntimePreflightRequest {
-            schema_version: 1,
-            architecture: if cfg!(target_arch = "aarch64") {
-                "linux-arm64"
-            } else {
-                "linux-amd64"
-            }
-            .parse()
-            .unwrap(),
             source_build: true,
             minimum_free_bytes: 0,
             fabric_connectivity: "none".parse().unwrap(),
             fabric_minimum_mbps: 0,
-            mandatory_capabilities: vec![],
         }
     }
     fn status<'a>(result: &'a RuntimePreflightResult, capability: &str) -> &'a Finding {
@@ -610,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn changed_host_or_request_reexecutes_cached_probe_and_refreshes_dynamic_facts() {
+    fn changed_host_reexecutes_cached_probe_and_refreshes_dynamic_facts() {
         let data = tempfile::tempdir().unwrap();
         let runtime = tempfile::tempdir().unwrap();
         let probe = data.path().join("probe");
@@ -629,22 +589,16 @@ mod tests {
         let second = preflight
             .run(&req, "a".repeat(64), None, &|| false)
             .unwrap();
-        assert!(!first.cached);
-        assert!(second.cached);
+        // The second run reuses the cached build probe.
+        assert_eq!(status(&second, "podman_build").status, Status::Passed);
         assert_eq!(runner.calls.borrow().len(), 2);
+        assert!(reusable_build_findings(&first, &"b".repeat(64), first.observed_at).is_empty());
         assert!(
-            reusable_build_findings(&first, &"b".repeat(64), &req, first.observed_at).is_empty()
+            reusable_build_findings(&first, &"a".repeat(64), first.observed_at + 301).is_empty()
         );
-        assert!(
-            reusable_build_findings(&first, &"a".repeat(64), &req, first.observed_at + 301)
-                .is_empty()
-        );
-        assert!(
-            !preflight
-                .run(&req, "b".repeat(64), None, &|| false)
-                .unwrap()
-                .cached
-        );
+        preflight
+            .run(&req, "b".repeat(64), None, &|| false)
+            .unwrap();
         assert_eq!(runner.calls.borrow().len(), 4);
         let mut changed = req;
         changed.minimum_free_bytes = u64::MAX;
@@ -698,8 +652,8 @@ mod tests {
             .join("runtime-root-with-a-deliberately-long-path-for-podman");
         let runner = Runner::default();
         let mut req = request();
-        req.fabric_connectivity = "full_mesh".parse().unwrap();
-        req.fabric_minimum_mbps = 100000;
+        req.fabric_connectivity = "connected".parse().unwrap();
+        req.fabric_minimum_mbps = 300000;
         let result = RuntimePreflight {
             runner: &runner,
             data_root: data.path(),

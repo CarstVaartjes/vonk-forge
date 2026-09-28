@@ -1216,9 +1216,6 @@
     "CompiledArtifact": {
       "additionalProperties": false,
       "properties": {
-        "distribution_object": {
-          "$ref": "#/$defs/CompiledDistributionObject"
-        },
         "file_id": {
           "maxLength": 64,
           "minLength": 1,
@@ -1269,72 +1266,29 @@
         "size_bytes",
         "roles",
         "mount",
-        "model",
-        "distribution_object"
+        "model"
       ],
       "title": "CompiledArtifact",
       "type": "object"
     },
     "CompiledArtifactMount": {
       "additionalProperties": false,
+      "description": "A read-only model mount.",
       "properties": {
-        "read_only": {
-          "title": "Read Only",
-          "type": "boolean"
-        },
         "target": {
           "title": "Target",
           "type": "string"
         }
       },
       "required": [
-        "target",
-        "read_only"
+        "target"
       ],
       "title": "CompiledArtifactMount",
       "type": "object"
     },
-    "CompiledDistributionObject": {
-      "additionalProperties": false,
-      "description": "Distribution objects usable as installed model or runtime inputs.",
-      "properties": {
-        "bytes": {
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Bytes",
-          "type": "integer"
-        },
-        "kind": {
-          "enum": [
-            "model",
-            "oci-archive"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "name": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Sha256",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "sha256",
-        "bytes",
-        "kind"
-      ],
-      "title": "CompiledDistributionObject",
-      "type": "object"
-    },
     "CompiledEndpoint": {
       "additionalProperties": false,
+      "description": "An OpenAI-compatible endpoint.",
       "properties": {
         "health_path": {
           "maxLength": 256,
@@ -1354,15 +1308,9 @@
           "minimum": 1024,
           "title": "Port",
           "type": "integer"
-        },
-        "protocol": {
-          "const": "openai",
-          "title": "Protocol",
-          "type": "string"
         }
       },
       "required": [
-        "protocol",
         "port",
         "model_aliases",
         "health_path"
@@ -1436,11 +1384,6 @@
         "runtime_image": {
           "$ref": "#/$defs/CompiledRuntimeImage"
         },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
-        },
         "security": {
           "$ref": "#/$defs/CompiledSecurity"
         },
@@ -1449,7 +1392,6 @@
         }
       },
       "required": [
-        "schema_version",
         "identity",
         "runtime",
         "artifacts",
@@ -1466,34 +1408,6 @@
     "CompiledIdentity": {
       "additionalProperties": false,
       "properties": {
-        "build_input_sha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Build Input Sha256"
-        },
-        "execution_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Execution Sha256",
-          "type": "string"
-        },
-        "harness_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Harness Sha256",
-          "type": "string"
-        },
-        "model_artifact_bytes": {
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Model Artifact Bytes",
-          "type": "integer"
-        },
         "model_artifact_set_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Model Artifact Set Sha256",
@@ -1507,11 +1421,7 @@
       },
       "required": [
         "recipe_revision_sha256",
-        "execution_sha256",
-        "harness_sha256",
-        "build_input_sha256",
-        "model_artifact_set_sha256",
-        "model_artifact_bytes"
+        "model_artifact_set_sha256"
       ],
       "title": "CompiledIdentity",
       "type": "object"
@@ -1540,11 +1450,6 @@
           "title": "Interface",
           "type": "string"
         },
-        "output_path": {
-          "const": "/outputs",
-          "title": "Output Path",
-          "type": "string"
-        },
         "timeout_seconds": {
           "maximum": 3600,
           "minimum": 1,
@@ -1555,7 +1460,6 @@
       "required": [
         "interface",
         "input",
-        "output_path",
         "timeout_seconds"
       ],
       "title": "CompiledJob",
@@ -1563,7 +1467,7 @@
     },
     "CompiledJobInput": {
       "additionalProperties": false,
-      "description": "Typed compiled form of the public ``RecipeJobInput`` declaration.",
+      "description": "Typed compiled form of the public ``RecipeJobInput`` declaration;\ninputs are staged read-only under /inputs.",
       "properties": {
         "max_bytes": {
           "maximum": 1073741824,
@@ -1579,11 +1483,6 @@
           "minItems": 1,
           "title": "Media Types",
           "type": "array"
-        },
-        "path": {
-          "const": "/inputs",
-          "title": "Path",
-          "type": "string"
         },
         "required": {
           "title": "Required",
@@ -1608,7 +1507,6 @@
         }
       },
       "required": [
-        "path",
         "required",
         "media_types",
         "max_bytes"
@@ -1696,28 +1594,6 @@
     "CompiledLifecycle": {
       "additionalProperties": false,
       "properties": {
-        "post_stop": {
-          "items": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "maxItems": 16,
-          "title": "Post Stop",
-          "type": "array"
-        },
-        "pre_start": {
-          "items": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "maxItems": 16,
-          "title": "Pre Start",
-          "type": "array"
-        },
         "stop_timeout_seconds": {
           "maximum": 600,
           "minimum": 1,
@@ -1726,8 +1602,6 @@
         }
       },
       "required": [
-        "pre_start",
-        "post_stop",
         "stop_timeout_seconds"
       ],
       "title": "CompiledLifecycle",
@@ -1820,15 +1694,6 @@
           "title": "Memory Floor Bytes",
           "type": "integer"
         },
-        "memory_kind": {
-          "enum": [
-            "unified",
-            "host",
-            "accelerator"
-          ],
-          "title": "Memory Kind",
-          "type": "string"
-        },
         "port": {
           "anyOf": [
             {
@@ -1875,8 +1740,7 @@
         "master_port",
         "port",
         "reserved_memory_bytes",
-        "memory_floor_bytes",
-        "memory_kind"
+        "memory_floor_bytes"
       ],
       "title": "CompiledPlacement",
       "type": "object"
@@ -1906,11 +1770,6 @@
           "title": "Executable",
           "type": "string"
         },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
         "placement": {
           "$ref": "#/$defs/CompiledPlacement"
         },
@@ -1922,7 +1781,6 @@
         "executable",
         "argv",
         "env",
-        "image_digest",
         "placement",
         "telemetry"
       ],
@@ -1931,25 +1789,13 @@
     },
     "CompiledRuntimeImage": {
       "additionalProperties": false,
+      "description": "The Controller-built OCI archive; imported locally as\n``localhost/vonk/compiled-runtime-<oci_layout_sha256>@<image_digest>``.",
       "properties": {
-        "architecture": {
-          "const": "linux-arm64",
-          "title": "Architecture",
-          "type": "string"
-        },
         "build_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Build Id"
-        },
-        "distribution_object": {
-          "$ref": "#/$defs/CompiledDistributionObject"
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Build Id",
+          "type": "string"
         },
         "image_bytes": {
           "exclusiveMinimum": 0,
@@ -1967,35 +1813,9 @@
           "title": "Local Image Config Id",
           "type": "string"
         },
-        "local_image_reference": {
-          "title": "Local Image Reference",
-          "type": "string"
-        },
         "oci_layout_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Oci Layout Sha256",
-          "type": "string"
-        },
-        "platform_manifest_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Platform Manifest Digest",
-          "type": "string"
-        },
-        "registry_manifest_digest": {
-          "anyOf": [
-            {
-              "pattern": "^sha256:[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Registry Manifest Digest"
-        },
-        "runtime_interface": {
-          "const": "vonk.runtime.v1",
-          "title": "Runtime Interface",
           "type": "string"
         },
         "runtime_interface_label": {
@@ -2003,29 +1823,14 @@
           "minLength": 1,
           "title": "Runtime Interface Label",
           "type": "string"
-        },
-        "source": {
-          "enum": [
-            "published",
-            "controller-build"
-          ],
-          "title": "Source",
-          "type": "string"
         }
       },
       "required": [
         "image_digest",
         "oci_layout_sha256",
         "image_bytes",
-        "architecture",
-        "runtime_interface",
-        "source",
         "build_id",
-        "distribution_object",
-        "registry_manifest_digest",
-        "platform_manifest_digest",
         "local_image_config_id",
-        "local_image_reference",
         "runtime_interface_label"
       ],
       "title": "CompiledRuntimeImage",
@@ -2092,23 +1897,10 @@
     },
     "CompiledSecurity": {
       "additionalProperties": false,
+      "description": "Per-workload security choices; everything else is a platform constant.",
       "properties": {
-        "capabilities": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Capabilities",
-          "type": "array"
-        },
-        "devices": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Devices",
-          "type": "array"
-        },
-        "host_network": {
-          "title": "Host Network",
+        "gpu": {
+          "title": "Gpu",
           "type": "boolean"
         },
         "mounts": {
@@ -2127,44 +1919,24 @@
           "title": "Network Mode",
           "type": "string"
         },
-        "no_new_privileges": {
-          "title": "No New Privileges",
-          "type": "boolean"
-        },
-        "privileged": {
-          "title": "Privileged",
-          "type": "boolean"
-        },
-        "read_only_root": {
-          "title": "Read Only Root",
-          "type": "boolean"
-        },
         "user": {
           "title": "User",
           "type": "string"
         }
       },
       "required": [
-        "devices",
-        "capabilities",
+        "gpu",
         "network_mode",
-        "host_network",
-        "privileged",
         "user",
-        "mounts",
-        "read_only_root",
-        "no_new_privileges"
+        "mounts"
       ],
       "title": "CompiledSecurity",
       "type": "object"
     },
     "CompiledSecurityMount": {
       "additionalProperties": false,
+      "description": "Model and input mounts are read-only; the output mount is writable.",
       "properties": {
-        "read_only": {
-          "title": "Read Only",
-          "type": "boolean"
-        },
         "source": {
           "enum": [
             "model",
@@ -2181,8 +1953,7 @@
       },
       "required": [
         "source",
-        "target",
-        "read_only"
+        "target"
       ],
       "title": "CompiledSecurityMount",
       "type": "object"
@@ -2190,26 +1961,6 @@
     "CompiledTopology": {
       "additionalProperties": false,
       "properties": {
-        "backend": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Backend",
-          "type": "string"
-        },
-        "mode": {
-          "enum": [
-            "single",
-            "distributed",
-            "tensor_parallel",
-            "pipeline_parallel",
-            "data_parallel",
-            "hybrid",
-            "ray",
-            "mpi"
-          ],
-          "title": "Mode",
-          "type": "string"
-        },
         "name": {
           "title": "Name",
           "type": "string"
@@ -2218,32 +1969,11 @@
           "exclusiveMinimum": 0,
           "title": "Node Count",
           "type": "integer"
-        },
-        "rank": {
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "world_size": {
-          "exclusiveMinimum": 0,
-          "title": "World Size",
-          "type": "integer"
         }
       },
       "required": [
         "name",
-        "mode",
-        "backend",
-        "node_count",
-        "world_size",
-        "rank",
-        "role"
+        "node_count"
       ],
       "title": "CompiledTopology",
       "type": "object"
@@ -4882,41 +4612,6 @@
       "title": "RecipeBuildAdditionalContext",
       "type": "object"
     },
-    "RecipeBuildArgument": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "maxLength": 64,
-          "minLength": 1,
-          "pattern": "^[a-z][a-z0-9._-]{0,63}$",
-          "title": "Name",
-          "type": "string"
-        },
-        "value": {
-          "anyOf": [
-            {
-              "maxLength": 1024,
-              "type": "string"
-            },
-            {
-              "maximum": 9223372036854775807,
-              "minimum": -9223372036854775808,
-              "type": "integer"
-            },
-            {
-              "type": "boolean"
-            }
-          ],
-          "title": "Value"
-        }
-      },
-      "required": [
-        "name",
-        "value"
-      ],
-      "title": "RecipeBuildArgument",
-      "type": "object"
-    },
     "RecipeBuildBaseImage": {
       "additionalProperties": false,
       "properties": {
@@ -4941,34 +4636,8 @@
     },
     "RecipeBuildCleanupEvidence": {
       "additionalProperties": false,
-      "properties": {
-        "build_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Build Id",
-          "type": "string"
-        },
-        "operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Operation Id",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "stopped": {
-          "const": true,
-          "title": "Stopped",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "schema_version",
-        "build_id",
-        "operation_id",
-        "stopped"
-      ],
+      "description": "The build service is stopped; the fenced attempt is the whole answer.",
+      "properties": {},
       "title": "RecipeBuildCleanupEvidence",
       "type": "object"
     },
@@ -4985,15 +4654,9 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Operation Id",
           "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "build_id",
         "operation_id"
       ],
@@ -5038,11 +4701,6 @@
     "RecipeBuildEvidence": {
       "additionalProperties": false,
       "properties": {
-        "build_input_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Build Input Sha256",
-          "type": "string"
-        },
         "image_bytes": {
           "exclusiveMinimum": 0,
           "maximum": 17592186044416,
@@ -5058,43 +4716,25 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Oci Layout Sha256",
           "type": "string"
-        },
-        "policy": {
-          "$ref": "#/$defs/RecipeBuildPolicy"
         }
       },
       "required": [
-        "build_input_sha256",
         "image_bytes",
         "image_digest",
-        "oci_layout_sha256",
-        "policy"
+        "oci_layout_sha256"
       ],
       "title": "RecipeBuildEvidence",
       "type": "object"
     },
     "RecipeBuildLimits": {
       "additionalProperties": false,
+      "description": "Resource limits; builds never get a GPU, privileges, host mounts or a\ncontainer socket.",
       "properties": {
-        "container_socket": {
-          "title": "Container Socket",
-          "type": "boolean"
-        },
         "cpu_cores": {
           "maximum": 256,
           "minimum": 1,
           "title": "Cpu Cores",
           "type": "integer"
-        },
-        "gpu": {
-          "maximum": 64,
-          "minimum": 0,
-          "title": "Gpu",
-          "type": "integer"
-        },
-        "host_mounts": {
-          "title": "Host Mounts",
-          "type": "boolean"
         },
         "memory_bytes": {
           "exclusiveMinimum": 0,
@@ -5107,10 +4747,6 @@
           "maximum": 17592186044416,
           "title": "Output Bytes",
           "type": "integer"
-        },
-        "privileged": {
-          "title": "Privileged",
-          "type": "boolean"
         },
         "processes": {
           "maximum": 65535,
@@ -5132,13 +4768,9 @@
         }
       },
       "required": [
-        "container_socket",
         "cpu_cores",
-        "gpu",
-        "host_mounts",
         "memory_bytes",
         "output_bytes",
-        "privileged",
         "processes",
         "temporary_bytes",
         "timeout_seconds"
@@ -5172,6 +4804,7 @@
     },
     "RecipeBuildNetwork": {
       "additionalProperties": false,
+      "description": "Public hosts the build may reach; an empty list builds offline.",
       "properties": {
         "hosts": {
           "items": {
@@ -5180,19 +4813,10 @@
           "maxItems": 64,
           "title": "Hosts",
           "type": "array"
-        },
-        "mode": {
-          "enum": [
-            "none",
-            "public"
-          ],
-          "title": "Mode",
-          "type": "string"
         }
       },
       "required": [
-        "hosts",
-        "mode"
+        "hosts"
       ],
       "title": "RecipeBuildNetwork",
       "type": "object"
@@ -5401,92 +5025,12 @@
       "title": "RecipeBuildOptions",
       "type": "object"
     },
-    "RecipeBuildPolicy": {
-      "additionalProperties": false,
-      "properties": {
-        "dockerfile": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Dockerfile",
-          "type": "string"
-        },
-        "findings": {
-          "items": {
-            "$ref": "#/$defs/RecipeBuildPolicyFinding"
-          },
-          "maxItems": 128,
-          "title": "Findings",
-          "type": "array"
-        },
-        "passed": {
-          "title": "Passed",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "passed",
-        "dockerfile",
-        "findings"
-      ],
-      "title": "RecipeBuildPolicy",
-      "type": "object"
-    },
-    "RecipeBuildPolicyFinding": {
-      "additionalProperties": false,
-      "properties": {
-        "code": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Code",
-          "type": "string"
-        },
-        "detail": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Detail",
-          "type": "string"
-        },
-        "line": {
-          "anyOf": [
-            {
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Line"
-        },
-        "path": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Path",
-          "type": "string"
-        }
-      },
-      "required": [
-        "code",
-        "path",
-        "detail"
-      ],
-      "title": "RecipeBuildPolicyFinding",
-      "type": "object"
-    },
     "RecipeBuildRequest": {
       "additionalProperties": false,
+      "description": "Build one recipe image for linux/arm64.",
       "properties": {
         "adapter": {
           "$ref": "#/$defs/RecipeBuildAdapter"
-        },
-        "arguments": {
-          "items": {
-            "$ref": "#/$defs/RecipeBuildArgument"
-          },
-          "maxItems": 64,
-          "title": "Arguments",
-          "type": "array"
         },
         "base_image_storage_bytes": {
           "maximum": 17592186044416,
@@ -5526,11 +5070,6 @@
           "title": "Dockerfile",
           "type": "string"
         },
-        "kind": {
-          "const": "recipe.build.v1",
-          "title": "Kind",
-          "type": "string"
-        },
         "limits": {
           "$ref": "#/$defs/RecipeBuildLimits"
         },
@@ -5539,11 +5078,6 @@
         },
         "options": {
           "$ref": "#/$defs/RecipeBuildOptions"
-        },
-        "platform": {
-          "const": "linux/arm64",
-          "title": "Platform",
-          "type": "string"
         },
         "recipe_content_sha256": {
           "pattern": "^[0-9a-f]{64}$",
@@ -5555,11 +5089,6 @@
           "title": "Recipe Revision Id",
           "type": "string"
         },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
         "source_bundle_bytes": {
           "maximum": 67108864,
           "minimum": 1,
@@ -5570,40 +5099,21 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Source Bundle Sha256",
           "type": "string"
-        },
-        "target": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9._-]+$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Target"
         }
       },
       "required": [
         "adapter",
-        "arguments",
         "base_image_storage_bytes",
         "base_images",
         "capabilities",
         "build_id",
         "build_input_sha256",
         "dockerfile",
-        "kind",
         "limits",
         "network",
         "options",
-        "platform",
         "recipe_content_sha256",
         "recipe_revision_id",
-        "schema_version",
         "source_bundle_bytes",
         "source_bundle_sha256"
       ],
@@ -5612,35 +5122,8 @@
     },
     "RecipeImageImportEvidence": {
       "additionalProperties": false,
-      "properties": {
-        "build_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Build Id",
-          "type": "string"
-        },
-        "image_bytes": {
-          "exclusiveMinimum": 0,
-          "maximum": 17592186044416,
-          "title": "Image Bytes",
-          "type": "integer"
-        },
-        "image_digest": {
-          "pattern": "^sha256:[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "oci_layout_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Oci Layout Sha256",
-          "type": "string"
-        }
-      },
-      "required": [
-        "build_id",
-        "image_bytes",
-        "image_digest",
-        "oci_layout_sha256"
-      ],
+      "description": "The image is imported; the Controller already holds its identity.",
+      "properties": {},
       "title": "RecipeImageImportEvidence",
       "type": "object"
     },
@@ -5663,11 +5146,6 @@
           "title": "Image Digest",
           "type": "string"
         },
-        "kind": {
-          "const": "recipe.image.import.v1",
-          "title": "Kind",
-          "type": "string"
-        },
         "mapping_generation": {
           "minimum": 1,
           "title": "Mapping Generation",
@@ -5683,11 +5161,6 @@
           "title": "Oci Layout Sha256",
           "type": "string"
         },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
         "source_node_id": {
           "pattern": "^spk_[0-9a-f]{32}$",
           "title": "Source Node Id",
@@ -5698,11 +5171,9 @@
         "build_id",
         "image_bytes",
         "image_digest",
-        "kind",
         "mapping_generation",
         "mapping_id",
         "oci_layout_sha256",
-        "schema_version",
         "source_node_id"
       ],
       "title": "RecipeImageImportRequest",
@@ -8362,21 +7833,12 @@
     },
     "RuntimePreflightRequest": {
       "additionalProperties": false,
+      "description": "Check this linux/arm64 host can run one recipe runtime.",
       "properties": {
-        "architecture": {
-          "enum": [
-            "linux-arm64",
-            "linux-amd64"
-          ],
-          "title": "Architecture",
-          "type": "string"
-        },
         "fabric_connectivity": {
           "enum": [
             "none",
-            "connected",
-            "full_mesh",
-            "switch"
+            "connected"
           ],
           "title": "Fabric Connectivity",
           "type": "string"
@@ -8387,24 +7849,10 @@
           "title": "Fabric Minimum Mbps",
           "type": "integer"
         },
-        "mandatory_capabilities": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Mandatory Capabilities",
-          "type": "array"
-        },
         "minimum_free_bytes": {
           "maximum": 18446744073709551615,
           "minimum": 0,
           "title": "Minimum Free Bytes",
-          "type": "integer"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
           "type": "integer"
         },
         "source_build": {
@@ -8413,13 +7861,10 @@
         }
       },
       "required": [
-        "schema_version",
-        "architecture",
         "source_build",
         "minimum_free_bytes",
         "fabric_connectivity",
-        "fabric_minimum_mbps",
-        "mandatory_capabilities"
+        "fabric_minimum_mbps"
       ],
       "title": "RuntimePreflightRequest",
       "type": "object"
@@ -8427,16 +7872,6 @@
     "RuntimePreflightResult": {
       "additionalProperties": false,
       "properties": {
-        "cached": {
-          "title": "Cached",
-          "type": "boolean"
-        },
-        "duration_ms": {
-          "exclusiveMaximum": 60000,
-          "minimum": 0,
-          "title": "Duration Ms",
-          "type": "integer"
-        },
         "findings": {
           "items": {
             "$ref": "#/$defs/RuntimePreflightFinding"
@@ -8455,25 +7890,11 @@
           "minimum": 0,
           "title": "Observed At",
           "type": "integer"
-        },
-        "request_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Request Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "fingerprint",
-        "request_sha256",
         "observed_at",
-        "duration_ms",
-        "cached",
         "findings"
       ],
       "title": "RuntimePreflightResult",
@@ -10095,9 +9516,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Vonk Agent Wire",
   "x-vonk-model-bases": {
-    "CompiledDistributionObject": [
-      "DistributionObject"
-    ],
     "InstallerAcceptanceBaselineRelease": [
       "InstallerReleaseIdentity"
     ],
@@ -10109,9 +9527,6 @@
     ],
     "InstallerPackageArtifact": [
       "InstallerReleaseObject"
-    ],
-    "RecipeBuildCleanupEvidence": [
-      "RecipeBuildCleanupRequest"
     ],
     "RecipeJobOutputManifest": [
       "RecipeJobOutputManifestContent"
@@ -10157,7 +9572,6 @@
     "ClaimRequest": "vonk_agent_protocol.claims.ClaimRequest",
     "CompiledArtifact": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifact",
     "CompiledArtifactMount": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifactMount",
-    "CompiledDistributionObject": "vonk_agent_protocol.compiled_execution_plan.CompiledDistributionObject",
     "CompiledEndpoint": "vonk_agent_protocol.compiled_execution_plan.CompiledEndpoint",
     "CompiledEnvironmentEntry": "vonk_agent_protocol.compiled_execution_plan.CompiledEnvironmentEntry",
     "CompiledExecutionPlan": "vonk_agent_protocol.compiled_execution_plan.CompiledExecutionPlan",
@@ -10215,7 +9629,6 @@
     "RecipeBuildAdapter": "vonk_agent_protocol.build_import.RecipeBuildAdapter",
     "RecipeBuildAdapterDefinition": "vonk_agent_protocol.build_import.RecipeBuildAdapterDefinition",
     "RecipeBuildAdditionalContext": "vonk_agent_protocol.build_import.RecipeBuildAdditionalContext",
-    "RecipeBuildArgument": "vonk_agent_protocol.build_import.RecipeBuildArgument",
     "RecipeBuildBaseImage": "vonk_agent_protocol.build_import.RecipeBuildBaseImage",
     "RecipeBuildCleanupEvidence": "vonk_agent_protocol.build_import.RecipeBuildCleanupEvidence",
     "RecipeBuildCleanupRequest": "vonk_agent_protocol.build_import.RecipeBuildCleanupRequest",
@@ -10225,8 +9638,6 @@
     "RecipeBuildMetadata": "vonk_agent_protocol.build_import.RecipeBuildMetadata",
     "RecipeBuildNetwork": "vonk_agent_protocol.build_import.RecipeBuildNetwork",
     "RecipeBuildOptions": "vonk_agent_protocol.build_import.RecipeBuildOptions",
-    "RecipeBuildPolicy": "vonk_agent_protocol.build_import.RecipeBuildPolicy",
-    "RecipeBuildPolicyFinding": "vonk_agent_protocol.build_import.RecipeBuildPolicyFinding",
     "RecipeBuildRequest": "vonk_agent_protocol.build_import.RecipeBuildRequest",
     "RecipeImageImportEvidence": "vonk_agent_protocol.build_import.RecipeImageImportEvidence",
     "RecipeImageImportRequest": "vonk_agent_protocol.build_import.RecipeImageImportRequest",
@@ -10305,7 +9716,6 @@
     "ClaimRequest": "#/$defs/ClaimRequest",
     "CompiledArtifact": "#/$defs/CompiledArtifact",
     "CompiledArtifactMount": "#/$defs/CompiledArtifactMount",
-    "CompiledDistributionObject": "#/$defs/CompiledDistributionObject",
     "CompiledEndpoint": "#/$defs/CompiledEndpoint",
     "CompiledEnvironmentEntry": "#/$defs/CompiledEnvironmentEntry",
     "CompiledExecutionPlan": "#/$defs/CompiledExecutionPlan",
@@ -10363,7 +9773,6 @@
     "RecipeBuildAdapter": "#/$defs/RecipeBuildAdapter",
     "RecipeBuildAdapterDefinition": "#/$defs/RecipeBuildAdapterDefinition",
     "RecipeBuildAdditionalContext": "#/$defs/RecipeBuildAdditionalContext",
-    "RecipeBuildArgument": "#/$defs/RecipeBuildArgument",
     "RecipeBuildBaseImage": "#/$defs/RecipeBuildBaseImage",
     "RecipeBuildCleanupEvidence": "#/$defs/RecipeBuildCleanupEvidence",
     "RecipeBuildCleanupRequest": "#/$defs/RecipeBuildCleanupRequest",
@@ -10373,8 +9782,6 @@
     "RecipeBuildMetadata": "#/$defs/RecipeBuildMetadata",
     "RecipeBuildNetwork": "#/$defs/RecipeBuildNetwork",
     "RecipeBuildOptions": "#/$defs/RecipeBuildOptions",
-    "RecipeBuildPolicy": "#/$defs/RecipeBuildPolicy",
-    "RecipeBuildPolicyFinding": "#/$defs/RecipeBuildPolicyFinding",
     "RecipeBuildRequest": "#/$defs/RecipeBuildRequest",
     "RecipeImageImportEvidence": "#/$defs/RecipeImageImportEvidence",
     "RecipeImageImportRequest": "#/$defs/RecipeImageImportRequest",

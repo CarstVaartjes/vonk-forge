@@ -704,7 +704,6 @@ pub struct ClaimRequest {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct CompiledArtifact {
-    pub distribution_object: CompiledDistributionObject,
     pub file_id: ::std::string::String,
     pub model: CompiledModelIdentity,
     pub mount: CompiledArtifactMount,
@@ -718,67 +717,7 @@ pub struct CompiledArtifact {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct CompiledArtifactMount {
-    pub read_only: bool,
     pub target: ::std::string::String,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct CompiledDistributionObject {
-    pub bytes: u64,
-    pub kind: CompiledDistributionObjectKind,
-    pub name: ::std::string::String,
-    pub sha256: ::std::string::String,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum CompiledDistributionObjectKind {
-    #[serde(rename = "model")]
-    Model,
-    #[serde(rename = "oci-archive")]
-    OciArchive,
-}
-impl ::std::fmt::Display for CompiledDistributionObjectKind {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Model => f.write_str("model"),
-            Self::OciArchive => f.write_str("oci-archive"),
-        }
-    }
-}
-impl ::std::str::FromStr for CompiledDistributionObjectKind {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "model" => Ok(Self::Model),
-            "oci-archive" => Ok(Self::OciArchive),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for CompiledDistributionObjectKind {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for CompiledDistributionObjectKind {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -787,7 +726,6 @@ pub struct CompiledEndpoint {
     pub health_path: ::std::string::String,
     pub model_aliases: ::std::vec::Vec<::std::string::String>,
     pub port: u16,
-    pub protocol: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -809,7 +747,6 @@ pub struct CompiledExecutionPlan {
     pub lifecycle: CompiledLifecycle,
     pub runtime: CompiledRuntime,
     pub runtime_image: CompiledRuntimeImage,
-    pub schema_version: u8,
     pub security: CompiledSecurity,
     pub topology: CompiledTopology,
 }
@@ -817,11 +754,6 @@ pub struct CompiledExecutionPlan {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct CompiledIdentity {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub build_input_sha256: ::std::option::Option<::std::string::String>,
-    pub execution_sha256: ::std::string::String,
-    pub harness_sha256: ::std::string::String,
-    pub model_artifact_bytes: u64,
     pub model_artifact_set_sha256: ::std::string::String,
     pub recipe_revision_sha256: ::std::string::String,
 }
@@ -832,7 +764,6 @@ pub struct CompiledJob {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub input: ::std::option::Option<CompiledJobInput>,
     pub interface: CompiledJobInterface,
-    pub output_path: ::std::string::String,
     pub timeout_seconds: u32,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -841,7 +772,6 @@ pub struct CompiledJob {
 pub struct CompiledJobInput {
     pub max_bytes: u32,
     pub media_types: ::std::vec::Vec<::std::string::String>,
-    pub path: ::std::string::String,
     pub required: bool,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub slots: ::std::option::Option<::std::vec::Vec<CompiledJobInputSlot>>,
@@ -926,8 +856,6 @@ impl ::std::convert::TryFrom<::std::string::String> for CompiledJobInterface {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct CompiledLifecycle {
-    pub post_stop: ::std::vec::Vec<::std::vec::Vec<::std::string::String>>,
-    pub pre_start: ::std::vec::Vec<::std::vec::Vec<::std::string::String>>,
     pub stop_timeout_seconds: u32,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -951,67 +879,12 @@ pub struct CompiledPlacement {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub master_port: ::std::option::Option<u16>,
     pub memory_floor_bytes: u64,
-    pub memory_kind: CompiledPlacementMemoryKind,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub port: ::std::option::Option<u16>,
     pub rank: u64,
     pub reserved_memory_bytes: u64,
     pub role: ::std::string::String,
     pub world_size: u64,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum CompiledPlacementMemoryKind {
-    #[serde(rename = "unified")]
-    Unified,
-    #[serde(rename = "host")]
-    Host,
-    #[serde(rename = "accelerator")]
-    Accelerator,
-}
-impl ::std::fmt::Display for CompiledPlacementMemoryKind {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Unified => f.write_str("unified"),
-            Self::Host => f.write_str("host"),
-            Self::Accelerator => f.write_str("accelerator"),
-        }
-    }
-}
-impl ::std::str::FromStr for CompiledPlacementMemoryKind {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "unified" => Ok(Self::Unified),
-            "host" => Ok(Self::Host),
-            "accelerator" => Ok(Self::Accelerator),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for CompiledPlacementMemoryKind {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for CompiledPlacementMemoryKind {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1020,7 +893,6 @@ pub struct CompiledRuntime {
     pub argv: ::std::vec::Vec<::std::string::String>,
     pub env: ::std::vec::Vec<CompiledEnvironmentEntry>,
     pub executable: ::std::string::String,
-    pub image_digest: ::std::string::String,
     pub placement: CompiledPlacement,
     pub telemetry: CompiledRuntimeTelemetry,
 }
@@ -1028,71 +900,12 @@ pub struct CompiledRuntime {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct CompiledRuntimeImage {
-    pub architecture: ::std::string::String,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub build_id: ::std::option::Option<::std::string::String>,
-    pub distribution_object: CompiledDistributionObject,
+    pub build_id: ::std::string::String,
     pub image_bytes: u64,
     pub image_digest: ::std::string::String,
     pub local_image_config_id: ::std::string::String,
-    pub local_image_reference: ::std::string::String,
     pub oci_layout_sha256: ::std::string::String,
-    pub platform_manifest_digest: ::std::string::String,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub registry_manifest_digest: ::std::option::Option<::std::string::String>,
-    pub runtime_interface: ::std::string::String,
     pub runtime_interface_label: ::std::string::String,
-    pub source: CompiledRuntimeImageSource,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum CompiledRuntimeImageSource {
-    #[serde(rename = "published")]
-    Published,
-    #[serde(rename = "controller-build")]
-    ControllerBuild,
-}
-impl ::std::fmt::Display for CompiledRuntimeImageSource {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Published => f.write_str("published"),
-            Self::ControllerBuild => f.write_str("controller-build"),
-        }
-    }
-}
-impl ::std::str::FromStr for CompiledRuntimeImageSource {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "published" => Ok(Self::Published),
-            "controller-build" => Ok(Self::ControllerBuild),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for CompiledRuntimeImageSource {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for CompiledRuntimeImageSource {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1160,21 +973,15 @@ impl ::std::convert::TryFrom<::std::string::String> for CompiledRuntimeTelemetry
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct CompiledSecurity {
-    pub capabilities: ::std::vec::Vec<::std::string::String>,
-    pub devices: ::std::vec::Vec<::std::string::String>,
-    pub host_network: bool,
+    pub gpu: bool,
     pub mounts: ::std::vec::Vec<CompiledSecurityMount>,
     pub network_mode: CompiledSecurityNetworkMode,
-    pub no_new_privileges: bool,
-    pub privileged: bool,
-    pub read_only_root: bool,
     pub user: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct CompiledSecurityMount {
-    pub read_only: bool,
     pub source: CompiledSecurityMountSource,
     pub target: ::std::string::String,
 }
@@ -1290,87 +1097,8 @@ impl ::std::convert::TryFrom<::std::string::String> for CompiledSecurityNetworkM
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct CompiledTopology {
-    pub backend: ::std::string::String,
-    pub mode: CompiledTopologyMode,
     pub name: ::std::string::String,
     pub node_count: u64,
-    pub rank: u64,
-    pub role: ::std::string::String,
-    pub world_size: u64,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum CompiledTopologyMode {
-    #[serde(rename = "single")]
-    Single,
-    #[serde(rename = "distributed")]
-    Distributed,
-    #[serde(rename = "tensor_parallel")]
-    TensorParallel,
-    #[serde(rename = "pipeline_parallel")]
-    PipelineParallel,
-    #[serde(rename = "data_parallel")]
-    DataParallel,
-    #[serde(rename = "hybrid")]
-    Hybrid,
-    #[serde(rename = "ray")]
-    Ray,
-    #[serde(rename = "mpi")]
-    Mpi,
-}
-impl ::std::fmt::Display for CompiledTopologyMode {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Single => f.write_str("single"),
-            Self::Distributed => f.write_str("distributed"),
-            Self::TensorParallel => f.write_str("tensor_parallel"),
-            Self::PipelineParallel => f.write_str("pipeline_parallel"),
-            Self::DataParallel => f.write_str("data_parallel"),
-            Self::Hybrid => f.write_str("hybrid"),
-            Self::Ray => f.write_str("ray"),
-            Self::Mpi => f.write_str("mpi"),
-        }
-    }
-}
-impl ::std::str::FromStr for CompiledTopologyMode {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "single" => Ok(Self::Single),
-            "distributed" => Ok(Self::Distributed),
-            "tensor_parallel" => Ok(Self::TensorParallel),
-            "pipeline_parallel" => Ok(Self::PipelineParallel),
-            "data_parallel" => Ok(Self::DataParallel),
-            "hybrid" => Ok(Self::Hybrid),
-            "ray" => Ok(Self::Ray),
-            "mpi" => Ok(Self::Mpi),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for CompiledTopologyMode {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for CompiledTopologyMode {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -2896,33 +2624,20 @@ pub struct RecipeBuildAdditionalContext {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
-pub struct RecipeBuildArgument {
-    pub name: ::std::string::String,
-    pub value: ::serde_json::Value,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
 pub struct RecipeBuildBaseImage {
     pub manifest_digest: ::std::string::String,
     pub reference: ::std::string::String,
 }
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
-pub struct RecipeBuildCleanupEvidence {
-    pub build_id: ::uuid::Uuid,
-    pub operation_id: ::uuid::Uuid,
-    pub schema_version: u8,
-    pub stopped: bool,
-}
+pub struct RecipeBuildCleanupEvidence {}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeBuildCleanupRequest {
     pub build_id: ::uuid::Uuid,
     pub operation_id: ::uuid::Uuid,
-    pub schema_version: u8,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -2935,23 +2650,17 @@ pub struct RecipeBuildEnvironmentArgument {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeBuildEvidence {
-    pub build_input_sha256: ::std::string::String,
     pub image_bytes: u64,
     pub image_digest: ::std::string::String,
     pub oci_layout_sha256: ::std::string::String,
-    pub policy: RecipeBuildPolicy,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RecipeBuildLimits {
-    pub container_socket: bool,
     pub cpu_cores: u32,
-    pub gpu: u32,
-    pub host_mounts: bool,
     pub memory_bytes: u64,
     pub output_bytes: u64,
-    pub privileged: bool,
     pub processes: u16,
     pub temporary_bytes: u64,
     pub timeout_seconds: u32,
@@ -2968,57 +2677,6 @@ pub struct RecipeBuildMetadata {
 #[derive(Eq)]
 pub struct RecipeBuildNetwork {
     pub hosts: ::std::vec::Vec<::std::string::String>,
-    pub mode: RecipeBuildNetworkMode,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum RecipeBuildNetworkMode {
-    #[serde(rename = "none")]
-    None,
-    #[serde(rename = "public")]
-    Public,
-}
-impl ::std::fmt::Display for RecipeBuildNetworkMode {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::None => f.write_str("none"),
-            Self::Public => f.write_str("public"),
-        }
-    }
-}
-impl ::std::str::FromStr for RecipeBuildNetworkMode {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "none" => Ok(Self::None),
-            "public" => Ok(Self::Public),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for RecipeBuildNetworkMode {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for RecipeBuildNetworkMode {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -3207,55 +2865,26 @@ impl ::std::convert::TryFrom<::std::string::String> for RecipeBuildOptionsSquash
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
-pub struct RecipeBuildPolicy {
-    pub dockerfile: ::std::string::String,
-    pub findings: ::std::vec::Vec<RecipeBuildPolicyFinding>,
-    pub passed: bool,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct RecipeBuildPolicyFinding {
-    pub code: ::std::string::String,
-    pub detail: ::std::string::String,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub line: ::std::option::Option<u64>,
-    pub path: ::std::string::String,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
 pub struct RecipeBuildRequest {
     pub adapter: RecipeBuildAdapter,
-    pub arguments: ::std::vec::Vec<RecipeBuildArgument>,
     pub base_image_storage_bytes: u64,
     pub base_images: ::std::vec::Vec<RecipeBuildBaseImage>,
     pub build_id: ::uuid::Uuid,
     pub build_input_sha256: ::std::string::String,
     pub capabilities: ::std::vec::Vec<::std::string::String>,
     pub dockerfile: ::std::string::String,
-    pub kind: ::std::string::String,
     pub limits: RecipeBuildLimits,
     pub network: RecipeBuildNetwork,
     pub options: RecipeBuildOptions,
-    pub platform: ::std::string::String,
     pub recipe_content_sha256: ::std::string::String,
     pub recipe_revision_id: ::uuid::Uuid,
-    pub schema_version: u8,
     pub source_bundle_bytes: u32,
     pub source_bundle_sha256: ::std::string::String,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub target: ::std::option::Option<::std::string::String>,
 }
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
-pub struct RecipeImageImportEvidence {
-    pub build_id: ::uuid::Uuid,
-    pub image_bytes: u64,
-    pub image_digest: ::std::string::String,
-    pub oci_layout_sha256: ::std::string::String,
-}
+pub struct RecipeImageImportEvidence {}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -3263,11 +2892,9 @@ pub struct RecipeImageImportRequest {
     pub build_id: ::uuid::Uuid,
     pub image_bytes: u64,
     pub image_digest: ::std::string::String,
-    pub kind: ::std::string::String,
     pub mapping_generation: u64,
     pub mapping_id: ::uuid::Uuid,
     pub oci_layout_sha256: ::std::string::String,
-    pub schema_version: u8,
     pub source_node_id: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -4239,63 +3866,10 @@ impl ::std::convert::TryFrom<::std::string::String> for RuntimePreflightFindingS
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RuntimePreflightRequest {
-    pub architecture: RuntimePreflightRequestArchitecture,
     pub fabric_connectivity: RuntimePreflightRequestFabricConnectivity,
     pub fabric_minimum_mbps: u64,
-    pub mandatory_capabilities: ::std::vec::Vec<::std::string::String>,
     pub minimum_free_bytes: u64,
-    pub schema_version: u8,
     pub source_build: bool,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum RuntimePreflightRequestArchitecture {
-    #[serde(rename = "linux-arm64")]
-    LinuxArm64,
-    #[serde(rename = "linux-amd64")]
-    LinuxAmd64,
-}
-impl ::std::fmt::Display for RuntimePreflightRequestArchitecture {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::LinuxArm64 => f.write_str("linux-arm64"),
-            Self::LinuxAmd64 => f.write_str("linux-amd64"),
-        }
-    }
-}
-impl ::std::str::FromStr for RuntimePreflightRequestArchitecture {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "linux-arm64" => Ok(Self::LinuxArm64),
-            "linux-amd64" => Ok(Self::LinuxAmd64),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for RuntimePreflightRequestArchitecture {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for RuntimePreflightRequestArchitecture {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(
     ::serde::Deserialize,
@@ -4314,18 +3888,12 @@ pub enum RuntimePreflightRequestFabricConnectivity {
     None,
     #[serde(rename = "connected")]
     Connected,
-    #[serde(rename = "full_mesh")]
-    FullMesh,
-    #[serde(rename = "switch")]
-    Switch,
 }
 impl ::std::fmt::Display for RuntimePreflightRequestFabricConnectivity {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::None => f.write_str("none"),
             Self::Connected => f.write_str("connected"),
-            Self::FullMesh => f.write_str("full_mesh"),
-            Self::Switch => f.write_str("switch"),
         }
     }
 }
@@ -4335,8 +3903,6 @@ impl ::std::str::FromStr for RuntimePreflightRequestFabricConnectivity {
         match value {
             "none" => Ok(Self::None),
             "connected" => Ok(Self::Connected),
-            "full_mesh" => Ok(Self::FullMesh),
-            "switch" => Ok(Self::Switch),
             _ => Err("invalid value".into()),
         }
     }
@@ -4359,13 +3925,9 @@ impl ::std::convert::TryFrom<::std::string::String> for RuntimePreflightRequestF
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct RuntimePreflightResult {
-    pub cached: bool,
-    pub duration_ms: u64,
     pub findings: ::std::vec::Vec<RuntimePreflightFinding>,
     pub fingerprint: ::std::string::String,
     pub observed_at: u64,
-    pub request_sha256: ::std::string::String,
-    pub schema_version: u8,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -5317,6 +4879,7 @@ impl<'de> ::serde::Deserialize<'de> for ActivateRequest {
             pub generation: u64,
             pub node_id: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             generation: raw.generation,
@@ -5346,6 +4909,7 @@ impl<'de> ::serde::Deserialize<'de> for ActivationMarker {
             pub schema_version: u8,
             pub state: ActivationMarkerState,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             authority_id: raw.authority_id,
@@ -5412,6 +4976,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaim {
             pub payload_digest: ::std::string::String,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             attempt: raw.attempt,
@@ -5450,6 +5015,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentDirective {
             pub operation_id: ::uuid::Uuid,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             attempt: raw.attempt,
@@ -5522,6 +5088,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureKind {
             #[serde(rename = "resource-prerequisite")]
             ResourcePrerequisite,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::TemporaryDependency => Self::TemporaryDependency,
@@ -5573,6 +5140,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub uncertain: ::std::option::Option<bool>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             diagnostic: raw.diagnostic,
@@ -5604,6 +5172,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentInstallResult {
         struct Raw {
             pub installed_bytes: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             installed_bytes: raw.installed_bytes,
@@ -5687,6 +5256,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
             #[serde(rename = "recipe.reconcile")]
             RecipeReconcile,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::RuntimePreflightV1 => Self::RuntimePreflightV1,
@@ -5720,6 +5290,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentPackageSource {
             pub package_url: ::std::string::String,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             architecture: raw.architecture,
@@ -5753,6 +5324,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentProgress {
             pub progress: ::std::option::Option<OperationProgress>,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             attempt: raw.attempt,
@@ -5789,6 +5361,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentResult {
             pub schema_version: u8,
             pub state: AgentResultState,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             attempt: raw.attempt,
@@ -5847,6 +5420,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentRuntimeIdentity {
             pub self_test_passed: bool,
             pub semantic_version: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             architecture: raw.architecture,
@@ -5901,6 +5475,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentUpgradeGrantRequest {
             pub package_sha256: ::std::string::String,
             pub package_signature: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             attempt: raw.attempt,
@@ -5936,6 +5511,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentUpgradePayload {
             pub target_binary_digest: ::std::string::String,
             pub target_build_digest: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             architecture: raw.architecture,
@@ -5971,6 +5547,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentUpgradeResult {
             pub self_test_passed: bool,
             pub status: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             activation_receipt: raw.activation_receipt,
@@ -5997,6 +5574,7 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionPayload {
             pub plan_digest: ::std::string::String,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             authority_revision: raw.authority_revision,
@@ -6024,6 +5602,7 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
             pub verified_image_digest: ::std::string::String,
             pub verified_oci_layout_sha256: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             assignment_id: raw.assignment_id,
@@ -6051,6 +5630,7 @@ impl<'de> ::serde::Deserialize<'de> for BoundedErrorResponse {
             pub context: ::std::option::Option<ErrorContextResponse>,
             pub detail: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             context: raw.context,
@@ -6076,6 +5656,7 @@ impl<'de> ::serde::Deserialize<'de> for ClaimRequest {
             pub runtime_identity: AgentRuntimeIdentity,
             pub wait_seconds: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             capabilities: raw.capabilities,
@@ -6097,7 +5678,6 @@ impl<'de> ::serde::Deserialize<'de> for CompiledArtifact {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub distribution_object: CompiledDistributionObject,
             pub file_id: ::std::string::String,
             pub model: CompiledModelIdentity,
             pub mount: CompiledArtifactMount,
@@ -6107,9 +5687,9 @@ impl<'de> ::serde::Deserialize<'de> for CompiledArtifact {
             pub sha256: ::std::string::String,
             pub size_bytes: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            distribution_object: raw.distribution_object,
             file_id: raw.file_id,
             model: raw.model,
             mount: raw.mount,
@@ -6130,61 +5710,11 @@ impl<'de> ::serde::Deserialize<'de> for CompiledArtifactMount {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub read_only: bool,
             pub target: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            read_only: raw.read_only,
-            target: raw.target,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for CompiledDistributionObject {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("CompiledDistributionObject", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub bytes: u64,
-            pub kind: CompiledDistributionObjectKind,
-            pub name: ::std::string::String,
-            pub sha256: ::std::string::String,
-        }
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            bytes: raw.bytes,
-            kind: raw.kind,
-            name: raw.name,
-            sha256: raw.sha256,
-        })
-    }
-}
-impl CompiledDistributionObjectKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Model => "model",
-            Self::OciArchive => "oci-archive",
-        }
-    }
-}
-impl ::std::ops::Deref for CompiledDistributionObjectKind {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for CompiledDistributionObjectKind {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for CompiledDistributionObjectKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
+        Ok(Self { target: raw.target })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledEndpoint {
@@ -6199,14 +5729,13 @@ impl<'de> ::serde::Deserialize<'de> for CompiledEndpoint {
             pub health_path: ::std::string::String,
             pub model_aliases: ::std::vec::Vec<::std::string::String>,
             pub port: u16,
-            pub protocol: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             health_path: raw.health_path,
             model_aliases: raw.model_aliases,
             port: raw.port,
-            protocol: raw.protocol,
         })
     }
 }
@@ -6222,6 +5751,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledEnvironmentEntry {
             pub name: ::std::string::String,
             pub value: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             name: raw.name,
@@ -6247,10 +5777,10 @@ impl<'de> ::serde::Deserialize<'de> for CompiledExecutionPlan {
             pub lifecycle: CompiledLifecycle,
             pub runtime: CompiledRuntime,
             pub runtime_image: CompiledRuntimeImage,
-            pub schema_version: u8,
             pub security: CompiledSecurity,
             pub topology: CompiledTopology,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifacts: raw.artifacts,
@@ -6260,7 +5790,6 @@ impl<'de> ::serde::Deserialize<'de> for CompiledExecutionPlan {
             lifecycle: raw.lifecycle,
             runtime: raw.runtime,
             runtime_image: raw.runtime_image,
-            schema_version: raw.schema_version,
             security: raw.security,
             topology: raw.topology,
         })
@@ -6275,20 +5804,12 @@ impl<'de> ::serde::Deserialize<'de> for CompiledIdentity {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub build_input_sha256: ::std::option::Option<::std::string::String>,
-            pub execution_sha256: ::std::string::String,
-            pub harness_sha256: ::std::string::String,
-            pub model_artifact_bytes: u64,
             pub model_artifact_set_sha256: ::std::string::String,
             pub recipe_revision_sha256: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            build_input_sha256: raw.build_input_sha256,
-            execution_sha256: raw.execution_sha256,
-            harness_sha256: raw.harness_sha256,
-            model_artifact_bytes: raw.model_artifact_bytes,
             model_artifact_set_sha256: raw.model_artifact_set_sha256,
             recipe_revision_sha256: raw.recipe_revision_sha256,
         })
@@ -6306,14 +5827,13 @@ impl<'de> ::serde::Deserialize<'de> for CompiledJob {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub input: ::std::option::Option<CompiledJobInput>,
             pub interface: CompiledJobInterface,
-            pub output_path: ::std::string::String,
             pub timeout_seconds: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             input: raw.input,
             interface: raw.interface,
-            output_path: raw.output_path,
             timeout_seconds: raw.timeout_seconds,
         })
     }
@@ -6329,16 +5849,15 @@ impl<'de> ::serde::Deserialize<'de> for CompiledJobInput {
         struct Raw {
             pub max_bytes: u32,
             pub media_types: ::std::vec::Vec<::std::string::String>,
-            pub path: ::std::string::String,
             pub required: bool,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub slots: ::std::option::Option<::std::vec::Vec<CompiledJobInputSlot>>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             max_bytes: raw.max_bytes,
             media_types: raw.media_types,
-            path: raw.path,
             required: raw.required,
             slots: raw.slots,
         })
@@ -6363,6 +5882,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledJobInputSlot {
             pub media_types: ::std::vec::Vec<::std::string::String>,
             pub min_files: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             description: raw.description,
@@ -6413,14 +5933,11 @@ impl<'de> ::serde::Deserialize<'de> for CompiledLifecycle {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub post_stop: ::std::vec::Vec<::std::vec::Vec<::std::string::String>>,
-            pub pre_start: ::std::vec::Vec<::std::vec::Vec<::std::string::String>>,
             pub stop_timeout_seconds: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            post_stop: raw.post_stop,
-            pre_start: raw.pre_start,
             stop_timeout_seconds: raw.stop_timeout_seconds,
         })
     }
@@ -6438,6 +5955,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledModelIdentity {
             pub publisher: ::std::string::String,
             pub slug: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             content_sha256: raw.content_sha256,
@@ -6464,7 +5982,6 @@ impl<'de> ::serde::Deserialize<'de> for CompiledPlacement {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub master_port: ::std::option::Option<u16>,
             pub memory_floor_bytes: u64,
-            pub memory_kind: CompiledPlacementMemoryKind,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub port: ::std::option::Option<u16>,
             pub rank: u64,
@@ -6472,6 +5989,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledPlacement {
             pub role: ::std::string::String,
             pub world_size: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             endpoint_address: raw.endpoint_address,
@@ -6479,38 +5997,12 @@ impl<'de> ::serde::Deserialize<'de> for CompiledPlacement {
             master_address: raw.master_address,
             master_port: raw.master_port,
             memory_floor_bytes: raw.memory_floor_bytes,
-            memory_kind: raw.memory_kind,
             port: raw.port,
             rank: raw.rank,
             reserved_memory_bytes: raw.reserved_memory_bytes,
             role: raw.role,
             world_size: raw.world_size,
         })
-    }
-}
-impl CompiledPlacementMemoryKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Unified => "unified",
-            Self::Host => "host",
-            Self::Accelerator => "accelerator",
-        }
-    }
-}
-impl ::std::ops::Deref for CompiledPlacementMemoryKind {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for CompiledPlacementMemoryKind {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for CompiledPlacementMemoryKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledRuntime {
@@ -6525,16 +6017,15 @@ impl<'de> ::serde::Deserialize<'de> for CompiledRuntime {
             pub argv: ::std::vec::Vec<::std::string::String>,
             pub env: ::std::vec::Vec<CompiledEnvironmentEntry>,
             pub executable: ::std::string::String,
-            pub image_digest: ::std::string::String,
             pub placement: CompiledPlacement,
             pub telemetry: CompiledRuntimeTelemetry,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             argv: raw.argv,
             env: raw.env,
             executable: raw.executable,
-            image_digest: raw.image_digest,
             placement: raw.placement,
             telemetry: raw.telemetry,
         })
@@ -6549,62 +6040,23 @@ impl<'de> ::serde::Deserialize<'de> for CompiledRuntimeImage {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub architecture: ::std::string::String,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub build_id: ::std::option::Option<::std::string::String>,
-            pub distribution_object: CompiledDistributionObject,
+            pub build_id: ::std::string::String,
             pub image_bytes: u64,
             pub image_digest: ::std::string::String,
             pub local_image_config_id: ::std::string::String,
-            pub local_image_reference: ::std::string::String,
             pub oci_layout_sha256: ::std::string::String,
-            pub platform_manifest_digest: ::std::string::String,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub registry_manifest_digest: ::std::option::Option<::std::string::String>,
-            pub runtime_interface: ::std::string::String,
             pub runtime_interface_label: ::std::string::String,
-            pub source: CompiledRuntimeImageSource,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            architecture: raw.architecture,
             build_id: raw.build_id,
-            distribution_object: raw.distribution_object,
             image_bytes: raw.image_bytes,
             image_digest: raw.image_digest,
             local_image_config_id: raw.local_image_config_id,
-            local_image_reference: raw.local_image_reference,
             oci_layout_sha256: raw.oci_layout_sha256,
-            platform_manifest_digest: raw.platform_manifest_digest,
-            registry_manifest_digest: raw.registry_manifest_digest,
-            runtime_interface: raw.runtime_interface,
             runtime_interface_label: raw.runtime_interface_label,
-            source: raw.source,
         })
-    }
-}
-impl CompiledRuntimeImageSource {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Published => "published",
-            Self::ControllerBuild => "controller-build",
-        }
-    }
-}
-impl ::std::ops::Deref for CompiledRuntimeImageSource {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for CompiledRuntimeImageSource {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for CompiledRuntimeImageSource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledRuntimeTelemetry {
@@ -6624,6 +6076,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledRuntimeTelemetry {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub metrics_path: ::std::option::Option<::std::string::String>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             engine: raw.engine,
@@ -6666,26 +6119,17 @@ impl<'de> ::serde::Deserialize<'de> for CompiledSecurity {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub capabilities: ::std::vec::Vec<::std::string::String>,
-            pub devices: ::std::vec::Vec<::std::string::String>,
-            pub host_network: bool,
+            pub gpu: bool,
             pub mounts: ::std::vec::Vec<CompiledSecurityMount>,
             pub network_mode: CompiledSecurityNetworkMode,
-            pub no_new_privileges: bool,
-            pub privileged: bool,
-            pub read_only_root: bool,
             pub user: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            capabilities: raw.capabilities,
-            devices: raw.devices,
-            host_network: raw.host_network,
+            gpu: raw.gpu,
             mounts: raw.mounts,
             network_mode: raw.network_mode,
-            no_new_privileges: raw.no_new_privileges,
-            privileged: raw.privileged,
-            read_only_root: raw.read_only_root,
             user: raw.user,
         })
     }
@@ -6699,13 +6143,12 @@ impl<'de> ::serde::Deserialize<'de> for CompiledSecurityMount {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub read_only: bool,
             pub source: CompiledSecurityMountSource,
             pub target: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            read_only: raw.read_only,
             source: raw.source,
             target: raw.target,
         })
@@ -6770,54 +6213,15 @@ impl<'de> ::serde::Deserialize<'de> for CompiledTopology {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub backend: ::std::string::String,
-            pub mode: CompiledTopologyMode,
             pub name: ::std::string::String,
             pub node_count: u64,
-            pub rank: u64,
-            pub role: ::std::string::String,
-            pub world_size: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            backend: raw.backend,
-            mode: raw.mode,
             name: raw.name,
             node_count: raw.node_count,
-            rank: raw.rank,
-            role: raw.role,
-            world_size: raw.world_size,
         })
-    }
-}
-impl CompiledTopologyMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Single => "single",
-            Self::Distributed => "distributed",
-            Self::TensorParallel => "tensor_parallel",
-            Self::PipelineParallel => "pipeline_parallel",
-            Self::DataParallel => "data_parallel",
-            Self::Hybrid => "hybrid",
-            Self::Ray => "ray",
-            Self::Mpi => "mpi",
-        }
-    }
-}
-impl ::std::ops::Deref for CompiledTopologyMode {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for CompiledTopologyMode {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for CompiledTopologyMode {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for ConfirmPackageActivationOperation {
@@ -6837,6 +6241,7 @@ impl<'de> ::serde::Deserialize<'de> for ConfirmPackageActivationOperation {
             #[serde(rename = "type")]
             pub type_: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             attempt_nonce: raw.attempt_nonce,
@@ -6869,6 +6274,7 @@ impl<'de> ::serde::Deserialize<'de> for DistributionAssignment {
             pub plan_digest: ::std::string::String,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             assignment_id: raw.assignment_id,
@@ -6898,6 +6304,7 @@ impl<'de> ::serde::Deserialize<'de> for DistributionObject {
             pub name: ::std::string::String,
             pub sha256: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             bytes: raw.bytes,
@@ -6950,6 +6357,7 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentBootstrapResponse {
             pub host_helper_authority_public_key: ::std::string::String,
             pub service_hostnames: ::std::vec::Vec<::std::string::String>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             ca_fingerprint: raw.ca_fingerprint,
@@ -6979,6 +6387,7 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentEvidence {
             pub node_id: ::std::string::String,
             pub observation_receipt_public_key: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             agent_digest: raw.agent_digest,
@@ -7004,6 +6413,7 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentSubmitRequest {
             pub evidence: EnrollmentEvidence,
             pub grant_token: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             csr: raw.csr,
@@ -7033,6 +6443,7 @@ impl<'de> ::serde::Deserialize<'de> for ErrorContextResponse {
             pub retryable: bool,
             pub source: ErrorContextResponseSource,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             code: raw.code,
@@ -7137,6 +6548,7 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             #[serde(rename = "type")]
             pub type_: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             action: raw.action,
@@ -7208,6 +6620,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureDiagnostics {
             pub storage: ::std::vec::Vec<FailureProperty>,
             pub versions: ::std::vec::Vec<FailureProperty>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             category: raw.category,
@@ -7269,6 +6682,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureLogTail {
             pub text: ::std::string::String,
             pub truncated: bool,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             dropped_bytes: raw.dropped_bytes,
@@ -7290,6 +6704,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureProperty {
             pub name: ::std::string::String,
             pub value: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             name: raw.name,
@@ -7314,6 +6729,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperGrantClaims {
             pub request_id: ::uuid::Uuid,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             authority: raw.authority,
@@ -7337,6 +6753,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperGrantResponse {
         struct Raw {
             pub grant: SignedHostHelperGrant,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self { grant: raw.grant })
     }
@@ -7353,6 +6770,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperProcessLogs {
             pub stderr: FailureLogTail,
             pub stdout: FailureLogTail,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             stderr: raw.stderr,
@@ -7386,6 +6804,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             pub schema_version: u8,
             pub status: HostHelperResponseStatus,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             diagnostic: raw.diagnostic,
@@ -7442,6 +6861,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperSignature {
             pub key_id: ::std::string::String,
             pub value: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             algorithm: raw.algorithm,
@@ -7466,6 +6886,7 @@ impl<'de> ::serde::Deserialize<'de> for HostOperation {
             ScheduleRebootOperation(ScheduleRebootOperation),
             ExecuteContainerRuntimeRequestOperation(ExecuteContainerRuntimeRequestOperation),
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::InstallVonkDebOperation(value0) => Self::InstallVonkDebOperation(value0),
@@ -7514,6 +6935,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub stop_plan_sha256: ::std::option::Option<::std::string::String>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             action: raw.action,
@@ -7595,6 +7017,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub stop_plan: ::std::option::Option<RecipeStopPayload>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             action: raw.action,
@@ -7658,6 +7081,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallVonkDebOperation {
             #[serde(rename = "type")]
             pub type_: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             package_sha256: raw.package_sha256,
@@ -7689,6 +7113,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerAcceptanceBaselineRelease {
             pub source_sha: ::std::string::String,
             pub version: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             acceptance_only: raw.acceptance_only,
@@ -7743,6 +7168,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerBaselineArtifacts {
             #[serde(rename = "spark-setup-signature-linux-arm64")]
             pub spark_setup_signature_linux_arm64: InstallerReleaseObject,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             agent_package_linux_arm64: raw.agent_package_linux_arm64,
@@ -7762,6 +7188,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerBaselineBootstraps {
         struct Raw {
             pub spark: InstallerReleaseObject,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self { spark: raw.spark })
     }
@@ -7796,6 +7223,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateArtifacts {
             #[serde(rename = "spark-setup-signature-linux-arm64")]
             pub spark_setup_signature_linux_arm64: InstallerReleaseObject,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             agent_package_linux_arm64: raw.agent_package_linux_arm64,
@@ -7823,6 +7251,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateBootstraps {
             pub nas: InstallerReleaseObject,
             pub spark: InstallerReleaseObject,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             nas: raw.nas,
@@ -7848,6 +7277,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateRelease {
             pub source_sha: ::std::string::String,
             pub version: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifacts: raw.artifacts,
@@ -7903,6 +7333,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerPackageArtifact {
             pub target_binary_digest: ::std::string::String,
             pub target_build_digest: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             architecture: raw.architecture,
@@ -7932,6 +7363,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseIdentity {
             pub source_sha: ::std::string::String,
             pub version: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             channel: raw.channel,
@@ -7981,6 +7413,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
             pub litellm: ::std::string::String,
             pub worker: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             api: raw.api,
@@ -8003,6 +7436,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseManifest {
             CandidateRelease(InstallerCandidateRelease),
             AcceptanceBaselineRelease(InstallerAcceptanceBaselineRelease),
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::CandidateRelease(value0) => Self::CandidateRelease(value0),
@@ -8023,6 +7457,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseObject {
             pub sha256: ::std::string::String,
             pub size: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             path: raw.path,
@@ -8063,6 +7498,7 @@ impl<'de> ::serde::Deserialize<'de> for InventoryRequest {
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_store_read_only: raw.artifact_store_read_only,
@@ -8126,6 +7562,7 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
             pub not_before: ::std::string::String,
             pub serial: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             certificate_pem: raw.certificate_pem,
@@ -8155,6 +7592,7 @@ impl<'de> ::serde::Deserialize<'de> for OperationCheckpoint {
             pub key: ::std::string::String,
             pub sequence: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             cursor: raw.cursor,
@@ -8201,6 +7639,7 @@ impl<'de> ::serde::Deserialize<'de> for OperationMemberProgress {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub total_items: ::std::option::Option<u64>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             activity: raw.activity,
@@ -8286,6 +7725,7 @@ impl<'de> ::serde::Deserialize<'de> for OperationProgress {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub total_items: ::std::option::Option<u64>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             activity: raw.activity,
@@ -8344,6 +7784,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageActivationGrantRequest {
             pub receipt: PackageActivationReceipt,
             pub runtime_identity: AgentRuntimeIdentity,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             node_id: raw.node_id,
@@ -8375,6 +7816,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageActivationReceipt {
             pub source_version: ::std::string::String,
             pub updated_at: i64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             attempt_nonce: raw.attempt_nonce,
@@ -8434,6 +7876,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageRollbackAuthority {
             pub attempt_nonce: ::std::string::String,
             pub source: PackageRollbackSource,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             activation_deadline: raw.activation_deadline,
@@ -8457,6 +7900,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageRollbackSource {
             pub package_signature: ::std::string::String,
             pub package_version: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             binary_sha256: raw.binary_sha256,
@@ -8479,6 +7923,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdapter {
             pub adapter_sha256: ::std::string::String,
             pub definition: RecipeBuildAdapterDefinition,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             adapter_sha256: raw.adapter_sha256,
@@ -8500,6 +7945,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdapterDefinition {
             pub engine: ::std::string::String,
             pub image_user: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             adapter_id: raw.adapter_id,
@@ -8521,29 +7967,11 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdditionalContext {
             pub name: ::std::string::String,
             pub path: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             name: raw.name,
             path: raw.path,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeBuildArgument {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeBuildArgument", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub name: ::std::string::String,
-            pub value: ::serde_json::Value,
-        }
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            name: raw.name,
-            value: raw.value,
         })
     }
 }
@@ -8559,6 +7987,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildBaseImage {
             pub manifest_digest: ::std::string::String,
             pub reference: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             manifest_digest: raw.manifest_digest,
@@ -8571,22 +8000,13 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupEvidence {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildCleanupEvidence", &mut value)
             .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
-        struct Raw {
-            pub build_id: ::uuid::Uuid,
-            pub operation_id: ::uuid::Uuid,
-            pub schema_version: u8,
-            pub stopped: bool,
-        }
+        struct Raw {}
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            build_id: raw.build_id,
-            operation_id: raw.operation_id,
-            schema_version: raw.schema_version,
-            stopped: raw.stopped,
-        })
+        Ok(Self {})
     }
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupRequest {
@@ -8600,13 +8020,12 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupRequest {
         struct Raw {
             pub build_id: ::uuid::Uuid,
             pub operation_id: ::uuid::Uuid,
-            pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             build_id: raw.build_id,
             operation_id: raw.operation_id,
-            schema_version: raw.schema_version,
         })
     }
 }
@@ -8622,6 +8041,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildEnvironmentArgument {
             pub name: ::std::string::String,
             pub value: ::serde_json::Value,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             name: raw.name,
@@ -8638,19 +8058,16 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildEvidence {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub build_input_sha256: ::std::string::String,
             pub image_bytes: u64,
             pub image_digest: ::std::string::String,
             pub oci_layout_sha256: ::std::string::String,
-            pub policy: RecipeBuildPolicy,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            build_input_sha256: raw.build_input_sha256,
             image_bytes: raw.image_bytes,
             image_digest: raw.image_digest,
             oci_layout_sha256: raw.oci_layout_sha256,
-            policy: raw.policy,
         })
     }
 }
@@ -8663,26 +8080,19 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildLimits {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub container_socket: bool,
             pub cpu_cores: u32,
-            pub gpu: u32,
-            pub host_mounts: bool,
             pub memory_bytes: u64,
             pub output_bytes: u64,
-            pub privileged: bool,
             pub processes: u16,
             pub temporary_bytes: u64,
             pub timeout_seconds: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            container_socket: raw.container_socket,
             cpu_cores: raw.cpu_cores,
-            gpu: raw.gpu,
-            host_mounts: raw.host_mounts,
             memory_bytes: raw.memory_bytes,
             output_bytes: raw.output_bytes,
-            privileged: raw.privileged,
             processes: raw.processes,
             temporary_bytes: raw.temporary_bytes,
             timeout_seconds: raw.timeout_seconds,
@@ -8701,6 +8111,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildMetadata {
             pub name: ::std::string::String,
             pub value: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             name: raw.name,
@@ -8718,37 +8129,10 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildNetwork {
         #[derive(Eq)]
         struct Raw {
             pub hosts: ::std::vec::Vec<::std::string::String>,
-            pub mode: RecipeBuildNetworkMode,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            hosts: raw.hosts,
-            mode: raw.mode,
-        })
-    }
-}
-impl RecipeBuildNetworkMode {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Public => "public",
-        }
-    }
-}
-impl ::std::ops::Deref for RecipeBuildNetworkMode {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for RecipeBuildNetworkMode {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for RecipeBuildNetworkMode {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
+        Ok(Self { hosts: raw.hosts })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildOptions {
@@ -8786,6 +8170,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildOptions {
             pub unset_environment: ::std::vec::Vec<::std::string::String>,
             pub unset_labels: ::std::vec::Vec<::std::string::String>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             additional_contexts: raw.additional_contexts,
@@ -8886,51 +8271,6 @@ impl ::std::cmp::PartialEq<&str> for RecipeBuildOptionsSquash {
         self.as_str() == *other
     }
 }
-impl<'de> ::serde::Deserialize<'de> for RecipeBuildPolicy {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeBuildPolicy", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub dockerfile: ::std::string::String,
-            pub findings: ::std::vec::Vec<RecipeBuildPolicyFinding>,
-            pub passed: bool,
-        }
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            dockerfile: raw.dockerfile,
-            findings: raw.findings,
-            passed: raw.passed,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for RecipeBuildPolicyFinding {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RecipeBuildPolicyFinding", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub code: ::std::string::String,
-            pub detail: ::std::string::String,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub line: ::std::option::Option<u64>,
-            pub path: ::std::string::String,
-        }
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            code: raw.code,
-            detail: raw.detail,
-            line: raw.line,
-            path: raw.path,
-        })
-    }
-}
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -8941,47 +8281,37 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildRequest {
         #[derive(Eq)]
         struct Raw {
             pub adapter: RecipeBuildAdapter,
-            pub arguments: ::std::vec::Vec<RecipeBuildArgument>,
             pub base_image_storage_bytes: u64,
             pub base_images: ::std::vec::Vec<RecipeBuildBaseImage>,
             pub build_id: ::uuid::Uuid,
             pub build_input_sha256: ::std::string::String,
             pub capabilities: ::std::vec::Vec<::std::string::String>,
             pub dockerfile: ::std::string::String,
-            pub kind: ::std::string::String,
             pub limits: RecipeBuildLimits,
             pub network: RecipeBuildNetwork,
             pub options: RecipeBuildOptions,
-            pub platform: ::std::string::String,
             pub recipe_content_sha256: ::std::string::String,
             pub recipe_revision_id: ::uuid::Uuid,
-            pub schema_version: u8,
             pub source_bundle_bytes: u32,
             pub source_bundle_sha256: ::std::string::String,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub target: ::std::option::Option<::std::string::String>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             adapter: raw.adapter,
-            arguments: raw.arguments,
             base_image_storage_bytes: raw.base_image_storage_bytes,
             base_images: raw.base_images,
             build_id: raw.build_id,
             build_input_sha256: raw.build_input_sha256,
             capabilities: raw.capabilities,
             dockerfile: raw.dockerfile,
-            kind: raw.kind,
             limits: raw.limits,
             network: raw.network,
             options: raw.options,
-            platform: raw.platform,
             recipe_content_sha256: raw.recipe_content_sha256,
             recipe_revision_id: raw.recipe_revision_id,
-            schema_version: raw.schema_version,
             source_bundle_bytes: raw.source_bundle_bytes,
             source_bundle_sha256: raw.source_bundle_sha256,
-            target: raw.target,
         })
     }
 }
@@ -8990,22 +8320,13 @@ impl<'de> ::serde::Deserialize<'de> for RecipeImageImportEvidence {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeImageImportEvidence", &mut value)
             .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
-        struct Raw {
-            pub build_id: ::uuid::Uuid,
-            pub image_bytes: u64,
-            pub image_digest: ::std::string::String,
-            pub oci_layout_sha256: ::std::string::String,
-        }
+        struct Raw {}
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            build_id: raw.build_id,
-            image_bytes: raw.image_bytes,
-            image_digest: raw.image_digest,
-            oci_layout_sha256: raw.oci_layout_sha256,
-        })
+        Ok(Self {})
     }
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeImageImportRequest {
@@ -9020,23 +8341,20 @@ impl<'de> ::serde::Deserialize<'de> for RecipeImageImportRequest {
             pub build_id: ::uuid::Uuid,
             pub image_bytes: u64,
             pub image_digest: ::std::string::String,
-            pub kind: ::std::string::String,
             pub mapping_generation: u64,
             pub mapping_id: ::uuid::Uuid,
             pub oci_layout_sha256: ::std::string::String,
-            pub schema_version: u8,
             pub source_node_id: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             build_id: raw.build_id,
             image_bytes: raw.image_bytes,
             image_digest: raw.image_digest,
-            kind: raw.kind,
             mapping_generation: raw.mapping_generation,
             mapping_id: raw.mapping_id,
             oci_layout_sha256: raw.oci_layout_sha256,
-            schema_version: raw.schema_version,
             source_node_id: raw.source_node_id,
         })
     }
@@ -9058,6 +8376,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeInstallPayload {
             pub role: ::std::string::String,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             compiled_execution_plan: raw.compiled_execution_plan,
@@ -9083,6 +8402,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobEvidence {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub peak_memory_bytes: ::std::option::Option<u64>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             elapsed_milliseconds: raw.elapsed_milliseconds,
@@ -9104,6 +8424,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobFile {
             pub sha256: ::std::string::String,
             pub size_bytes: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             media_type: raw.media_type,
@@ -9128,6 +8449,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobInputFile {
             pub size_bytes: u32,
             pub slot: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             media_type: raw.media_type,
@@ -9151,6 +8473,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobInputManifest {
             pub schema_version: u8,
             pub total_bytes: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             files: raw.files,
@@ -9173,6 +8496,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputLimits {
             pub max_files: u32,
             pub max_total_bytes: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             allowed_media_types: raw.allowed_media_types,
@@ -9196,6 +8520,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputManifest {
             pub schema_version: u8,
             pub total_bytes: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             files: raw.files,
@@ -9218,6 +8543,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputManifestContent {
             pub schema_version: u8,
             pub total_bytes: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             files: raw.files,
@@ -9239,6 +8565,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputMapping {
             pub media_type: ::std::string::String,
             pub slot: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             extensions: raw.extensions,
@@ -9282,6 +8609,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
             pub schema_version: u8,
             pub timeout_seconds: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             compiled_execution_plan: raw.compiled_execution_plan,
@@ -9384,6 +8712,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunResult {
             pub run_id: ::uuid::Uuid,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             diagnostics: raw.diagnostics,
@@ -9409,6 +8738,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequest {
             pub operation: AgentOperation,
             pub payload: RecipeOperationRequestPayload,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             operation: raw.operation,
@@ -9435,6 +8765,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeReconcilePayload {
             pub recipe_revision_id: ::uuid::Uuid,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             compiled_spec_canonical_sha256: raw.compiled_spec_canonical_sha256,
@@ -9470,6 +8801,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeReconcileResult {
             pub reconciled: bool,
             pub removed_bytes: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             cleanup_receipt_sha256: raw.cleanup_receipt_sha256,
@@ -9505,6 +8837,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeReconciliationIdentity {
             pub recipe_revision_id: ::uuid::Uuid,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             compiled_spec_canonical_sha256: raw.compiled_spec_canonical_sha256,
@@ -9550,6 +8883,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunInspectionBinding {
             pub runtime_arguments_sha256: ::std::string::String,
             pub world_size: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
@@ -9615,6 +8949,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationGrantRequest {
             pub schema_version: u8,
             pub world_size: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
@@ -9659,6 +8994,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationGrantWire {
             pub observation_identity_sha256: ::std::string::String,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             grant: raw.grant,
@@ -9700,6 +9036,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationIdentity {
             pub schema_version: u8,
             pub world_size: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
@@ -9746,6 +9083,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationReceiptClaims {
             pub request_sha256: ::std::string::String,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             authority: raw.authority,
@@ -9827,6 +9165,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
             pub schema_version: u8,
             pub world_size: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
@@ -9875,6 +9214,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationsWire {
             pub runs: ::std::vec::Vec<RecipeRunObservationWire>,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             observed_at: raw.observed_at,
@@ -9918,6 +9258,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartCollectiveReadinessEvidence {
             pub runtime_arguments_sha256: ::std::string::String,
             pub world_size: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
@@ -9981,6 +9322,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
             pub start_deadline: ::std::option::Option<::std::string::String>,
             pub world_size: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             alias: raw.alias,
@@ -10093,6 +9435,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartRankLaunchEvidence {
             pub runtime_arguments_sha256: ::std::string::String,
             pub world_size: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
@@ -10130,6 +9473,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartResult {
             pub endpoint: ::std::option::Option<::std::string::String>,
             pub evidence: RecipeStartResultEvidence,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             endpoint: raw.endpoint,
@@ -10163,6 +9507,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartSingleEvidence {
             pub runtime_arguments_sha256: ::std::string::String,
             pub world_size: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
@@ -10209,6 +9554,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopPayload {
             pub target_runtime_id: ::uuid::Uuid,
             pub world_size: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             cancel_pending_start: raw.cancel_pending_start,
@@ -10241,6 +9587,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopResult {
         struct Raw {
             pub stopped: bool,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             stopped: raw.stopped,
@@ -10263,6 +9610,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeUninstallPayload {
             pub recipe_content_sha256: ::std::string::String,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             cleanup_model_content_sha256: raw.cleanup_model_content_sha256,
@@ -10285,6 +9633,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeUninstallResult {
             pub removed_model_bytes: u64,
             pub uninstalled: bool,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             removed_model_bytes: raw.removed_model_bytes,
@@ -10304,6 +9653,7 @@ impl<'de> ::serde::Deserialize<'de> for RenewRequest {
             pub csr: ::std::string::String,
             pub node_id: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             csr: raw.csr,
@@ -10325,6 +9675,7 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationIssue {
             #[serde(rename = "type")]
             pub type_: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             loc: raw.loc,
@@ -10349,6 +9700,7 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
             pub detail: ::std::string::String,
             pub issues: ::std::vec::Vec<RequestValidationIssue>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             candidates: raw.candidates,
@@ -10371,6 +9723,7 @@ impl<'de> ::serde::Deserialize<'de> for RestartVonkUnitOperation {
             pub type_: ::std::string::String,
             pub unit: RestartVonkUnitOperationUnit,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             type_: raw.type_,
@@ -10415,6 +9768,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightFinding {
             pub code: ::std::string::String,
             pub status: RuntimePreflightFindingStatus,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             capability: raw.capability,
@@ -10457,48 +9811,19 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightRequest {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub architecture: RuntimePreflightRequestArchitecture,
             pub fabric_connectivity: RuntimePreflightRequestFabricConnectivity,
             pub fabric_minimum_mbps: u64,
-            pub mandatory_capabilities: ::std::vec::Vec<::std::string::String>,
             pub minimum_free_bytes: u64,
-            pub schema_version: u8,
             pub source_build: bool,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            architecture: raw.architecture,
             fabric_connectivity: raw.fabric_connectivity,
             fabric_minimum_mbps: raw.fabric_minimum_mbps,
-            mandatory_capabilities: raw.mandatory_capabilities,
             minimum_free_bytes: raw.minimum_free_bytes,
-            schema_version: raw.schema_version,
             source_build: raw.source_build,
         })
-    }
-}
-impl RuntimePreflightRequestArchitecture {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::LinuxArm64 => "linux-arm64",
-            Self::LinuxAmd64 => "linux-amd64",
-        }
-    }
-}
-impl ::std::ops::Deref for RuntimePreflightRequestArchitecture {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for RuntimePreflightRequestArchitecture {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for RuntimePreflightRequestArchitecture {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
     }
 }
 impl RuntimePreflightRequestFabricConnectivity {
@@ -10506,8 +9831,6 @@ impl RuntimePreflightRequestFabricConnectivity {
         match self {
             Self::None => "none",
             Self::Connected => "connected",
-            Self::FullMesh => "full_mesh",
-            Self::Switch => "switch",
         }
     }
 }
@@ -10536,23 +9859,16 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightResult {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub cached: bool,
-            pub duration_ms: u64,
             pub findings: ::std::vec::Vec<RuntimePreflightFinding>,
             pub fingerprint: ::std::string::String,
             pub observed_at: u64,
-            pub request_sha256: ::std::string::String,
-            pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            cached: raw.cached,
-            duration_ms: raw.duration_ms,
             findings: raw.findings,
             fingerprint: raw.fingerprint,
             observed_at: raw.observed_at,
-            request_sha256: raw.request_sha256,
-            schema_version: raw.schema_version,
         })
     }
 }
@@ -10569,6 +9885,7 @@ impl<'de> ::serde::Deserialize<'de> for ScheduleRebootOperation {
             #[serde(rename = "type")]
             pub type_: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             delay_seconds: raw.delay_seconds,
@@ -10589,6 +9906,7 @@ impl<'de> ::serde::Deserialize<'de> for SignedHostHelperGrant {
             pub schema_version: u8,
             pub signature: HostHelperSignature,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             claims: raw.claims,
@@ -10613,6 +9931,7 @@ impl<'de> ::serde::Deserialize<'de> for SignedRecipeRunObservationReceipt {
             pub schema_version: u8,
             pub signature: HostHelperSignature,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             claims: raw.claims,
@@ -10634,6 +9953,7 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleDigestManifest {
             pub schema_version: u8,
             pub total_bytes: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             files: raw.files,
@@ -10656,6 +9976,7 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleFile {
             pub sha256: ::std::string::String,
             pub size: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             mode: raw.mode,
@@ -10679,6 +10000,7 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleManifest {
             pub sha256: ::std::string::String,
             pub total_bytes: u32,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             files: raw.files,
@@ -10706,6 +10028,7 @@ impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
             pub schema_version: u8,
             pub state: SupervisorAcknowledgementState,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             acknowledged_at: raw.acknowledged_at,
@@ -10773,6 +10096,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryCapability {
             pub supported: bool,
             pub unit: ::std::string::String,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             device_id: raw.device_id,
@@ -10863,6 +10187,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryDetails {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub accelerator_performance_state: ::std::option::Option<::std::string::String>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             accelerator_name: raw.accelerator_name,
@@ -10885,6 +10210,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryMetrics {
             pub series: ::std::vec::Vec<TelemetrySeries>,
             pub workloads: ::std::vec::Vec<TelemetryWorkload>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             capabilities: raw.capabilities,
@@ -10917,6 +10243,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryProvenance {
             pub source_observed_at:
                 ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             collector: raw.collector,
@@ -10937,6 +10264,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryRequest {
             pub samples: ::std::vec::Vec<TelemetrySample>,
             pub schema_version: u8,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             samples: raw.samples,
@@ -10980,6 +10308,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryRuntime {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub version: ::std::option::Option<::std::string::String>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             adapter: raw.adapter,
@@ -11075,6 +10404,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub temperature_c: ::std::option::Option<f64>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             boot_id: raw.boot_id,
@@ -11142,6 +10472,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySeries {
             pub unit: ::std::string::String,
             pub value: ::serde_json::Value,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             aggregation: raw.aggregation,
@@ -11329,6 +10660,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryWorkload {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub title: ::std::option::Option<::std::string::String>,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             created_at: raw.created_at,
@@ -11407,6 +10739,7 @@ impl<'de> ::serde::Deserialize<'de> for TensorParallelStartEvidence {
             pub runtime_arguments_sha256: ::std::string::String,
             pub world_size: u64,
         }
+        #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
@@ -11440,15 +10773,6 @@ impl From<&InstallerPackageArtifact> for InstallerReleaseObject {
             path: value.path.clone(),
             sha256: value.sha256.clone(),
             size: value.size,
-        }
-    }
-}
-impl From<&RecipeBuildCleanupEvidence> for RecipeBuildCleanupRequest {
-    fn from(value: &RecipeBuildCleanupEvidence) -> Self {
-        Self {
-            build_id: value.build_id,
-            operation_id: value.operation_id,
-            schema_version: value.schema_version,
         }
     }
 }

@@ -460,6 +460,8 @@ fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
                 crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
                     .map_err(::serde::de::Error::custom)?;
                 #raw
+                // An empty message constructs itself without reading `raw`.
+                #[allow(unused_variables)]
                 let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
                 Ok(#construction)
             }
@@ -509,6 +511,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Declare a union of model references exclusive when one variant is an empty
+/// message. typify cannot prove `{}` disjoint from the other variants and would
+/// otherwise flatten the union into a struct of optional parts. Only the Rust
+/// declarations change: the authoritative schema, which validates every
+/// document, keeps its `anyOf`, and callers match the empty result by content.
+fn exclusive_empty_unions(schema: &mut Value) {
+    let empty: Vec<String> = schema
+        .get("$defs")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, definition)| {
+            definition.get("type").and_then(Value::as_str) == Some("object")
+                && definition
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .is_some_and(|properties| properties.is_empty())
+        })
+        .map(|(name, _)| format!("#/$defs/{name}"))
+        .collect();
+    fn visit(value: &mut Value, empty: &[String]) {
+        match value {
+            Value::Object(object) => {
+                let rewrite =
+                    object
+                        .get("anyOf")
+                        .and_then(Value::as_array)
+                        .is_some_and(|variants| {
+                            variants.iter().all(|variant| variant.get("$ref").is_some())
+                                && variants.iter().any(|variant| {
+                                    variant.get("$ref").and_then(Value::as_str).is_some_and(
+                                        |reference| empty.iter().any(|e| e == reference),
+                                    )
+                                })
+                        });
+                if rewrite && let Some(variants) = object.remove("anyOf") {
+                    object.insert("oneOf".into(), variants);
+                }
+                for child in object.values_mut() {
+                    visit(child, empty);
+                }
+            }
+            Value::Array(values) => {
+                for child in values {
+                    visit(child, empty);
+                }
+            }
+            _ => {}
+        }
+    }
+    visit(schema, &empty);
+}
+
 /// The formatted Rust wire types for one exported Pydantic wire schema.
 fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut schema: Value = serde_json::from_slice(&fs::read(schema_path)?)?;
@@ -517,6 +572,7 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
         .cloned()
         .unwrap_or(json!({}));
     prepare(&mut schema);
+    exclusive_empty_unions(&mut schema);
     let defs = schema.get_mut("$defs").ok_or("missing $defs")?.take();
     let defs_text = serde_json::to_string(&defs)?.replace("#/$defs/", "#/definitions/");
     let values: BTreeMap<String, Value> = serde_json::from_str(&defs_text)?;

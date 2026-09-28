@@ -29,7 +29,7 @@ fn claim(attempt: u32, deadline: &str) -> AgentClaim {
         mapping_generation: 1,
         mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
         node_id: NODE_ID.to_owned(),
-        plan_digest: compiled_execution_plan.identity.execution_sha256,
+        plan_digest: "e".repeat(64),
         rank: compiled_execution_plan.runtime.placement.rank,
         recipe_content_sha256: compiled_execution_plan.identity.recipe_revision_sha256,
         recipe_revision_id: Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
@@ -238,7 +238,7 @@ fn real_751_artifact_claim_parses_through_rust_and_full_plan_dto() {
     raw.payload_digest = payload_digest;
     raw.payload = AgentClaimPayload::RecipeInstallPayload(payload);
     let body = canonical_json(&raw).unwrap();
-    assert!(body.len() > 500 * 1024);
+    assert!(body.len() > 256 * 1024);
     let parsed = vonk_agent::client::parse_claim_response(200, &body)
         .unwrap()
         .unwrap();

@@ -647,12 +647,8 @@ fn distributed_worker_has_runtime_identity_without_a_public_metrics_scrape() {
     plan.runtime.placement.master_address = Some("192.168.100.10".parse().unwrap());
     plan.runtime.placement.master_port = Some(29500);
     plan.security.network_mode = "host".parse().unwrap();
-    plan.security.host_network = true;
-    plan.topology.rank = 1;
-    plan.topology.role = "worker".into();
-    plan.topology.world_size = 2;
+    plan.security.gpu = true;
     plan.topology.node_count = 2;
-    plan.topology.mode = "distributed".parse().unwrap();
     plan.validate().unwrap();
     write_runtime_plan(&fixtures, run_id, &plan);
     let output = runner(b"vllm_num_requests_running 2\n");

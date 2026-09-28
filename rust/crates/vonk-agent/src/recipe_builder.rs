@@ -18,7 +18,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use vonk_agent_protocol::{
     RecipeBuildAdapter, RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence,
-    RecipeBuildPolicy, RecipeBuildPolicyFinding, RecipeBuildRequest, canonical_json, hex_sha256,
+    RecipeBuildRequest, canonical_json, hex_sha256,
 };
 
 use crate::{
@@ -45,6 +45,8 @@ const RUNTIME_ADAPTER_DIGEST_LABEL: &str = "ai.vonkforge.runtime-adapter-sha256"
 /// The adaptation stage names the recipe image through an argument so the
 /// adapter bytes -- and therefore their digest -- do not change per build.
 const ADAPTER_RECIPE_IMAGE_ARGUMENT: &str = "VONK_RECIPE_IMAGE";
+/// Recipe images are always built for DGX Spark.
+const BUILD_PLATFORM: &str = "linux/arm64";
 
 /// A Controller-authorized cleanup names an operation, never a host path or
 /// arbitrary service. Systemd stops the entire build cgroup before capacity is
@@ -117,11 +119,7 @@ pub fn cleanup_build<R: ProcessRunner>(
             return Err(RecipeBuildError::Evidence);
         }
     }
-    serde_json::from_value(serde_json::json!({
-        "schema_version": 1, "build_id": request.build_id,
-        "operation_id": request.operation_id, "stopped": true,
-    }))
-    .map_err(|_| RecipeBuildError::Evidence)
+    Ok(RecipeBuildCleanupEvidence {})
 }
 
 #[derive(Debug, Error)]
@@ -306,27 +304,6 @@ fn process_error_diagnostic(error: &ProcessError) -> &'static str {
     }
 }
 
-impl From<SourcePolicyReport> for RecipeBuildPolicy {
-    fn from(value: SourcePolicyReport) -> Self {
-        Self {
-            passed: value.passed,
-            dockerfile: value.dockerfile,
-            findings: value
-                .findings
-                .into_iter()
-                .map(|finding| RecipeBuildPolicyFinding {
-                    code: finding.code.to_owned(),
-                    path: finding.path,
-                    line: finding.line.map(|line| {
-                        u64::try_from(line).expect("usize fits the wire u64 line count")
-                    }),
-                    detail: finding.detail.to_owned(),
-                })
-                .collect(),
-        }
-    }
-}
-
 pub struct RecipeBuilder<'a, R> {
     pub runner: &'a R,
     pub data_root: &'a Path,
@@ -391,22 +368,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         // enforce a destination allowlist.  Never silently widen a declared
         // host policy into unrestricted egress. Public builds therefore get
         // an operation-private internal network and dual-homed proxy below.
-        let network = build_network(&request.network)?;
-        if network == BuildNetwork::Public
-            && request.arguments.iter().any(|argument| {
-                matches!(
-                    argument.name.as_str(),
-                    "HTTP_PROXY"
-                        | "HTTPS_PROXY"
-                        | "NO_PROXY"
-                        | "http_proxy"
-                        | "https_proxy"
-                        | "no_proxy"
-                )
-            })
-        {
-            return Err(RecipeBuildError::NetworkPolicy);
-        }
+        let network = build_network(&request.network);
         let staging_root = self.data_root.join("build-staging");
         fs::create_dir_all(&staging_root)?;
         let staging = PodmanBuildStaging::create(&staging_root)?;
@@ -492,7 +454,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             "--no-cache".to_owned(),
             "--pull=never".to_owned(),
             "--platform".to_owned(),
-            request.platform.clone(),
+            BUILD_PLATFORM.to_owned(),
             "--file".to_owned(),
             context.join(&request.dockerfile).display().to_string(),
             "--tag".to_owned(),
@@ -567,16 +529,8 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             podman_arguments.push("--unsetlabel".to_owned());
             podman_arguments.push(name.clone());
         }
-        for argument in &request.arguments {
-            podman_arguments.push("--build-arg".to_owned());
-            podman_arguments.push(format!("{}={}", argument.name, scalar(&argument.value)?));
-        }
         for capability in &request.capabilities {
             podman_arguments.push(format!("--cap-add={capability}"));
-        }
-        if let Some(target) = &request.target {
-            podman_arguments.push("--target".to_owned());
-            podman_arguments.push(target.clone());
         }
         podman_arguments.push(context.display().to_string());
         let timeout = remaining_build_time(deadline)?;
@@ -696,11 +650,9 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 .run(Program::Podman, &remove_arguments, Duration::from_secs(60));
         }
         Ok(RecipeBuildEvidence {
-            build_input_sha256: request.build_input_sha256.clone(),
             image_bytes,
             image_digest,
             oci_layout_sha256,
-            policy: policy.into(),
         })
     }
 
@@ -755,7 +707,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             "--no-cache".to_owned(),
             "--pull=never".to_owned(),
             "--platform".to_owned(),
-            request.platform.clone(),
+            BUILD_PLATFORM.to_owned(),
             "--file".to_owned(),
             containerfile.display().to_string(),
             "--tag".to_owned(),
@@ -841,7 +793,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 .materialize(
                     self.runner,
                     image,
-                    &request.platform,
+                    BUILD_PLATFORM,
                     remaining,
                     request.limits.temporary_bytes,
                 )
@@ -1105,15 +1057,13 @@ enum BuildNetwork {
     Public,
 }
 
-fn build_network(
-    network: &vonk_agent_protocol::RecipeBuildNetwork,
-) -> Result<BuildNetwork, RecipeBuildError> {
-    if network.mode == "none" && network.hosts.is_empty() {
-        Ok(BuildNetwork::None)
-    } else if network.mode == "public" && !network.hosts.is_empty() {
-        Ok(BuildNetwork::Public)
+/// An empty host list builds offline; otherwise the build reaches only the
+/// listed public hosts.
+fn build_network(network: &vonk_agent_protocol::RecipeBuildNetwork) -> BuildNetwork {
+    if network.hosts.is_empty() {
+        BuildNetwork::None
     } else {
-        Err(RecipeBuildError::NetworkPolicy)
+        BuildNetwork::Public
     }
 }
 

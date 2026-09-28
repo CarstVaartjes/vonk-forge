@@ -62,7 +62,6 @@ fn opaque_legacy_spec() -> (Value, String) {
     // document as opaque; current executable-plan parsing must fail closed.
     let placement = spec["runtime"]["placement"].as_object_mut().unwrap();
     assert!(placement.remove("memory_floor_bytes").is_some());
-    assert!(placement.remove("memory_kind").is_some());
     assert!(serde_json::from_value::<CompiledExecutionPlan>(spec.clone()).is_err());
     let recipe_digest = spec["identity"]["recipe_revision_sha256"]
         .as_str()

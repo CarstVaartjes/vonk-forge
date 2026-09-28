@@ -12,10 +12,9 @@ pub use generated::{
     ArtifactDistributionPayload as ArtifactDistributionRequest, DistributionAssignment,
     DistributionObject, EnrollmentEvidence, EnrollmentSubmitRequest as EnrollmentRequest,
     InventoryRequest, InventoryRequestMemoryPool as MemoryPool, RecipeBuildAdapter,
-    RecipeBuildAdapterDefinition, RecipeBuildAdditionalContext, RecipeBuildArgument,
-    RecipeBuildBaseImage, RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest,
-    RecipeBuildEvidence, RecipeBuildLimits, RecipeBuildMetadata, RecipeBuildNetwork,
-    RecipeBuildOptions, RecipeBuildPolicy, RecipeBuildPolicyFinding, RecipeBuildRequest,
+    RecipeBuildAdapterDefinition, RecipeBuildAdditionalContext, RecipeBuildBaseImage,
+    RecipeBuildCleanupEvidence, RecipeBuildCleanupRequest, RecipeBuildEvidence, RecipeBuildLimits,
+    RecipeBuildMetadata, RecipeBuildNetwork, RecipeBuildOptions, RecipeBuildRequest,
     RecipeImageImportEvidence, RecipeImageImportRequest,
     RecipeInstallPayload as RecipeInstallRequest, RecipeJobEvidence, RecipeJobFile,
     RecipeJobInputFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
@@ -1053,19 +1052,14 @@ impl AgentResult {
                     &self.result,
                     AgentResultResult::ArtifactDistributionResult(_)
                 ),
-                AgentOperation::RecipeBuildCleanupV1 => {
-                    matches!(
-                        &self.result,
-                        AgentResultResult::RecipeBuildCleanupEvidence(_)
-                    )
+                // An empty success deserializes into the first empty-capable
+                // variant, so it is recognized by content, not by variant.
+                AgentOperation::RecipeBuildCleanupV1 | AgentOperation::RecipeImageImportV1 => {
+                    empty_result(&self.result)
                 }
                 AgentOperation::RecipeBuildV1 => {
                     matches!(&self.result, AgentResultResult::RecipeBuildEvidence(_))
                 }
-                AgentOperation::RecipeImageImportV1 => matches!(
-                    &self.result,
-                    AgentResultResult::RecipeImageImportEvidence(_)
-                ),
                 AgentOperation::RecipeInstall => {
                     matches!(&self.result, AgentResultResult::AgentInstallResult(_))
                 }
@@ -1428,13 +1422,11 @@ impl RecipeOperationRequest {
     fn validate(&self) -> Result<(), ProtocolError> {
         let valid_common = |version: u8, plan: &str| version == 1 && lower_hex(plan, 64);
         let valid = match self {
-            Self::RuntimePreflight(value) => value.validate().is_ok(),
+            Self::RuntimePreflight(_) => true,
             Self::Build(value) => validate_build(value),
-            Self::BuildCleanup(value) => value.schema_version == 1,
+            Self::BuildCleanup(_) => true,
             Self::ImageImport(value) => {
-                value.schema_version == 1
-                    && value.kind == "recipe.image.import.v1"
-                    && value.mapping_generation >= 1
+                value.mapping_generation >= 1
                     && valid_node_id(&value.source_node_id)
                     && valid_oci_digest(&value.image_digest)
                     && lower_hex(&value.oci_layout_sha256, 64)
@@ -1446,7 +1438,6 @@ impl RecipeOperationRequest {
                     && lower_hex(&value.plan_digest, 64)
                     && value.expected_bytes <= 16 * 1024_u64.pow(4)
                     && valid_role(&value.role)
-                    && value.compiled_execution_plan.schema_version == 2
             }
             Self::Start(value) => {
                 let valid_phase = match (&value.phase, &value.start_deadline) {
@@ -1502,7 +1493,6 @@ impl RecipeOperationRequest {
                             && value.master_port.is_some_and(|port| port >= 1024)
                     }
                     && valid_alias(&value.alias)
-                    && value.compiled_execution_plan.schema_version == 2
                     && value.memory_floor_bytes <= 16 * 1024_u64.pow(4)
                     && value.memory_floor_bytes
                         == value
@@ -1510,13 +1500,6 @@ impl RecipeOperationRequest {
                             .runtime
                             .placement
                             .memory_floor_bytes
-                    && value.memory_kind.to_string()
-                        == value
-                            .compiled_execution_plan
-                            .runtime
-                            .placement
-                            .memory_kind
-                            .to_string()
             }
             Self::Stop(value) => validate_recipe_stop(value),
             Self::Uninstall(value) => {
@@ -1863,18 +1846,6 @@ mod recipe_start_tests {
     }
 
     #[test]
-    fn start_request_memory_kind_must_match_compiled_placement() {
-        let mut request = start_payload(1, 0, None, None, None);
-        request["memory_kind"] = Value::String("host".to_owned());
-        assert!(parsed_start(request).is_err());
-
-        let mut request = start_payload(1, 0, None, None, None);
-        request["compiled_execution_plan"]["runtime"]["placement"]["memory_kind"] =
-            Value::String("host".to_owned());
-        assert!(parsed_start(request).is_err());
-    }
-
-    #[test]
     fn distributed_start_accepts_rank_launch_and_exact_owner_collective_readiness() {
         let launch = parsed_start(start_payload(
             2,
@@ -2069,7 +2040,6 @@ mod recipe_install_tests {
             panic!("expected install request");
         };
         assert_eq!(request.schema_version, 2);
-        assert_eq!(request.compiled_execution_plan.schema_version, 2);
     }
 }
 
@@ -2188,7 +2158,6 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
         && value.role == "entrypoint"
         && inputs_valid
         && manifest_valid
-        && value.compiled_execution_plan.schema_version == 2
         && mappings_valid
         && (1..=32).contains(&limits.max_files)
         && (1..=1024 * 1024 * 1024).contains(&limits.max_file_bytes)
@@ -2220,13 +2189,6 @@ fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
                 .runtime
                 .placement
                 .memory_floor_bytes
-        && value.memory_kind.to_string()
-            == value
-                .compiled_execution_plan
-                .runtime
-                .placement
-                .memory_kind
-                .to_string()
 }
 
 fn validate_recipe_stop(value: &RecipeStopRequest) -> bool {
@@ -2245,7 +2207,6 @@ fn validate_recipe_stop(value: &RecipeStopRequest) -> bool {
         && value.world_size >= 1
         && value.rank < value.world_size
         && valid_role(&value.role)
-        && value.compiled_execution_plan.schema_version == 2
         && value
             .compiled_execution_plan
             .identity
@@ -2310,26 +2271,11 @@ fn valid_media_type(value: &str) -> bool {
 }
 
 fn validate_build(value: &RecipeBuildRequest) -> bool {
-    value.schema_version == 1
-        && value.kind == "recipe.build.v1"
-        && lower_hex(&value.recipe_content_sha256, 64)
+    lower_hex(&value.recipe_content_sha256, 64)
         && lower_hex(&value.source_bundle_sha256, 64)
         && lower_hex(&value.build_input_sha256, 64)
         && (1..=64 * 1024 * 1024).contains(&value.source_bundle_bytes)
-        && value.platform == "linux/arm64"
         && valid_bundle_path(&value.dockerfile)
-        && value.target.as_ref().is_none_or(|target| {
-            !target.is_empty()
-                && target.len() <= 64
-                && target
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-        })
-        && value.arguments.len() <= 64
-        && value
-            .arguments
-            .iter()
-            .all(|argument| valid_name(&argument.name) && valid_scalar(&argument.value))
         && value.capabilities.len() <= 11
         && value
             .capabilities
@@ -2365,10 +2311,15 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
         } else {
             (1..=16 * 1024_u64.pow(4)).contains(&value.base_image_storage_bytes)
         }
-        && matches!(value.network.mode.as_str(), "none" | "public")
-        && ((value.network.mode == "none" && value.network.hosts.is_empty())
-            || (value.network.mode == "public" && !value.network.hosts.is_empty()))
+        // An empty host list builds offline; otherwise only these public
+        // hosts are reachable.
         && value.network.hosts.len() <= 64
+        && value
+            .network
+            .hosts
+            .iter()
+            .enumerate()
+            .all(|(index, host)| !value.network.hosts[..index].contains(host))
         && value
             .network
             .hosts
@@ -2386,10 +2337,6 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
         && value.limits.timeout_seconds <= 86_400
         && value.limits.output_bytes >= 1
         && value.limits.output_bytes <= 16 * 1024_u64.pow(4)
-        && value.limits.gpu == 0
-        && !value.limits.privileged
-        && !value.limits.host_mounts
-        && !value.limits.container_socket
 }
 
 pub fn parse_strict<T: DeserializeOwned>(input: &[u8]) -> Result<T, ProtocolError> {
@@ -2452,6 +2399,15 @@ fn validate_attempt_identity(
         return Err(ProtocolError::Identity("attempt identity"));
     }
     Ok(())
+}
+
+/// An empty success: an object without any non-null value.
+fn empty_result(result: &generated::AgentResultResult) -> bool {
+    serde_json::to_value(result).is_ok_and(|value| {
+        value
+            .as_object()
+            .is_some_and(|object| object.values().all(serde_json::Value::is_null))
+    })
 }
 
 fn lower_hex(value: &str, length: usize) -> bool {
@@ -2772,10 +2728,6 @@ mod recipe_job_tests {
         mismatched_floor.memory_floor_bytes += 1;
         assert!(!validate_recipe_job(&mismatched_floor));
 
-        let mut mismatched_kind = valid.clone();
-        mismatched_kind.memory_kind = "host".parse().unwrap();
-        assert!(!validate_recipe_job(&mismatched_kind));
-
         let mut reserved_manifest = valid.clone();
         reserved_manifest.inputs[0].name = "manifest.json".to_owned();
         let manifest = serde_json::json!({
@@ -2874,20 +2826,6 @@ mod recipe_job_tests {
             serde_json::to_value(unavailable_peak).unwrap()["evidence"]["peak_memory_bytes"]
                 .is_null()
         );
-    }
-
-    #[test]
-    fn payload_digest_valid_claim_cannot_change_the_compiled_memory_pool() {
-        let mut document: Value = serde_json::from_str(include_str!(
-            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
-        ))
-        .unwrap();
-        document["payload"]["memory_kind"] = Value::String("host".to_owned());
-        let payload = canonical_json(&document["payload"]).unwrap();
-        document["payload_digest"] = Value::String(hex_sha256(&payload));
-        let claim: AgentClaim = serde_json::from_value(document).unwrap();
-        claim.validate().unwrap();
-        assert!(RecipeOperationRequest::parse(&claim).is_err());
     }
 
     #[test]

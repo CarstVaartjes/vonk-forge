@@ -1483,7 +1483,7 @@ mod tests {
         compiled["security"]["network_mode"] = serde_json::json!("bridge");
         let placement = compiled["runtime"]["placement"].clone();
         let recipe_digest = compiled["identity"]["recipe_revision_sha256"].clone();
-        let image_digest = compiled["runtime"]["image_digest"].clone();
+        let image_digest = compiled["runtime_image"]["image_digest"].clone();
         serde_json::from_value(serde_json::json!({
             "schema_version": 2,
             "run_id": "00000000-0000-4000-8000-000000000003",
@@ -1500,7 +1500,7 @@ mod tests {
             "port": placement["port"],
             "reserved_memory_bytes": placement["reserved_memory_bytes"],
             "memory_floor_bytes": placement["memory_floor_bytes"],
-            "memory_kind": placement["memory_kind"],
+            "memory_kind": "unified",
             "endpoint_address": "100.100.20.30",
             "world_size": placement["world_size"],
             "compiled_execution_plan": compiled,
