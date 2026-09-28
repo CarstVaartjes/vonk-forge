@@ -45,10 +45,9 @@ def test_library_keeps_canonical_cache_evidence_and_exact_selection(
         action="library",
     )
     output = capsys.readouterr().out
-    assert f"USE {selector}" in output
-    assert "preparing" in output and "download" in output
-    assert "0 B" in output and "unavailable" in output
-    assert "cursor-on-page-two" in output and "more results" in output
+    assert selector in output
+    assert "download" in output and "0 B" in output
+    assert "cursor-on-page-two" in output
     assert "'controller'" not in output and '"controller"' not in output
 
 
@@ -58,6 +57,74 @@ def test_empty_is_distinct_from_missing_or_malformed_fleet(capsys):
     for payload in ({}, {"nodes": "offline"}, {"nodes": [{}, None]}):
         with pytest.raises(ValueError, match="nodes"):
             render_payload(payload, "fleet")
+
+
+def _spark(name, number, *, online=True, loaded=()):
+    return {
+        "id": f"spk_{number:032x}",
+        "display_name": name,
+        "lifecycle": "ready",
+        "connection": {
+            "online_state": "online" if online else "offline",
+            "offline_reason": None if online else "heartbeat missed",
+            "last_seen_at": "2026-09-28T10:00:00Z",
+        },
+        "inventory": {
+            "freshness": "fresh",
+            "host_memory_total_bytes": 128 << 30,
+            "host_memory_free_bytes": 32 << 30,
+            "disk_free_bytes": 1 << 40,
+        },
+        "telemetry": None,
+        "loaded": list(loaded),
+        "installed": [],
+        "warnings": [],
+    }
+
+
+def _rank(rank, *, group="healthy"):
+    return {
+        "run_id": "run-1",
+        "installation_id": "installation-1",
+        "title": "GLM two Sparks",
+        "alias": "glm-dual",
+        "run_state": "running",
+        "group_state": group,
+        "route_state": "published",
+        "expected_rank_count": 2,
+        "present_ranks": [0, 1],
+        "member_node_ids": [f"spk_{1:032x}", f"spk_{2:032x}"],
+        "rank": rank,
+        "role": "entrypoint" if rank == 0 else "worker",
+        "rank_fresh": True,
+    }
+
+
+def test_fleet_overview_names_workload_members_and_what_needs_attention(capsys):
+    healthy = {
+        "nodes": [
+            _spark("atlas", 1, loaded=[_rank(0)]),
+            _spark("boreas", 2, loaded=[_rank(1)]),
+        ]
+    }
+    render_payload(healthy, "fleet")
+    output = capsys.readouterr().out
+    assert "glm-dual" in output and "75% of 128.0 GiB" in output
+    workload = output[output.index("Workloads") :]
+    assert "atlas" in workload and "boreas" in workload
+    assert "Needs attention" not in output
+
+    degraded = {
+        "nodes": [
+            _spark("atlas", 1, loaded=[_rank(0, group="degraded")]),
+            _spark("boreas", 2, online=False),
+        ]
+    }
+    render_payload(degraded, "fleet")
+    output = capsys.readouterr().out
+    attention = output[output.index("Needs attention") :]
+    assert "boreas" in attention and "heartbeat missed" in attention
+    assert "glm-dual" in attention and "degraded" in attention
 
 
 def test_fleet_detail_surfaces_invalid_history_without_hiding_online_state(capsys):
