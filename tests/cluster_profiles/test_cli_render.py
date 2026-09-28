@@ -127,6 +127,13 @@ def test_fleet_overview_names_workload_members_and_what_needs_attention(capsys):
     assert "glm-dual" in attention and "degraded" in attention
 
 
+def test_rename_reports_the_new_name_of_the_renamed_spark(capsys):
+    identity = {"id": "spk_" + "a" * 32, "display_name": "Studio", "hostname": "h"}
+    render_payload(identity, "fleet", action="rename")
+    output = capsys.readouterr().out
+    assert "Studio" in output and identity["id"] in output
+
+
 def test_fleet_detail_surfaces_invalid_history_without_hiding_online_state(capsys):
     render_payload(
         {
