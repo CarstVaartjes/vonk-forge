@@ -336,6 +336,9 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 "optional": True,
             },
         ],
+        # Kept on upgrade when the operator set them; any other .env key is
+        # obsolete and dropped.
+        "optional_values": ["VONK_RECIPE_LIBRARY_RELEASE", "VONK_BACKUP_OFFHOST_PATH"],
         "install_modes": {
             "prompt": "Install mode: secure-remote (Tailscale) or lab (LAN only)",
             "default": "secure-remote",
