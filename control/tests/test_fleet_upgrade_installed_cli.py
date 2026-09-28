@@ -30,7 +30,7 @@ from .test_profile_load_installed_cli import _https_api_peer, _process_environme
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
-def test_installed_upgrade_reconnects_to_first_failure_without_dispatching_next_spark(
+def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
     installed_vonkctl: Path, postgres_engine, tmp_path: Path, monkeypatch
 ) -> None:
     now = datetime(2026, 8, 27, tzinfo=UTC)
@@ -150,25 +150,29 @@ def test_installed_upgrade_reconnects_to_first_failure_without_dispatching_next_
         assert observed.returncode == 0, observed.stdout + observed.stderr
         result = json.loads(observed.stdout)
         assert result["id"] == job_id
-        assert result["state"] == "waiting-for-operator"
-        assert (
-            operations.claim(
-                NODE_B,
-                "serial-b",
-                30,
-                capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
-                runtime_identity=OLD_IDENTITY,
-            )
-            is None
+        # A failed Spark retries automatically behind its safety fence; the
+        # rollout stays live and moves on to the next Spark meanwhile.
+        assert result["state"] == "queued"
+        second = operations.claim(
+            NODE_B,
+            "serial-b",
+            30,
+            capabilities=["agent.runtime.rust.v1", "agent.upgrade.v1"],
+            runtime_identity=OLD_IDENTITY,
         )
+        assert second is not None
         with sessions() as session:
             jobs = tuple(session.scalars(select(Job).where(Job.request_id == key)))
-            children = tuple(
-                session.scalars(
+            children = {
+                child.node_id: child
+                for child in session.scalars(
                     select(AgentOperation).where(AgentOperation.parent_job_id == job_id)
                 )
-            )
+            }
             assert len(jobs) == 1 and jobs[0].id == job_id
-            assert len(children) == 1 and children[0].node_id == NODE_A
-            assert children[0].state == "waiting-for-operator"
+            assert set(children) == {NODE_A, NODE_B}
+            assert children[NODE_A].state == "waiting-for-operator"
+            assert children[NODE_A].retry_disposition == "retry"
+            assert children[NODE_A].retry_due_at is not None
+            assert children[NODE_B].state == "running"
         assert peer.dropped_responses == [("POST", "/api/fleet/upgrade")]

@@ -54,8 +54,8 @@ owner, then records a controlled failure through its normal failure path. The
 smoke checks that a redirected request without `--yes` exits 2, emits one JSON
 error, makes no API request, and creates no job. With explicit consent, it
 checks one JSON acceptance receipt, then reads the exact job and confirms the
-first node is waiting for an operator and no child was created for the second
-node.
+first node has an automatic retry scheduled behind its safety fence while the
+rollout stays queued and dispatches the second node.
 
 This reuses the same installed sequential-upgrade contract already covered by
 [`test_fleet_upgrade_installed_cli.py`](../../control/tests/test_fleet_upgrade_installed_cli.py).
