@@ -146,7 +146,6 @@ def test_installed_recipe_cancel_recovers_dropped_acceptance_and_settles(
             ("GET", operation_path),
         ]
         assert peer.calls[0][2] == {
-            "schema_version": 2,
             "request_key": CANCEL_REQUEST_KEY,
             "reason": CANCEL_REASON,
         }

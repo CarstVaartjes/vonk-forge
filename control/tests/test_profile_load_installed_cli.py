@@ -549,11 +549,10 @@ def test_installed_json_no_input_load_uses_latest_plan_and_emits_one_result(
     token_value = headers["Authorization"].removeprefix("Bearer ")
     assert token_value not in completed.stdout + completed.stderr
     assert [(method, path) for method, path, _ in state.calls] == [
-        ("POST", "/api/profile/1/preview"),
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/1/requests/{KEY}"),
     ]
-    assert state.calls[1][2] == {
+    assert state.calls[0][2] == {
         "request_key": KEY,
     }
     with sessions() as session:

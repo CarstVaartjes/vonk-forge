@@ -140,7 +140,6 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
         response = _api(service).post(
             f"/api/model/operations/{operation.id}/cancel",
             json={
-                "schema_version": 2,
                 "request_key": CANCEL_REQUEST,
                 "reason": CANCEL_REASON,
             },

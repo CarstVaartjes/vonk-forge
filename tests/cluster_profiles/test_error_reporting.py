@@ -125,7 +125,10 @@ def test_http_errors_keep_status_code_and_request_id(
     )
     expected = ControlUnauthorized if status == 401 else ControlForbidden
     with pytest.raises(expected) as raised:
-        client.request("GET", "/api/jobs/00000000-0000-4000-8000-000000000001/logs")
+        client.request(
+            "GET",
+            "/api/profile/1/requests/00000000-0000-4000-8000-000000000001",
+        )
     assert raised.value.context is not None
     assert raised.value.context.http_status == status
     assert raised.value.context.code == code

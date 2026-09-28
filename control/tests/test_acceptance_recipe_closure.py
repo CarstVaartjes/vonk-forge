@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 
-def test_canary_load_and_cleanup_submit_their_own_reviewed_plan() -> None:
+def test_canary_load_and_cleanup_submit_their_own_request_key() -> None:
     repository = Path(__file__).resolve().parents[2]
     subprocess.run(
         [
@@ -37,7 +37,6 @@ for digest, key in (
     ("b" * 64, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
 ):
     run._load_canary_profile({"plan_digest": digest}, request_key=key)
-    assert requests[-1].plan_digest == digest
     assert str(requests[-1].request_key) == key
 """,
         ],

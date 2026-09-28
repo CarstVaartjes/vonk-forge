@@ -216,7 +216,6 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             submitted = peer.calls[reviewed_call_count + 2][2]
             assert isinstance(submitted, dict)
             assert submitted == {
-                "schema_version": 2,
                 "request_key": _REMOVE_KEY,
             }
 
