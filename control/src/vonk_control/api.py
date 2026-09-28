@@ -1740,7 +1740,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         )
 
     recipe_library = RecipePackageClient(
-        settings.recipe_library_package_url,
         cache_root=settings.state_path / "recipe-library-packages",
         api_url=RECIPE_LIBRARY_API_URL,
         asset_url=RECIPE_LIBRARY_ASSET_URL,

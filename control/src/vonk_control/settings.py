@@ -213,26 +213,6 @@ def _control_hostname(raw: str) -> str:
     return hostname
 
 
-def _package_url(raw: str) -> str | None:
-    """Acceptance-only unsigned fixture channel (the Spark lifecycle canary)."""
-    value = raw.strip().rstrip("/")
-    if not value:
-        return None
-    parsed = urlsplit(value)
-    loopback = parsed.hostname in {"localhost", "127.0.0.1", "::1", "caddy"}
-    if (
-        not parsed.hostname
-        or (parsed.scheme != "https" and not (parsed.scheme == "http" and loopback))
-        or parsed.username
-        or parsed.password
-        or parsed.query
-        or parsed.fragment
-        or parsed.path not in {"", "/"}
-    ):
-        raise SettingsError("recipe library package URL must be a fixed HTTPS origin")
-    return value
-
-
 def parse_go_duration_seconds(value: object) -> int | None:
     """Parse the step-ca duration subset used for certificate claims."""
     if not isinstance(value, str) or not value:
@@ -286,7 +266,6 @@ class Settings:
     direct_fabric_cidrs: str = ""
     install_channel: str = "stable"
     recipe_library_release: str = "latest"
-    recipe_library_package_url: str | None = None
     secrets_root: Path = SECRETS_ROOT
     state_path: Path = STATE_ROOT
     agent_artifact_root: Path = AGENT_ARTIFACT_ROOT
@@ -342,9 +321,6 @@ class Settings:
             direct_fabric_cidrs=direct_fabric_cidrs,
             install_channel=install_channel,
             recipe_library_release=release,
-            recipe_library_package_url=_package_url(
-                os.environ.get("VONK_RECIPE_LIBRARY_PACKAGE_URL", "")
-            ),
             secrets_root=SECRETS_ROOT,
         )
 

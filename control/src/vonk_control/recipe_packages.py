@@ -13,7 +13,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -40,7 +40,6 @@ from .recipe_release import (
 from .source_bundles import SourceBundleError, generate_source_bundle
 
 PACKAGE_SCHEMA_VERSION = 2
-PACKAGE_INDEX_PATH = "/v1/recipe-library/index.json"
 PACKAGE_MEDIA_TYPE = "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
 PACKAGE_REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 PACKAGE_API_ORIGIN = "https://api.github.com"
@@ -62,7 +61,6 @@ _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _RELEASE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 _REDIRECTS = {301, 302, 303, 307, 308}
 _ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_INDEX_MEDIA_TYPES = {"application/json", "text/plain"}
 _PACKAGE_MEDIA_TYPES = {"application/octet-stream", PACKAGE_MEDIA_TYPE}
 
 
@@ -210,30 +208,24 @@ def _validate_package_paths(
 class RecipePackageClient:
     """Fetch complete recipe packages and persist verified bytes by digest.
 
-    Without ``base_url`` the reader consumes signed GitHub releases of the
-    recipe repository: the configured release (``latest`` or an exact tag) is
-    trusted only after its ``SHA256SUMS`` verifies against the pinned Sigstore
-    publisher identity, and every index and package byte is then checked
-    against the digest ``SHA256SUMS`` lists. ``base_url`` selects an
-    operator-configured package channel serving the same index and packages.
+    The reader consumes signed GitHub releases of the recipe repository: the
+    configured release (``latest`` or an exact tag) is trusted only after its
+    ``SHA256SUMS`` verifies against the pinned Sigstore publisher identity, and
+    every index and package byte is then checked against the digest
+    ``SHA256SUMS`` lists.
     """
 
     def __init__(
         self,
-        base_url: str | None = None,
         *,
         cache_root: Path,
         transport: httpx2.BaseTransport | None = None,
         timeout_seconds: float = 8.0,
-        publication_commit: str | None = None,
         api_url: str = PACKAGE_API_ORIGIN,
         asset_url: str | None = None,
         release: str = "latest",
     ) -> None:
-        production = base_url is None
-        origin = (
-            (asset_url or RELEASE_DOWNLOAD_ORIGIN) if production else str(base_url)
-        ).rstrip("/")
+        origin = (asset_url or RELEASE_DOWNLOAD_ORIGIN).rstrip("/")
         parsed = urlsplit(origin)
         if not parsed.hostname or (
             parsed.scheme != "https"
@@ -274,23 +266,15 @@ class RecipePackageClient:
                 "recipe_package.release_invalid",
                 "recipe release must be latest or an exact vMAJOR.MINOR.PATCH tag",
             )
-        if publication_commit is not None and (
-            production or not _SHA1.fullmatch(publication_commit)
-        ):
-            raise RecipePackageError(
-                "recipe_package.commit_invalid", "publication commit is invalid"
-            )
-        self._production = production
         self._api_url = api_url.rstrip("/")
-        self._base_url = origin
+        self._download_origin = origin
         self._redirect_origin = origin if asset_url else RELEASE_ASSET_ORIGIN
         self._release_selector = release
         self._release: _VerifiedRelease | None = None
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
-        self._publication_commit = publication_commit
         self._client = httpx2.Client(
-            base_url=self._base_url,
+            base_url=self._download_origin,
             timeout=httpx2.Timeout(timeout_seconds),
             follow_redirects=False,
             trust_env=False,
@@ -311,9 +295,7 @@ class RecipePackageClient:
 
     def list(self) -> RecipeLibrarySnapshot:
         try:
-            raw, publication, release = (
-                self._fetch_release() if self._production else self._fetch_channel()
-            )
+            raw, publication, release = self._fetch_release()
         except (httpx2.HTTPError, OSError) as error:
             persisted = self._read_persisted_snapshot()
             if persisted is not None:
@@ -330,8 +312,7 @@ class RecipePackageClient:
                     return persisted
             raise
         snapshot, packages = self._parse_index(raw, publication_commit=publication)
-        if release is not None:
-            _bind_release(snapshot, packages, release)
+        _bind_release(snapshot, packages, release)
         self._persist_index(raw, publication_commit=publication, release=release)
         self._candidate_active = True
         self._release = release
@@ -339,33 +320,6 @@ class RecipePackageClient:
         self._snapshot = snapshot
         self._prepared = {}
         return snapshot
-
-    def _fetch_channel(self) -> tuple[bytes, str | None, None]:
-        response = self._client.get(PACKAGE_INDEX_PATH)
-        if response.status_code != 200 or response.is_redirect:
-            raise RecipePackageError(
-                "recipe_package.unavailable", "recipe package index is unavailable"
-            )
-        media_type = (
-            response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-        )
-        if (
-            media_type not in _INDEX_MEDIA_TYPES
-            or len(response.content) > MAX_INDEX_BYTES
-        ):
-            raise RecipePackageError(
-                "recipe_package.response_invalid",
-                "recipe package index response is invalid",
-            )
-        publication = response.headers.get(
-            "x-vonk-publication-commit"
-        ) or response.headers.get("x-recipe-library-publication-commit")
-        if publication is not None and not _SHA1.fullmatch(publication):
-            raise RecipePackageError(
-                "recipe_package.response_invalid",
-                "recipe publication identity is invalid",
-            )
-        return response.content, publication, None
 
     def _fetch_release(self) -> tuple[bytes, str, _VerifiedRelease]:
         tag, assets = self._resolve_release()
@@ -458,7 +412,7 @@ class RecipePackageClient:
                 f"recipe release does not contain {name}",
             )
         response = self._client.get(
-            f"{self._base_url}/{PACKAGE_REPOSITORY}/releases/download/{tag}/{name}",
+            f"{self._download_origin}/{PACKAGE_REPOSITORY}/releases/download/{tag}/{name}",
             headers={"Accept": "application/octet-stream"},
         )
         if response.status_code in _REDIRECTS:
@@ -498,7 +452,7 @@ class RecipePackageClient:
         return content
 
     def _parse_index(
-        self, raw: bytes, *, publication_commit: str | None = None
+        self, raw: bytes, *, publication_commit: str
     ) -> tuple[RecipeLibrarySnapshot, dict[str, dict[str, object]]]:
         try:
             index = _json(raw)
@@ -537,21 +491,6 @@ class RecipePackageClient:
                 "recipe_package.response_invalid",
                 "recipe package index identity is invalid",
             )
-        index_publication = index.get("publication_commit")
-        if index_publication is not None and (
-            not isinstance(index_publication, str)
-            or not _SHA1.fullmatch(index_publication)
-        ):
-            raise RecipePackageError(
-                "recipe_package.response_invalid",
-                "recipe publication identity is invalid",
-            )
-        resolved_publication = (
-            publication_commit
-            or self._publication_commit
-            or index_publication
-            or commit
-        )
         catalog_entities: list[dict[str, object]] = []
         identities: set[tuple[str, str]] = set()
         for entry in raw_entities:
@@ -687,7 +626,7 @@ class RecipePackageClient:
                     "recipe package identity is duplicated",
                 )
             packages[key] = dict(package_entry)
-            packages[key]["publication_commit"] = resolved_publication
+            packages[key]["publication_commit"] = publication_commit
             tags = package_entry.get("tags", [])
             items.append(
                 RecipeLibraryItem(
@@ -722,22 +661,21 @@ class RecipePackageClient:
         self,
         raw: bytes,
         *,
-        publication_commit: str | None,
-        release: _VerifiedRelease | None,
+        publication_commit: str,
+        release: _VerifiedRelease,
     ) -> None:
+        # Keep the signature material so a restart re-verifies the previous
+        # generation instead of trusting local state.
         payload: dict[str, object] = {
             "index": raw.decode("utf-8"),
             "publication_commit": publication_commit,
-        }
-        if release is not None:
-            # Keep the signature material so a restart re-verifies the
-            # previous generation instead of trusting local state.
-            payload["release"] = {
+            "release": {
                 "tag": release.tag,
                 "assets": sorted(release.assets),
                 "checksums": release.checksums_raw.decode("ascii"),
                 "bundle": release.bundle_raw.decode("utf-8"),
-            }
+            },
+        }
         temporary = self._candidate_path.with_suffix(".tmp")
         try:
             temporary.write_text(
@@ -793,21 +731,18 @@ class RecipePackageClient:
             ):
                 return None
             publication = payload.get("publication_commit")
-            if publication is not None and not isinstance(publication, str):
-                return None
             raw = payload["index"].encode("utf-8")
-            release = (
-                _persisted_release(payload.get("release"), raw)
-                if self._production
-                else None
-            )
-            if self._production and (release is None or release.commit != publication):
+            release = _persisted_release(payload.get("release"), raw)
+            if (
+                release is None
+                or not isinstance(publication, str)
+                or release.commit != publication
+            ):
                 # A generation without verifiable release signatures (for
                 # example one cached by an older reader) is never served.
                 return None
             snapshot, packages = self._parse_index(raw, publication_commit=publication)
-            if release is not None:
-                _bind_release(snapshot, packages, release)
+            _bind_release(snapshot, packages, release)
         except (
             OSError,
             TypeError,
@@ -886,19 +821,13 @@ class RecipePackageClient:
             package_digest,
             str(package["location"]),
             require_integer(package["size"], "package size"),
-            expected_publication=str(package.get("publication_commit", "")) or None,
         )
         return self._decode_package(
             archive, item, package=package, archive_path=archive_path
         )
 
     def _cached_or_download(
-        self,
-        digest: str,
-        location: str,
-        expected_size: int,
-        *,
-        expected_publication: str | None = None,
+        self, digest: str, location: str, expected_size: int
     ) -> tuple[bytes, Path]:
         target = self._cache_root / digest[:2] / f"{digest}.tar.gz"
         try:
@@ -907,12 +836,7 @@ class RecipePackageClient:
                 return cached, target
         except OSError:
             pass
-        if self._production:
-            content = self._download_release_package(digest, location, expected_size)
-        else:
-            content = self._download_channel_package(
-                digest, location, expected_size, expected_publication
-            )
+        content = self._download_release_package(digest, location, expected_size)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary_name = tempfile.mkstemp(
             prefix=f".{digest}.", suffix=".tmp", dir=target.parent
@@ -953,49 +877,6 @@ class RecipePackageClient:
                 "recipe package bytes do not match the trusted index",
             )
         return content
-
-    def _download_channel_package(
-        self,
-        digest: str,
-        location: str,
-        expected_size: int,
-        expected_publication: str | None,
-    ) -> bytes:
-        try:
-            response = self._client.get(urljoin(self._base_url + "/", location))
-        except (httpx2.HTTPError, OSError) as error:
-            raise RecipePackageError(
-                "recipe_package.unavailable", "recipe package is unavailable"
-            ) from error
-        media_type = (
-            response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-        )
-        publication = response.headers.get(
-            "x-vonk-publication-commit"
-        ) or response.headers.get("x-recipe-library-publication-commit")
-        if (
-            publication is not None
-            and not _SHA1.fullmatch(publication)
-            or expected_publication is not None
-            and publication is not None
-            and publication != expected_publication
-        ):
-            raise RecipePackageError(
-                "recipe_package.snapshot_changed", "recipe package publication changed"
-            )
-        if (
-            response.status_code != 200
-            or response.is_redirect
-            or media_type not in _PACKAGE_MEDIA_TYPES
-            or len(response.content) != expected_size
-            or len(response.content) > MAX_PACKAGE_BYTES
-            or _sha256(response.content) != digest
-        ):
-            raise RecipePackageError(
-                "recipe_package.digest_mismatch",
-                "recipe package bytes do not match the trusted index",
-            )
-        return response.content
 
     def _decode_package(
         self,
@@ -1330,7 +1211,6 @@ def load_recipe_package(
 
 
 __all__ = [
-    "PACKAGE_INDEX_PATH",
     "PACKAGE_MEDIA_TYPE",
     "PACKAGE_REPOSITORY",
     "RecipePackageClient",

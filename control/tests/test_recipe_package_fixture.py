@@ -10,7 +10,6 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx2
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
@@ -25,16 +24,14 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from vonk_control.recipe_packages import (
-    PACKAGE_MEDIA_TYPE,
-    RecipePackageClient,
-    RecipePackageError,
-    load_recipe_package,
-)
+from vonk_control.recipe_packages import RecipePackageError, load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
+
+pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
 
 def _publisher_fixture() -> tuple[Path, Path, dict[str, object]]:
@@ -60,44 +57,23 @@ def _publisher_fixture() -> tuple[Path, Path, dict[str, object]]:
 def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_packages(
     tmp_path: Path,
 ) -> None:
-    fixture, index_path, descriptor = _publisher_fixture()
+    fixture, _index_path, descriptor = _publisher_fixture()
     rows = require_sequence(descriptor["recipes"], "catalog index recipes")
     expected_recipe_count = len(rows)
-    calls: list[str] = []
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        calls.append(request.url.path)
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=index_path.read_bytes(),
-            )
-        return httpx2.Response(
-            200,
-            headers={"content-type": PACKAGE_MEDIA_TYPE},
-            content=(fixture / Path(request.url.path).name).read_bytes(),
-        )
+    release = SignedRecipeRelease.from_library(descriptor, fixture.parent)
 
     cache = tmp_path / "packages"
-    client = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
-    )
+    client = release.client(cache)
     snapshot = client.list()
     client.prepare(snapshot)
     assert len(snapshot.items) == expected_recipe_count
-    assert (
-        len([path for path in calls if path.endswith(".tar.gz")])
-        == expected_recipe_count
-    )
+    assert len(release.package_downloads) == expected_recipe_count
     client.close()
 
-    calls.clear()
-    restarted = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
-    )
+    release.requests.clear()
+    restarted = release.client(cache)
     restarted.prepare(restarted.list())
-    assert calls == ["/v1/recipe-library/index.json"]
+    assert release.package_downloads == []
     restarted.close()
 
 
@@ -135,28 +111,13 @@ def test_publisher_package_binds_manifest_metadata_identity_and_digest(
     tampered = _repack(files)
     row["package"]["sha256"] = hashlib.sha256(tampered).hexdigest()
     row["package"]["expected_bytes"] = len(tampered)
-    calls: list[str] = []
+    index["recipes"] = [row]
+    release = SignedRecipeRelease(index, lambda _location: tampered)
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        calls.append(request.url.path)
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=_canonical(index) + b"\n",
-            )
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=tampered
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
-    )
+    client = release.client(tmp_path / "packages")
     with pytest.raises(RecipePackageError, match="invalid"):
         client.prepare(client.list())
-    assert len([path for path in calls if path.endswith(".tar.gz")]) == 1
+    assert len(release.package_downloads) == 1
     client.close()
 
 
@@ -281,21 +242,13 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     )
     expected_recipe_count = len(index_recipes)
     expected_model_count = len(index_entities)
-    index_bytes = _canonical(original_index) + b"\n"
-    calls: list[str] = []
+    package_overrides: dict[str, bytes] = {}
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        calls.append(request.url.path)
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200, headers={"content-type": "application/json"}, content=index_bytes
-            )
-        name = Path(request.url.path).name
-        return httpx2.Response(
-            200,
-            headers={"content-type": PACKAGE_MEDIA_TYPE},
-            content=package_overrides.get(name, (fixture / name).read_bytes()),
-        )
+    def packages(location: str) -> bytes:
+        name = Path(location).name
+        return package_overrides.get(name) or (fixture / name).read_bytes()
+
+    release = SignedRecipeRelease(original_index, packages)
 
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
@@ -306,11 +259,8 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         cursors=TokenCodec(b"p" * 32).cursor_codec(),
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
     )
-    package_overrides: dict[str, bytes] = {}
     cache = tmp_path / "packages"
-    client = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
-    )
+    client = release.client(cache)
     sync = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=catalog,
@@ -325,10 +275,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     )
     assert first.state == "current"
     assert first.imported_count == expected_recipe_count
-    assert (
-        len([path for path in calls if path.endswith(".tar.gz")])
-        == expected_recipe_count
-    )
+    assert len(release.package_downloads) == expected_recipe_count
     with sessions() as session:
         assert (
             session.scalar(
@@ -377,8 +324,8 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     changed_row["package"].update(changed_descriptor)
     package_overrides[Path(changed_row["package"]["path"]).name] = changed_bytes
     changed_index["source_commit"] = "f" * 40
-    index_bytes = _canonical(changed_index) + b"\n"
-    calls.clear()
+    release.publish(changed_index, packages)
+    release.requests.clear()
     second = sync.sync(
         request_key="00000000-0000-0000-0000-000000000002",
         trigger="automatic",
@@ -386,18 +333,16 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     )
     assert second.state == "current"
     assert second.updated_count == 1
-    assert len([path for path in calls if path.endswith(".tar.gz")]) == 1
+    assert len(release.package_downloads) == 1
     with sessions() as session:
         after_second_recipes = _active_recipe_state(session)
         assert len(after_second_recipes) == expected_recipe_count
     client.close()
 
     # A fresh Controller process reuses every verified package object after a
-    # restart; only the trusted index is requested again.
-    calls.clear()
-    restarted_good = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
-    )
+    # restart; only the signed release and its index are requested again.
+    release.requests.clear()
+    restarted_good = release.client(cache)
     restarted_sync = ManagedRecipeCatalogSyncService(
         sessions, catalog=catalog, reader=restarted_good, clock=sync._clock
     )
@@ -407,7 +352,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         actor="test",
     )
     assert restarted_result.state == "current"
-    assert calls == ["/v1/recipe-library/index.json"]
+    assert release.package_downloads == []
     restarted_good.close()
 
     # A malformed candidate fails during prepare, before any active link is changed.
@@ -422,10 +367,8 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     invalid_package["sha256"] = hashlib.sha256(invalid_bytes).hexdigest()
     invalid_package["expected_bytes"] = len(invalid_bytes)
     package_overrides[invalid_name] = invalid_bytes
-    index_bytes = _canonical(invalid_index) + b"\n"
-    restarted = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(handler)
-    )
+    release.publish(invalid_index, packages)
+    restarted = release.client(cache)
     invalid_snapshot = restarted.list()
     with pytest.raises(RecipePackageError, match="extract"):
         restarted.prepare(invalid_snapshot)
@@ -449,7 +392,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     failing_row["content_sha256"] = failing_descriptor["recipe_content_sha256"]
     failing_row["package"].update(failing_descriptor)
     package_overrides[Path(failing_row["package"]["path"]).name] = failing_bytes
-    index_bytes = _canonical(failing_index) + b"\n"
+    release.publish(failing_index, packages)
     original_import = catalog.import_recipe_library
 
     def fail_late(*args, **kwargs):
@@ -463,11 +406,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     failing = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=catalog,
-        reader=RecipePackageClient(
-            "http://127.0.0.1",
-            cache_root=cache,
-            transport=httpx2.MockTransport(handler),
-        ),
+        reader=release.client(cache),
         clock=sync._clock,
     )
     failing_result = failing.sync(
