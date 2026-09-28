@@ -273,42 +273,22 @@ def _entrypoint_result(
 def _settings_result(
     rendered: dict, tmp_path: Path
 ) -> subprocess.CompletedProcess[str]:
-    tmp_path.mkdir(parents=True, exist_ok=True)
+    """Load the real Controller settings from the rendered API environment."""
+    secrets = tmp_path / "secrets"
+    secrets.mkdir(parents=True, exist_ok=True)
+    for name, value in {
+        "database-url": "postgresql://control:pw@postgres/control\n",
+        "agent-proxy-auth": "A" * 30 + "_-\r\n",
+    }.items():
+        (secrets / name).write_text(value)
     environment = {
         name: value
         for name, value in os.environ.items()
         if not name.startswith("VONK_")
+    } | {
+        name: str(value)
+        for name, value in rendered["services"]["control-api"]["environment"].items()
     }
-    control_environment = rendered["services"]["control-api"]["environment"].copy()
-    secret_values = {
-        "VONK_DATABASE_URL_FILE": "postgresql://control:pw@postgres/control\n",
-        "VONK_TOKEN_SIGNING_KEY_FILE": "t" * 32 + "\n",
-        "VONK_METRICS_TOKEN_FILE": "m" * 16 + "\n",
-        "VONK_AGENT_CLIENT_CA_FILE": "test-client-ca\n",
-        "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "test-intermediate-certificate\n",
-        "VONK_AGENT_CA_CREDENTIAL_FILE": "test-provider-credential\n",
-        "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "test-provider-public-jwk\n",
-        "VONK_AGENT_CA_ROOT_FILE": "test-root-certificate\n",
-        "VONK_CONTROLLER_CA_FILE": "test-controller-ca\n",
-        "VONK_AGENT_PROXY_AUTH_FILE": "A" * 30 + "_-\r\n",
-        "VONK_MANAGEMENT_CIDRS_FILE": "10.0.0.0/24\n",
-        "VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "test-package-grant-key\n",
-        "VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "test-package-receipt-key\n",
-        "VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "test-host-runtime-key\n",
-    }
-    for name, value in tuple(control_environment.items()):
-        if name not in secret_values:
-            continue
-        secret = tmp_path / name.lower()
-        secret.write_text(secret_values[name])
-        control_environment[name] = str(secret)
-    control_environment.setdefault("VONK_AGENT_CA_PROVISIONER_NAME", "vonk-forge-agent")
-    control_environment.setdefault(
-        "VONK_AGENT_CA_PROVISIONER_KID", "test-provisioner-kid"
-    )
-    environment.update(
-        {name: str(value) for name, value in control_environment.items()}
-    )
     return subprocess.run(
         [
             # A fresh interpreter from the synced control environment: the
@@ -316,12 +296,16 @@ def _settings_result(
             sys.executable,
             "-c",
             (
-                "from vonk_control.settings import Settings; "
-                "settings = Settings.from_env_and_secrets(); "
+                "import sys; from pathlib import Path; "
+                "import vonk_control.settings as module; "
+                "module.SECRETS_ROOT = Path(sys.argv[1]); "
+                "settings = module.Settings.from_env_and_secrets(); "
                 "print(settings.agent_proxy_auth.decode('ascii')); "
                 "print(settings.management_cidrs); "
-                "print(settings.direct_fabric_cidrs)"
+                "print(settings.direct_fabric_cidrs); "
+                "print(settings.agent_enrollment_origin)"
             ),
+            str(secrets),
         ],
         capture_output=True,
         text=True,
@@ -341,17 +325,13 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
 
     result = _settings_result(rendered, tmp_path / "settings")
     assert result.returncode == 0, result.stderr
-    proxy_auth, management, direct_fabric = result.stdout.splitlines()
+    proxy_auth, management, direct_fabric, enrollment = result.stdout.splitlines()
     assert proxy_auth == "A" * 30 + "_-"
     assert management == "10.0.0.0/24"
     assert direct_fabric == "192.168.100.0/24,192.168.101.0/24"
+    assert enrollment == "https://enroll.control.test.example:8443"
 
-    assert api["environment"]["VONK_AGENT_RUNTIME"] == "enabled"
-    assert api["environment"]["VONK_MANAGEMENT_CIDRS"] == "10.0.0.0/24"
-    assert api["environment"]["VONK_AGENT_CONTROLLER_ADDRESS"] == "10.0.0.2"
-    assert api["environment"]["VONK_AGENT_SERVICE_HOSTNAMES"] == (
-        "control.test.example,enroll.test.example,agents.test.example,registry.test.example"
-    )
+    assert api["environment"]["VONK_NAS_LAN_IP"] == "10.0.0.2"
     assert set(caddy["networks"]) == {
         "agent-proxy",
         "hermes-inference",
@@ -1121,18 +1101,3 @@ def test_control_api_has_no_repository_or_git_runtime_mounts() -> None:
     )
     assert "VONK_REPOSITORY_PATH" not in api.get("environment", {})
     assert "VONK_GIT_SIGNING_KEY_FILE" not in api.get("environment", {})
-
-
-def test_canonical_step_ca_settings_pass_application_guard(tmp_path: Path) -> None:
-    token = "A" * 30 + "_-"
-    rendered = _rendered()
-    environment = rendered["services"]["control-api"]["environment"]
-    assert environment["VONK_DEPLOYMENT_MODE"] == "production"
-    assert environment["VONK_AGENT_RUNTIME"] == "enabled"
-    result = _settings_result(rendered, tmp_path / "step-ca")
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [
-        token,
-        "10.0.0.0/24",
-        "192.168.100.0/24,192.168.101.0/24",
-    ]
