@@ -121,6 +121,8 @@ def test_operator_routes_use_singular_namespaces_and_shared_mutation_roles() -> 
         assert "/api/model/{selector}" in paths
         assert "/api/recipe/library" in paths
         assert "/api/recipe/{selector}" in paths
+        assert "/api/model" not in paths
+        assert "/api/recipe" not in paths
         assert "/api/fleet" in paths
         assert not any(path.startswith("/api/v1/") for path in paths)
     finally:

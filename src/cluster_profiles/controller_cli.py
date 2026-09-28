@@ -2152,9 +2152,9 @@ def _overview(
     if noun == "fleet":
         return client.request("GET", "/api/fleet")
     if noun == "model":
-        return client.request("GET", "/api/model")
+        return client.request("GET", "/api/model/library", query={"local": True})
     if noun == "recipe":
-        return client.request("GET", "/api/recipe")
+        return client.request("GET", "/api/recipe/library")
     return client.request("GET", f"/api/profile/{_profile_number(args)}")
 
 

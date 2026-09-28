@@ -139,9 +139,7 @@ class FakeClient:
         )
         known_get = {
             "/api/fleet",
-            "/api/model",
             "/api/model/library",
-            "/api/recipe",
             "/api/recipe/library",
             "/api/profile",
             "/api/operations",
@@ -1190,7 +1188,7 @@ def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None
                 "resources": {},
                 "document": {},
             },
-            ("GET", "/api/model"): {
+            ("GET", "/api/model/library"): {
                 "models": [
                     {
                         "selector": "qwen",
@@ -3186,7 +3184,7 @@ def test_error_output_redacts_request_secrets_and_keeps_json_clean() -> None:
 def test_plain_output_is_adaptive_and_keeps_identity_before_optional_columns() -> None:
     client = FakeClient(
         {
-            ("GET", "/api/model"): {
+            ("GET", "/api/model/library"): {
                 "models": [
                     {
                         "selector": "qwen-3.8-nvfp4",

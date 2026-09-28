@@ -3517,7 +3517,7 @@ class QualificationRunner:
                 query["cursor"] = cursor
             try:
                 page = RecipeLibraryResponse.from_dict(
-                    self.client.request("GET", "/api/recipe", query=query)
+                    self.client.request("GET", "/api/recipe/library", query=query)
                 )
             except (KeyError, TypeError, ValueError) as error:
                 errors.append(

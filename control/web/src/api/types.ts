@@ -25,10 +25,8 @@ export type AuditSummary = components["schemas"]["AuditEventResponse"];
 export type AuditResponse = components["schemas"]["AuditResponse"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
-export type ModelStatus = components["schemas"]["ModelLibraryResponse"];
 export type ModelLibrary = components["schemas"]["ModelLibraryResponse"];
 export type ModelDetail = components["schemas"]["ModelDetailResponse"];
-export type RecipeStatus = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
 export type CacheRemovalReview = components["schemas"]["CacheRemovalReview"];
@@ -143,10 +141,8 @@ export type FleetStreamEvent = components["schemas"]["FleetStreamEvent"];
 export interface CatalogApi {
 }
 export interface LibraryApi {
-  modelStatus(signal?: AbortSignal): Promise<ModelStatus>;
   modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary>;
   modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail>;
-  recipeStatus(signal?: AbortSignal): Promise<RecipeStatus>;
   recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary>;
   recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail>;
   libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;

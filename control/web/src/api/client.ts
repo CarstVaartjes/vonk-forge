@@ -28,7 +28,6 @@ import type {
   LibrarySort,
   ModelDetail,
   ModelLibrary,
-  ModelStatus,
   ModelCacheOperatorResponse,
   CacheRemovalReview,
   RecipeImageAvailabilityResponse,
@@ -37,7 +36,6 @@ import type {
   RecipeUpdateResponse,
   RecipeDetail,
   RecipeLibrary,
-  RecipeStatus,
 } from "./types";
 
 function csrfToken(): string | undefined {
@@ -268,10 +266,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async modelStatus(signal?: AbortSignal): Promise<ModelStatus> {
-    return resultData(await this.generated.GET("/api/model", {signal}));
-  }
-
   async modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary> {
     return resultData(await this.generated.GET("/api/model/library", {
       params: {query: {cursor, limit: 100, sort, updated_since: updatedSince}},
@@ -284,10 +278,6 @@ export class ApiClient implements ControlApi {
       params: {path: {selector}},
       signal,
     }));
-  }
-
-  async recipeStatus(signal?: AbortSignal): Promise<RecipeStatus> {
-    return resultData(await this.generated.GET("/api/recipe", {signal}));
   }
 
   async recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary> {
