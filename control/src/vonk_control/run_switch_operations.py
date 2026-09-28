@@ -2306,10 +2306,7 @@ class RecipeLifecyclePhaseExecutor:
                 installation is None
                 or installation.state != "uninstalled"
                 or not exact_members
-                or any(
-                    node.state != "uninstalled" or node.evidence_digest is None
-                    for node in members
-                )
+                or any(node.state != "uninstalled" for node in members)
             ):
                 raise RunSwitchOperationConflict(
                     "run-switch.reconciliation-state-verification-failed"

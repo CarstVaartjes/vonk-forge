@@ -59,11 +59,10 @@ class UninstallNodeImpact:
     rank: int
     role: str
     state: str
-    installed_bytes: int | None
-    # Node-level install evidence.  A ``planned`` membership row that already
-    # recorded bytes or evidence contradicts its own plan, so it can never be
+    # Bytes the membership row records on its Spark.  A ``planned`` row that
+    # already recorded bytes contradicts its own plan, so it can never be
     # treated as a never-installed leftover.
-    evidence_digest: str | None = None
+    installed_bytes: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,7 +300,7 @@ def uninstall_plan(
     # A plan that was persisted but never applied has nothing on any node to
     # remove.  It may only be abandoned while every membership row still proves
     # that: the deterministic plan still matches, every rank is still
-    # ``planned``, and no rank recorded installed bytes or install evidence.
+    # ``planned``, and no rank recorded installed bytes.
     # Any of those facts contradicting the plan keeps the row on the ordinary
     # uninstall path, where the integrity check above reports it.
     never_installed = bool(
@@ -309,9 +308,7 @@ def uninstall_plan(
         and ordered_nodes
         and immutable_membership_exact
         and all(
-            node.state == "planned"
-            and node.installed_bytes in (None, 0)
-            and node.evidence_digest is None
+            node.state == "planned" and node.installed_bytes in (None, 0)
             for node in ordered_nodes
         )
     )
@@ -395,7 +392,6 @@ def uninstall_plan(
                 "role": node.role,
                 "state": node.state,
                 "installed_bytes": node.installed_bytes,
-                "evidence_digest": node.evidence_digest,
             }
             for node in ordered_nodes
         ],

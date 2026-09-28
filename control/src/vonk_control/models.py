@@ -2287,7 +2287,6 @@ class InstallationNode(Base):
     installed_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
-    evidence_digest: Mapped[str | None] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
