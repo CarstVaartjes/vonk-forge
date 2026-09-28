@@ -209,7 +209,6 @@ def test_postgres_new_review_reuses_receipt_after_cancelled_rank_before_releasin
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-            plan_digest=first_plan.plan_digest,
             request_key=str(uuid.uuid4()),
         ),
         actor="admin",
@@ -330,7 +329,6 @@ def test_postgres_new_review_reuses_receipt_after_cancelled_rank_before_releasin
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-            plan_digest=retry_plan.plan_digest,
             request_key=str(uuid.uuid4()),
         ),
         actor="admin",

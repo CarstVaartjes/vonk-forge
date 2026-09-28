@@ -2609,7 +2609,6 @@ def _run_switch_request_operation(
     request_key: str,
     *,
     installation_id: str,
-    expected_plan_digest: str | None,
 ) -> dict[str, object] | None:
     """Resolve one accepted Run/Switch request before considering a resubmit."""
     page = validate_control_document(
@@ -2664,7 +2663,6 @@ def _run_switch_request_operation(
         observed,
         operation_id=operation_id,
         request_key=request_key,
-        plan_digest=expected_plan_digest,
         installation_id=installation_id,
     )
     return observed
@@ -2675,7 +2673,6 @@ def _validate_installation_reconcile_operation(
     *,
     operation_id: str | None,
     request_key: str,
-    plan_digest: str | None,
     installation_id: str,
 ) -> str:
     if (
@@ -2685,10 +2682,9 @@ def _validate_installation_reconcile_operation(
         or value.get("action") != "cleanup"
         or value.get("cleanup_mode") != "reconcile"
         or value.get("installation_id") != installation_id
-        or (plan_digest is not None and value.get("plan_digest") != plan_digest)
     ):
         raise ControlMalformedResponse(
-            "reconciliation status identifies another request or reviewed plan"
+            "reconciliation status identifies another request"
         )
     returned_id = value.get("operation_id")
     if not isinstance(returned_id, str) or not returned_id:
@@ -2704,13 +2700,11 @@ def _follow_installation_reconciliation(
     args: argparse.Namespace,
     *,
     request_key: str,
-    plan_digest: str | None,
 ) -> dict[str, object]:
     operation_id = _validate_installation_reconcile_operation(
         operation,
         operation_id=None,
         request_key=request_key,
-        plan_digest=plan_digest,
         installation_id=cast(str, args.installation_id),
     )
     if getattr(args, "detach", False):
@@ -2721,7 +2715,6 @@ def _follow_installation_reconciliation(
             observed,
             operation_id=operation_id,
             request_key=request_key,
-            plan_digest=plan_digest,
             installation_id=cast(str, args.installation_id),
         )
 
@@ -2744,11 +2737,6 @@ def _recipe_installation_reconcile(
         f"/api/recipe/installations/{_quoted(installation_id)}/reconcile/preview"
     )
     apply_path = f"/api/recipe/installations/{_quoted(installation_id)}/reconcile"
-    preview_body = {
-        "schema_version": 2,
-        "installation_id": installation_id,
-        "cleanup_mode": "reconcile",
-    }
     if getattr(args, "review", False):
         if (
             getattr(args, "yes", False)
@@ -2760,7 +2748,7 @@ def _recipe_installation_reconcile(
             )
         args.outcome_context = "read"
         return validate_control_document(
-            "RunSwitchPlan", client.request("POST", preview_path, preview_body)
+            "RunSwitchPlan", client.request("POST", preview_path)
         )
     if not getattr(args, "yes", False):
         raise ValueError(
@@ -2820,45 +2808,15 @@ def _recipe_installation_reconcile(
         request,
         key,
         installation_id=installation_id,
-        expected_plan_digest=None,
     )
     if existing is not None:
         submission.acceptance = "accepted"
         submission.operation_id = cast(str, existing["operation_id"])
         return _follow_installation_reconciliation(
-            client,
-            existing,
-            args,
-            request_key=key,
-            plan_digest=None,
+            client, existing, args, request_key=key
         )
 
-    preview = validate_control_document(
-        "RunSwitchPlan", request("POST", preview_path, preview_body)
-    )
-    if (
-        preview.get("action") != "cleanup"
-        or preview.get("cleanup_mode") != "reconcile"
-        or preview.get("installation_id") != installation_id
-        or not isinstance(preview.get("plan_digest"), str)
-    ):
-        raise ControlConflict(
-            409,
-            "installation reconciliation plan is unavailable",
-        )
-    reviewed_digest = cast(str, preview["plan_digest"])
-    security = _security_blocker_codes(preview.get("blockers"))
-    if security:
-        raise ControlConflict(
-            409,
-            "installation reconciliation is refused by the Controller: "
-            + ", ".join(security[:6]),
-        )
-    body = {
-        **preview_body,
-        "plan_digest": reviewed_digest,
-        "request_key": key,
-    }
+    body: dict[str, object] = {"request_key": key}
 
     submission.acceptance = "unknown"
     try:
@@ -2868,7 +2826,6 @@ def _recipe_installation_reconcile(
             operation,
             operation_id=None,
             request_key=key,
-            plan_digest=None,
             installation_id=installation_id,
         )
     except (ControlTransportError, ControlUnavailable, OSError) as error:
@@ -2879,7 +2836,6 @@ def _recipe_installation_reconcile(
             request,
             key,
             installation_id=installation_id,
-            expected_plan_digest=reviewed_digest,
         )
         if existing is not None:
             operation = existing
@@ -2891,7 +2847,6 @@ def _recipe_installation_reconcile(
                 operation,
                 operation_id=None,
                 request_key=key,
-                plan_digest=None,
                 installation_id=installation_id,
             )
     except ControlHTTPError as error:
@@ -2902,7 +2857,6 @@ def _recipe_installation_reconcile(
             request,
             key,
             installation_id=installation_id,
-            expected_plan_digest=reviewed_digest,
         )
         if existing is not None:
             operation = existing
@@ -2914,7 +2868,6 @@ def _recipe_installation_reconcile(
                 operation,
                 operation_id=None,
                 request_key=key,
-                plan_digest=reviewed_digest,
                 installation_id=installation_id,
             )
     except (ControlMalformedResponse, ControlResponseTooLarge):
@@ -2923,7 +2876,6 @@ def _recipe_installation_reconcile(
             request,
             key,
             installation_id=installation_id,
-            expected_plan_digest=reviewed_digest,
         )
         if existing is None:
             raise
@@ -2932,13 +2884,7 @@ def _recipe_installation_reconcile(
 
     submission.acceptance = "accepted"
     submission.operation_id = operation_id
-    return _follow_installation_reconciliation(
-        client,
-        operation,
-        args,
-        request_key=key,
-        plan_digest=reviewed_digest,
-    )
+    return _follow_installation_reconciliation(client, operation, args, request_key=key)
 
 
 def _recipe(

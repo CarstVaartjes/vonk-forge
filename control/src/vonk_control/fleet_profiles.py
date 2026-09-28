@@ -1611,7 +1611,6 @@ class RunSwitchFleetProfileAdapter:
             return self._run_switch.apply_cleanup(
                 RunSwitchCleanupApplyRequest(
                     installation_id=installation_id,
-                    plan_digest=cleanup_preview.plan_digest,
                     request_key=child_request_key,
                 ),
                 actor=actor,

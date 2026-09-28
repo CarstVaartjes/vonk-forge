@@ -2808,9 +2808,7 @@ class RunSwitchOperationService:
         cleanup_mode: Literal["uninstall", "reconcile"] = (
             "uninstall" if isinstance(request, str) else request.cleanup_mode
         )
-        invocation = (
-            InvocationMetadata() if isinstance(request, str) else request.invocation
-        )
+        invocation = InvocationMetadata()
         now = _now(self._clock)
         with self._sessions() as session:
             installation = session.get(RecipeInstallation, installation_id)
@@ -3137,7 +3135,7 @@ class RunSwitchOperationService:
         request_key = request.request_key or str(uuid.uuid4())
         intent = {
             "type": "cleanup",
-            **request.model_dump(mode="json", exclude={"plan_digest", "request_key"}),
+            **request.model_dump(mode="json", exclude={"request_key"}),
         }
         if request.request_key is not None:
             existing = self._existing_request_operation(

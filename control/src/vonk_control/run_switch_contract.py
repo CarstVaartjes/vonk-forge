@@ -263,12 +263,16 @@ class RunSwitchCleanupPreviewRequest(_StrictModel):
     schema_version: Literal[2] = 2
     installation_id: UuidId
     cleanup_mode: Literal["uninstall", "reconcile"] = "uninstall"
-    invocation: InvocationMetadata = Field(default_factory=InvocationMetadata)
 
 
 class RunSwitchCleanupApplyRequest(RunSwitchCleanupPreviewRequest):
-    plan_digest: Digest | None = None
     request_key: UuidId | None = None
+
+
+class InstallationReconcileRequest(_StrictModel):
+    """Idempotency key for reconciling the installation named by the path."""
+
+    request_key: UuidId
 
 
 class RunSwitchReconciliationTarget(_StrictModel):
@@ -1344,6 +1348,7 @@ __all__ = [
     "CapabilityEvidence",
     "Digest",
     "FreshnessEvidence",
+    "InstallationReconcileRequest",
     "InvocationMetadata",
     "MappingSelection",
     "RunSwitchAction",

@@ -4903,7 +4903,6 @@ def test_reconcile_run_switch_releases_install_claims_after_exact_group_receipts
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-            plan_digest=preview.plan_digest,
             request_key=str(uuid.uuid4()),
         ),
         actor="admin",
@@ -5048,7 +5047,6 @@ def test_new_reconcile_review_reuses_exact_partial_receipt_and_releases_last_cla
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-            plan_digest=first_plan.plan_digest,
             request_key=str(uuid.uuid4()),
         ),
         actor="admin",
@@ -5123,7 +5121,6 @@ def test_new_reconcile_review_reuses_exact_partial_receipt_and_releases_last_cla
         RunSwitchCleanupApplyRequest(
             installation_id=installation.owner_id,
             cleanup_mode="reconcile",
-            plan_digest=retry_plan.plan_digest,
             request_key=str(uuid.uuid4()),
         ),
         actor="admin",
