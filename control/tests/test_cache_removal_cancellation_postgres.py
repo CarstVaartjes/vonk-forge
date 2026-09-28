@@ -340,8 +340,6 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
             selector,
             actor="operator",
             request_key=removal_request_id,
-            model_content_sha256=model_digest,
-            review_digest=pending_review.review_digest,
         )
         for _ in range(4):
             cache.advance_removals(limit=1)

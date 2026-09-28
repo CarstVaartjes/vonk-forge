@@ -331,7 +331,7 @@ the verdict.
 
 Recipe removal requires an explicit `--keep-model` or `--with-model` choice.
 The read-only `--review` form reports the exact recipe revision and affected
-archives/model assets, readiness, references, active work, blockers, and digest.
+archives/model assets, readiness, references, active work, and blockers.
 In a terminal, the removal command shows that impact before asking for consent.
 For a scripted request, inspect the review if needed, then submit with `--yes`:
 
@@ -342,9 +342,9 @@ vonkctl --json recipe remove qwen-code --keep-model \
   --yes --request-key REQUEST_UUID --detach
 ```
 
-Submission reads and binds the latest Controller review automatically.
-`--with-model` binds
-the exact reviewed model-removal child and completes only after that child
+Removal always applies to the recipe's current state when the Controller
+accepts it; a review is informational. `--with-model` binds
+the model-removal child and completes only after that child
 settles. Shared model files needed by retained cache entries are preserved.
 Use `recipe progress --request-key REQUEST_UUID --follow` to reconnect to the
 same operation and inspect a waiting dependency or failure.
@@ -362,8 +362,8 @@ vonkctl --json recipe installation reconcile INSTALLATION_UUID \
   --yes --request-key REQUEST_UUID --detach
 ```
 
-Submission reads the current plan automatically. The Controller rechecks the
-exact installation identity before accepting cleanup. The same request UUID reconnects to an accepted operation,
+Submission sends only the request UUID; the Controller plans the current
+cleanup and rechecks the exact installation identity before accepting it. The same request UUID reconnects to an accepted operation,
 including after a lost response; a failed lookup does not authorize a new
 request. Follow the typed Run/Switch operation receipt with the returned
 operation ID or rerun the same command with its original request UUID.
@@ -673,7 +673,7 @@ the Controller error code and original detail in JSON output for debugging.
 In an interactive terminal, load shows the current review and asks for one
 default-no confirmation. `--detach` returns the accepted application instead
 of following it. For scripts, JSON, redirected input, or `--no-input`, use
-`--yes`; the CLI fetches the latest plan before submitting:
+`--yes`; the CLI submits the load directly and the Controller plans it:
 
 ```bash
 vonkctl --profile 2 --json profile load --dry-run > reviewed-plan.json
@@ -681,9 +681,9 @@ vonkctl --profile 2 --json profile load --dry-run > reviewed-plan.json
 vonkctl --profile 2 --json profile load --yes --detach
 ```
 
-A dry-run reports the current plan without submitting. With `--yes`, the CLI
-submits the latest plan even when waitable blockers are present; the Controller
-parks the request until they clear. Authentication and authorization failures
+A dry-run reports the current plan without submitting. A load always applies
+the Controller's current plan, even when waitable blockers are present; the
+Controller parks the request until they clear. Authentication and authorization failures
 such as 401 or 403 remain refusals. Do not combine `--dry-run` with `--yes` or
 `--detach`.
 
@@ -694,9 +694,9 @@ before saving; the web editor likewise sends the selected library row's
 canonical selector. It does not pin a recipe revision or declare a subset scope.
 The Controller returns warnings for incomplete groups and resource pressure at
 save time. A load preview reports blockers, resolved immutable identities, the
-whole-fleet snapshot, resource fit, and a `plan_digest`. The CLI binds its
-current preview to submission; the Controller revalidates the plan and parks
-requests with waitable blockers until their dependencies clear.
+whole-fleet snapshot, resource fit, and a `plan_digest`. A load request carries
+only its request key; the Controller plans the current profile at admission and
+parks requests with waitable blockers until their dependencies clear.
 
 ### Batched recipe qualification
 

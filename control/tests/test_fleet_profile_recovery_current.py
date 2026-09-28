@@ -81,7 +81,6 @@ def _failed_profile(tmp_path: Path):
     assert preview.allowed
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(800),
         actor="admin",
     )
@@ -217,13 +216,11 @@ def test_repeated_idle_loads_preserve_distinct_noop_receipts(tmp_path: Path) -> 
         idle.number,
         request_key=_uuid(805),
         actor="admin",
-        expected_plan_digest=service.preview(idle.id).plan_digest,
     )
     second = service.load(
         idle.number,
         request_key=_uuid(806),
         actor="admin",
-        expected_plan_digest=service.preview(idle.id).plan_digest,
     )
     assert first.state == second.state == "succeeded"
     assert first.id != second.id
@@ -234,7 +231,6 @@ def test_repeated_idle_loads_preserve_distinct_noop_receipts(tmp_path: Path) -> 
             idle.number,
             request_key=_uuid(806),
             actor="admin",
-            expected_plan_digest=service.preview(idle.id).plan_digest,
         )
         == second
     )
@@ -324,7 +320,6 @@ def test_new_intent_supersedes_a_parked_exhausted_application(tmp_path: Path) ->
         profile.number,
         request_key=_uuid(810),
         actor="admin",
-        expected_plan_digest=service.preview(profile.id).plan_digest,
     )
 
     assert second.id != first.id
@@ -493,7 +488,6 @@ def test_retry_of_a_failed_order_with_a_live_child_resumes_it(tmp_path: Path) ->
     assert preview.allowed
     application = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(820),
         actor="admin",
     )

@@ -260,7 +260,6 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
                 f"/api/profile/{profile.number}/load",
                 json={
                     "request_key": str(uuid4()),
-                    "plan_digest": preview["plan_digest"],
                 },
                 headers=headers,
             )

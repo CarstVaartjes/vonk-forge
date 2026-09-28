@@ -160,7 +160,6 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
         assert installed is not None and installed.plan == old_plan
     accepted = profiles.apply(
         profile_id,
-        plan_digest=review.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )

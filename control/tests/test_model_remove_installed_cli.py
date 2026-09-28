@@ -218,8 +218,6 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             assert submitted == {
                 "schema_version": 2,
                 "request_key": _REMOVE_KEY,
-                "model_content_sha256": original_digest,
-                "review_digest": review["review_digest"],
             }
 
             # A second installed process with the same key reconnects to the

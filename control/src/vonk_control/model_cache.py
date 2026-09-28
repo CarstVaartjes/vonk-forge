@@ -1939,17 +1939,14 @@ class ModelCacheService:
         *,
         actor: str,
         request_key: str,
-        model_content_sha256: str | None = None,
-        review_digest: str | None = None,
     ) -> CacheOperationView:
         """Accept a durable removal of the named model against current state.
 
-        A previously reviewed digest is advisory: the removal always applies to
-        what the selector resolves to now. Sets still in use are fenced against
-        new consumers and the removal waits for their current owners.
+        The removal applies to what the selector resolves to now. Sets still in
+        use are fenced against new consumers and the removal waits for their
+        current owners.
         """
 
-        del model_content_sha256, review_digest
         request_key = _request_key(request_key)
         normalized_selector = _model_selector(selector).casefold()
         with self._session() as session:

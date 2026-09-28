@@ -26,10 +26,6 @@ from vonk_control.models import (
     RecipeInstallation,
 )
 from vonk_control.operation_api import durable_operation_services
-from vonk_control.run_switch_contract import (
-    RunSwitchCleanupApplyRequest,
-    RunSwitchCleanupPreviewRequest,
-)
 from vonk_control.run_switch_operations import RunSwitchOperationConflict
 
 from .test_recipe_operations import NOW, installed_recipe, setup_services
@@ -155,16 +151,14 @@ def test_reconciliation_routes_are_typed_and_discoverable() -> None:
     preview = paths["/api/recipe/installations/{installation_id}/reconcile/preview"][
         "post"
     ]
-    assert preview["requestBody"]["content"]["application/json"]["schema"][
-        "$ref"
-    ].endswith("RunSwitchCleanupPreviewRequest")
+    assert "requestBody" not in preview
     assert preview["responses"]["200"]["content"]["application/json"]["schema"][
         "$ref"
     ].endswith("RunSwitchPlan")
     apply = paths["/api/recipe/installations/{installation_id}/reconcile"]["post"]
     assert apply["requestBody"]["content"]["application/json"]["schema"][
         "$ref"
-    ].endswith("RunSwitchCleanupApplyRequest")
+    ].endswith("InstallationReconcileRequest")
     assert apply["responses"]["202"]["content"]["application/json"]["schema"][
         "$ref"
     ].endswith("RunSwitchOperation")
@@ -178,29 +172,6 @@ def test_reconciliation_routes_are_typed_and_discoverable() -> None:
         assert paths[path][method]["operationId"] == operation_id
 
 
-def test_preview_requires_path_identity_and_explicit_reconcile_mode() -> None:
-    operations = Mock()
-    client = _client(operations)
-    path = f"/api/recipe/installations/{INSTALLATION_ID}/reconcile/preview"
-
-    wrong_installation = client.post(
-        path,
-        json={
-            "schema_version": 2,
-            "installation_id": OPERATION_ID,
-            "cleanup_mode": "reconcile",
-        },
-    )
-    wrong_mode = client.post(
-        path,
-        json={"schema_version": 2, "installation_id": INSTALLATION_ID},
-    )
-
-    assert wrong_installation.status_code == 422
-    assert wrong_mode.status_code == 422
-    operations.preview_cleanup.assert_not_called()
-
-
 def test_preview_delegates_reconcile_mode_to_existing_run_switch_owner() -> None:
     operations = Mock()
     operations.preview_cleanup.side_effect = RunSwitchOperationConflict(
@@ -209,12 +180,7 @@ def test_preview_delegates_reconcile_mode_to_existing_run_switch_owner() -> None
     client = _client(operations)
 
     response = client.post(
-        f"/api/recipe/installations/{INSTALLATION_ID}/reconcile/preview",
-        json={
-            "schema_version": 2,
-            "installation_id": INSTALLATION_ID,
-            "cleanup_mode": "reconcile",
-        },
+        f"/api/recipe/installations/{INSTALLATION_ID}/reconcile/preview"
     )
 
     assert response.status_code == 409
@@ -224,20 +190,14 @@ def test_preview_delegates_reconcile_mode_to_existing_run_switch_owner() -> None
     assert operations.preview_cleanup.call_args.kwargs == {"actor": "test-actor"}
 
 
-def test_apply_is_administrator_only_and_preserves_reviewed_request_identity() -> None:
+def test_apply_is_administrator_only_and_preserves_request_identity() -> None:
     operations = Mock()
     operations.apply_cleanup.side_effect = RunSwitchOperationConflict(
         "run-switch.reconciliation-stale-plan"
     )
     client = _client(operations, role="operator")
     path = f"/api/recipe/installations/{INSTALLATION_ID}/reconcile"
-    body = {
-        "schema_version": 2,
-        "installation_id": INSTALLATION_ID,
-        "cleanup_mode": "reconcile",
-        "plan_digest": PLAN_DIGEST,
-        "request_key": REQUEST_KEY,
-    }
+    body = {"request_key": REQUEST_KEY}
 
     forbidden = client.post(path, json=body)
     assert forbidden.status_code == 403
@@ -250,7 +210,6 @@ def test_apply_is_administrator_only_and_preserves_reviewed_request_identity() -
     request = operations.apply_cleanup.call_args.args[0]
     assert request.installation_id == INSTALLATION_ID
     assert request.cleanup_mode == "reconcile"
-    assert request.plan_digest == PLAN_DIGEST
     assert request.request_key == REQUEST_KEY
 
 
@@ -303,10 +262,6 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
 
     preview_response = client.post(
         f"/api/recipe/installations/{installation.owner_id}/reconcile/preview",
-        json=RunSwitchCleanupPreviewRequest(
-            installation_id=installation.owner_id,
-            cleanup_mode="reconcile",
-        ).model_dump(mode="json"),
         headers=headers,
     )
     assert preview_response.status_code == 200, preview_response.text
@@ -317,12 +272,7 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
     plan_digest = preview["plan_digest"]
 
     apply_path = f"/api/recipe/installations/{installation.owner_id}/reconcile"
-    apply_body = RunSwitchCleanupApplyRequest(
-        installation_id=installation.owner_id,
-        cleanup_mode="reconcile",
-        plan_digest=plan_digest,
-        request_key=request_key,
-    ).model_dump(mode="json")
+    apply_body = {"request_key": request_key}
     accepted_response = client.post(apply_path, json=apply_body, headers=headers)
     assert accepted_response.status_code == 202, accepted_response.text
     accepted = accepted_response.json()
@@ -331,13 +281,6 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
     assert replay.status_code == 202, replay.text
     assert replay.json()["operation_id"] == accepted["operation_id"]
     assert replay.json()["request_key"] == request_key
-    # The fleet may change between preview and apply. The committed cleanup is
-    # returned for its request key instead of a 503 after it already started.
-    moved = client.post(
-        apply_path, json={**apply_body, "plan_digest": "f" * 64}, headers=headers
-    )
-    assert moved.status_code == 202, moved.text
-    assert moved.json()["operation_id"] == accepted["operation_id"]
 
     operation_id = accepted["operation_id"]
     assert service.tick() is True

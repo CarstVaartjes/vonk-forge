@@ -28,11 +28,11 @@ test("reads and loads a numbered profile without legacy status or application ro
   expect((await screen.findAllByText("Profile 2 · Coding"))[0]).toBeVisible();
   await user.click(await screen.findByRole("button", {name: "Load profile"}));
   expect(api.previewProfile).toHaveBeenCalledWith(2, expect.any(AbortSignal));
-  expect(api.loadProfile).toHaveBeenCalledWith(2, {plan_digest: preview.plan_digest, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  expect(api.loadProfile).toHaveBeenCalledWith(2, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(await screen.findByRole("region", {name: "Profile load progress"})).toBeVisible();
 });
 
-test("reconciles an ambiguous profile load with the same request key and preview digest", async () => {
+test("reconciles an ambiguous profile load with the same request key", async () => {
   const user = userEvent.setup();
   const loadProfile = vi.fn(async (..._args: Parameters<ControlApi["loadProfile"]>) => application);
   loadProfile.mockRejectedValueOnce(new TypeError("connection lost"));
@@ -48,7 +48,6 @@ test("reconciles an ambiguous profile load with the same request key and preview
   expect(loadProfile).toHaveBeenCalledTimes(2);
   expect(loadProfile.mock.calls[0]).toEqual(loadProfile.mock.calls[1]);
   expect(loadProfile.mock.calls[0]?.[1]).toEqual({
-    plan_digest: preview.plan_digest,
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
   });
 });
@@ -75,16 +74,15 @@ test("renders an empty profile as an explicit whole-fleet idle outcome", async (
   expect(within(saved).getByText("No assignments; every Spark becomes idle on load.")).toBeVisible();
 });
 
-test("refreshes and resumes a profile load after the plan changes", async () => {
+test("shows a refused profile load without resubmitting it", async () => {
   const user = userEvent.setup();
   const loadProfile = vi.fn(async () => application);
-  loadProfile.mockRejectedValueOnce(new ApiError(409, "Current plan changed"));
+  loadProfile.mockRejectedValueOnce(new ApiError(409, "Profile admission refused"));
   const api = apiFor({loadProfile});
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/>);
   await user.click(await screen.findByRole("button", {name: "Load profile"}));
-  expect(await screen.findByRole("region", {name: "Profile load progress"})).toBeVisible();
-  expect(loadProfile).toHaveBeenCalledTimes(2);
-  expect(api.previewProfile).toHaveBeenCalledTimes(2);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Profile admission refused");
+  expect(loadProfile).toHaveBeenCalledTimes(1);
 });
 
 test("a loaded profile names the inference gateway and alias as its client endpoint", async () => {

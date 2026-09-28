@@ -43,10 +43,10 @@ test("removes a recipe only after an explicit model choice", async () => {
     review = cacheRemovalReview({selector, with_model: withModel});
     return review;
   });
-  const removeRecipe = vi.fn().mockImplementation(async (selector: string, requestKey: string, withModel: boolean, reviewDigest: string) => ({
+  const removeRecipe = vi.fn().mockImplementation(async (selector: string, requestKey: string, withModel: boolean) => ({
     action: "remove", operation_id: "op", recipe_revision_id: review.target_identity,
     reclaimed_bytes: 0, request_key: requestKey, schema_version: 2, selector,
-    review_digest: reviewDigest, with_model: withModel, state: "succeeded", progress: {phase: "complete"},
+    with_model: withModel, state: "succeeded", progress: {phase: "complete"},
   }));
   const api = {removeRecipe, recipeRemovalReview} as unknown as ControlApi;
   const base = libraryViewSnapshot.models.find(entry => entry.recipes.length > 0)!;
@@ -62,7 +62,7 @@ test("removes a recipe only after an explicit model choice", async () => {
   expect(recipeRemovalReview).toHaveBeenCalledWith(expect.any(String), false, expect.anything());
   fireEvent.click(screen.getByRole("button", {name: "Confirm remove"}));
   await waitFor(() => expect(removeRecipe).toHaveBeenCalledTimes(1));
-  expect(removeRecipe).toHaveBeenCalledWith(expect.any(String), expect.any(String), false, review.review_digest, expect.anything());
+  expect(removeRecipe).toHaveBeenCalledWith(expect.any(String), expect.any(String), false, expect.anything());
   const [, , withModel] = (removeRecipe as unknown as {mock: {calls: [string, string, boolean][]}}).mock.calls[0]!;
   expect(withModel).toBe(false);
 });

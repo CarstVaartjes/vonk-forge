@@ -341,8 +341,6 @@ def test_removing_one_set_leaves_shared_object_open_for_second_model(
             selector_a,
             actor="operator",
             request_key="00000000-0000-4000-8000-000000000123",
-            model_content_sha256=digest_a,
-            review_digest=review.review_digest,
         )
         assert removing_a.state == "queued"
 
@@ -388,7 +386,7 @@ def test_sibling_membership_change_after_review_keeps_the_shared_object(
     model_b = _one_model(tmp_path, "shared-review-b")
     selector_a = _register_model(sessions, model_a)
     _register_model(sessions, model_b)
-    digest_a, _artifact_a, set_a = _seed_model(
+    _digest_a, _artifact_a, set_a = _seed_model(
         service,
         tmp_path,
         model_a,
@@ -400,7 +398,6 @@ def test_sibling_membership_change_after_review_keeps_the_shared_object(
         model_b,
         "00000000-0000-4000-8000-000000000126",
     )
-    review = service.review_model_removal(selector_a)
     object_digest = hashlib.sha256(b"abc").hexdigest()
     object_path = service._object_path(object_digest)
     original_review = service.review_model_removal
@@ -421,8 +418,6 @@ def test_sibling_membership_change_after_review_keeps_the_shared_object(
             selector_a,
             actor="operator",
             request_key="00000000-0000-4000-8000-000000000127",
-            model_content_sha256=digest_a,
-            review_digest=review.review_digest,
         )
         settled = _settle_removal(service, removing_a)
         assert settled.state == "succeeded", settled

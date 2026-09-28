@@ -249,10 +249,8 @@ class FakeClient:
             assert payload == {"disposition": "resume"}
             return
         if path.endswith("/preview"):
-            if installation_reconcile_path is not None:
-                validate_control_document("RunSwitchCleanupPreviewRequest", payload)
-            else:
-                assert profile_path is not None and payload is None
+            assert payload is None
+            assert installation_reconcile_path is not None or profile_path is not None
         elif path.endswith("/load"):
             assert profile_path is not None
             validate_control_document("FleetProfileLoadRequest", payload)
@@ -264,30 +262,19 @@ class FakeClient:
             )
             uuid.UUID(payload["request_key"])
         elif installation_reconcile_path is not None and path.endswith("/reconcile"):
-            validate_control_document("RunSwitchCleanupApplyRequest", payload)
+            assert isinstance(payload, dict) and set(payload) == {"request_key"}
+            uuid.UUID(payload["request_key"])
         elif selector_path is not None and selector_path.group(2) in {
             "download",
             "remove",
         }:
             assert isinstance(payload, dict)
             if selector_path.group(1) == "model" and selector_path.group(2) == "remove":
-                assert set(payload) == {
-                    "schema_version",
-                    "request_key",
-                    "model_content_sha256",
-                    "review_digest",
-                }
+                assert set(payload) == {"schema_version", "request_key"}
                 assert payload["schema_version"] == 2
                 uuid.UUID(payload["request_key"])
-                assert re.fullmatch(r"[0-9a-f]{64}", payload["model_content_sha256"])
-                assert re.fullmatch(r"[0-9a-f]{64}", payload["review_digest"])
             else:
-                assert set(payload) <= {
-                    "schema_version",
-                    "request_key",
-                    "with_model",
-                    "review_digest",
-                }
+                assert set(payload) <= {"schema_version", "request_key", "with_model"}
                 assert payload["schema_version"] == 2
                 uuid.UUID(payload["request_key"])
                 if selector_path.group(2) == "remove":
@@ -295,9 +282,7 @@ class FakeClient:
                         "schema_version",
                         "request_key",
                         "with_model",
-                        "review_digest",
                     }
-                    assert re.fullmatch(r"[0-9a-f]{64}", payload["review_digest"])
             if selector_path.group(1) == "model":
                 assert "with_model" not in payload
             if selector_path.group(2) == "download":
@@ -483,100 +468,22 @@ def test_recipe_installation_reconcile_review_uses_typed_preview_route(
     )
 
     assert status == 0 and result == plan
-    assert client.calls == [
-        (
-            "POST",
-            path,
-            {
-                "schema_version": 2,
-                "installation_id": installation_id,
-                "cleanup_mode": "reconcile",
-            },
-            None,
-        )
-    ]
+    assert client.calls == [("POST", path, None, None)]
 
 
-def test_recipe_installation_reconcile_rejects_security_or_changed_preview(
-    monkeypatch,
-) -> None:
+def test_recipe_installation_reconcile_submits_without_a_preview() -> None:
     installation_id = "22222222-2222-4222-8222-222222222222"
     key = "11111111-1111-4111-8111-111111111111"
     apply = f"/api/recipe/installations/{installation_id}/reconcile"
-    preview = f"{apply}/preview"
     empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
     client = FakeClient(
         {
             ("GET", "/api/operations"): empty,
-            ("POST", preview): _reconciliation_plan(
-                "55555555-5555-4555-8555-555555555555"
-            ),
-        }
-    )
-    _allow_minimal_reconciliation_plan(monkeypatch)
-
-    status, result = run(
-        (
-            "recipe",
-            "installation",
-            "reconcile",
-            installation_id,
-            "--request-key",
-            key,
-            "--yes",
-            "--json",
-        ),
-        client,
-    )
-
-    assert status == 2
-    assert "unavailable" in str(result["error"]).lower()
-    assert all(call[1] != apply for call in client.calls)
-
-    refused = _reconciliation_plan(installation_id, allowed=False)
-    refused["blockers"] = [
-        {"code": "run-switch.node_revoked", "detail": "Spark was revoked"}
-    ]
-    client.responses[("POST", preview)] = refused
-    status, result = run(
-        (
-            "recipe",
-            "installation",
-            "reconcile",
-            installation_id,
-            "--request-key",
-            key,
-            "--yes",
-            "--json",
-        ),
-        client,
-    )
-    assert status == 2
-    assert "run-switch.node_revoked" in str(result["error"])
-    assert all(call[1] != apply for call in client.calls)
-
-
-def test_recipe_installation_reconcile_submits_despite_ordinary_blockers(
-    monkeypatch,
-) -> None:
-    installation_id = "22222222-2222-4222-8222-222222222222"
-    key = "11111111-1111-4111-8111-111111111111"
-    apply = f"/api/recipe/installations/{installation_id}/reconcile"
-    blocked = _reconciliation_plan(installation_id, allowed=False)
-    blocked["blockers"] = [
-        {"code": "run-switch.capacity_busy", "detail": "capacity is busy"}
-    ]
-    empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
-    client = FakeClient(
-        {
-            ("GET", "/api/operations"): empty,
-            ("POST", f"{apply}/preview"): blocked,
             ("POST", apply): ControlConflict(409, "installation is busy"),
         }
     )
-    _allow_minimal_reconciliation_plan(monkeypatch)
 
-    run(
+    status, result = run(
         (
             "recipe",
             "installation",
@@ -590,10 +497,13 @@ def test_recipe_installation_reconcile_submits_despite_ordinary_blockers(
         client,
     )
 
-    submitted = [call for call in client.calls if call[:2] == ("POST", apply)]
-    assert len(submitted) == 1
-    assert submitted[0][2] is not None
-    assert submitted[0][2]["plan_digest"] == blocked["plan_digest"]
+    assert status == 2
+    assert "installation is busy" in json.dumps(result)
+    assert [call[:2] for call in client.calls] == [
+        ("GET", "/api/operations"),
+        ("POST", apply),
+    ]
+    assert client.calls[1][2] == {"request_key": key}
 
 
 def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity_rows(
@@ -724,26 +634,23 @@ def test_recipe_installation_reconcile_does_not_replay_after_uncertain_lookup() 
     assert [call[0] for call in client.calls] == ["GET"]
 
 
-def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identity(
-    monkeypatch,
-) -> None:
+def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identity() -> (
+    None
+):
     installation_id = "22222222-2222-4222-8222-222222222222"
     key = "11111111-1111-4111-8111-111111111111"
     apply = f"/api/recipe/installations/{installation_id}/reconcile"
-    preview = f"{apply}/preview"
     empty = {"schema_version": 2, "operations": [], "next_cursor": None, "total": 0}
     operation = _reconciliation_operation(key, installation_id)
     client = FakeClient(
         {
             ("GET", "/api/operations"): [empty, empty],
-            ("POST", preview): _reconciliation_plan(installation_id),
             ("POST", apply): [
                 ControlTransportError("acceptance response was lost"),
                 operation,
             ],
         }
     )
-    _allow_minimal_reconciliation_plan(monkeypatch)
 
     status, result = run(
         (
@@ -763,13 +670,7 @@ def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identit
     assert status == 0 and result["operation_id"] == operation["operation_id"]
     posts = [call[2] for call in client.calls if call[0] == "POST" and call[1] == apply]
     assert len(posts) == 2 and posts[0] == posts[1]
-    assert posts[0] == {
-        "schema_version": 2,
-        "installation_id": installation_id,
-        "cleanup_mode": "reconcile",
-        "plan_digest": _REVIEW_DIGEST,
-        "request_key": key,
-    }
+    assert posts[0] == {"request_key": key}
 
 
 def _model_detail(selector: str = "qwen") -> tuple[dict[str, object], str]:
@@ -815,7 +716,6 @@ def _recipe_removal_receipt(
         "operation_id": "11111111-1111-4111-8111-111111111121",
         "recipe_revision_id": "revision-1",
         "with_model": with_model,
-        "review_digest": "b" * 64,
         "progress": {"phase": "queued"},
         "reclaimed_bytes": 0,
         "state": "queued",
@@ -1222,7 +1122,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "selector": "qwen",
                 "request_key": request_key,
                 "model_content_sha256": model_digest,
-                "review_digest": _REVIEW_DIGEST,
                 "state": "cancelled",
                 "operation_id": model_operation_id,
                 "phase": "completed",
@@ -1241,7 +1140,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
                 "operation_id": recipe_operation_id,
                 "recipe_revision_id": "revision-1",
                 "with_model": True,
-                "review_digest": _REVIEW_DIGEST,
                 "progress": {"phase": "completed"},
                 "reclaimed_bytes": 0,
             },
@@ -1278,8 +1176,6 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
     assert client.calls[1][2] == {
         "schema_version": 2,
         "request_key": "11111111-1111-4111-8111-111111111111",
-        "model_content_sha256": model_digest,
-        "review_digest": _REVIEW_DIGEST,
     }
     assert (
         run(
@@ -1302,7 +1198,7 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
     assert recipe_remove["with_model"] is True
 
 
-def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> None:
+def test_model_remove_reconciles_after_lost_acceptance() -> None:
     selector = "qwen"
     request_key = "11111111-1111-4111-8111-111111111111"
     operation_id = "11111111-1111-4111-8111-111111111121"
@@ -1313,7 +1209,6 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
         "selector": selector,
         "request_key": request_key,
         "model_content_sha256": digest,
-        "review_digest": _REVIEW_DIGEST,
         "operation_id": operation_id,
         "state": "queued",
         "phase": "queued",
@@ -1361,8 +1256,6 @@ def test_model_remove_reconciles_the_exact_digest_after_lost_acceptance() -> Non
     assert body == {
         "schema_version": 2,
         "request_key": request_key,
-        "model_content_sha256": digest,
-        "review_digest": _REVIEW_DIGEST,
     }
 
 
@@ -1377,7 +1270,6 @@ def test_model_remove_reconnects_to_existing_key_before_resolving_current_head()
         "selector": selector,
         "request_key": request_key,
         "model_content_sha256": "a" * 64,
-        "review_digest": _REVIEW_DIGEST,
         "operation_id": "11111111-1111-4111-8111-111111111121",
         "state": "succeeded",
         "phase": "completed",
@@ -1451,7 +1343,6 @@ def test_recipe_remove_reconciles_lost_acceptance_with_the_same_request_key() ->
         "schema_version": 2,
         "request_key": request_key,
         "with_model": False,
-        "review_digest": _REVIEW_DIGEST,
     }
 
 
@@ -1527,7 +1418,6 @@ def test_recipe_remove_reconnect_rejects_foreign_selector_or_retention(
             "request_key",
             "22222222-2222-4222-8222-222222222222",
         ),
-        ("model", "qwen", "model_content_sha256", "b" * 64),
         ("recipe", "vision", "selector", "other-recipe"),
         (
             "recipe",
@@ -1551,7 +1441,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             "selector": selector,
             "request_key": request_key,
             "model_content_sha256": model_digest,
-            "review_digest": _REVIEW_DIGEST,
             "operation_id": operation_id,
             "state": "succeeded",
             "phase": "completed",
@@ -1567,7 +1456,6 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             "operation_id": operation_id,
             "recipe_revision_id": "revision-1",
             "with_model": False,
-            "review_digest": _REVIEW_DIGEST,
             "state": "succeeded",
             "progress": {"phase": "completed"},
             "reclaimed_bytes": 0,
@@ -2313,13 +2201,11 @@ def test_profile_load_follows_the_application_it_submitted() -> None:
 
     assert status == 0 and payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
-        "/api/profile/1/preview",
         "/api/profile/1/load",
         f"/api/profile/applications/{application_id}",
     ]
-    assert client.calls[1][2] == {
+    assert client.calls[0][2] == {
         "request_key": "11111111-1111-4111-8111-111111111111",
-        "plan_digest": "c" * 64,
     }
 
 
@@ -2345,7 +2231,7 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
     )
 
     assert status != 0
-    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
     assert not any(call[1].endswith("/progress") for call in client.calls)
 
 
@@ -2666,7 +2552,7 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
 
     assert status == 0
     assert payload["id"] == operation
-    assert [call[0] for call in client.calls] == ["POST", "POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
 
 
 def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> None:
@@ -2715,7 +2601,6 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
         "request_key": key,
     }
     assert [call[:2] for call in client.calls] == [
-        ("POST", "/api/profile/1/preview"),
         ("POST", "/api/profile/1/load"),
         ("GET", f"/api/profile/applications/{operation}"),
     ]
@@ -4190,9 +4075,7 @@ def test_run_prepares_reviews_and_waits_before_reporting_endpoint(
                     "request_key": payload["request_key"],
                     "state": "running",
                     "progress": {
-                        "intended_profile": {
-                            "reviewed_plan_digest": payload["plan_digest"]
-                        }
+                        "intended_profile": {"reviewed_plan_digest": "b" * 64}
                     },
                 }
             if path == f"/api/profile/applications/{application_id}":

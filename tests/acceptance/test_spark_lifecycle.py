@@ -2448,9 +2448,7 @@ class SparkLifecycle:
 
         assert self.control is not None
         request = FleetProfileLoadRequest.model_validate_json(
-            _canonical(
-                {"request_key": request_key, "plan_digest": preview.get("plan_digest")}
-            )
+            _canonical({"request_key": request_key})
         )
         _, payload = self.control.request(
             "POST",

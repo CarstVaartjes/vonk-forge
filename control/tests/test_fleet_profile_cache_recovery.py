@@ -400,10 +400,8 @@ def test_malformed_failed_profile_does_not_block_unrelated_queued_work(
         ),
         actor="admin",
     )
-    preview = service.preview(other.id)
     queued = service.apply(
         other.id,
-        plan_digest=preview.plan_digest,
         request_key="00000000-0000-4000-8000-000000009002",
         actor="admin",
     )

@@ -404,15 +404,16 @@ def test_generated_python_models_compile() -> None:
         compile(path.read_text(), str(path), "exec")
 
 
-def test_packaged_profile_load_requires_review_and_refuses_revision_overrides() -> None:
+def test_packaged_profile_load_requires_a_request_key_and_refuses_overrides() -> None:
     request = {
         "request_key": "00000000-0000-4000-8000-000000000001",
-        "plan_digest": "a" * 64,
     }
     assert validate_control_document("FleetProfileLoadRequest", request) == request
     with pytest.raises(ControlClientError):
+        validate_control_document("FleetProfileLoadRequest", {})
+    with pytest.raises(ControlClientError):
         validate_control_document(
-            "FleetProfileLoadRequest", {"request_key": request["request_key"]}
+            "FleetProfileLoadRequest", {**request, "plan_digest": "a" * 64}
         )
     with pytest.raises(ControlClientError):
         validate_control_document(

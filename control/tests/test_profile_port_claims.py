@@ -53,7 +53,6 @@ def _load(profile, api, headers):
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "plan_digest": review["plan_digest"],
             "request_key": str(uuid4()),
         },
     )

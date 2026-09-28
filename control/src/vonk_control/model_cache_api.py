@@ -63,7 +63,6 @@ def _model_operator_response(
         selector=selector,
         request_key=operation.request_key,
         model_content_sha256=operation.model_content_sha256,
-        review_digest=operation.review_digest,
         operation_id=operation.id,
         state=operation.state,
         phase=str(raw.get("phase", progress.phase)),
@@ -229,8 +228,6 @@ def install_model_operator_routes(
                 selector,
                 actor=actor.subject,
                 request_key=body.request_key,
-                model_content_sha256=body.model_content_sha256,
-                review_digest=body.review_digest,
             )
             return _model_operator_response(
                 operation, action="remove", selector=selector

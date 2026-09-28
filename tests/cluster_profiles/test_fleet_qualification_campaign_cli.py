@@ -1536,7 +1536,7 @@ def test_submit_load_looks_up_first_and_posts_exact_reviewed_digest() -> None:
         (
             "POST",
             "/api/profile/7/load",
-            {"plan_digest": plan_digest, "request_key": request_key},
+            {"request_key": request_key},
         ),
     ]
 
@@ -1575,7 +1575,7 @@ def test_ambiguous_load_retries_only_after_lookup_and_reuses_exact_identity() ->
     plan_digest = "b" * 64
     profile_id = "12345678-1234-4123-8123-123456789abc"
     profile_digest = "c" * 64
-    payload = {"plan_digest": plan_digest, "request_key": request_key}
+    payload = {"request_key": request_key}
     client = _LoadRequestClient(
         campaign_cli.ControlNotFound(404, "not found"),
         campaign_cli.ControlTransportError("response lost"),
@@ -4398,7 +4398,7 @@ def test_paired_lifecycle_releases_each_lane_with_typed_controller_receipts(
                 self.load_posts += 1
                 body = cast(dict[str, object], payload)
                 request_key = str(body["request_key"])
-                base_plan_digest = str(body["plan_digest"])
+                base_plan_digest = str(self._profile_preview()["plan_digest"])
                 assignment = self._assignment()
                 before_runs = dict(self.active_runs)
                 stop_run_ids: list[str]

@@ -517,7 +517,6 @@ def test_pending_later_receipt_does_not_supersede_retry_until_accepted(
     assert root_review.allowed, root_review.reasons
     root = profiles.apply(
         root_profile.id,
-        plan_digest=root_review.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )

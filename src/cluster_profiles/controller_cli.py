@@ -1086,17 +1086,13 @@ def _poll_path(
 def _submit_profile_load(
     client: ControllerClient,
     number: int,
-    expected_digest: str,
     args: argparse.Namespace,
     factory: Callable[[], str],
 ) -> dict[str, object]:
     key = _request_key(args, factory)
     path = f"/api/profile/{number}/load"
     lookup = f"/api/profile/{number}/requests/{key}"
-    body: dict[str, object] = {
-        "request_key": key,
-        "plan_digest": expected_digest,
-    }
+    body: dict[str, object] = {"request_key": key}
 
     def validate(result: Mapping[str, object]) -> str:
         operation_id = result.get("id")
@@ -1106,7 +1102,7 @@ def _submit_profile_load(
             or not operation_id
         ):
             raise ControlMalformedResponse(
-                "profile load receipt identifies another request or review"
+                "profile load receipt identifies another request"
             )
         return operation_id
 
@@ -1232,7 +1228,6 @@ def _validate_cache_removal_receipt(
     result: Mapping[str, object],
     *,
     expected_with_model: bool | None,
-    expected_model_content_sha256: str | None = None,
 ) -> str:
     """Bind a removal receipt to its submitted target and durable identity."""
 
@@ -1258,25 +1253,14 @@ def _validate_cache_removal_receipt(
     if noun == "recipe":
         identity_matches = (
             identity_matches
-            and expected_model_content_sha256 is None
             and expected_with_model is not None
             and receipt.get("with_model") is expected_with_model
         )
     else:
-        digest = receipt.get("model_content_sha256")
-        identity_matches = (
-            identity_matches
-            and expected_with_model is None
-            and isinstance(digest, str)
-            and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
-            and (
-                expected_model_content_sha256 is None
-                or digest == expected_model_content_sha256
-            )
-        )
+        identity_matches = identity_matches and expected_with_model is None
     if not identity_matches:
         raise ControlMalformedResponse(
-            f"{noun} removal receipt identifies another request, selector, digest, or retention choice"
+            f"{noun} removal receipt identifies another request, selector, or retention choice"
         )
     return _cache_operation_id(noun, receipt)
 
@@ -1365,20 +1349,19 @@ def _security_blocker_codes(blockers: object) -> list[str]:
     return codes
 
 
-def _review_digest_for_acceptance(
+def _confirm_removal(
     client: ControllerClient,
     noun: str,
     selector: str,
     args: argparse.Namespace,
     *,
     with_model: bool | None,
-) -> tuple[str, str | None]:
+) -> None:
     interactive = _removal_is_interactive(args)
     if not args.yes and not interactive:
         raise ValueError(f"{noun} remove requires --yes in noninteractive mode")
 
     review = _cache_removal_review(client, noun, selector, with_model=with_model)
-    current_digest = cast(str, review["review_digest"])
     security = _security_blocker_codes(review["blockers"])
     if security:
         raise ControlConflict(
@@ -1388,11 +1371,7 @@ def _review_digest_for_acceptance(
     if not args.yes:
         with redirect_stdout(sys.stderr):
             render_payload(review, noun, action="preview")
-        _confirm_action(
-            args,
-            f"Remove {noun} selector {selector} with reviewed impact {current_digest}?",
-        )
-    return current_digest, cast(str, review["target_identity"])
+        _confirm_action(args, f"Remove {noun} selector {selector}?")
 
 
 def _existing_cache_removal(
@@ -1441,11 +1420,8 @@ def _submit_model_removal(
     client: ControllerClient,
     args: argparse.Namespace,
     factory: Callable[[], str],
-    *,
-    review_digest: str,
-    model_content_sha256: str,
 ) -> dict[str, object]:
-    """Submit one removal bound to the Controller's displayed review."""
+    """Submit one removal of the model's current state."""
     selector = cast(str, args.selector)
     key = _request_key(args, factory)
     path = f"/api/model/{_quoted(selector)}/remove"
@@ -1458,7 +1434,6 @@ def _submit_model_removal(
             key,
             result,
             expected_with_model=None,
-            expected_model_content_sha256=model_content_sha256,
         )
 
     return _submit_idempotent_request(
@@ -1467,12 +1442,7 @@ def _submit_model_removal(
         key=key,
         path=path,
         lookup=lookup,
-        body={
-            "schema_version": 2,
-            "request_key": key,
-            "model_content_sha256": model_content_sha256,
-            "review_digest": review_digest,
-        },
+        body={"schema_version": 2, "request_key": key},
         noun="model",
         action="remove",
         validate=validate,
@@ -1496,10 +1466,9 @@ def _submit_recipe_removal(
     args: argparse.Namespace,
     factory: Callable[[], str],
     *,
-    review_digest: str,
     with_model: bool,
 ) -> dict[str, object]:
-    """Submit one recipe removal bound to its reviewed retention choice."""
+    """Submit one recipe removal bound to its retention choice."""
     selector = cast(str, args.selector)
     key = _request_key(args, factory)
     path = f"/api/recipe/{_quoted(selector)}/remove"
@@ -1525,7 +1494,6 @@ def _submit_recipe_removal(
             "schema_version": 2,
             "request_key": key,
             "with_model": with_model,
-            "review_digest": review_digest,
         },
         noun="recipe",
         action="remove",
@@ -1576,18 +1544,8 @@ def _remove_model(
     )
     if existing is not None:
         return existing
-    digest, target_identity = _review_digest_for_acceptance(
-        client, "model", selector, args, with_model=None
-    )
-    if target_identity is None:
-        raise ControlMalformedResponse("model removal review has no target identity")
-    return _submit_model_removal(
-        client,
-        args,
-        factory,
-        review_digest=digest,
-        model_content_sha256=target_identity,
-    )
+    _confirm_removal(client, "model", selector, args, with_model=None)
+    return _submit_model_removal(client, args, factory)
 
 
 def _remove_recipe(
@@ -1623,16 +1581,8 @@ def _remove_recipe(
     )
     if existing is not None:
         return existing
-    digest, _target_identity = _review_digest_for_acceptance(
-        client, "recipe", selector, args, with_model=with_model
-    )
-    return _submit_recipe_removal(
-        client,
-        args,
-        factory,
-        review_digest=digest,
-        with_model=with_model,
-    )
+    _confirm_removal(client, "recipe", selector, args, with_model=with_model)
+    return _submit_recipe_removal(client, args, factory, with_model=with_model)
 
 
 def _submit_cache_request(
@@ -2659,7 +2609,6 @@ def _run_switch_request_operation(
     request_key: str,
     *,
     installation_id: str,
-    expected_plan_digest: str | None,
 ) -> dict[str, object] | None:
     """Resolve one accepted Run/Switch request before considering a resubmit."""
     page = validate_control_document(
@@ -2714,7 +2663,6 @@ def _run_switch_request_operation(
         observed,
         operation_id=operation_id,
         request_key=request_key,
-        plan_digest=expected_plan_digest,
         installation_id=installation_id,
     )
     return observed
@@ -2725,7 +2673,6 @@ def _validate_installation_reconcile_operation(
     *,
     operation_id: str | None,
     request_key: str,
-    plan_digest: str | None,
     installation_id: str,
 ) -> str:
     if (
@@ -2735,10 +2682,9 @@ def _validate_installation_reconcile_operation(
         or value.get("action") != "cleanup"
         or value.get("cleanup_mode") != "reconcile"
         or value.get("installation_id") != installation_id
-        or (plan_digest is not None and value.get("plan_digest") != plan_digest)
     ):
         raise ControlMalformedResponse(
-            "reconciliation status identifies another request or reviewed plan"
+            "reconciliation status identifies another request"
         )
     returned_id = value.get("operation_id")
     if not isinstance(returned_id, str) or not returned_id:
@@ -2754,13 +2700,11 @@ def _follow_installation_reconciliation(
     args: argparse.Namespace,
     *,
     request_key: str,
-    plan_digest: str | None,
 ) -> dict[str, object]:
     operation_id = _validate_installation_reconcile_operation(
         operation,
         operation_id=None,
         request_key=request_key,
-        plan_digest=plan_digest,
         installation_id=cast(str, args.installation_id),
     )
     if getattr(args, "detach", False):
@@ -2771,7 +2715,6 @@ def _follow_installation_reconciliation(
             observed,
             operation_id=operation_id,
             request_key=request_key,
-            plan_digest=plan_digest,
             installation_id=cast(str, args.installation_id),
         )
 
@@ -2794,11 +2737,6 @@ def _recipe_installation_reconcile(
         f"/api/recipe/installations/{_quoted(installation_id)}/reconcile/preview"
     )
     apply_path = f"/api/recipe/installations/{_quoted(installation_id)}/reconcile"
-    preview_body = {
-        "schema_version": 2,
-        "installation_id": installation_id,
-        "cleanup_mode": "reconcile",
-    }
     if getattr(args, "review", False):
         if (
             getattr(args, "yes", False)
@@ -2810,7 +2748,7 @@ def _recipe_installation_reconcile(
             )
         args.outcome_context = "read"
         return validate_control_document(
-            "RunSwitchPlan", client.request("POST", preview_path, preview_body)
+            "RunSwitchPlan", client.request("POST", preview_path)
         )
     if not getattr(args, "yes", False):
         raise ValueError(
@@ -2870,45 +2808,15 @@ def _recipe_installation_reconcile(
         request,
         key,
         installation_id=installation_id,
-        expected_plan_digest=None,
     )
     if existing is not None:
         submission.acceptance = "accepted"
         submission.operation_id = cast(str, existing["operation_id"])
         return _follow_installation_reconciliation(
-            client,
-            existing,
-            args,
-            request_key=key,
-            plan_digest=None,
+            client, existing, args, request_key=key
         )
 
-    preview = validate_control_document(
-        "RunSwitchPlan", request("POST", preview_path, preview_body)
-    )
-    if (
-        preview.get("action") != "cleanup"
-        or preview.get("cleanup_mode") != "reconcile"
-        or preview.get("installation_id") != installation_id
-        or not isinstance(preview.get("plan_digest"), str)
-    ):
-        raise ControlConflict(
-            409,
-            "installation reconciliation plan is unavailable",
-        )
-    reviewed_digest = cast(str, preview["plan_digest"])
-    security = _security_blocker_codes(preview.get("blockers"))
-    if security:
-        raise ControlConflict(
-            409,
-            "installation reconciliation is refused by the Controller: "
-            + ", ".join(security[:6]),
-        )
-    body = {
-        **preview_body,
-        "plan_digest": reviewed_digest,
-        "request_key": key,
-    }
+    body: dict[str, object] = {"request_key": key}
 
     submission.acceptance = "unknown"
     try:
@@ -2918,7 +2826,6 @@ def _recipe_installation_reconcile(
             operation,
             operation_id=None,
             request_key=key,
-            plan_digest=None,
             installation_id=installation_id,
         )
     except (ControlTransportError, ControlUnavailable, OSError) as error:
@@ -2929,7 +2836,6 @@ def _recipe_installation_reconcile(
             request,
             key,
             installation_id=installation_id,
-            expected_plan_digest=reviewed_digest,
         )
         if existing is not None:
             operation = existing
@@ -2941,7 +2847,6 @@ def _recipe_installation_reconcile(
                 operation,
                 operation_id=None,
                 request_key=key,
-                plan_digest=None,
                 installation_id=installation_id,
             )
     except ControlHTTPError as error:
@@ -2952,7 +2857,6 @@ def _recipe_installation_reconcile(
             request,
             key,
             installation_id=installation_id,
-            expected_plan_digest=reviewed_digest,
         )
         if existing is not None:
             operation = existing
@@ -2964,7 +2868,6 @@ def _recipe_installation_reconcile(
                 operation,
                 operation_id=None,
                 request_key=key,
-                plan_digest=reviewed_digest,
                 installation_id=installation_id,
             )
     except (ControlMalformedResponse, ControlResponseTooLarge):
@@ -2973,7 +2876,6 @@ def _recipe_installation_reconcile(
             request,
             key,
             installation_id=installation_id,
-            expected_plan_digest=reviewed_digest,
         )
         if existing is None:
             raise
@@ -2982,13 +2884,7 @@ def _recipe_installation_reconcile(
 
     submission.acceptance = "accepted"
     submission.operation_id = operation_id
-    return _follow_installation_reconciliation(
-        client,
-        operation,
-        args,
-        request_key=key,
-        plan_digest=reviewed_digest,
-    )
+    return _follow_installation_reconciliation(client, operation, args, request_key=key)
 
 
 def _recipe(
@@ -3588,38 +3484,12 @@ def _profile(
         )
         if not args.yes and not interactive:
             raise ValueError("profile load requires --yes in noninteractive mode")
-        preview = client.request("POST", f"/api/profile/{number}/preview")
-        expected_digest = preview.get("plan_digest")
-        if (
-            not isinstance(expected_digest, str)
-            or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
-        ):
-            raise ControlMalformedResponse(
-                "profile preview has no valid current plan digest"
-            )
         if not args.yes:
+            preview = client.request("POST", f"/api/profile/{number}/preview")
             with redirect_stdout(sys.stderr):
                 render_payload(preview, "profile", action="preview")
             _confirm_action(args, f"Load profile {number} with these effects?")
-        try:
-            result = _submit_profile_load(
-                client, number, expected_digest, args, factory
-            )
-        except ControlConflict as error:
-            # A stale review is bookkeeping. Refresh the same user's intent and
-            # reconnect with its original request identity.
-            if error.code not in {None, "http.409", "profile.stale_plan"}:
-                raise
-            current = client.request("POST", f"/api/profile/{number}/preview")
-            current_digest = current.get("plan_digest")
-            if (
-                not isinstance(current_digest, str)
-                or re.fullmatch(r"[0-9a-f]{64}", current_digest) is None
-            ):
-                raise ControlMalformedResponse(
-                    "profile preview has no valid current plan digest"
-                )
-            result = _submit_profile_load(client, number, current_digest, args, factory)
+        result = _submit_profile_load(client, number, args, factory)
         if args.detach:
             return result
         application_id = result.get("id")

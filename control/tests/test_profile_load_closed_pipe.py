@@ -116,5 +116,4 @@ def test_closed_stdout_reconnects_to_the_single_accepted_load(
     ]
     assert state.calls[1][2] == {
         "request_key": KEY,
-        "plan_digest": digest,
     }

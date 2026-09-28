@@ -142,8 +142,7 @@ class _FakeController:
                     "action": "remove",
                     "selector": "publisher/model",
                     "request_key": payload["request_key"],
-                    "model_content_sha256": payload["model_content_sha256"],
-                    "review_digest": payload["review_digest"],
+                    "model_content_sha256": _MODEL_DIGEST,
                     "operation_id": "model-operation-9",
                     "state": "queued",
                 }
@@ -153,7 +152,6 @@ class _FakeController:
                     "selector": "publisher/recipe",
                     "request_key": payload["request_key"],
                     "with_model": payload["with_model"],
-                    "review_digest": payload["review_digest"],
                     "operation_id": "recipe-operation-9",
                     "state": "queued",
                 }
@@ -250,7 +248,7 @@ def test_noninteractive_yes_uses_the_latest_controller_review(
 
     result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
-    assert result["review_digest"] == _REVIEW_DIGEST
+    assert "review_digest" not in result
     assert [path for _, path, _, _ in client.calls] == [
         "/api/model/publisher%2Fmodel/remove-review",
         "/api/model/publisher%2Fmodel/remove",
@@ -305,10 +303,8 @@ def test_interactive_review_is_rendered_before_prompt_and_post(
 
     result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
-    assert result["review_digest"] == _REVIEW_DIGEST
-    assert client.accepted is not None
-    assert client.accepted["model_content_sha256"] == _MODEL_DIGEST
-    assert client.accepted["review_digest"] == _REVIEW_DIGEST
+    assert result["model_content_sha256"] == _MODEL_DIGEST
+    assert client.calls[-1][2] == {"schema_version": 2, "request_key": _REQUEST_KEY}
     assert [(method, path) for method, path, _, _ in client.calls] == [
         ("GET", "/api/model/publisher%2Fmodel/remove-review"),
         ("POST", "/api/model/publisher%2Fmodel/remove"),
@@ -350,7 +346,7 @@ def test_scripted_remove_uses_latest_review_without_digest_gate(
 
     result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
-    assert result["review_digest"] == "c" * 64
+    assert "review_digest" not in result
     assert [(method, path) for method, path, _, _ in client.calls][-2:] == [
         ("GET", "/api/model/publisher%2Fmodel/remove-review"),
         ("POST", "/api/model/publisher%2Fmodel/remove"),
@@ -417,7 +413,7 @@ def test_blocked_review_is_submitted_so_the_controller_can_park_it(
 
     result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
-    assert result["review_digest"] == _REVIEW_DIGEST
+    assert result["operation_id"] == "model-operation-9"
     assert "Blocker: cache.asset.partial" in rendered.getvalue()
     assert "[y/N]" in rendered.getvalue()
     assert [(method, path) for method, path, _, _ in client.calls] == [
@@ -457,7 +453,7 @@ def test_security_blocker_refuses_without_prompt_or_post() -> None:
     ]
 
 
-def test_same_key_replay_precedes_review_lookup_and_uses_stored_digest(
+def test_same_key_replay_precedes_review_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     receipt: dict[str, object] = {
@@ -465,40 +461,6 @@ def test_same_key_replay_precedes_review_lookup_and_uses_stored_digest(
         "selector": "publisher/model",
         "request_key": _REQUEST_KEY,
         "model_content_sha256": _MODEL_DIGEST,
-        "review_digest": _REVIEW_DIGEST,
-        "operation_id": "model-operation-9",
-        "state": "queued",
-    }
-    client = _FakeController(_review("model", "publisher/model"), existing=receipt)
-    args = _parse(
-        "--json",
-        "model",
-        "remove",
-        "publisher/model",
-        "--request-key",
-        _REQUEST_KEY,
-        "--yes",
-        "--detach",
-    )
-    _accept_response_contracts(monkeypatch)
-
-    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
-
-    assert result == receipt
-    assert [(method, path) for method, path, _, _ in client.calls] == [
-        ("GET", f"/api/model/requests/{_REQUEST_KEY}")
-    ]
-
-
-def test_same_key_reconciles_even_when_receipt_digest_differs_from_latest_review(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    receipt: dict[str, object] = {
-        "action": "remove",
-        "selector": "publisher/model",
-        "request_key": _REQUEST_KEY,
-        "model_content_sha256": _MODEL_DIGEST,
-        "review_digest": "c" * 64,
         "operation_id": "model-operation-9",
         "state": "queued",
     }
@@ -548,7 +510,7 @@ def test_recipe_review_passes_explicit_keep_choice_in_query() -> None:
     ]
 
 
-def test_scripted_recipe_remove_binds_digest_and_explicit_model_choice(
+def test_scripted_recipe_remove_binds_explicit_model_choice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     review = _unblocked_review(_review("recipe", "publisher/recipe", with_model=False))
@@ -566,7 +528,7 @@ def test_scripted_recipe_remove_binds_digest_and_explicit_model_choice(
 
     result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
-    assert result["review_digest"] == _REVIEW_DIGEST
+    assert result["operation_id"] == "recipe-operation-9"
     assert client.calls == [
         (
             "GET",
@@ -581,7 +543,6 @@ def test_scripted_recipe_remove_binds_digest_and_explicit_model_choice(
                 "schema_version": 2,
                 "request_key": _REQUEST_KEY,
                 "with_model": False,
-                "review_digest": _REVIEW_DIGEST,
             },
             None,
         ),

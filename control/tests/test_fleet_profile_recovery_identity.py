@@ -178,7 +178,6 @@ def test_restored_exact_bytes_recover_only_current_profile_intent(
             profile.number,
             request_key=_uuid(911),
             actor="admin",
-            expected_plan_digest=service.preview(profile.id).plan_digest,
         )
 
     def recovered_clock():
@@ -270,7 +269,6 @@ def test_retry_requires_preparation_only_when_an_assignment_needs_work(
     assert kept.actions == ["keep"]
     first = service.apply(
         profile.id,
-        plan_digest=preview.plan_digest,
         request_key=_uuid(921),
         actor="admin",
     )

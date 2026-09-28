@@ -229,7 +229,6 @@ def test_changed_published_output_fails_profile_run_before_target_dispatch(
     assert approved.image_digest == authorization.platform_manifest_digest
     application = profiles.apply(
         profile.id,
-        plan_digest=review.plan_digest,
         request_key="2a167580-2a76-4fd6-8f4a-c67767a35a0f",
         actor="test",
     )

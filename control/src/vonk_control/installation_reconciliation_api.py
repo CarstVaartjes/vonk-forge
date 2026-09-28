@@ -10,6 +10,7 @@ from .auth import MUTATION_ROLES, Actor
 from .logging import redact_text
 from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
 from .run_switch_contract import (
+    InstallationReconcileRequest,
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
     RunSwitchOperation,
@@ -53,18 +54,6 @@ def install_installation_reconciliation_routes(
     def require_apply(actor: Actor) -> None:
         if actor.role not in MUTATION_ROLES[("POST", _APPLY_PATH)]:
             raise HTTPException(status_code=403, detail="insufficient role")
-
-    def require_reconcile_mode(body: object, installation_id: str) -> None:
-        if getattr(body, "installation_id", None) != installation_id:
-            raise HTTPException(
-                status_code=422,
-                detail="installation path and request identity must match",
-            )
-        if getattr(body, "cleanup_mode", None) != "reconcile":
-            raise HTTPException(
-                status_code=422,
-                detail="installation reconciliation requires cleanup_mode=reconcile",
-            )
 
     def refusal_detail(error: RunSwitchOperationConflict) -> str:
         detail = redact_text(str(error))[:256]
@@ -119,12 +108,15 @@ def install_installation_reconciliation_routes(
     )
     def preview_installation_reconciliation(
         installation_id: Annotated[str, Path(pattern=_UUID)],
-        body: RunSwitchCleanupPreviewRequest,
         actor: Actor = authenticated,
     ) -> RunSwitchPlan:
-        require_reconcile_mode(body, installation_id)
         try:
-            plan = service().preview_cleanup(body, actor=actor.subject)
+            plan = service().preview_cleanup(
+                RunSwitchCleanupPreviewRequest(
+                    installation_id=installation_id, cleanup_mode="reconcile"
+                ),
+                actor=actor.subject,
+            )
             return validate_plan(plan, installation_id)
         except HTTPException:
             raise
@@ -144,21 +136,19 @@ def install_installation_reconciliation_routes(
     )
     def apply_installation_reconciliation(
         installation_id: Annotated[str, Path(pattern=_UUID)],
-        body: RunSwitchCleanupApplyRequest,
+        body: InstallationReconcileRequest,
         actor: Actor = authenticated,
     ) -> RunSwitchOperation:
         require_apply(actor)
-        require_reconcile_mode(body, installation_id)
-        if body.plan_digest is None or body.request_key is None:
-            raise HTTPException(
-                status_code=422,
-                detail="installation reconciliation requires the reviewed plan digest and request UUID",
-            )
         try:
-            operation = service().apply_cleanup(body, actor=actor.subject)
-            # The cleanup is already committed: the reviewed plan digest is not
-            # compared here, because a fleet change since the preview would turn
-            # an accepted, running cleanup into an error. Return what runs.
+            operation = service().apply_cleanup(
+                RunSwitchCleanupApplyRequest(
+                    installation_id=installation_id,
+                    cleanup_mode="reconcile",
+                    request_key=body.request_key,
+                ),
+                actor=actor.subject,
+            )
             operation = validate_operation(
                 operation,
                 request_key=body.request_key,

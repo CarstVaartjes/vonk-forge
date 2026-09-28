@@ -324,11 +324,11 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async removeModelCache(selector: string, modelContentSha256: string, requestKey: string, reviewDigest: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
-    // Bind removal to the exact revision the operator reviewed.
+  async removeModelCache(selector: string, requestKey: string, signal?: AbortSignal): Promise<ModelCacheOperatorResponse> {
+    // Removal applies to what the selector resolves to when the Controller accepts it.
     return resultData(await this.generated.POST("/api/model/{selector}/remove", {
       params: {path: {selector}},
-      body: {model_content_sha256: modelContentSha256, request_key: requestKey, review_digest: reviewDigest, schema_version: 2},
+      body: {request_key: requestKey, schema_version: 2},
       signal,
     }));
   }
@@ -362,13 +362,13 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async removeRecipe(selector: string, requestKey: string, withModel: boolean, reviewDigest: string, signal?: AbortSignal): Promise<RecipeOperatorResponse> {
+  async removeRecipe(selector: string, requestKey: string, withModel: boolean, signal?: AbortSignal): Promise<RecipeOperatorResponse> {
     // The model choice is explicit, like the CLI's mandatory --keep-model or
     // --with-model: the Controller fails closed rather than guessing whether a
     // shared model entry should go too.
     return resultData(await this.generated.POST("/api/recipe/{selector}/remove", {
       params: {path: {selector}},
-      body: {request_key: requestKey, review_digest: reviewDigest, schema_version: 2, with_model: withModel},
+      body: {request_key: requestKey, schema_version: 2, with_model: withModel},
       signal,
     }));
   }

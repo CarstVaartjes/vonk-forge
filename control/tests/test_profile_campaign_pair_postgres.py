@@ -208,13 +208,11 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     review = api.post("/api/profile/1/preview", headers=headers)
     assert review.status_code == 200, review.text
     assert review.json()["allowed"] is True
-    reviewed = review.json()["plan_digest"]
+    review.json()["plan_digest"]
 
     path = "/api/profile/1/load"
     request_keys = [str(uuid4()), str(uuid4())]
-    request_bodies = [
-        {"request_key": key, "plan_digest": reviewed} for key in request_keys
-    ]
+    request_bodies = [{"request_key": key} for key in request_keys]
     both_reviewed = Barrier(2)
     original_preview = FleetProfileService.preview
 
@@ -376,7 +374,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     stale = api.post(
         path,
         headers=headers,
-        json={"request_key": stale_key, "plan_digest": reviewed},
+        json={"request_key": stale_key},
     )
     assert stale.status_code == 202, stale.text
     with sessions() as session:

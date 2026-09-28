@@ -277,7 +277,6 @@ def test_changed_physical_pool_loads_against_the_current_plan(
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "plan_digest": reviewed["plan_digest"],
             "request_key": str(uuid4()),
         },
     )

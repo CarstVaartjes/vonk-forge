@@ -244,13 +244,10 @@ def _remove_model(
     request_key: str,
     model_content_sha256: str,
 ):
-    review = service.review_model_removal(selector)
     return service.remove_model_selector(
         selector,
         actor=actor,
         request_key=request_key,
-        model_content_sha256=model_content_sha256,
-        review_digest=review.review_digest,
     )
 
 
@@ -423,8 +420,6 @@ def test_model_removal_applies_to_current_storage_after_an_old_review(
         "a" * 64,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000001064",
-        model_content_sha256="a" * 64,
-        review_digest=reviewed.review_digest,
     )
     for _ in range(10):
         if service.get_operation(accepted.id).state == "succeeded":
@@ -449,13 +444,10 @@ def test_model_removal_review_reports_exact_live_deletion_owner(cache, tmp_path)
         model_content_sha256="a" * 64,
         request_key="00000000-0000-4000-8000-000000001065",
     )
-    before = service.review_model_removal("a" * 64)
     accepted = service.remove_model_selector(
         "a" * 64,
         actor="operator",
         request_key="00000000-0000-4000-8000-000000001066",
-        model_content_sha256="a" * 64,
-        review_digest=before.review_digest,
     )
 
     blocked = service.review_model_removal("a" * 64)
@@ -3599,8 +3591,6 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
         "vonk-forge/exact-removal",
         actor="operator",
         request_key=request_key,
-        model_content_sha256=digest_b,
-        review_digest=reviewed.review_digest,
     )
     assert accepted.model_content_sha256 == digest_a
     assert accepted.review_digest == reviewed.review_digest
@@ -3629,8 +3619,6 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
         "vonk-forge/exact-removal",
         actor="operator",
         request_key=request_key,
-        model_content_sha256=digest_a,
-        review_digest=reviewed.review_digest,
     )
     assert replay.id == accepted.id
     assert replay.model_content_sha256 == digest_a

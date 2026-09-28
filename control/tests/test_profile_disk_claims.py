@@ -42,7 +42,6 @@ def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "plan_digest": review["plan_digest"],
             "request_key": str(uuid4()),
         },
     )
@@ -106,14 +105,13 @@ def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
 def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
     tmp_path, postgres_engine
 ):
-    sessions, profiles, planner, profile, api, headers, review, _ = _capacity_profile(
+    sessions, profiles, planner, profile, api, headers, _review, _ = _capacity_profile(
         tmp_path, postgres_engine
     )
     response = api.post(
         f"/api/profile/{profile.number}/load",
         headers=headers,
         json={
-            "plan_digest": review["plan_digest"],
             "request_key": str(uuid4()),
         },
     )
@@ -190,7 +188,6 @@ def test_supersession_and_failed_dispatch_release_only_unassigned_claims(
             f"/api/profile/{profile.number}/load",
             headers=headers,
             json={
-                "plan_digest": review["plan_digest"],
                 "request_key": str(uuid4()),
             },
         )
@@ -288,7 +285,6 @@ def test_profile_disk_handoff_preserves_materialized_install_headroom(
     assert review.allowed
     application = profiles.apply(
         profile.id,
-        plan_digest=review.plan_digest,
         request_key=str(uuid4()),
         actor="admin",
     )
