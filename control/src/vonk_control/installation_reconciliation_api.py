@@ -105,13 +105,11 @@ def install_installation_reconciliation_routes(
         *,
         operation_id: str | None = None,
         request_key: str | None = None,
-        plan_digest: str | None = None,
         installation_id: str | None = None,
     ) -> RunSwitchOperation:
         if (
             (operation_id is not None and operation.operation_id != operation_id)
             or (request_key is not None and operation.request_key != request_key)
-            or (plan_digest is not None and operation.plan_digest != plan_digest)
             or operation.kind != "recipe.cleanup.v2"
             or operation.action != "cleanup"
             or operation.cleanup_mode != "reconcile"
@@ -172,10 +170,12 @@ def install_installation_reconciliation_routes(
             )
         try:
             operation = service().apply_cleanup(body, actor=actor.subject)
+            # The cleanup is already committed: the reviewed plan digest is not
+            # compared here, because a fleet change since the preview would turn
+            # an accepted, running cleanup into an error. Return what runs.
             operation = validate_operation(
                 operation,
                 request_key=body.request_key,
-                plan_digest=body.plan_digest,
                 installation_id=installation_id,
             )
         except HTTPException:

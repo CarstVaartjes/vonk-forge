@@ -112,6 +112,16 @@ function viewRecipeDetail(detail: RecipeDetail): LibraryViewRecipeDetail {
   return {schema_version: 2, generated_at: detail.updated_at, definition: detail.document, recipe, model_documents: detail.model_documents, operational_state: {builds: [], installations: [], mappings: [], runs: []}, placement: [], reasons: [], topology: detail.document.topology};
 }
 
+/** Running runs of this exact recipe revision, as the fleet snapshot reports them. */
+export function withObservedRuns(detail: LibraryViewRecipeDetail | undefined, fleet: VisualFleetSnapshot | undefined): LibraryViewRecipeDetail | undefined {
+  if (!detail || !fleet) return detail;
+  const runs = new Map<string, {run_id: string; state: string}>();
+  for (const node of fleet.nodes) for (const run of node.loaded) {
+    if (run.recipe_revision_id === detail.recipe.recipe_revision_id && run.run_state === "running") runs.set(run.run_id, {run_id: run.run_id, state: run.run_state});
+  }
+  return {...detail, operational_state: {...detail.operational_state, runs: [...runs.values()]}};
+}
+
 export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path}: {api: ControlApi; path: string; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void}) {
   const [snapshot, setSnapshot] = useState<LibraryViewSnapshot>();
   const [fleet, setFleet] = useState<VisualFleetSnapshot>();
@@ -158,12 +168,13 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
   const contextualNavigate = useCallback((event: MouseEvent<HTMLAnchorElement>, nextPath: string) => { if (!preferredNodeId || !nextPath.startsWith("/library")) return onNavigate(event, nextPath); const url = new URL(nextPath, location.origin); url.searchParams.set("spark", preferredNodeId); onNavigate(event, `${url.pathname}${url.search}`); }, [onNavigate, preferredNodeId]);
   const refresh = useCallback(async (signal: AbortSignal) => { if (route.kind === "recipe") await api.recipeDetail(route.recipeId, signal).then(value => { if (!signal.aborted) setDetail(viewRecipeDetail(value)); }); if (!signal.aborted) { setAttempt(value => value + 1); setFleetAttempt(value => value + 1); } }, [api, route]);
   const names = nodeNames;
+  const observedDetail = useMemo(() => withObservedRuns(detail, fleet), [detail, fleet]);
   return <div className="library-page">
     <header className="library-command-header"><div className="library-command-title"><h1 ref={heading} tabIndex={-1}>Library</h1><p>Choose a Model. Pair it with an exact Recipe, then run it on your Sparks.</p></div></header>
     {preferredNodeId && <aside className="library-spark-context" aria-label={`Managing Models on ${names[preferredNodeId] ?? preferredNodeId}`}><strong>{names[preferredNodeId] ?? preferredNodeId}</strong><span>Choose a compatible Recipe for this Spark.</span><a className="button secondary" href="/library" onClick={event => onNavigate(event, "/library")}>Exit Spark workspace</a></aside>}
     <nav className="library-subnav" aria-label="Library sections">{(["models", "recipes", "profiles"] as const).map(item => <a key={item} className={view === item ? "is-active" : undefined} aria-current={view === item ? "page" : undefined} href={tabPath(path, item)} onClick={event => onNavigate(event, tabPath(path, item))}>{item[0]!.toUpperCase() + item.slice(1)}</a>)}</nav>
     {error && <div className="library-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => setAttempt(value => value + 1)}>Retry Library</button></div>}
     {fleetError && <div className="library-error" role="status"><span>{fleetError}</span><button type="button" className="button secondary" onClick={() => setFleetAttempt(value => value + 1)}>Retry Sparks</button></div>}
-    {snapshot && <LibraryNodeNamesProvider names={names}><LibraryBrowser api={api} detail={detail} detailError={detailError} detailLoading={detailLoading} fleet={fleet} onBusyChange={onBusyChange} onNavigate={contextualNavigate} onNavigatePath={onNavigatePath} onQueryChange={updateQuery} onRefresh={refresh} onRetryDetail={() => setDetailAttempt(value => value + 1)} path={path} query={query} route={route} snapshot={snapshot} subview={view}/></LibraryNodeNamesProvider>}
+    {snapshot && <LibraryNodeNamesProvider names={names}><LibraryBrowser api={api} detail={observedDetail} detailError={detailError} detailLoading={detailLoading} fleet={fleet} onBusyChange={onBusyChange} onNavigate={contextualNavigate} onNavigatePath={onNavigatePath} onQueryChange={updateQuery} onRefresh={refresh} onRetryDetail={() => setDetailAttempt(value => value + 1)} path={path} query={query} route={route} snapshot={snapshot} subview={view}/></LibraryNodeNamesProvider>}
   </div>;
 }

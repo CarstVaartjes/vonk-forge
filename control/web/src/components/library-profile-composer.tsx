@@ -8,7 +8,7 @@ function nextProfileNumber(profiles: FleetProfile[]): number {
 }
 
 function inputFromProfile(profile: FleetProfile): FleetProfileInput {
-  return {...profile.definition, expected_revision: profile.status === "not-created" ? 0 : profile.revision};
+  return {...profile.definition, expected_revision: profile.revision};
 }
 
 export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: ControlApi; detail: LibraryViewRecipeDetail; preferredNodeId?: string}) {
