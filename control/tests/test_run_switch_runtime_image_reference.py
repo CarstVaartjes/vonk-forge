@@ -191,6 +191,64 @@ def test_background_runtime_image_prep_is_a_durable_waiting_phase(
         executor.close()
 
 
+def test_background_runtime_image_prep_resumes_when_its_observation_is_due(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A waiting background preparation is observed again and completes.
+
+    The waiting checkpoint used to be reopened only for final verification, so
+    a finished background preparation was never observed and the operation
+    stayed waiting forever.
+    """
+
+    service, sessions, revision_id, _digest, _mapping, executor, _events = (
+        _make_service(tmp_path, engine=postgres_engine)
+    )
+    storage = FilesystemRuntimeImageStorage(tmp_path / "runtime")
+    preparer = executor._runtime_image_preparer
+    assert callable(preparer)
+
+    waiting_recorded = threading.Event()
+
+    def background_preparer(*args: object, progress: object = None, **kwargs):
+        # A real transfer outlasts the tick, so publication happens while the
+        # operation is already waiting on it. The fixture preparer has no
+        # transfer-progress callback.
+        assert waiting_recorded.wait(10)
+        return preparer(*args, **kwargs)
+
+    executor._runtime_image_preparer = background_preparer
+    executor._async_runtime_image_preparation = True
+    operation = _apply(service, revision_id)
+    _plan, phase, _progress = _advance_to_runtime_image(
+        service, sessions, operation.operation_id
+    )
+    try:
+        assert service._advance(operation.operation_id)
+        with sessions() as session:
+            job = session.get(Job, operation.operation_id)
+            assert job is not None
+            assert job.state == "waiting", job.status_reason
+        waiting_recorded.set()
+        futures = list(executor._runtime_image_futures.values())
+        assert len(futures) == 1
+        futures[0].result(timeout=30)
+
+        later = NOW + timedelta(seconds=6)
+        service._clock = lambda: later
+        executor._clock = lambda: later
+        assert service._advance(operation.operation_id)
+
+        with sessions() as session:
+            job = session.get(Job, operation.operation_id)
+            assert job is not None and job.result is not None
+            assert job.state in {"queued", "running"}, job.status_reason
+            assert job.result.get("phase_index") != phase.index
+        assert (storage.root / ARCHIVE_DIGEST).is_file()
+    finally:
+        executor.close()
+
+
 def test_postgres_reference_survives_worker_death_and_restart(
     tmp_path: Path, postgres_engine
 ) -> None:
