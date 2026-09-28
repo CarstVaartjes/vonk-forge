@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Pull the pinned container images the Docker-backed tests run, once and with
+# retries, so no test pulls an image. Names are keys of the "images" table in
+# deploy/compose/images.lock.json, or "python" for the plain Python base the
+# runtime-init volume test uses.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+if (($# == 0)); then
+    echo "usage: scripts/pull-test-images NAME..." >&2
+    exit 2
+fi
+images=()
+for name in "$@"; do
+    case "$name" in
+        python) images+=("python:3.14-slim-trixie") ;;
+        *)
+            image=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["images"][sys.argv[2]])' \
+                "$root/deploy/compose/images.lock.json" "$name")
+            images+=("$image")
+            ;;
+    esac
+done
+pids=()
+for image in "${images[@]}"; do
+    "$root/scripts/retry-dependency-fetch" docker pull --quiet "$image" &
+    pids+=("$!")
+done
+status=0
+for pid in "${pids[@]}"; do
+    wait "$pid" || status=1
+done
+exit "$status"

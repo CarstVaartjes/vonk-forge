@@ -28,7 +28,6 @@ dev = [
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",
     "pyyaml>=6.0.3",
-    "ruff>=0.16.9",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -58,11 +57,10 @@ extend-exclude = [
 ]
 
 [tool.pyright]
-# One checker for the whole repository. The control virtualenv carries the
-# union of both projects' dependencies, so import resolution is complete.
+# One checker for the whole repository. scripts/check-python-types runs it from
+# the control environment, which carries the union of both projects'
+# dependencies, so import resolution is complete.
 pythonVersion = "3.14"
-venvPath = "control"
-venv = ".venv"
 typeCheckingMode = "basic"
 # Mirror the import roots the test suites add to sys.path, so static analysis
 # resolves the same modules the runtime does.

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Sync the vonkctl CLI's own locked runtime dependencies (the root project's,
+# without the project, dev tools, the Controller or pydantic) into one
+# environment. The installed-CLI tests install each wheel they build into a
+# scratch venv with --no-deps and link this environment in, so no test
+# resolves or downloads a dependency.
+set -euo pipefail
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+export UV_PROJECT_ENVIRONMENT=${VONK_CLI_DEPENDENCY_ENV:-"$root/.cli-dependencies"}
+exec "$root/scripts/retry-dependency-fetch" \
+    uv sync --project "$root" --frozen --no-dev --no-install-project --quiet

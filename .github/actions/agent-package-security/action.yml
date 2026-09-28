@@ -14,6 +14,6 @@ runs:
         cargo build --locked -p vonk-agent --bin vonk-agent
         VONK_AGENT_BINARY="${CARGO_TARGET_DIR:-target}/debug/vonk-agent" \
           VONK_CI_PREREQUISITES=needs_agent_binary \
-          uvx --from pytest==9.1.1 pytest -q \
+          uv run --frozen --only-group dev pytest -q \
           tests/scripts/test_agent_deb.py \
           tests/acceptance/test_rust_agent_parity.py

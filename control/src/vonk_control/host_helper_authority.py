@@ -408,6 +408,94 @@ class HostRuntimeAuthorityService:
             pending.consumed = False
             return observation_identity, grant
 
+    def issue_unowned_recipe_run_probe_grant(
+        self,
+        *,
+        node_id: str,
+        certificate_serial: str,
+        identity: Mapping[str, object],
+        job_id: str,
+        operation_id: str,
+        attempt: int,
+        fence: str,
+        request_sha256: str,
+        expires_in_seconds: int,
+    ) -> tuple[str, SignedHostHelperGrant] | None:
+        """Authorize a read-only probe of a local run this Controller never owned.
+
+        A Spark can retain the lifecycle of a run that no longer exists in this
+        Controller's database, for example after the database was rebuilt.  No
+        exact observation can ever be accepted for it, so the agent needs one
+        authenticated answer instead: whether the process still runs.  The
+        grant is the same exact, ten-second, node-bound ``RUN_INSPECT`` the
+        helper already enforces; it changes nothing on the host, is never
+        consumed as an observation of an owned run, and is refused whenever
+        this Controller has any record of the run.  ``None`` means the run is
+        known and the ordinary observation authority decides.
+        """
+
+        if expires_in_seconds != 10:
+            raise HostHelperAuthorityError(
+                "recipe run observation grant TTL is invalid"
+            )
+        now = _aware(self._clock())
+        with self._sessions.begin() as session:
+            try:
+                normalized = RecipeRunObservationIdentity.model_validate(
+                    dict(identity)
+                ).model_dump(mode="json")
+            except ValidationError as error:
+                raise HostHelperAuthorityError(
+                    "recipe run observation identity is invalid"
+                ) from error
+            run_id = normalized.get("run_id")
+            if session.get(RecipeRun, run_id) is not None or (
+                session.scalar(
+                    select(RunNode.id).where(RunNode.run_id == run_id).limit(1)
+                )
+                is not None
+            ):
+                return None
+            node = session.get(AgentNode, node_id)
+            certificate = session.get(AgentCertificate, certificate_serial)
+            if (
+                normalized.get("node_id") != node_id
+                or job_id != run_id
+                or attempt != normalized.get("run_generation")
+                or node is None
+                or node.state != "active"
+                or node.revoked_at is not None
+                or "recipe.run.inspect.exact.v1" not in set(node.capabilities or ())
+                or certificate is None
+                or certificate.node_id != node_id
+                or certificate.state != "active"
+                or certificate.revoked_at is not None
+                or certificate.ca_revoked_at is not None
+                or _aware(certificate.not_before) > now
+                or _aware(certificate.not_after) <= now
+            ):
+                raise HostHelperAuthorityError(
+                    "recipe run probe authority is unavailable"
+                )
+            observation_identity = hashlib.sha256(
+                canonical_message(normalized)
+            ).hexdigest()
+            grant = self._issuer.issue_grant(
+                node_id=node_id,
+                operation=ExecuteContainerRuntimeRequestOperation(
+                    type=HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
+                    action=ContainerRuntimeAction.RUN_INSPECT.value,
+                    job_id=job_id,
+                    operation_id=operation_id,
+                    attempt=attempt,
+                    fence=fence,
+                    request_sha256=request_sha256,
+                    observation_identity_sha256=observation_identity,
+                ),
+                expires_in_seconds=expires_in_seconds,
+            )
+            return observation_identity, grant
+
     def consume_recipe_run_observation_grant(
         self,
         session: Session,

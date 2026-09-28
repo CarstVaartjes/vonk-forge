@@ -505,7 +505,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
     let schema_path = args.next().ok_or("schema path is required")?;
     let output_path = args.next().ok_or("output path is required")?;
-    let check = args.next().as_deref() == Some("--check");
+    fs::write(output_path, render(&schema_path)?)?;
+    Ok(())
+}
+
+/// The formatted Rust wire types for one exported Pydantic wire schema.
+fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut schema: Value = serde_json::from_slice(&fs::read(schema_path)?)?;
     let bases = schema
         .get("x-vonk-model-bases")
@@ -677,20 +682,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !formatted.status.success() {
         return Err("pinned rustfmt failed".into());
     }
-    let content = String::from_utf8(formatted.stdout)?;
-    if check {
-        if fs::read_to_string(&output_path)? != content {
-            return Err(format!("stale generated Rust wire types: {output_path}").into());
-        }
-    } else {
-        fs::write(output_path, content)?;
-    }
-    Ok(())
+    Ok(String::from_utf8(formatted.stdout)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn committed_generated_types_match_the_committed_wire_schema() {
+        let protocol =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../vonk-agent-protocol");
+        let rendered = render(protocol.join("schema/wire.json").to_str().unwrap()).unwrap();
+        let committed = fs::read_to_string(protocol.join("src/generated.rs")).unwrap();
+        assert!(
+            committed == rendered,
+            "stale generated Rust wire types; run scripts/generate-agent-wire"
+        );
+    }
     #[test]
     fn annotations_do_not_remove_identically_named_properties() {
         let mut schema = json!({"type":"object", "description":"metadata", "properties": {

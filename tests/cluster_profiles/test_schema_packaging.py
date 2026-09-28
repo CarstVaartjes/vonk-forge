@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -28,7 +29,18 @@ def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
 
 def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
     subprocess.run(
-        ["uv", "build", "--wheel", "--offline", "--out-dir", str(tmp_path)],
+        # The locked build backend in the test environment: no isolated build
+        # environment, no network.
+        [
+            sys.executable,
+            "-m",
+            "hatchling",
+            "build",
+            "--target",
+            "wheel",
+            "--directory",
+            str(tmp_path),
+        ],
         cwd=ROOT,
         check=True,
         capture_output=True,

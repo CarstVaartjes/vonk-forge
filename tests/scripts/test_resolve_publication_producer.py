@@ -143,3 +143,70 @@ def test_renaming_an_input_out_of_its_area_is_a_change(tmp_path, monkeypatch):
     git("mv", "packaging/input", "docs/input")
     git("commit", "-qm", "move input")
     assert resolver.changed_matches(before, git("rev-parse", "HEAD"), ["packaging/**"])
+
+
+@pytest.mark.parametrize(
+    ("status", "conclusion"),
+    [("completed", "failure"), ("in_progress", "")],
+)
+def test_later_failed_or_running_rerun_keeps_successful_exact_evidence(
+    monkeypatch, status, conclusion
+):
+    """A dispatch that raced the push build must not revoke its evidence."""
+    resolver = module()
+    runs = [
+        {
+            "id": 5,
+            "run_number": 541,
+            "event": "push",
+            "created_at": "2026-09-28T11:45:00Z",
+            "status": "completed",
+            "conclusion": "success",
+        },
+        {
+            "id": 9,
+            "run_number": 542,
+            "event": "workflow_dispatch",
+            "created_at": "2026-09-28T11:46:00Z",
+            "status": status,
+            "conclusion": conclusion,
+        },
+    ]
+    for item in runs:
+        item.update(head_sha=SOURCE, head_branch="main")
+
+    def command(*args):
+        assert "head_sha=" in args[-1]
+        return json.dumps({"workflow_runs": runs})
+
+    monkeypatch.setattr(resolver, "run", command)
+    assert resolver.resolve("dev-images.yml", SOURCE, "owner/repo") == (
+        0,
+        (5, 541, SOURCE),
+    )
+
+
+def test_exact_runs_that_all_failed_are_rejected_only_when_none_is_running(
+    monkeypatch,
+):
+    resolver = module()
+    runs = [
+        {"id": 5, "status": "completed", "conclusion": "failure"},
+        {"id": 9, "status": "in_progress", "conclusion": ""},
+    ]
+    for index, item in enumerate(runs):
+        item.update(
+            head_sha=SOURCE,
+            head_branch="main",
+            event="push",
+            run_number=index,
+            created_at=f"2026-09-28T11:4{index}:00Z",
+        )
+
+    def command(*args):
+        return json.dumps({"workflow_runs": runs})
+
+    monkeypatch.setattr(resolver, "run", command)
+    assert resolver.resolve("dev-images.yml", SOURCE, "owner/repo") == (2, None)
+    runs[1].update(status="completed", conclusion="failure")
+    assert resolver.resolve("dev-images.yml", SOURCE, "owner/repo") == (1, None)

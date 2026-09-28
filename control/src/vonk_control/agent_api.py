@@ -146,6 +146,10 @@ from .workload_helper_authority import (
 )
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+#: Response header on an observation grant that names a run this Controller
+#: has no record of; the grant then authorizes only a read-only probe.
+RECIPE_RUN_DISPOSITION_HEADER = "x-vonk-recipe-run-disposition"
+RECIPE_RUN_UNOWNED = "unowned"
 _UUID4_TEXT = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -1619,7 +1623,7 @@ def install_agent_routes(
         response_model=RecipeRunObservationGrantWire,
     )
     def recipe_run_observation_grant(
-        body: RecipeRunObservationGrantRequest, request: Request
+        body: RecipeRunObservationGrantRequest, request: Request, response: Response
     ) -> RecipeRunObservationGrantWire:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
@@ -1627,6 +1631,36 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=409,
                 detail="recipe run observation authority rejected request",
+            )
+        try:
+            probe = required.issue_unowned_recipe_run_probe_grant(
+                node_id=identity.node_id,
+                certificate_serial=identity.certificate_serial,
+                identity=body.observation_identity(),
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                request_sha256=body.request_sha256,
+                expires_in_seconds=body.expires_in_seconds,
+            )
+        except (TypeError, ValueError, HostHelperAuthorityError):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe run observation authority rejected request",
+            ) from None
+        if probe is not None:
+            # This Controller has no record of the run (for example after its
+            # database was rebuilt), so no observation of it can ever be
+            # accepted.  Authorize only the read-only probe and say so: the
+            # agent retires the local lifecycle once the helper proves the
+            # process is gone, instead of asking for this grant forever.
+            observation_identity, grant = probe
+            response.headers[RECIPE_RUN_DISPOSITION_HEADER] = RECIPE_RUN_UNOWNED
+            return RecipeRunObservationGrantWire(
+                schema_version=1,
+                observation_identity_sha256=observation_identity,
+                grant=SignedHostHelperGrant.parse(grant.to_mapping()),
             )
         with _require_services(services).sessions() as session:
             run = session.get(RecipeRun, body.run_id)

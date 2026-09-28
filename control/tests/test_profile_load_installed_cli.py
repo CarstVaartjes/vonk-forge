@@ -13,6 +13,7 @@ import signal
 import socket
 import ssl
 import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -266,7 +267,16 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
         },
     )
     built = subprocess.run(
-        [uv, "build", "--wheel", "--offline", "--out-dir", str(wheel_directory)],
+        [
+            sys.executable,
+            "-m",
+            "hatchling",
+            "build",
+            "--target",
+            "wheel",
+            "--directory",
+            str(wheel_directory),
+        ],
         cwd=root,
         env=environment,
         capture_output=True,
@@ -278,43 +288,9 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
     wheels = list(wheel_directory.glob("vonk_cluster_profiles-*-py3-none-any.whl"))
     assert len(wheels) == 1
     venv = workspace / "venv"
-    created = subprocess.run(
-        [uv, "venv", "--python", "3.14", str(venv)],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert created.returncode == 0, created.stderr
-    python = venv / "bin" / "python"
-    installed = subprocess.run(
-        [
-            uv,
-            "pip",
-            "install",
-            "--offline",
-            "--compile-bytecode",
-            "--python",
-            str(python),
-            str(wheels[0]),
-        ],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
-    if installed.returncode != 0 and (
-        "not found in the cache" in installed.stderr
-        or "network was disabled" in installed.stderr
-    ):
-        from tests.subprocess_environment import prerequisite_unavailable
+    from tests.subprocess_environment import install_cli_wheel
 
-        prerequisite_unavailable(
-            "needs_uv_cache: offline installed-CLI setup requires dependency wheels in the uv cache"
-        )
-    assert installed.returncode == 0, installed.stderr
+    python = install_cli_wheel(uv, venv, wheels[0], environment)
     executable = venv / "bin" / "vonkctl"
     assert executable.is_file()
     isolated_import = subprocess.run(

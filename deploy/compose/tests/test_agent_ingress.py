@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -115,7 +116,7 @@ def _adapted_caddy(environment: dict[str, str], caddyfile: str | None = None) ->
             f"VONK_BACKEND_PORT={environment.get('VONK_BACKEND_PORT', '8443')}",
             "-e",
             "VONK_AGENT_PROXY_AUTH=test-proxy-secret",
-            "caddy:2.10.2",
+            DEV_CADDY_IMAGE,
             "caddy",
             "adapt",
             "--config",
@@ -305,7 +306,7 @@ def _entrypoint_result(
         command.extend(("-v", f"{secret_source}:/run/secrets/agent-proxy-auth:ro"))
     command.extend(
         (
-            "caddy:2.10.2",
+            DEV_CADDY_IMAGE,
             "/bin/sh",
             "/usr/local/bin/vonk-caddy-entrypoint",
         )
@@ -357,11 +358,9 @@ def _settings_result(
     )
     return subprocess.run(
         [
-            "uv",
-            "run",
-            "--project",
-            str(ROOT / "control"),
-            "python",
+            # A fresh interpreter from the synced control environment: the
+            # settings are read from this process environment only.
+            sys.executable,
             "-c",
             (
                 "from vonk_control.settings import Settings; "

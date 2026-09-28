@@ -37,7 +37,13 @@ from .api_response_witness import (
     pytest_sessionfinish as _api_response_sessionfinish,
 )
 
-POSTGRES_IMAGE = "postgres:18.6"
+# The same pinned PostgreSQL the Compose deployment runs; scripts/pull-test-images
+# pulls it before the suite, so starting the server never downloads.
+POSTGRES_IMAGE = json.loads(
+    (Path(__file__).resolve().parents[2] / "deploy/compose/images.lock.json").read_text(
+        encoding="utf-8"
+    )
+)["images"]["postgres"]
 _POSTGRES_PASSWORD = "postgres"
 _POSTGRES_OWNER_LABEL = "dev.vonk-forge.control-tests.owner"
 _POSTGRES_NAME_PREFIX = "vonk-control-tests-"

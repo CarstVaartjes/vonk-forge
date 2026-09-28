@@ -19,6 +19,12 @@ APT_WORKFLOW = ROOT / ".github/actions/agent-apt-publish/action.yml"
 ALLOWED_SIGNERS = ROOT / ".github/release-allowed-signers"
 
 
+def _pinned(action: str) -> str:
+    """An action reference pinned to a full commit SHA (Dependabot bumps it)."""
+
+    return re.escape(action) + r"@[0-9a-f]{40}\b(?: # v[0-9.]+)?"
+
+
 def workflow() -> str:
     return WORKFLOW.read_text()
 
@@ -315,12 +321,7 @@ def test_development_images_build_supported_linux_architectures_with_targeted_ca
     publisher = text[text.index("  publish-development-images:") :]
 
     assert "build-oci-archives" not in jobs
-    assert (
-        publisher.count(
-            "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
-        )
-        == 4
-    )
+    assert len(re.findall(_pinned("docker/build-push-action"), publisher)) == 4
     assert publisher.count("platforms: linux/amd64,linux/arm64") == 4
     for role, image in (
         ("api", "${{ steps.metadata.outputs.api_image }}"),
@@ -345,8 +346,10 @@ def test_development_images_build_supported_linux_architectures_with_targeted_ca
 
 def test_development_images_enable_arm64_emulation_before_building() -> None:
     text = DEV_WORKFLOW.read_text()
-    setup = "docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0"
     publisher = text[text.index("  publish-development-images:") :]
+    pinned_setup = re.search(_pinned("docker/setup-qemu-action"), publisher)
+    assert pinned_setup is not None
+    setup = pinned_setup.group(0)
     first_build = publisher.index("docker/build-push-action@")
 
     assert setup in publisher
@@ -1177,12 +1180,12 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
     text = workflow()
     publisher = job("publish-images")
     for action in (
-        "docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8",
-        "docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e",
-        "docker/login-action@dbcb813823bdd20940b903addbd779551569679f",
-        "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a",
+        "docker/setup-qemu-action",
+        "docker/setup-buildx-action",
+        "docker/login-action",
+        "docker/build-push-action",
     ):
-        assert action in text
+        assert re.search(_pinned(action), text), action
     assert publisher.count("docker/build-push-action@") == 1
     metadata = (ROOT / "scripts/container-release-metadata").read_text()
     for package in (
@@ -1192,9 +1195,9 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
         "vonk-forge-litellm",
     ):
         assert package in metadata
-    qemu = "docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8"
-    buildx = "docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e"
-    assert publisher.index(qemu) < publisher.index(buildx)
+    assert publisher.index("docker/setup-qemu-action@") < publisher.index(
+        "docker/setup-buildx-action@"
+    )
     assert (
         "image: docker.io/tonistiigi/binfmt@sha256:"
         "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0" in publisher
@@ -1248,7 +1251,6 @@ def test_supply_chain_evidence_gate_runs_on_every_pull_request() -> None:
 
     gate = job("supply-chain")
     assert "needs:" not in gate
-    assert "scripts/verify-public-image-inputs" in gate
     assert "scripts/build-control-wheel" in gate
     assert (
         'scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json'

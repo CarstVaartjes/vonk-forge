@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import shutil
 import subprocess
@@ -351,22 +352,12 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
 
 
 def test_control_environment_installs_the_verified_protocol_wheel() -> None:
-    result = subprocess.run(
-        [
-            "uv",
-            "run",
-            "--project",
-            "control",
-            "python",
-            "-c",
-            "import importlib.metadata, json; d = importlib.metadata.distribution('vonk-agent-protocol'); print((d._path / 'direct_url.json').read_text())",
-        ],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    direct_url = json.loads(result.stdout)
+    # The suite runs in the synced control environment, so its installed
+    # distribution is the one under test.
+    installed = importlib.metadata.distribution("vonk-agent-protocol")
+    direct_url_text = installed.read_text("direct_url.json")
+    assert direct_url_text is not None
+    direct_url = json.loads(direct_url_text)
     control_lock = tomllib.loads((ROOT / "control/uv.lock").read_text())
     package = next(
         package
@@ -389,45 +380,26 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
 
 
 def test_control_environment_preserves_the_canonical_zero_byte_model_contract() -> None:
-    result = subprocess.run(
-        [
-            "uv",
-            "run",
-            "--project",
-            "control",
-            "python",
-            "-c",
-            dedent(
-                """
-                from vonk_agent_protocol import AgentProtocolError, DistributionObject
+    from vonk_agent_protocol import AgentProtocolError, DistributionObject
 
-                empty = DistributionObject.parse({
-                    "name": "support/empty.safetensors",
-                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-                    "bytes": 0,
-                    "kind": "model",
-                })
-                try:
-                    DistributionObject.parse({
-                        "name": "support/empty.safetensors",
-                        "sha256": "0" * 64,
-                        "bytes": 0,
-                        "kind": "model",
-                    })
-                except AgentProtocolError:
-                    inconsistent = True
-                else:
-                    inconsistent = False
-                print(empty.bytes == 0 and inconsistent)
-                """
-            ),
-        ],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
+    empty = DistributionObject.parse(
+        {
+            "name": "support/empty.safetensors",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0,
+            "kind": "model",
+        }
     )
-    assert result.stdout.strip() == "True"
+    assert empty.bytes == 0
+    with pytest.raises(AgentProtocolError):
+        DistributionObject.parse(
+            {
+                "name": "support/empty.safetensors",
+                "sha256": "0" * 64,
+                "bytes": 0,
+                "kind": "model",
+            }
+        )
 
 
 # Checks the Controller image the image-build CI job built once from the root

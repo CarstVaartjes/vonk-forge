@@ -1,0 +1,30 @@
+name: Locked Python environment
+description: >-
+  Install uv, build the locked protocol wheel, and sync the control
+  environment once. Every Python suite, lint and type check then runs in it
+  with `uv run --project control --frozen`, which fetches nothing.
+runs:
+  using: composite
+  steps:
+    - name: Install uv and Python with a lockfile-keyed cache
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        version: "0.12.19"
+        python-version: "3.14"
+        enable-cache: true
+        cache-python: true
+        cache-dependency-glob: |
+          control/uv.lock
+          uv.lock
+          agent_protocol/pyproject.toml
+        # Pull requests restore the cache main last saved; only main writes it.
+        save-cache: ${{ github.ref == 'refs/heads/main' }}
+    - name: Build and verify the Controller protocol wheel
+      shell: bash
+      run: scripts/build-control-wheel
+    - name: Sync the locked control environment
+      shell: bash
+      run: scripts/retry-dependency-fetch uv sync --project control --frozen
+    - name: Sync the CLI's own dependencies for the installed-CLI tests
+      shell: bash
+      run: scripts/sync-cli-dependencies

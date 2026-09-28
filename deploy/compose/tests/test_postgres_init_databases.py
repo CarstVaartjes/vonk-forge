@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -12,7 +13,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "deploy/compose/postgres/init-databases.sh"
 ENTRYPOINT = ROOT / "deploy/compose/postgres/entrypoint.sh"
-POSTGRES_IMAGE = "postgres:18.6"
+POSTGRES_IMAGE = json.loads(
+    (ROOT / "deploy/compose/images.lock.json").read_text(encoding="utf-8")
+)["images"]["postgres"]
 
 
 def _docker_unavailable(message: str) -> None:
@@ -86,7 +89,7 @@ def test_database_initializer_rejects_an_invalid_password(tmp_path: Path) -> Non
 
 @pytest.fixture(scope="module")
 def postgres_image() -> str:
-    """Pull the pinned image once, outside the test's time budget."""
+    """The pinned image, pulled beforehand by scripts/pull-test-images."""
     if shutil.which("docker") is None:
         _docker_unavailable("Docker is required for the fresh PostgreSQL test")
     docker_info = subprocess.run(
@@ -98,14 +101,19 @@ def postgres_image() -> str:
     )
     if docker_info.returncode != 0:
         _docker_unavailable("Docker is unavailable for the fresh PostgreSQL test")
-    pulled = subprocess.run(
-        ["docker", "pull", "--quiet", POSTGRES_IMAGE],
+    present = subprocess.run(
+        ["docker", "image", "inspect", POSTGRES_IMAGE],
         check=False,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=15,
     )
-    assert pulled.returncode == 0, pulled.stderr
+    if present.returncode != 0:
+        # Tests never download: CI and scripts/test-local pull pinned images
+        # once, with retries, before the suite starts.
+        _docker_unavailable(
+            f"{POSTGRES_IMAGE} is not present; run scripts/pull-test-images postgres"
+        )
     return POSTGRES_IMAGE
 
 

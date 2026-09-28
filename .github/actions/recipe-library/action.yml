@@ -1,0 +1,56 @@
+name: Canonical recipe library
+description: >-
+  Provide the recipe library at the reviewed revision in .recipe-library,
+  together with the catalog and qualification-authority source commits the
+  suites validate against. It is fetched once per revision and then restored
+  from the cache main saved.
+outputs:
+  revision:
+    description: The reviewed recipe library commit
+    value: ${{ steps.source.outputs.revision }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve the reviewed recipe library revision
+      id: source
+      shell: bash
+      run: |
+        set -euo pipefail
+        revision=$(cat tests/acceptance/recipe-library-revision.txt)
+        [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+        test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
+        printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+    - name: Restore the recipe library for this revision
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .recipe-library
+        key: recipe-library-v1-${{ steps.source.outputs.revision }}
+    - name: Check out the reviewed recipe library
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: CarstVaartjes/vonk-forge-recipes
+        ref: ${{ steps.source.outputs.revision }}
+        path: .recipe-library
+        persist-credentials: false
+    - name: Fetch catalog and authority validation sources
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: python3 "$GITHUB_ACTION_PATH/fetch_validation_sources.py" .recipe-library
+    - name: Save the recipe library for later runs
+      if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .recipe-library
+        key: recipe-library-v1-${{ steps.source.outputs.revision }}
+    - name: Record the recipe library source
+      shell: bash
+      env:
+        EXPECTED_REVISION: ${{ steps.source.outputs.revision }}
+      run: |
+        set -euo pipefail
+        resolved=$(git -C .recipe-library rev-parse --verify 'HEAD^{commit}')
+        test "$resolved" = "$EXPECTED_REVISION"
+        test -z "$(git -C .recipe-library status --porcelain)"
+        printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"

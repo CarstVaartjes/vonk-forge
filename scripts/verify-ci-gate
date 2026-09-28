@@ -8,7 +8,7 @@ import sys
 
 AREAS = ("rust", "repository", "control", "web", "generated", "compose")
 AREA_JOBS = {
-    "rust": ("rust-tests", "rust-platform"),
+    "rust": ("rust-quality", "rust-tests", "rust-platform"),
     "repository": ("repository",),
     "control": ("control", "control-image-build"),
     "web": ("web",),
@@ -34,13 +34,7 @@ def verify(
     if selector_result != "success":
         errors.append(f"selector result is {selector_result!r}, expected 'success'")
 
-    required_success = {
-        "lint",
-        "rust-umbrella",
-        "rust-quality-gate",
-        "catalog-runtime",
-        "supply-chain",
-    }
+    required_success = {"lint", "supply-chain"}
     for job in required_success:
         if results.get(job) != "success":
             errors.append(f"{job} result is {results.get(job)!r}, expected 'success'")

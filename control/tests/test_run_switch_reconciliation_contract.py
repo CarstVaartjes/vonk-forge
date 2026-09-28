@@ -73,18 +73,16 @@ def test_reconciliation_authority_rejects_a_legacy_nested_schema_version() -> No
 
 def test_reconciled_target_requires_exact_prior_receipt() -> None:
     with pytest.raises(ValidationError, match="receipt does not match target state"):
-        RunSwitchReconciliationTarget(
-            **(_target("1", 0).model_dump() | {"state": "reconciled"})
+        RunSwitchReconciliationTarget.model_validate(
+            _target("1", 0).model_dump() | {"state": "reconciled"}
         )
 
-    target = RunSwitchReconciliationTarget(
-        **(
-            _target("1", 0).model_dump()
-            | {
-                "state": "reconciled",
-                "cleanup_receipt_sha256": "9" * 64,
-            }
-        )
+    target = RunSwitchReconciliationTarget.model_validate(
+        _target("1", 0).model_dump()
+        | {
+            "state": "reconciled",
+            "cleanup_receipt_sha256": "9" * 64,
+        }
     )
 
     assert target.state == "reconciled"

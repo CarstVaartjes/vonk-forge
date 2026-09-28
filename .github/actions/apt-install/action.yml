@@ -1,0 +1,20 @@
+name: Install Ubuntu packages
+description: apt-get update and install with bounded network retries and timeouts
+inputs:
+  packages:
+    description: Space-separated package names
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install ${{ inputs.packages }}
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
+        printf '%s\n' 'Acquire::Retries "5";' 'Acquire::http::Timeout "30";' \
+          'Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/80-vonk-retries >/dev/null
+        read -r -a packages <<< "$PACKAGES"
+        timeout 300 sudo apt-get update
+        timeout 600 sudo apt-get install --yes --no-install-recommends "${packages[@]}"

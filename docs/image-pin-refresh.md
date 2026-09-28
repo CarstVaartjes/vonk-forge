@@ -181,7 +181,7 @@ pytest -q control/tests/test_controller_image_packaging.py
 #    image and run the two lane tests that pull and execute the packaged
 #    Skopeo. These are the tests that failed when the old pin rotted.
 UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
-  uv run --project control --frozen --with-editable . pytest -q \
+  uv run --project control --frozen pytest -q \
   "control/tests/security/test_no_routine_ssh.py::test_built_worker_image_contains_no_direct_transport_executable" \
   "control/tests/security/test_agent_protocol.py::test_root_context_image_installs_contracts_and_protocol_from_build_inputs" \
   -m lane
