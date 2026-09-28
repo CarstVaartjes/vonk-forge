@@ -3024,13 +3024,13 @@ class FleetProfileService:
             document = {
                 "schema_version": 2,
                 "number": number,
-                "revision": 1,
+                "revision": 0,
                 "assignments": [],
             }
             return FleetProfileView(
                 id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"vonk-forge:profile:{number}")),
                 number=number,
-                revision=1,
+                revision=0,
                 name="Default" if number == 1 else f"Profile {number}",
                 description="",
                 installation_policy="keep-cached",

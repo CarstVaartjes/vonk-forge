@@ -7533,7 +7533,7 @@
             "type": "string"
           },
           "revision": {
-            "minimum": 1.0,
+            "minimum": 0.0,
             "title": "Revision",
             "type": "integer"
           },
@@ -17163,11 +17163,6 @@
             "title": "Endpoint",
             "type": "string"
           },
-          "evidence_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Evidence Digest",
-            "type": "string"
-          },
           "image_digest": {
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Image Digest",
@@ -17291,7 +17286,6 @@
           "rank",
           "world_size",
           "memory_reservation_bytes",
-          "evidence_digest",
           "phase",
           "run_id",
           "run_generation",
@@ -17311,11 +17305,6 @@
           "artifact_set_digest": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Artifact Set Digest",
-            "type": "string"
-          },
-          "evidence_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Evidence Digest",
             "type": "string"
           },
           "fabric_projection_bound": {
@@ -17451,7 +17440,6 @@
           "rank",
           "world_size",
           "memory_reservation_bytes",
-          "evidence_digest",
           "phase",
           "run_id",
           "run_generation",
@@ -17476,11 +17464,6 @@
           },
           "endpoint": {
             "title": "Endpoint",
-            "type": "string"
-          },
-          "evidence_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Evidence Digest",
             "type": "string"
           },
           "image_digest": {
@@ -17564,7 +17547,6 @@
           "rank",
           "world_size",
           "memory_reservation_bytes",
-          "evidence_digest",
           "endpoint",
           "ready",
           "run_generation",
@@ -25302,11 +25284,6 @@
             "title": "Endpoint",
             "type": "string"
           },
-          "evidence_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Evidence Digest",
-            "type": "string"
-          },
           "image_digest": {
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Image Digest",
@@ -25390,7 +25367,6 @@
           "rank",
           "world_size",
           "memory_reservation_bytes",
-          "evidence_digest",
           "endpoint",
           "ready",
           "run_generation",

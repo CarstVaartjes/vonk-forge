@@ -112,7 +112,6 @@ def _installation_node() -> models.InstallationNode:
         state="planned",
         required_bytes=1000,
         installed_bytes=0,
-        evidence_digest="e" * 64,
         updated_at=NOW,
     )
 
@@ -150,7 +149,6 @@ def _run_node() -> models.RunNode:
         reserved_memory_bytes=2000,
         observed_memory_bytes=None,
         endpoint={"credential": "private endpoint"},
-        evidence_digest="1" * 64,
         updated_at=NOW,
     )
 

@@ -428,7 +428,6 @@ def setup(
                     port=8000,
                     reserved_memory_bytes=100,
                     endpoint={"url": f"http://10.0.0.{rank + 2}:8000"},
-                    evidence_digest=str(rank + 1) * 64,
                     observed_run_generation=(
                         run.run_generation if exact_distributed else None
                     ),
@@ -589,7 +588,6 @@ def add_running_run(
                 port=8000,
                 reserved_memory_bytes=100,
                 endpoint={"url": f"http://10.0.0.{identity}:8000"},
-                evidence_digest=f"{identity:x}" * 64,
                 observed_run_generation=1,
                 observation_receipt_sha256=f"{identity:x}" * 64,
                 observation_endpoint_ready=True,
@@ -1224,14 +1222,12 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert routes["state"] == "published"
     assert routes["routes"]["qwen"] == {
         "address": "10.0.0.2",
-        "evidence_digest": "1" * 64,
         "node_id": "spk_" + "1".zfill(32),
         "observed_at": NOW.isoformat(),
         "operation_id": f"recipe:{run_id}:rank:0",
         "path": "/v1",
         "port": 8000,
         "scheme": "http",
-        "verify_evidence_digest": "1" * 64,
     }
     assert (
         json.loads((directory / "litellm.json").read_text())["model_list"][0][
@@ -1346,10 +1342,11 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         if not renewed_during_verification:
             renewed_during_verification = True
             with service.sessions.begin() as session:
-                for node in session.scalars(
-                    select(RunNode).where(RunNode.run_id == run_id)
-                ):
-                    node.evidence_digest = "7" * 64
+                owner = session.scalar(
+                    select(RunNode).where(RunNode.run_id == run_id, RunNode.rank == 0)
+                )
+                assert owner is not None
+                owner.endpoint = {"url": "http://10.0.0.9:8000"}
             replacement_generation = service.publish_run(run_id).generation
         return bundle
 
@@ -1410,9 +1407,8 @@ def test_worker_renews_from_fresh_all_rank_evidence_and_recovers_owner(
     clock.now = NOW + timedelta(seconds=240)
     with service.sessions.begin() as session:
         nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
-        for index, node in enumerate(nodes):
+        for node in nodes:
             node.updated_at = clock.now
-            node.evidence_digest = f"{index + 5}" * 64
         session.delete(session.get(RoutePublicationOwner, 1))
 
     restarted = RecipeOperationWorker(service.sessions, service, clock=clock)
@@ -1606,7 +1602,7 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
     service = atomic_service(base, root, clock)
     first = service.publish_run(run_id)
     bundle = verify_active_route_bundle(root, clock=clock)
-    request = _supervisor(monkeypatch, root)._active_request(now=clock.now)
+    request = _supervisor(monkeypatch, root)._active_request()
     assert request is not None and request.activation_sha256 == bundle.marker.digest
     with service.sessions() as session:
         owner = _publication_owner(session)
@@ -1617,9 +1613,8 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
 
     clock.now += timedelta(seconds=240)
     with service.sessions.begin() as session:
-        for index, node in enumerate(session.query(RunNode).filter_by(run_id=run_id)):
+        for node in session.query(RunNode).filter_by(run_id=run_id):
             node.updated_at = clock.now
-            node.evidence_digest = str(index + 5) * 64
         session.delete(session.get(RoutePublicationOwner, 1))
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
     renewed = verify_active_route_bundle(root, clock=clock)
@@ -1633,7 +1628,7 @@ def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
     assert withdrawn.marker.state == "maintenance"
     assert withdrawn.marker.generation > renewed.marker.generation
     assert withdrawn.routes["routes"] == {}
-    assert _supervisor(monkeypatch, root)._active_request(now=clock.now) is not None
+    assert _supervisor(monkeypatch, root)._active_request() is not None
 
 
 def test_postgres_expired_empty_route_renews_once_and_restores_supervisor_access(
@@ -1661,7 +1656,8 @@ def test_postgres_expired_empty_route_renews_once_and_restores_supervisor_access
         expires_at = publication.lease_expires_at.replace(tzinfo=UTC)
     clock.now = expires_at + timedelta(seconds=1)
     supervisor = _supervisor(monkeypatch, root)
-    assert supervisor._active_request(now=clock.now) is None
+    # The supervisor keeps serving the expired marker; renewal is Controller-side.
+    assert supervisor._active_request() is not None
 
     # Independent workers serialize through the real PostgreSQL owner row.
     # Only the first tick activates a new empty bundle.
@@ -1689,7 +1685,7 @@ def test_postgres_expired_empty_route_renews_once_and_restores_supervisor_access
         assert publication.lease_expires_at.replace(tzinfo=UTC) == (
             clock.now + timedelta(seconds=ROUTE_LEASE_SECONDS)
         )
-    request = supervisor._active_request(now=clock.now)
+    request = supervisor._active_request()
     assert request is not None
     assert request.marker["generation"] == renewed.marker.generation
 
@@ -1798,7 +1794,7 @@ def test_postgres_empty_route_renewal_recovers_exact_unprojected_activation(
     assert routes.maintain() is True
     recovered = verify_active_route_bundle(root, clock=clock)
     assert recovered.marker == unprojected
-    assert _supervisor(monkeypatch, root)._active_request(now=clock.now) is not None
+    assert _supervisor(monkeypatch, root)._active_request() is not None
     with routes.sessions() as session:
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)

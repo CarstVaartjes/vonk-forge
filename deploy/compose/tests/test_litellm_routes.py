@@ -23,7 +23,6 @@ def test_entrypoint_uses_supervisor_for_atomic_generated_config() -> None:
     assert '"/run/vonk-runtime-assets/litellm/bootstrap-config.json"' in source
     assert 'Path("/supervisor")' in source
     assert "sha256" in source
-    assert "MAXIMUM_LEASE" in source
     assert "terminate" in source
     assert "kill" in source
     assert "shell=True" not in source

@@ -877,7 +877,7 @@ or prove physical model quality.
 The client endpoint is the Controller's inference gateway, not a Spark:
 `API base` is `https://<controller host>/v1` (the same origin as
 `VONK_CONTROL_URL`; over Tailscale, the `svc:vonk-forge` service), where Caddy
-routes `/v1/*` to LiteLLM behind the route-lease check. Use it with the
+routes `/v1/*` to LiteLLM. Use it with the
 `Client model identifier` as the OpenAI `model`. `Spark backend (diagnostic)`
 is the Spark-local serving address LiteLLM forwards to; it is usually
 unreachable from a client and is never the endpoint. The web Profiles view

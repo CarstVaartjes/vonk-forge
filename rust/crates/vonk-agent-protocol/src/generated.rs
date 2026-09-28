@@ -671,7 +671,6 @@ pub struct ArtifactDistributionPayload {
 pub struct ArtifactDistributionResult {
     pub assignment_id: ::uuid::Uuid,
     pub downloaded_bytes: u64,
-    pub evidence_digest: ::std::string::String,
     pub imported_image_digest: ::std::string::String,
     pub model_artifact_set_sha256: ::std::string::String,
     pub oci_image_digest: ::std::string::String,
@@ -4379,7 +4378,6 @@ pub struct RecipeRunObservationsWire {
 pub struct RecipeStartCollectiveReadinessEvidence {
     pub artifact_set_digest: ::std::string::String,
     pub endpoint: ::std::string::String,
-    pub evidence_digest: ::std::string::String,
     pub image_digest: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub local_address: ::std::option::Option<::std::string::String>,
@@ -4545,7 +4543,6 @@ impl ::std::convert::TryFrom<::std::string::String> for RecipeStartPayloadPhase 
 #[derive(Eq)]
 pub struct RecipeStartRankLaunchEvidence {
     pub artifact_set_digest: ::std::string::String,
-    pub evidence_digest: ::std::string::String,
     pub fabric_projection_bound: bool,
     pub image_digest: ::std::string::String,
     pub launched: bool,
@@ -4576,7 +4573,6 @@ pub struct RecipeStartResult {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub endpoint: ::std::option::Option<::std::string::String>,
     pub evidence: RecipeStartResultEvidence,
-    pub evidence_digest: ::std::string::String,
 }
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecipeStartResultEvidence {
@@ -4595,7 +4591,6 @@ pub struct RecipeStartResultEvidence {
 pub struct RecipeStartSingleEvidence {
     pub artifact_set_digest: ::std::string::String,
     pub endpoint: ::std::string::String,
-    pub evidence_digest: ::std::string::String,
     pub image_digest: ::std::string::String,
     pub local_address: (),
     pub master_address: (),
@@ -6097,7 +6092,6 @@ impl ::std::convert::TryFrom<::std::string::String> for TelemetryWorkloadState {
 pub struct TensorParallelStartEvidence {
     pub artifact_set_digest: ::std::string::String,
     pub endpoint: ::std::string::String,
-    pub evidence_digest: ::std::string::String,
     pub image_digest: ::std::string::String,
     pub local_address: ::std::string::String,
     pub master_address: ::std::string::String,
@@ -6862,7 +6856,6 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
         struct Raw {
             pub assignment_id: ::uuid::Uuid,
             pub downloaded_bytes: u64,
-            pub evidence_digest: ::std::string::String,
             pub imported_image_digest: ::std::string::String,
             pub model_artifact_set_sha256: ::std::string::String,
             pub oci_image_digest: ::std::string::String,
@@ -6875,7 +6868,6 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
         Ok(Self {
             assignment_id: raw.assignment_id,
             downloaded_bytes: raw.downloaded_bytes,
-            evidence_digest: raw.evidence_digest,
             imported_image_digest: raw.imported_image_digest,
             model_artifact_set_sha256: raw.model_artifact_set_sha256,
             oci_image_digest: raw.oci_image_digest,
@@ -11481,7 +11473,6 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartCollectiveReadinessEvidence {
         struct Raw {
             pub artifact_set_digest: ::std::string::String,
             pub endpoint: ::std::string::String,
-            pub evidence_digest: ::std::string::String,
             pub image_digest: ::std::string::String,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub local_address: ::std::option::Option<::std::string::String>,
@@ -11507,7 +11498,6 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartCollectiveReadinessEvidence {
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
             endpoint: raw.endpoint,
-            evidence_digest: raw.evidence_digest,
             image_digest: raw.image_digest,
             local_address: raw.local_address,
             master_address: raw.master_address,
@@ -11656,7 +11646,6 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartRankLaunchEvidence {
         #[derive(Eq)]
         struct Raw {
             pub artifact_set_digest: ::std::string::String,
-            pub evidence_digest: ::std::string::String,
             pub fabric_projection_bound: bool,
             pub image_digest: ::std::string::String,
             pub launched: bool,
@@ -11683,7 +11672,6 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartRankLaunchEvidence {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
-            evidence_digest: raw.evidence_digest,
             fabric_projection_bound: raw.fabric_projection_bound,
             image_digest: raw.image_digest,
             launched: raw.launched,
@@ -11717,13 +11705,11 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartResult {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub endpoint: ::std::option::Option<::std::string::String>,
             pub evidence: RecipeStartResultEvidence,
-            pub evidence_digest: ::std::string::String,
         }
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             endpoint: raw.endpoint,
             evidence: raw.evidence,
-            evidence_digest: raw.evidence_digest,
         })
     }
 }
@@ -11738,7 +11724,6 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartSingleEvidence {
         struct Raw {
             pub artifact_set_digest: ::std::string::String,
             pub endpoint: ::std::string::String,
-            pub evidence_digest: ::std::string::String,
             pub image_digest: ::std::string::String,
             pub local_address: (),
             pub master_address: (),
@@ -11758,7 +11743,6 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartSingleEvidence {
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
             endpoint: raw.endpoint,
-            evidence_digest: raw.evidence_digest,
             image_digest: raw.image_digest,
             local_address: raw.local_address,
             master_address: raw.master_address,
@@ -13273,7 +13257,6 @@ impl<'de> ::serde::Deserialize<'de> for TensorParallelStartEvidence {
         struct Raw {
             pub artifact_set_digest: ::std::string::String,
             pub endpoint: ::std::string::String,
-            pub evidence_digest: ::std::string::String,
             pub image_digest: ::std::string::String,
             pub local_address: ::std::string::String,
             pub master_address: ::std::string::String,
@@ -13293,7 +13276,6 @@ impl<'de> ::serde::Deserialize<'de> for TensorParallelStartEvidence {
         Ok(Self {
             artifact_set_digest: raw.artifact_set_digest,
             endpoint: raw.endpoint,
-            evidence_digest: raw.evidence_digest,
             image_digest: raw.image_digest,
             local_address: raw.local_address,
             master_address: raw.master_address,

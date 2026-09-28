@@ -185,11 +185,7 @@ def canonical_start_result(payload: Mapping[str, object]) -> dict[str, object]:
         "run_generation": payload["run_generation"],
         "runtime_arguments_sha256": "c" * 64,
     }
-    evidence = {
-        **identity,
-        "evidence_digest": hashlib.sha256(canonical_message(identity)).hexdigest(),
-    }
-    return {"evidence": evidence, "evidence_digest": evidence["evidence_digest"]}
+    return {"evidence": identity}
 
 
 def canonical_install_payload() -> dict[str, object]:
@@ -2688,7 +2684,6 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
             "verified_oci_layout_sha256": COMMIT,
             "oci_image_digest": "sha256:" + COMMIT,
             "downloaded_bytes": 0,
-            "evidence_digest": COMMIT,
         },
     )
     with sessions() as session:
@@ -2740,7 +2735,6 @@ def test_successful_distribution_receipt_closes_coalesced_final_counters(
             "verified_oci_layout_sha256": COMMIT,
             "oci_image_digest": "sha256:" + COMMIT,
             "downloaded_bytes": 200,
-            "evidence_digest": COMMIT,
         },
     )
     with sessions() as session:

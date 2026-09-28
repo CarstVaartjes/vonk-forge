@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
-"""Run LiteLLM with only an exact, unexpired atomic route bundle."""
+"""Run LiteLLM with the last exact atomic route bundle the Controller published.
+
+The activation marker still carries the Controller's issued/expiry timestamps,
+but the supervisor deliberately ignores expiry: a stalled Controller must not
+darken inference on healthy Sparks. Routes change only when the Controller
+publishes a new generation (including explicit withdrawals).
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import re
 import signal
 import stat
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -26,7 +28,6 @@ from pydantic import ValidationError
 sys.path.insert(0, "/opt/vonk-litellm")
 from route_activation import (
     ROUTE_KILL_REAP_SECONDS,
-    ROUTE_MAXIMUM_LEASE_SECONDS,
     ROUTE_SHUTDOWN_SECONDS,
     ROUTE_STARTUP_SECONDS,
     ActivationMarker,
@@ -45,10 +46,8 @@ STARTUP_SECONDS = ROUTE_STARTUP_SECONDS
 STARTUP_ATTEMPTS = 10
 STARTUP_RETRY_SECONDS = 1
 HEALTH_TIMEOUT_SECONDS = 3
-MAXIMUM_LEASE = timedelta(seconds=ROUTE_MAXIMUM_LEASE_SECONDS)
 _PRISMA_CACHE_ROOT = Path("/opt/vonk-litellm/prisma")
 _PRISMA_QUERY_ENGINE_ENV = "PRISMA_QUERY_ENGINE_BINARY"
-_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class ActiveRequest:
@@ -130,279 +129,6 @@ def _prepare_query_engine(*, deadline: float | None = None) -> None:
         raise RuntimeError("Prisma query engine cache is unsafe")
 
 
-@dataclass(frozen=True)
-class _RouteLeaseSnapshot:
-    state: str
-    generation: int | None = None
-    activation_sha256: str | None = None
-    litellm_sha256: str | None = None
-    expires_at: datetime | None = None
-
-
-class _RouteLeaseAuthority:
-    """Own the request-time decision for the loaded LiteLLM route."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._snapshot = _RouteLeaseSnapshot(state="denied")
-
-    def deny(self) -> None:
-        with self._lock:
-            self._snapshot = _RouteLeaseSnapshot(state="denied")
-
-    def allow_bootstrap(self) -> None:
-        with self._lock:
-            self._snapshot = _RouteLeaseSnapshot(state="bootstrap")
-
-    def activate(self, request: ActiveRequest) -> None:
-        marker = getattr(request, "marker", None)
-        activation_sha256 = getattr(request, "activation_sha256", None)
-        if not isinstance(marker, dict):
-            self.deny()
-            return
-        generation = marker.get("generation")
-        litellm_sha256 = marker.get("litellm_sha256")
-        expires_at = _parse_timestamp(marker.get("expires_at"))
-        if (
-            isinstance(generation, bool)
-            or not isinstance(generation, int)
-            or generation <= 0
-            or not isinstance(activation_sha256, str)
-            or _DIGEST.fullmatch(activation_sha256) is None
-            or not isinstance(litellm_sha256, str)
-            or _DIGEST.fullmatch(litellm_sha256) is None
-            or expires_at is None
-        ):
-            self.deny()
-            return
-        snapshot = _RouteLeaseSnapshot(
-            state="active",
-            generation=generation,
-            activation_sha256=activation_sha256,
-            litellm_sha256=litellm_sha256,
-            expires_at=expires_at,
-        )
-        with self._lock:
-            self._snapshot = snapshot
-
-    def authorized(self, now: datetime) -> bool:
-        if (
-            not isinstance(now, datetime)
-            or now.tzinfo is None
-            or now.utcoffset() is None
-        ):
-            return False
-        with self._lock:
-            snapshot = self._snapshot
-        if snapshot.state == "bootstrap":
-            return True
-        return (
-            snapshot.state == "active"
-            and isinstance(snapshot.generation, int)
-            and not isinstance(snapshot.generation, bool)
-            and snapshot.generation > 0
-            and isinstance(snapshot.activation_sha256, str)
-            and _DIGEST.fullmatch(snapshot.activation_sha256) is not None
-            and isinstance(snapshot.litellm_sha256, str)
-            and _DIGEST.fullmatch(snapshot.litellm_sha256) is not None
-            and isinstance(snapshot.expires_at, datetime)
-            and snapshot.expires_at.tzinfo is not None
-            and snapshot.expires_at.utcoffset() is not None
-            and now.astimezone(UTC) < snapshot.expires_at.astimezone(UTC)
-        )
-
-
-def _start_route_lease_server(
-    authority: _RouteLeaseAuthority,
-    *,
-    host: str = "0.0.0.0",
-    port: int = 4001,
-) -> ThreadingHTTPServer:
-    class RouteLeaseHandler(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
-
-        def _respond(self, status: int) -> None:
-            self.request_version = self.protocol_version
-            self.send_response_only(status)
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-
-        def _not_found(self) -> None:
-            self._respond(404)
-
-        def handle_expect_100(self) -> bool:
-            self.close_connection = True
-            self._not_found()
-            return False
-
-        def send_error(
-            self,
-            code: int,
-            message: str | None = None,
-            explain: str | None = None,
-        ) -> None:
-            del code, message, explain
-            self.close_connection = True
-            self._not_found()
-
-        def do_GET(self) -> None:
-            if self.path != "/vonk/route-lease":
-                self._not_found()
-                return
-            self._respond(204 if authority.authorized(datetime.now(UTC)) else 503)
-
-        do_CONNECT = _not_found
-        do_DELETE = _not_found
-        do_HEAD = _not_found
-        do_OPTIONS = _not_found
-        do_PATCH = _not_found
-        do_POST = _not_found
-        do_PUT = _not_found
-        do_TRACE = _not_found
-
-        def log_message(self, _format: str, *_args: object) -> None:
-            return
-
-    server = ThreadingHTTPServer((host, port), RouteLeaseHandler)
-    server.daemon_threads = True
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server
-
-
-class _ServingLeaseGuard:
-    """Kill the exact loaded serving process when its route lease expires."""
-
-    def __init__(
-        self,
-        request: ActiveRequest | None,
-        child: subprocess.Popen[bytes],
-        *,
-        authority: _RouteLeaseAuthority | None = None,
-        clock=lambda: datetime.now(UTC),
-    ) -> None:
-        self._child = child
-        self._authority = authority
-        self._clock = clock
-        self._expires = (
-            _parse_timestamp(request.marker.get("expires_at"))
-            if request is not None
-            else None
-        )
-        if request is not None and self._expires is None:
-            raise RuntimeError("LiteLLM serving lease is invalid")
-        self._lock = threading.Lock()
-        self._timer: threading.Timer | None = None
-        self._timer_generation = 0
-        self._expired = threading.Event()
-
-    @property
-    def expired(self) -> bool:
-        return self._expired.is_set()
-
-    def start(self) -> None:
-        with self._lock:
-            self._timer_generation += 1
-            generation = self._timer_generation
-            expires = self._expires
-        if expires is None:
-            return
-        remaining = (expires - self._clock().astimezone(UTC)).total_seconds()
-        if remaining <= 0:
-            self._expire(generation)
-            return
-        timer = threading.Timer(remaining, lambda: self._expire(generation))
-        timer.daemon = True
-        with self._lock:
-            if generation != self._timer_generation:
-                return
-            self._timer = timer
-        timer.start()
-
-    def cancel(self) -> None:
-        with self._lock:
-            self._timer_generation += 1
-            timer = self._timer
-            self._timer = None
-        if timer is not None:
-            timer.cancel()
-
-    def renew(self, request: ActiveRequest | None) -> None:
-        expires = (
-            _parse_timestamp(request.marker.get("expires_at"))
-            if request is not None
-            else None
-        )
-        if request is not None and expires is None:
-            raise RuntimeError("LiteLLM serving lease is invalid")
-        timer: threading.Timer | None = None
-        expire_generation: int | None = None
-        with self._lock:
-            self._timer_generation += 1
-            generation = self._timer_generation
-            previous_timer = self._timer
-            self._timer = None
-            if self._expired.is_set():
-                raise RuntimeError("LiteLLM serving lease already expired")
-            self._expires = expires
-            if expires is not None:
-                remaining = (expires - self._clock().astimezone(UTC)).total_seconds()
-                if remaining <= 0:
-                    expire_generation = generation
-                else:
-                    timer = threading.Timer(
-                        remaining,
-                        lambda: self._expire(generation),
-                    )
-                    timer.daemon = True
-            if request is not None and self._authority is not None:
-                self._authority.activate(request)
-            self._timer = timer
-        if previous_timer is not None:
-            previous_timer.cancel()
-        if timer is not None:
-            timer.start()
-        if expire_generation is not None:
-            self._expire(expire_generation)
-
-    def publish_ack(self, request: ActiveRequest, *, now: datetime) -> None:
-        with self._lock:
-            if self._expired.is_set():
-                raise RuntimeError("LiteLLM serving lease already expired")
-            _write_ack(request, self._child, now=now)
-
-    def _expire(self, generation: int) -> None:
-        with self._lock:
-            if generation != self._timer_generation:
-                return
-            self._timer = None
-            self._expired.set()
-            if self._authority is not None:
-                self._authority.deny()
-            try:
-                _clear_ack()
-            except RuntimeError:
-                pass
-        try:
-            if self._child.poll() is None:
-                self._child.kill()
-        except OSError:
-            pass
-
-
-def _parse_timestamp(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return None
-    return parsed.astimezone(UTC)
-
-
 def _encoded(value: dict[str, object]) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
@@ -411,7 +137,7 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _active_request(*, now: datetime) -> ActiveRequest | None:
+def _active_request() -> ActiveRequest | None:
     if (
         ACTIVATION.is_symlink()
         or not ACTIVATION.is_file()
@@ -435,18 +161,6 @@ def _active_request(*, now: datetime) -> ActiveRequest | None:
     directory_name = activation.directory
     manifest_digest = activation.manifest_sha256
     if directory_name != f"{generation:08d}-{manifest_digest}":
-        return None
-    issued = _parse_timestamp(marker.get("issued_at"))
-    expires = _parse_timestamp(marker.get("expires_at"))
-    current = now.astimezone(UTC)
-    if (
-        issued is None
-        or expires is None
-        or issued > current
-        or current >= expires
-        or expires <= issued
-        or expires - issued > MAXIMUM_LEASE
-    ):
         return None
     directory = GENERATIONS / directory_name
     if directory.is_symlink() or not directory.is_dir():
@@ -480,19 +194,10 @@ def _active_request(*, now: datetime) -> ActiveRequest | None:
     )
 
 
-def _active_config(*, now: datetime) -> Path | None:
-    request = _active_request(now=now)
-    return None if request is None else request.config
-
-
-def _activation_present() -> bool:
-    return ACTIVATION.exists() or ACTIVATION.is_symlink()
-
-
-def _selected(*, now: datetime | None = None) -> Path:
-    active = _active_config(now=now or datetime.now(UTC))
-    if active is not None:
-        return active
+def _selected() -> Path:
+    request = _active_request()
+    if request is not None:
+        return request.config
     if BOOTSTRAP.is_symlink() or not BOOTSTRAP.is_file():
         raise RuntimeError("LiteLLM bootstrap config is unavailable")
     try:
@@ -537,14 +242,6 @@ def _write_ack(
     if child.poll() is not None or not isinstance(child.pid, int) or child.pid <= 0:
         raise RuntimeError("LiteLLM process is not live")
     marker = request.marker
-    expires = _parse_timestamp(marker.get("expires_at"))
-    if expires is None or now.astimezone(UTC) >= expires:
-        try:
-            if child.poll() is None:
-                child.kill()
-        except OSError:
-            pass
-        raise RuntimeError("LiteLLM serving lease expired before acknowledgement")
     acknowledgement = SupervisorAcknowledgement(
         acknowledged_at=now.astimezone(UTC).isoformat(),
         activation_sha256=request.activation_sha256,
@@ -630,7 +327,7 @@ def _await_healthy(
     request: ActiveRequest | None = None,
 ) -> bool:
     while child.poll() is None and time.monotonic() < deadline:
-        if _newer_activation(request, _active_request(now=datetime.now(UTC))):
+        if _newer_activation(request, _active_request()):
             return False
         if _healthy(child) and time.monotonic() < deadline:
             return True
@@ -640,9 +337,7 @@ def _await_healthy(
     return False
 
 
-def _supervise(
-    authority: _RouteLeaseAuthority, *, startup_deadline: float | None = None
-) -> int:
+def _supervise(*, startup_deadline: float | None = None) -> int:
     stopping = False
     child: subprocess.Popen[bytes] | None = None
     startup_attempts = 0
@@ -652,16 +347,14 @@ def _supervise(
     def request_stop(_signum: int, _frame: object) -> None:
         nonlocal stopping
         stopping = True
-        authority.deny()
         if child is not None:
             child.terminate()
 
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
-    request = _active_request(now=datetime.now(UTC))
+    request = _active_request()
     selected = request.config if request is not None else _selected()
     while not stopping:
-        authority.deny()
         if time.monotonic() >= startup_deadline:
             _clear_ack()
             return 1
@@ -679,14 +372,10 @@ def _supervise(
             ],
             stdin=subprocess.DEVNULL,
         )
-        serving_lease = _ServingLeaseGuard(request, child, authority=authority)
-        serving_lease.start()
         if not _await_healthy(child, deadline=startup_deadline, request=request):
             exited_before_health = child.poll() is not None
-            authority.deny()
-            serving_lease.cancel()
             _clear_ack()
-            next_request = _active_request(now=datetime.now(UTC))
+            next_request = _active_request()
             newer_activation = _newer_activation(request, next_request)
             _stop(child, deadline=None if newer_activation else startup_deadline)
             if newer_activation:
@@ -695,19 +384,6 @@ def _supervise(
                 startup_attempts = 0
                 request = next_request
                 selected = request.config
-                startup_deadline = time.monotonic() + STARTUP_SECONDS
-                continue
-            if serving_lease.expired:
-                if next_request is not None and (
-                    request is None
-                    or next_request.marker["generation"] <= request.marker["generation"]
-                ):
-                    return 1
-                # Only a newer activation or denied maintenance/bootstrap state
-                # may begin another bounded startup after authority expires.
-                startup_attempts = 0
-                request = next_request
-                selected = request.config if request is not None else _selected()
                 startup_deadline = time.monotonic() + STARTUP_SECONDS
                 continue
             if exited_before_health and startup_attempts < STARTUP_ATTEMPTS:
@@ -719,18 +395,15 @@ def _supervise(
             return 1
         startup_attempts = 0
         if request is None:
-            if _activation_present():
-                authority.deny()
-            else:
-                authority.allow_bootstrap()
             _clear_ack()
         else:
-            authority.activate(request)
-            serving_lease.publish_ack(request, now=datetime.now(UTC))
+            _write_ack(request, child, now=datetime.now(UTC))
         reload_requested = False
         while child.poll() is None and not stopping:
             time.sleep(POLL_SECONDS)
-            candidate_request = _active_request(now=datetime.now(UTC))
+            if child.poll() is not None:
+                break
+            candidate_request = _active_request()
             candidate = (
                 candidate_request.config
                 if candidate_request is not None
@@ -738,46 +411,25 @@ def _supervise(
             )
             if _digest(candidate) != active_digest:
                 reload_requested = True
-                authority.deny()
-                serving_lease.cancel()
                 _clear_ack()
                 _stop(child)
                 selected = candidate
                 request = candidate_request
                 startup_deadline = time.monotonic() + STARTUP_SECONDS
                 break
-            if not _healthy(child):
-                authority.deny()
-                _clear_ack()
-            elif candidate_request is None:
-                serving_lease.renew(None)
-                if _activation_present():
-                    authority.deny()
-                else:
-                    authority.allow_bootstrap()
+            if not _healthy(child) or candidate_request is None:
                 _clear_ack()
             else:
-                try:
-                    serving_lease.renew(candidate_request)
-                except Exception:
-                    authority.deny()
-                    _clear_ack()
-                    raise
-                serving_lease.publish_ack(
-                    candidate_request,
-                    now=datetime.now(UTC),
-                )
+                # Same config under a newer marker: acknowledge it without a
+                # restart so the Controller sees the generation converge.
+                _write_ack(candidate_request, child, now=datetime.now(UTC))
             request = candidate_request
         if stopping:
-            authority.deny()
-            serving_lease.cancel()
             _clear_ack()
             _stop(child)
             return 0
         if reload_requested:
             continue
-        authority.deny()
-        serving_lease.cancel()
         _clear_ack()
         return int(child.returncode or 1)
     return 0
@@ -786,14 +438,7 @@ def _supervise(
 def main() -> int:
     startup_deadline = time.monotonic() + STARTUP_SECONDS
     _prepare_query_engine(deadline=startup_deadline)
-    authority = _RouteLeaseAuthority()
-    server = _start_route_lease_server(authority)
-    try:
-        return _supervise(authority, startup_deadline=startup_deadline)
-    finally:
-        authority.deny()
-        server.shutdown()
-        server.server_close()
+    return _supervise(startup_deadline=startup_deadline)
 
 
 if __name__ == "__main__":
