@@ -198,8 +198,6 @@ class ArtifactJobClient:
         if path == f"/api/artifact-jobs/{JOB_ID}/finalize" and method == "POST":
             self.job["state"] = "ready"
             return copy.deepcopy(self.job)
-        if path == f"/api/artifact-jobs/{JOB_ID}/result" and method == "GET":
-            return copy.deepcopy(self.job)
         if path == f"/api/artifact-jobs/{JOB_ID}" and method == "GET":
             return copy.deepcopy(self.job)
         raise AssertionError(f"unexpected API call: {method} {path}")

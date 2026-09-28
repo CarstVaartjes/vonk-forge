@@ -1736,11 +1736,8 @@ class ArtifactJobSmokeAdapter:
                 raise QualificationError(
                     f"artifact-job smoke entered terminal state {status.get('state')}"
                 )
-            result = client.request(
-                "GET", f"/api/artifact-jobs/{_quote(job_id)}/result"
-            )
             try:
-                assertions = validate_outputs(recipe, result, client)
+                assertions = validate_outputs(recipe, status, client)
             except FixtureError as error:
                 raise QualificationError(str(error)) from error
         return {

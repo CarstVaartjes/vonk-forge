@@ -521,14 +521,6 @@ class _ArtifactClient(_DownloadClient):
                 "state": "succeeded",
                 "contract_sha256": "d" * 64,
                 "input_manifest_sha256": "e" * 64,
-            }
-        if path.endswith("/finalize"):
-            return {"id": path.split("/")[-2], "state": "ready"}
-        if path.endswith("/submit"):
-            return {"id": path.split("/")[-2], "state": "queued"}
-        if path.endswith("/result"):
-            return {
-                "id": path.split("/")[-2],
                 "output_manifest_sha256": "f" * 64,
                 "output_files": [
                     {
@@ -539,6 +531,10 @@ class _ArtifactClient(_DownloadClient):
                     }
                 ],
             }
+        if path.endswith("/finalize"):
+            return {"id": path.split("/")[-2], "state": "ready"}
+        if path.endswith("/submit"):
+            return {"id": path.split("/")[-2], "state": "queued"}
         raise AssertionError((method, path, payload, query))
 
     def upload_file(

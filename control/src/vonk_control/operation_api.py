@@ -110,7 +110,6 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/artifact-jobs/{job_id}/finalize"): "finalizeArtifactJob",
     ("post", "/api/artifact-jobs/{job_id}/submit"): "submitArtifactJob",
     ("post", "/api/artifact-jobs/{job_id}/cancel"): "cancelArtifactJob",
-    ("get", "/api/artifact-jobs/{job_id}/result"): "getArtifactJobResult",
     (
         "get",
         "/api/artifact-jobs/{job_id}/results/{name}/{sha256}",

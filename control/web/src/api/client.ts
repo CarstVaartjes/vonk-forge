@@ -463,10 +463,6 @@ export class ApiClient implements ControlApi {
     });
   }
 
-  artifactJobResult(jobId: string, signal?: AbortSignal): Promise<ArtifactJob> {
-    return this.request(`/api/artifact-jobs/${encodeURIComponent(jobId)}/result`, {signal});
-  }
-
   artifactJobResultUrl(jobId: string, name: string, sha256: string): string {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) {
       throw new Error("Unsafe artifact result name");
