@@ -6844,11 +6844,13 @@ class RunSwitchOperationService:
                     "plan": refreshed.model_dump(mode="json"),
                     "plan_digest": refreshed.plan_digest,
                 }
-                total_bytes, _ = _planned_transfer_bytes(refreshed)
-                phase_index = min(
-                    require_integer(progress.get("phase_index", 0), "phase index"),
-                    max(0, len(refreshed.phases) - 1),
+                current.authority_revision = (
+                    refreshed.recipe_content_sha256 or refreshed.plan_digest
                 )
+                total_bytes, _ = _planned_transfer_bytes(refreshed)
+                # Replanned phases are idempotent, and even an unchanged shape
+                # does not prove the old phase remains valid under new authority.
+                phase_index = 0
                 progress.update(
                     {
                         "phase_index": phase_index,
@@ -6933,6 +6935,15 @@ class RunSwitchOperationService:
                 self._mark_failed(
                     job,
                     "run-switch workload authority or Spark scope is invalid",
+                    now=now,
+                    progress=progress,
+                )
+                session.commit()
+                return True
+            if intent_status == "missing-target":
+                self._mark_failed(
+                    job,
+                    "run-switch target node no longer exists; accepted intent is superseded",
                     now=now,
                     progress=progress,
                 )
@@ -7905,9 +7916,9 @@ class RunSwitchOperationService:
         current = list(nodes)
         if any(node.revoked_at is not None for node in current):
             return "invalid"
-        if len(current) != len(job.targets) or any(
-            node.state != "active" for node in current
-        ):
+        if len(current) != len(job.targets):
+            return "missing-target"
+        if any(node.state != "active" for node in current):
             return "waiting"
         if any(node.workload_intent_ordinal != ordinal for node in current):
             return "superseded"
@@ -8970,34 +8981,42 @@ def _transient_distribution_exception(error: BaseException) -> bool:
 
 
 def _security_failure_code(code: object, detail: str) -> bool:
-    """Preserve explicit security refusals while allowing stale work to retry."""
-    value = f"{code or ''} {detail}".casefold()
-    return any(
-        marker in value
-        for marker in (
-            "permission_denied",
-            "permission denied",
-            "unauthorized",
-            "forbidden",
-            "identity",
-            "revoked",
-            "signature",
-            "digest_mismatch",
-            "integrity",
-            "invalid",
-            "unsupported",
-            "contract",
-            "unresolved",
-            "authorization",
-            "access denied",
-            "cancelled",
-            "nas_evicted",
-            "evict nas",
-            "cleanup scope",
-            "scope changed",
-            "not uninstallable",
-            "not_uninstallable",
-        )
+    """Classify only explicit security codes; stale plans and prose can retry."""
+    terminal_codes = {
+        "permission_denied",
+        "unauthorized",
+        "forbidden",
+        "401",
+        "403",
+        "identity_mismatch",
+        "node_revoked",
+        "enrollment_token_invalid",
+        "signature_invalid",
+        "signature_mismatch",
+        "helper_authority_error",
+        "tombstone_fenced",
+    }
+    aliases = {
+        "permission denied": "permission_denied",
+        "access denied": "permission_denied",
+        "authentication required": "unauthorized",
+        "identity mismatch": "identity_mismatch",
+        "node revoked": "node_revoked",
+        "invalid enrollment token": "enrollment_token_invalid",
+        "invalid signature": "signature_invalid",
+        "signature mismatch": "signature_mismatch",
+    }
+
+    def normalized(value: object) -> str:
+        return str(getattr(value, "code", value) or "").strip().casefold()
+
+    code_value = normalized(code)
+    detail_value = normalized(detail)
+    return (
+        code_value in terminal_codes
+        or aliases.get(code_value) in terminal_codes
+        or detail_value in terminal_codes
+        or aliases.get(detail_value) in terminal_codes
     )
 
 

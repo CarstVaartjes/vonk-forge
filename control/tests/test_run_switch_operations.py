@@ -96,6 +96,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationProvider,
     RunSwitchOperationService,
     _phase_result,
+    _security_failure_code,
     _transient_distribution_exception,
     effective_build_receipt,
 )
@@ -786,6 +787,12 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
     )
     assert operation.state == "waiting"
     with sessions.begin() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        progress = dict(job.result or {})
+        progress.update({"phase_index": 1, "phase": "final_verify"})
+        job.result = progress
+    with sessions.begin() as session:
         snapshot = session.scalar(
             select(NodeInventorySnapshot).where(
                 NodeInventorySnapshot.node_id == nodes[0]
@@ -797,6 +804,51 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
     assert service._advance(operation.operation_id) is True
     refreshed = service.get(operation.operation_id)
     assert refreshed.state == "queued"
+    with sessions() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        assert isinstance(job.result, dict)
+        assert job.result.get("phase_index") == 0
+        refreshed_plan = job.payload.get("plan")
+        assert isinstance(refreshed_plan, dict)
+        authority_revision = refreshed_plan.get(
+            "recipe_content_sha256"
+        ) or job.payload.get("plan_digest")
+        assert job.authority_revision == authority_revision
+
+
+def test_run_switch_missing_target_is_terminal_with_clear_reason(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+        artifacts=CompleteArtifactInspector(),
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        job.targets = ["spk_ffffffffffffffffffffffffffffffff"]
+
+    assert service._advance(operation.operation_id) is True
+    failed = service.get(operation.operation_id)
+    assert failed.state == "failed"
+    assert "target node no longer exists" in (failed.status_reason or "")
 
 
 def test_child_activity_change_persists_without_clock_only_writes(
@@ -3388,7 +3440,9 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
     assert len(starts) == 1
 
 
-def test_cleanup_adapter_cannot_evict_nas_or_return_noop(tmp_path: Path) -> None:
+def test_cleanup_adapter_retries_when_executor_reports_nas_eviction(
+    tmp_path: Path,
+) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(
         lifecycle,
@@ -3438,10 +3492,9 @@ def test_cleanup_adapter_cannot_evict_nas_or_return_noop(tmp_path: Path) -> None
         actor="admin",
     )
     assert bad_service.tick() is True
-    assert bad_service.get(operation.operation_id).state == "failed"
-    assert "run-switch.cleanup-scope-invalid" in (
-        bad_service.get(operation.operation_id).status_reason or ""
-    )
+    retried = bad_service.get(operation.operation_id)
+    assert retried.state in {"running", "waiting"}
+    assert retried.status_reason and "next attempt" in retried.status_reason
 
 
 def test_invocation_metadata_does_not_change_plan_digest(tmp_path: Path) -> None:
@@ -3691,9 +3744,33 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
     assert detail.progress.total_bytes_known is False
     if failed:
         assert isinstance(detail.failure, OperationFailureEvidence)
-        assert detail.failure.detail == reason
+        # Failure evidence has a strict byte cap. This repetitive long detail
+        # is dropped instead of exceeding the public operation contract.
+        assert detail.failure.detail in {None, "failure evidence truncated"}
+        assert detail.failure.error_code == "run_switch_failed"
     else:
         assert detail.failure is None
+
+
+@pytest.mark.parametrize(
+    ("code", "detail", "terminal"),
+    [
+        ("permission_denied", "authorization denied", True),
+        (401, "credential rejected", True),
+        (403, "insufficient authority", True),
+        ("identity_mismatch", "stale workload identity", True),
+        ("node_revoked", "node was revoked", True),
+        ("signature_invalid", "package signature failed", True),
+        (None, "run plan is invalid under current authority", False),
+        (None, "runtime_image.digest_mismatch", False),
+        (None, "downloaded bytes failed integrity verification", False),
+        (None, "run-switch.stale_plan", False),
+    ],
+)
+def test_security_failure_requires_explicit_terminal_code(
+    code: object | None, detail: str, terminal: bool
+) -> None:
+    assert _security_failure_code(code, detail) is terminal
 
 
 @pytest.mark.parametrize(
@@ -5122,15 +5199,13 @@ def test_scoped_cleanup_refuses_a_planned_row_with_install_evidence(
         and "uninstall.installation_not_uninstallable" in reason.detail
         for reason in preview.blockers
     ), [(reason.code, reason.detail) for reason in preview.blockers]
-    with pytest.raises(
-        RunSwitchOperationConflict, match="run-switch.uninstall-blocked"
-    ):
-        service.apply_cleanup(
-            RunSwitchCleanupApplyRequest(
-                installation_id=installation_id, request_key=str(uuid.uuid4())
-            ),
-            actor="admin",
-        )
+    operation = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation_id, request_key=str(uuid.uuid4())
+        ),
+        actor="admin",
+    )
+    assert operation.state in {"queued", "waiting"}
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None and installation.state == "planned"

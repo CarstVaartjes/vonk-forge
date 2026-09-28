@@ -5166,6 +5166,12 @@ class FleetProfileService:
                 row.updated_at = now
             session.flush()
             if retry_of_application_id is not None and existing is None:
+                if retry_parent is not None and automatic_cache_recovery:
+                    retry_parent.state = "failed"
+                    retry_parent.status_reason = (
+                        f"Automatically reconciled by profile retry {row.id}"
+                    )[:512]
+                    retry_parent.updated_at = now
                 if (
                     selected_generation is None
                     or selected_application_id is None
@@ -5279,13 +5285,15 @@ class FleetProfileService:
             return row is not None and self._retry_eligible(session, row)
 
     def _retry_eligible(self, session: Session, row: FleetProfileApplication) -> bool:
-        if row.state not in {"failed", "waiting-for-operator"}:
+        if row.state not in {"failed", "queued", "waiting-for-operator"}:
             return False
         try:
             progress = _canonical_progress(row.progress)
         except (FleetProfileConflict, ValidationError, TypeError, ValueError):
             # A damaged receipt cannot prove that it still carries the current
             # recoverable intent, so it simply does not advertise retry.
+            return False
+        if row.state == "queued" and progress.retry_due_at is None:
             return False
         if row.selection_generation is not None:
             if not self._application_is_current_selection(session, row, progress):
@@ -5443,12 +5451,19 @@ class FleetProfileService:
                         progress = _persisted_profile_progress(row)
                         progress_data = progress.model_dump(mode="json")
                         progress_data["attempt"] = progress.attempt + 1
-                        row.progress = FleetProfileApplicationProgress.model_validate(
-                            progress_data, strict=True
-                        ).model_dump(mode="json")
-                        row.state = "waiting-for-operator"
+                        due = _aware(self._clock()) + _cache_recovery_delay(
+                            progress.attempt
+                        )
+                        progress_data["retry_due_at"] = due.isoformat()
+                        row.progress = (
+                            FleetProfileApplicationProgress.model_validate_json(
+                                canonical_message(progress_data), strict=True
+                            ).model_dump(mode="json")
+                        )
+                        row.state = "queued"
                         row.status_reason = (
-                            "Waiting for current Fleet conditions before retrying"
+                            "Retrying after current Fleet conditions change; "
+                            f"next attempt at {due.isoformat()}"
                         )
                         row.updated_at = _aware(self._clock())
                         return self._application_view(row)
@@ -6147,6 +6162,14 @@ class FleetProfileService:
                     if row is not None and self._retry_eligible(session, row):
                         progress = _persisted_profile_progress(row)
                         next_check = now + _cache_recovery_delay(progress.attempt)
+                        progress_data = progress.model_dump(mode="json")
+                        progress_data["retry_due_at"] = next_check.isoformat()
+                        row.progress = (
+                            FleetProfileApplicationProgress.model_validate_json(
+                                canonical_message(progress_data), strict=True
+                            ).model_dump(mode="json")
+                        )
+                        row.state = "queued"
                         row.status_reason = (
                             f"{error} Next cache check: {next_check.isoformat()}."
                         )[:512]
@@ -6168,11 +6191,14 @@ class FleetProfileService:
                         progress = _persisted_profile_progress(row)
                         progress_data = progress.model_dump(mode="json")
                         progress_data["attempt"] = progress.attempt + 1
-                        row.progress = FleetProfileApplicationProgress.model_validate(
-                            progress_data, strict=True
-                        ).model_dump(mode="json")
-                        row.state = "waiting-for-operator"
                         due = now + _cache_recovery_delay(progress.attempt)
+                        progress_data["retry_due_at"] = due.isoformat()
+                        row.progress = (
+                            FleetProfileApplicationProgress.model_validate_json(
+                                canonical_message(progress_data), strict=True
+                            ).model_dump(mode="json")
+                        )
+                        row.state = "queued"
                         row.status_reason = (
                             f"{error}; next retry at {due.isoformat()}"
                         )[:512]
@@ -6874,13 +6900,14 @@ class FleetProfileService:
                 select(FleetProfileApplication)
                 .where(
                     FleetProfileApplication.state.in_(
-                        ("failed", "waiting-for-operator")
+                        ("failed", "queued", "waiting-for-operator")
                     )
                 )
                 .order_by(
                     FleetProfileApplication.updated_at.desc(),
                     FleetProfileApplication.id.desc(),
                 )
+                .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
             )
             for row in rows:
                 try:
@@ -6890,6 +6917,12 @@ class FleetProfileService:
                 if progress.intended_profile is None or _profile_failure_is_security(
                     row.status_reason
                 ):
+                    continue
+                if progress.retry_due_at is not None and _aware(
+                    progress.retry_due_at
+                ) > _aware(now):
+                    continue
+                if row.state == "queued" and progress.retry_due_at is None:
                     continue
                 current_scope = tuple(
                     session.scalars(

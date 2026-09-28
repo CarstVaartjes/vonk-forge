@@ -808,7 +808,13 @@ def _accepted_start_authority(
             .order_by(Job.created_at, Job.id)
         )
     )
-    accepted = tuple(job for job in starts if job.payload.get("recovery") is None)
+    accepted = tuple(
+        job
+        for job in starts
+        if job.payload.get("recovery") is None
+        and job.state == "succeeded"
+        and _start_binds_current_run_plan(session, job, run)
+    )
     original = accepted[-1] if accepted else None
     targets = sorted(
         session.scalars(select(RunNode.node_id).where(RunNode.run_id == run.id))
@@ -833,6 +839,8 @@ def _accepted_start_authority(
             job
             for job in starts
             if isinstance(job.payload.get("recovery"), Mapping)
+            and job.state == "succeeded"
+            and _start_binds_current_run_plan(session, job, run)
             and _launch_generation(job, node_id) == run.run_generation
         )
         start = current[-1] if current else None
@@ -1059,6 +1067,30 @@ def _validate_distributed_recovery_start_origin(
         raise DistributedLifecycleError(
             "distributed recovery Start differs from its exact Stop continuation"
         )
+
+
+def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) -> bool:
+    """Only completed Start receipts for the run's current exact plan can seed recovery."""
+
+    try:
+        plan = run_plan_document(run.plan)
+    except RecipeExecutionContractError:
+        return False
+    installation = session.get(RecipeInstallation, run.installation_id)
+    revision = (
+        session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        if installation is not None
+        else None
+    )
+    return (
+        start.state == "succeeded"
+        and revision is not None
+        and start.authority_revision == revision.content_digest
+        and start.payload.get("plan_digest") == run.plan_digest
+        and plan.get("plan_digest") == run.plan_digest
+        and start.payload_digest
+        == hashlib.sha256(canonical_message(start.payload)).hexdigest()
+    )
 
 
 def _project_start_phases(value: object) -> list[list[dict[str, object]]] | None:
@@ -1771,6 +1803,12 @@ def _original_start_authority(
             )
             .order_by(Job.created_at, Job.id)
         )
+    )
+    starts = tuple(
+        start
+        for start in starts
+        if start.state == "succeeded"
+        and _start_binds_current_run_plan(session, start, run)
     )
     if not starts:
         raise DistributedLifecycleError(

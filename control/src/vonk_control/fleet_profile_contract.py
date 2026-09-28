@@ -880,6 +880,7 @@ class FleetProfileApplicationProgress(_StrictModel):
     """Typed progress tree persisted with every profile application."""
 
     attempt: int = Field(default=1, ge=1)
+    retry_due_at: datetime | None = None
     retry_of_application_id: UuidId | None = None
     admission_pending: bool = False
     admission_attempt: int = Field(default=0, ge=0)
