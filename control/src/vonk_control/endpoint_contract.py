@@ -50,7 +50,6 @@ class EndpointResponse(StrictJSONModel):
     alias: str = Field(pattern=_IDENTIFIER_PATTERN, max_length=63)
     api_base: str = Field(min_length=1, max_length=512)
     backend_api_base: str = Field(min_length=1, max_length=512)
-    expires_at: str = Field(min_length=1, max_length=64)
     generation: int = Field(ge=1)
     node_id: str = Field(pattern=_NODE_PATTERN)
     observed_at: str = Field(min_length=1, max_length=64)

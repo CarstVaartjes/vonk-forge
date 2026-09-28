@@ -67,8 +67,7 @@ class _IdleRoutes:
         del run_id
         return None
 
-    def maintain(self, *, renew_before_seconds: int = 10) -> bool:
-        del renew_before_seconds
+    def maintain(self) -> bool:
         return False
 
 

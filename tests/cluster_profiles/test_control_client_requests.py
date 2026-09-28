@@ -241,7 +241,6 @@ def test_cli_profile_endpoint_uses_generated_scoped_endpoint_client(
                     "alias": "studio-chat",
                     "api_base": "https://vonk-forge.example.ts.net/v1",
                     "backend_api_base": "http://10.0.0.10:8000/v1",
-                    "expires_at": "2026-09-23T13:00:00Z",
                     "generation": 8,
                     "node_id": "spk_" + "a" * 32,
                     "observed_at": "2026-09-23T12:59:30Z",

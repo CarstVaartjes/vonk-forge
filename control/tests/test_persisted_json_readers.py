@@ -13,8 +13,6 @@ def test_route_publication_reader_rejects_malformed_activation_marker() -> None:
         evidence_set_digest="b" * 64,
         routes_sha256="c" * 64,
         litellm_sha256="d" * 64,
-        issued_at="2026-08-07T00:00:00+00:00",
-        expires_at="2026-08-07T00:05:00+00:00",
         directory="00000001-" + "e" * 64,
         manifest_sha256="f" * 64,
     )
