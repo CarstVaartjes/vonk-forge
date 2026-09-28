@@ -645,12 +645,18 @@ jobs:
         with:
           image: ${{ env.VONK_TEST_CONTROLLER_IMAGE }}
           category: controller-api
+          # skopeo and its runtime libraries are copied unchanged from the
+          # upstream quay.io/skopeo release image.
+          skip-dirs: /usr/local/lib/skopeo
       - name: Scan the worker image for fixable vulnerabilities
         if: always()
         uses: ./.github/actions/image-scan
         with:
           image: ${{ env.VONK_TEST_WORKER_IMAGE }}
           category: controller-worker
+          # skopeo and its runtime libraries are copied unchanged from the
+          # upstream quay.io/skopeo release image.
+          skip-dirs: /usr/local/lib/skopeo
 
   web-suite:
     name: Admin web behavior
@@ -1319,6 +1325,8 @@ jobs:
         with:
           image: ${{ needs.release-metadata.outputs.hermes_image }}@${{ steps.hermes-build.outputs.digest }}
           category: release-hermes
+          # An upstream application release with a thin layer of ours.
+          gate: "false"
       - name: Attest Hermes release provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

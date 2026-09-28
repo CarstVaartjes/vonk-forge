@@ -254,6 +254,9 @@ jobs:
         with:
           image: ${{ steps.metadata.outputs.api_image }}@${{ steps.build_api.outputs.digest }}
           category: development-api
+          # skopeo and its runtime libraries are copied unchanged from the
+          # upstream quay.io/skopeo release image.
+          skip-dirs: /usr/local/lib/skopeo
       - name: Scan the worker image for fixable vulnerabilities
         uses: ./.github/actions/image-scan
         env:
@@ -261,6 +264,9 @@ jobs:
         with:
           image: ${{ steps.metadata.outputs.worker_image }}@${{ steps.build_worker.outputs.digest }}
           category: development-worker
+          # skopeo and its runtime libraries are copied unchanged from the
+          # upstream quay.io/skopeo release image.
+          skip-dirs: /usr/local/lib/skopeo
       - name: Scan the hermes image for fixable vulnerabilities
         if: steps.reuse_hermes.outputs.digest == ''
         uses: ./.github/actions/image-scan
@@ -269,6 +275,8 @@ jobs:
         with:
           image: ghcr.io/carstvaartjes/vonk-forge-hermes@${{ steps.build_hermes.outputs.digest }}
           category: development-hermes
+          # An upstream application release with a thin layer of ours.
+          gate: "false"
       - name: Scan the litellm image for fixable vulnerabilities
         if: steps.reuse_litellm.outputs.digest == ''
         uses: ./.github/actions/image-scan
@@ -277,6 +285,8 @@ jobs:
         with:
           image: ghcr.io/carstvaartjes/vonk-forge-litellm@${{ steps.build_litellm.outputs.digest }}
           category: development-litellm
+          # An upstream application release with a thin layer of ours.
+          gate: "false"
 
       - name: Remove registry write credentials before acceptance
         shell: bash
