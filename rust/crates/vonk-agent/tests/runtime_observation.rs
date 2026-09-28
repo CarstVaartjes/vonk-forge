@@ -63,14 +63,8 @@ fn placement(plan: &CompiledExecutionPlan) -> CompiledRuntimePlacement {
     plan.runtime.placement.clone()
 }
 
-fn identity(plan: &CompiledExecutionPlan) -> RecipeRunStartIdentity {
-    RecipeRunStartIdentity {
-        mapping_generation: 3,
-        mapping_id: "11111111-1111-4111-8111-111111111111".parse().unwrap(),
-        recipe_content_sha256: plan.identity.recipe_revision_sha256.clone(),
-        recipe_revision_id: "22222222-2222-4222-8222-222222222222".parse().unwrap(),
-        run_generation: 2,
-    }
+fn identity(_plan: &CompiledExecutionPlan) -> RecipeRunStartIdentity {
+    RecipeRunStartIdentity { run_generation: 2 }
 }
 
 #[test]
@@ -120,7 +114,7 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
     fs::create_dir_all(root.path().join("runs").join("not-a-run-id")).unwrap();
     let inspections = runtime.recipe_run_inspection_plans().unwrap();
     assert_eq!(inspections.len(), 1);
-    assert_eq!(inspections[0].binding.run_id.to_string(), RUN);
+    assert_eq!(inspections[0].run_id.to_string(), RUN);
     assert_eq!(&inspections[0].arguments[4..], launched.main.as_slice());
     assert_eq!(runtime.load_spec(INSTALLATION).unwrap(), installed);
 

@@ -98,11 +98,7 @@ def test_optional_native_timestamps_keep_presence_policy_and_microseconds() -> N
 
 def test_actual_snapshot_producer_uses_the_same_native_timestamp_bytes() -> None:
     value = RecipeRunObservationsWire.model_validate(
-        {
-            "schema_version": 2,
-            "observed_at": "2026-09-08T15:00:00.123000+02:00",
-            "runs": [],
-        }
+        {"observed_at": "2026-09-08T15:00:00.123000+02:00", "runs": []}
     )
     expected = canonical_message(value)
     assert probe("RecipeRunObservationsWire", expected) == expected

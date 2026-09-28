@@ -789,11 +789,6 @@
           "title": "Build Digest",
           "type": "string"
         },
-        "observation_receipt_public_key": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Receipt Public Key",
-          "type": "string"
-        },
         "package_activation": {
           "anyOf": [
             {
@@ -821,8 +816,7 @@
         "semantic_version",
         "build_digest",
         "binary_digest",
-        "self_test_passed",
-        "observation_receipt_public_key"
+        "self_test_passed"
       ],
       "title": "AgentRuntimeIdentity",
       "type": "object"
@@ -2487,11 +2481,6 @@
           "pattern": "^spk_[0-9a-f]{32}$",
           "title": "Node Id",
           "type": "string"
-        },
-        "observation_receipt_public_key": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Receipt Public Key",
-          "type": "string"
         }
       },
       "required": [
@@ -2500,8 +2489,7 @@
         "host_key_fingerprint",
         "hardware_fingerprint",
         "agent_digest",
-        "boot_id",
-        "observation_receipt_public_key"
+        "boot_id"
       ],
       "title": "EnrollmentEvidence",
       "type": "object"
@@ -2668,19 +2656,6 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Job Id",
           "type": "string"
-        },
-        "observation_identity_sha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Observation Identity Sha256"
         },
         "operation_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -3104,17 +3079,6 @@
           "default": null,
           "title": "Exit Code"
         },
-        "observation_receipt": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SignedRecipeRunObservationReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "process_logs": {
           "anyOf": [
             {
@@ -3125,6 +3089,18 @@
             }
           ],
           "default": null
+        },
+        "process_running": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process Running"
         },
         "request_id": {
           "anyOf": [
@@ -3450,17 +3426,6 @@
           "anyOf": [
             {
               "$ref": "#/$defs/RecipeJobRunRequest"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "observation": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RecipeRunInspectionBinding"
             },
             {
               "type": "null"
@@ -6520,579 +6485,10 @@
       "title": "RecipeReconciliationIdentity",
       "type": "object"
     },
-    "RecipeRunInspectionBinding": {
+    "RecipeRunInspectionRequest": {
       "additionalProperties": false,
-      "description": "Exact run identity bound into a signed helper inspection request.",
+      "description": "Helper frame for one read-only inspection of a managed run.\n\nUnlike every other helper operation it needs no Controller grant: it only\nreports whether the exact container of an agent-written ``run-inspect``\nruntime request is running.",
       "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Local Address"
-        },
-        "mapping_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
-        "mapping_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Mapping Id",
-          "type": "string"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Port"
-        },
-        "model_identity": {
-          "maxLength": 1024,
-          "minLength": 3,
-          "title": "Model Identity",
-          "type": "string"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Port",
-          "type": "integer"
-        },
-        "rank": {
-          "maximum": 1023,
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "run_generation": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "run_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Run Id",
-          "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "world_size": {
-          "maximum": 1024,
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "run_id",
-        "installation_id",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "mapping_id",
-        "mapping_generation",
-        "run_generation",
-        "image_digest",
-        "artifact_set_digest",
-        "model_identity",
-        "rank",
-        "role",
-        "world_size",
-        "local_address",
-        "master_address",
-        "master_port",
-        "port",
-        "runtime_arguments_sha256"
-      ],
-      "title": "RecipeRunInspectionBinding",
-      "type": "object"
-    },
-    "RecipeRunObservationGrantRequest": {
-      "additionalProperties": false,
-      "description": "Exact Controller request that authorizes one runtime inspection.",
-      "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "attempt": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Attempt",
-          "type": "integer"
-        },
-        "expires_in_seconds": {
-          "const": 10,
-          "title": "Expires In Seconds",
-          "type": "integer"
-        },
-        "fence": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Fence",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "job_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Job Id",
-          "type": "string"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Local Address"
-        },
-        "mapping_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
-        "mapping_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Mapping Id",
-          "type": "string"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Port"
-        },
-        "model_identity": {
-          "maxLength": 1024,
-          "minLength": 3,
-          "title": "Model Identity",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "operation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Operation Id",
-          "type": "string"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Port",
-          "type": "integer"
-        },
-        "rank": {
-          "maximum": 1023,
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "request_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Request Sha256",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "run_generation": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "run_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Run Id",
-          "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "world_size": {
-          "maximum": 1024,
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "run_id",
-        "installation_id",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "mapping_id",
-        "mapping_generation",
-        "run_generation",
-        "image_digest",
-        "artifact_set_digest",
-        "model_identity",
-        "rank",
-        "role",
-        "world_size",
-        "local_address",
-        "master_address",
-        "master_port",
-        "port",
-        "runtime_arguments_sha256",
-        "schema_version",
-        "node_id",
-        "job_id",
-        "operation_id",
-        "attempt",
-        "fence",
-        "request_sha256",
-        "expires_in_seconds"
-      ],
-      "title": "RecipeRunObservationGrantRequest",
-      "type": "object"
-    },
-    "RecipeRunObservationGrantWire": {
-      "additionalProperties": false,
-      "description": "Canonical grant response used to authorize one exact observation.",
-      "properties": {
-        "grant": {
-          "$ref": "#/$defs/SignedHostHelperGrant"
-        },
-        "observation_identity_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Identity Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "schema_version",
-        "observation_identity_sha256",
-        "grant"
-      ],
-      "title": "RecipeRunObservationGrantWire",
-      "type": "object"
-    },
-    "RecipeRunObservationIdentity": {
-      "additionalProperties": false,
-      "description": "Canonical Controller identity projection for one exact observation.",
-      "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
-        "image_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Local Address"
-        },
-        "mapping_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
-        "mapping_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Mapping Id",
-          "type": "string"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Port"
-        },
-        "model_identity": {
-          "maxLength": 1024,
-          "minLength": 3,
-          "title": "Model Identity",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Port",
-          "type": "integer"
-        },
-        "rank": {
-          "maximum": 1023,
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
-        },
-        "run_generation": {
-          "maximum": 2147483647,
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "run_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Run Id",
-          "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "world_size": {
-          "maximum": 1024,
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "run_id",
-        "installation_id",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "mapping_id",
-        "mapping_generation",
-        "run_generation",
-        "image_digest",
-        "artifact_set_digest",
-        "model_identity",
-        "rank",
-        "role",
-        "world_size",
-        "local_address",
-        "master_address",
-        "master_port",
-        "port",
-        "runtime_arguments_sha256",
-        "schema_version",
-        "node_id"
-      ],
-      "title": "RecipeRunObservationIdentity",
-      "type": "object"
-    },
-    "RecipeRunObservationReceiptClaims": {
-      "additionalProperties": false,
-      "properties": {
-        "authority": {
-          "const": "vonk.recipe-run-observation-helper",
-          "title": "Authority",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "observation_identity_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Identity Sha256",
-          "type": "string"
-        },
-        "observed_at": {
-          "exclusiveMinimum": 0,
-          "format": "int64",
-          "maximum": 9223372036854775807,
-          "title": "Observed At",
-          "type": "integer"
-        },
-        "outcome": {
-          "enum": [
-            "running",
-            "not-running"
-          ],
-          "title": "Outcome",
-          "type": "string"
-        },
         "request_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Request Id",
@@ -7102,35 +6498,19 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Request Sha256",
           "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
-        "authority",
-        "node_id",
         "request_id",
-        "request_sha256",
-        "observation_identity_sha256",
-        "outcome",
-        "observed_at"
+        "request_sha256"
       ],
-      "title": "RecipeRunObservationReceiptClaims",
+      "title": "RecipeRunInspectionRequest",
       "type": "object"
     },
     "RecipeRunObservationWire": {
       "additionalProperties": false,
-      "description": "One current, exact observation produced by the Rust agent.",
+      "description": "What the agent saw of one local run generation.",
       "properties": {
-        "artifact_set_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Artifact Set Digest",
-          "type": "string"
-        },
         "endpoint_ready": {
           "anyOf": [
             {
@@ -7142,127 +6522,9 @@
           ],
           "title": "Endpoint Ready"
         },
-        "grant": {
-          "$ref": "#/$defs/SignedHostHelperGrant"
-        },
-        "helper_receipt": {
-          "$ref": "#/$defs/SignedRecipeRunObservationReceipt"
-        },
-        "image_digest": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Image Digest",
-          "type": "string"
-        },
-        "installation_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Installation Id",
-          "type": "string"
-        },
-        "local_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Local Address"
-        },
-        "mapping_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Mapping Generation",
-          "type": "integer"
-        },
-        "mapping_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Mapping Id",
-          "type": "string"
-        },
-        "master_address": {
-          "anyOf": [
-            {
-              "maxLength": 45,
-              "minLength": 2,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "format": "ip",
-          "title": "Master Address"
-        },
-        "master_port": {
-          "anyOf": [
-            {
-              "maximum": 65535,
-              "minimum": 1024,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Master Port"
-        },
-        "model_identity": {
-          "maxLength": 1024,
-          "minLength": 3,
-          "title": "Model Identity",
-          "type": "string"
-        },
-        "node_id": {
-          "pattern": "^spk_[0-9a-f]{32}$",
-          "title": "Node Id",
-          "type": "string"
-        },
-        "observation_identity_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Identity Sha256",
-          "type": "string"
-        },
-        "observation_receipt_public_key": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Observation Receipt Public Key",
-          "type": "string"
-        },
-        "observed_at": {
-          "format": "date-time",
-          "title": "Observed At",
-          "type": "string"
-        },
-        "port": {
-          "maximum": 65535,
-          "minimum": 1024,
-          "title": "Port",
-          "type": "integer"
-        },
-        "rank": {
-          "maximum": 1023,
-          "minimum": 0,
-          "title": "Rank",
-          "type": "integer"
-        },
-        "recipe_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Recipe Content Sha256",
-          "type": "string"
-        },
-        "recipe_revision_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Recipe Revision Id",
-          "type": "string"
-        },
-        "role": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Role",
-          "type": "string"
+        "process_running": {
+          "title": "Process Running",
+          "type": "boolean"
         },
         "run_generation": {
           "maximum": 2147483647,
@@ -7274,58 +6536,20 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Run Id",
           "type": "string"
-        },
-        "runtime_arguments_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Runtime Arguments Sha256",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "world_size": {
-          "maximum": 1024,
-          "minimum": 1,
-          "title": "World Size",
-          "type": "integer"
         }
       },
       "required": [
         "run_id",
-        "installation_id",
-        "recipe_revision_id",
-        "recipe_content_sha256",
-        "mapping_id",
-        "mapping_generation",
         "run_generation",
-        "image_digest",
-        "artifact_set_digest",
-        "model_identity",
-        "rank",
-        "role",
-        "world_size",
-        "local_address",
-        "master_address",
-        "master_port",
-        "port",
-        "runtime_arguments_sha256",
-        "schema_version",
-        "node_id",
-        "observed_at",
-        "endpoint_ready",
-        "observation_identity_sha256",
-        "grant",
-        "helper_receipt",
-        "observation_receipt_public_key"
+        "process_running",
+        "endpoint_ready"
       ],
       "title": "RecipeRunObservationWire",
       "type": "object"
     },
     "RecipeRunObservationsWire": {
       "additionalProperties": false,
-      "description": "The sole current observation snapshot envelope.",
+      "description": "The agent's current observation of every locally managed run.\n\n``observed_at`` is taken before the agent lists its local runs, so a run\nthe Controller changed after that instant is never overwritten by it.",
       "properties": {
         "observed_at": {
           "format": "date-time",
@@ -7339,15 +6563,9 @@
           "maxItems": 64,
           "title": "Runs",
           "type": "array"
-        },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "observed_at",
         "runs"
       ],
@@ -8522,29 +7740,6 @@
         "signature"
       ],
       "title": "SignedHostHelperGrant",
-      "type": "object"
-    },
-    "SignedRecipeRunObservationReceipt": {
-      "additionalProperties": false,
-      "properties": {
-        "claims": {
-          "$ref": "#/$defs/RecipeRunObservationReceiptClaims"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "signature": {
-          "$ref": "#/$defs/HostHelperSignature"
-        }
-      },
-      "required": [
-        "schema_version",
-        "claims",
-        "signature"
-      ],
-      "title": "SignedRecipeRunObservationReceipt",
       "type": "object"
     },
     "SourceBundleDigestManifest": {
@@ -10119,17 +9314,6 @@
     "RecipeReconcilePayload": [
       "RecipeReconciliationIdentity"
     ],
-    "RecipeRunObservationGrantRequest": [
-      "RecipeRunObservationIdentity",
-      "RecipeRunInspectionBinding"
-    ],
-    "RecipeRunObservationIdentity": [
-      "RecipeRunInspectionBinding"
-    ],
-    "RecipeRunObservationWire": [
-      "RecipeRunObservationIdentity",
-      "RecipeRunInspectionBinding"
-    ],
     "RequestValidationProblem": [
       "BoundedErrorResponse"
     ],
@@ -10245,11 +9429,7 @@
     "RecipeReconcilePayload": "vonk_agent_protocol.recipe_operations.RecipeReconcilePayload",
     "RecipeReconcileResult": "vonk_agent_protocol.recipe_operations.RecipeReconcileResult",
     "RecipeReconciliationIdentity": "vonk_agent_protocol.host_helper.RecipeReconciliationIdentity",
-    "RecipeRunInspectionBinding": "vonk_agent_protocol.host_helper.RecipeRunInspectionBinding",
-    "RecipeRunObservationGrantRequest": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantRequest",
-    "RecipeRunObservationGrantWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationGrantWire",
-    "RecipeRunObservationIdentity": "vonk_agent_protocol.recipe_observations.RecipeRunObservationIdentity",
-    "RecipeRunObservationReceiptClaims": "vonk_agent_protocol.host_helper.RecipeRunObservationReceiptClaims",
+    "RecipeRunInspectionRequest": "vonk_agent_protocol.host_helper.RecipeRunInspectionRequest",
     "RecipeRunObservationWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationWire",
     "RecipeRunObservationsWire": "vonk_agent_protocol.recipe_observations.RecipeRunObservationsWire",
     "RecipeStartCollectiveReadinessEvidence": "vonk_agent_protocol.contracts.RecipeStartCollectiveReadinessEvidence",
@@ -10269,7 +9449,6 @@
     "RuntimePreflightResult": "vonk_agent_protocol.runtime_preflight.RuntimePreflightResult",
     "ScheduleRebootOperation": "vonk_agent_protocol.host_helper.ScheduleRebootOperation",
     "SignedHostHelperGrant": "vonk_agent_protocol.host_helper.SignedHostHelperGrant",
-    "SignedRecipeRunObservationReceipt": "vonk_agent_protocol.host_helper.SignedRecipeRunObservationReceipt",
     "SourceBundleDigestManifest": "vonk_agent_protocol.source_bundles.SourceBundleDigestManifest",
     "SourceBundleFile": "vonk_agent_protocol.source_bundles.SourceBundleFile",
     "SourceBundleManifest": "vonk_agent_protocol.source_bundles.SourceBundleManifest",
@@ -10393,11 +9572,7 @@
     "RecipeReconcilePayload": "#/$defs/RecipeReconcilePayload",
     "RecipeReconcileResult": "#/$defs/RecipeReconcileResult",
     "RecipeReconciliationIdentity": "#/$defs/RecipeReconciliationIdentity",
-    "RecipeRunInspectionBinding": "#/$defs/RecipeRunInspectionBinding",
-    "RecipeRunObservationGrantRequest": "#/$defs/RecipeRunObservationGrantRequest",
-    "RecipeRunObservationGrantWire": "#/$defs/RecipeRunObservationGrantWire",
-    "RecipeRunObservationIdentity": "#/$defs/RecipeRunObservationIdentity",
-    "RecipeRunObservationReceiptClaims": "#/$defs/RecipeRunObservationReceiptClaims",
+    "RecipeRunInspectionRequest": "#/$defs/RecipeRunInspectionRequest",
     "RecipeRunObservationWire": "#/$defs/RecipeRunObservationWire",
     "RecipeRunObservationsWire": "#/$defs/RecipeRunObservationsWire",
     "RecipeStartCollectiveReadinessEvidence": "#/$defs/RecipeStartCollectiveReadinessEvidence",
@@ -10417,7 +9592,6 @@
     "RuntimePreflightResult": "#/$defs/RuntimePreflightResult",
     "ScheduleRebootOperation": "#/$defs/ScheduleRebootOperation",
     "SignedHostHelperGrant": "#/$defs/SignedHostHelperGrant",
-    "SignedRecipeRunObservationReceipt": "#/$defs/SignedRecipeRunObservationReceipt",
     "SourceBundleDigestManifest": "#/$defs/SourceBundleDigestManifest",
     "SourceBundleFile": "#/$defs/SourceBundleFile",
     "SourceBundleManifest": "#/$defs/SourceBundleManifest",

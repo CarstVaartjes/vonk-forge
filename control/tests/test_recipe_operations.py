@@ -12,7 +12,6 @@ from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
@@ -29,16 +28,13 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     RecipeInstallPayload,
-    RecipeRunObservationReceiptClaims,
     RecipeStartPayload,
     RecipeStopPayload,
-    SignedRecipeRunObservationReceipt,
     canonical_message,
     format_model_identity,
     host_helper_grant_signing_bytes,
-    recipe_run_observation_receipt_signing_bytes,
 )
-from vonk_agent_protocol.host_helper import HostHelperSignature, HostRuntimeRequest
+from vonk_agent_protocol.host_helper import HostRuntimeRequest
 from vonk_control.agent_jobs import _NEXT_CAPABILITIES, AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import _digest
@@ -50,7 +46,6 @@ from vonk_control.execution_plan_service import (
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.host_helper_authority import (
-    HostHelperAuthorityError,
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
@@ -211,7 +206,6 @@ class ConcurrentPublisher(AtomicRecipeRoutePublisher):
 
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
-RECEIPT_SIGNER = ed25519.Ed25519PrivateKey.from_private_bytes(b"r" * 32)
 
 
 def _required[T](value: T | None) -> T:
@@ -341,38 +335,6 @@ class _CanonicalModelCache:
         )
 
 
-def signed_observation_receipt(
-    grant,
-    observation_identity_sha256: str,
-    *,
-    node_id: str,
-    observed_at: datetime,
-    outcome: Literal["running", "not-running"] = "running",
-) -> SignedRecipeRunObservationReceipt:
-    claims = RecipeRunObservationReceiptClaims(
-        schema_version=1,
-        authority="vonk.recipe-run-observation-helper",
-        node_id=node_id,
-        request_id=grant.claims.request_id,
-        request_sha256=str(grant.claims.operation.request_sha256),
-        observation_identity_sha256=observation_identity_sha256,
-        outcome=outcome,
-        observed_at=int(observed_at.timestamp()),
-    )
-    public_key = RECEIPT_SIGNER.public_key().public_bytes_raw()
-    return SignedRecipeRunObservationReceipt(
-        schema_version=1,
-        claims=claims,
-        signature=HostHelperSignature(
-            algorithm="ed25519",
-            key_id=hashlib.sha256(public_key).hexdigest(),
-            value=RECEIPT_SIGNER.sign(
-                recipe_run_observation_receipt_signing_bytes(claims)
-            ).hex(),
-        ),
-    )
-
-
 def start_evidence(payload: dict[str, object]) -> dict[str, object]:
     model_identity = format_model_identity(
         "vonk-forge", "synthetic-tiny-fp16", _synthetic_model_content_sha256()
@@ -470,18 +432,12 @@ def setup_services(
                     node_id=node_id,
                     state="active",
                     architecture="linux-arm64",
-                    observation_receipt_public_key=(
-                        RECEIPT_SIGNER.public_key().public_bytes_raw().hex()
-                        if nodes > 1
-                        else None
-                    ),
                     capabilities=["runtime.vonk.v1", "recipe.operations.v1"]
                     + (
                         [
                             "fabric.connected.mbps.1000",
                             "recipe.start.two-phase.v1",
                             "recipe.run.inspect.exact.v1",
-                            "recipe.run.inspect.receipt.v1",
                         ]
                         if nodes > 1
                         else []
@@ -513,7 +469,6 @@ def setup_services(
             "fabric.connected.mbps.1000",
             "recipe.start.two-phase.v1",
             "recipe.run.inspect.exact.v1",
-            "recipe.run.inspect.receipt.v1",
         )
         if nodes > 1
         else ()
@@ -881,9 +836,8 @@ def mark_current_exact_observations(
             select(RunNode).where(RunNode.run_id == run_id).order_by(RunNode.rank)
         ):
             node.observed_run_generation = run.run_generation
-            node.observation_receipt_sha256 = hashlib.sha256(
-                f"{run_id}:{run.run_generation}:{node.node_id}".encode()
-            ).hexdigest()
+            node.observation_process_running = True
+            node.observation_observed_at = observed_at
             node.observation_endpoint_ready = (
                 True if node.role == "entrypoint" else None
             )
@@ -900,15 +854,10 @@ def _issue_exact_stop_grant(
 ):
     """Claim a queued Stop and exercise the production exact-plan signer."""
 
-    with sessions() as session:
-        node = _required(session.get(AgentNode, node_id))
-        receipt_public_key = node.observation_receipt_public_key
     runtime_identity = {
         **PACKAGED_RUNTIME_IDENTITY,
         "architecture": "linux-arm64",
     }
-    if receipt_public_key is not None:
-        runtime_identity["observation_receipt_public_key"] = receipt_public_key
     queue = AgentJobService(sessions, clock=lambda: grant_now)
     claim = claim_agent(
         queue,
@@ -1959,7 +1908,7 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
             )
         )
         owner.observed_run_generation = 1
-        owner.observation_receipt_sha256 = "d" * 64
+        owner.observation_observed_at = NOW
         owner.observation_endpoint_ready = True
         owner.updated_at = NOW
     with pytest.raises(RecipeRouteNotReady):
@@ -1973,7 +1922,7 @@ def test_distributed_start_launches_all_ranks_then_checks_collective(
             )
         )
         worker.observed_run_generation = 1
-        worker.observation_receipt_sha256 = "e" * 64
+        worker.observation_observed_at = NOW
         worker.observation_endpoint_ready = None
         worker.updated_at = NOW
     routes.publish_run(start.owner_id)
@@ -2041,12 +1990,7 @@ def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
         return {"evidence": evidence}
 
     def claim(node_id: str):
-        with sessions() as session:
-            node = _required(session.get(AgentNode, node_id))
-            receipt_key = node.observation_receipt_public_key
         runtime_identity = dict(PACKAGED_RUNTIME_IDENTITY)
-        if receipt_key is not None:
-            runtime_identity["observation_receipt_public_key"] = receipt_key
         return claim_agent(
             jobs,
             node_id,
@@ -2116,7 +2060,7 @@ def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
             )
         )
         owner.observed_run_generation = 1
-        owner.observation_receipt_sha256 = "d" * 64
+        owner.observation_observed_at = NOW
         owner.observation_endpoint_ready = True
         owner.updated_at = NOW
         worker = _required(
@@ -2127,7 +2071,7 @@ def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
             )
         )
         worker.observed_run_generation = 1
-        worker.observation_receipt_sha256 = "e" * 64
+        worker.observation_observed_at = NOW
         worker.observation_endpoint_ready = None
         worker.updated_at = NOW
     routes.publish_run(start.owner_id)
@@ -2502,27 +2446,6 @@ def test_distributed_start_capability_is_an_admission_blocker(tmp_path: Path) ->
     plan = service.preview_run(installation.owner_id, "unsupported")
     assert plan.allowed is False
     assert "run.distributed_start_capability_missing" in {
-        blocker.code for blocker in plan.nodes[1].blockers
-    }
-
-
-def test_distributed_start_requires_enrollment_pinned_receipt_key(
-    tmp_path: Path,
-) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True
-    )
-    installation = installed_recipe(
-        service, mapping_id, build_id, nodes, request_id="k" * 36
-    )
-    with sessions.begin() as session:
-        _required(
-            session.get(AgentNode, nodes[1])
-        ).observation_receipt_public_key = None
-
-    plan = service.preview_run(installation.owner_id, "unpinned-receipt-key")
-    assert plan.allowed is False
-    assert "run.distributed_observation_receipt_capability_missing" in {
         blocker.code for blocker in plan.nodes[1].blockers
     }
 
@@ -4742,622 +4665,6 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
             )
         )
         assert exact_worker.state == "running"
-
-
-def test_unowned_run_probe_grant_is_read_only_node_bound_and_never_for_owned_runs(
-    tmp_path: Path,
-) -> None:
-    """A run this Controller never recorded gets only a read-only probe.
-
-    Live regression: after the Controller database was rebuilt, each Spark
-    asked for an observation grant for its pre-reset run every sweep and was
-    refused forever, so the run could neither be observed nor retired.
-    """
-
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True
-    )
-    installation = installed_recipe(
-        service, mapping_id, build_id, nodes, request_id="7" * 36
-    )
-    start = started_recipe(
-        sessions,
-        service,
-        installation.owner_id,
-        nodes,
-        request_id="8" * 36,
-        alias="observed-unowned",
-    )
-    with sessions() as session:
-        run = _required(session.get(RecipeRun, start.owner_id))
-        installed = _required(session.get(RecipeInstallation, run.installation_id))
-        run_node = _required(
-            session.scalar(
-                select(RunNode).where(
-                    RunNode.run_id == run.id, RunNode.node_id == nodes[0]
-                )
-            )
-        )
-        start_job = _required(session.get(Job, start.id))
-        launch = require_mapping(
-            require_mapping(
-                _required(start_job.result)["launch_evidence"], "launch evidence"
-            )[nodes[0]],
-            "node launch evidence",
-        )
-        owned = {
-            "schema_version": 1,
-            "node_id": nodes[0],
-            "run_id": run.id,
-            "installation_id": run.installation_id,
-            "recipe_revision_id": installed.recipe_revision_id,
-            "recipe_content_sha256": launch["recipe_content_sha256"],
-            "mapping_id": run.mapping_id,
-            "mapping_generation": run.mapping_generation,
-            "run_generation": run.run_generation,
-            "image_digest": installed.image_digest.removeprefix("sha256:"),
-            "artifact_set_digest": launch["artifact_set_digest"],
-            "model_identity": launch["model_identity"],
-            "rank": run_node.rank,
-            "role": run_node.role,
-            "world_size": launch["world_size"],
-            "local_address": launch["local_address"],
-            "master_address": launch["master_address"],
-            "master_port": launch["master_port"],
-            "port": run_node.port,
-            "runtime_arguments_sha256": launch["runtime_arguments_sha256"],
-        }
-    authority = HostRuntimeAuthorityService(
-        sessions,
-        HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=lambda: NOW),
-        clock=lambda: NOW,
-    )
-
-    def probe(identity, **overrides):
-        values = {
-            "node_id": nodes[0],
-            "certificate_serial": "serial-0",
-            "identity": identity,
-            "job_id": identity["run_id"],
-            "operation_id": str(uuid.uuid4()),
-            "attempt": identity["run_generation"],
-            "fence": str(uuid.uuid4()),
-            "request_sha256": "d" * 64,
-            "expires_in_seconds": 10,
-        }
-        values.update(overrides)
-        return authority.issue_unowned_recipe_run_probe_grant(**values)
-
-    # An owned run is never probed this way: ordinary observation decides.
-    assert probe(owned) is None
-
-    orphan = {**owned, "run_id": str(uuid.uuid4())}
-    issued = probe(orphan)
-    assert issued is not None
-    identity_sha256, grant = issued
-    operation = grant.claims.operation
-    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
-    assert operation.action == "run-inspect"
-    assert operation.job_id == orphan["run_id"]
-    assert grant.claims.node_id == nodes[0]
-    assert grant.claims.expires_at - grant.claims.issued_at == 10
-    assert (
-        operation.observation_identity_sha256
-        == identity_sha256
-        == hashlib.sha256(canonical_message(orphan)).hexdigest()
-    )
-    # A probe is read-only and holds no pending slot, so the next sweep may ask.
-    assert probe(orphan) is not None
-
-    with pytest.raises(HostHelperAuthorityError):
-        probe(orphan, node_id=nodes[1], certificate_serial="serial-1")
-    with pytest.raises(HostHelperAuthorityError):
-        probe(orphan, job_id=str(uuid.uuid4()))
-    with pytest.raises(HostHelperAuthorityError):
-        probe(orphan, attempt=orphan["run_generation"] + 1)
-    with pytest.raises(HostHelperAuthorityError):
-        probe(orphan, certificate_serial="serial-1")
-    with pytest.raises(HostHelperAuthorityError):
-        probe(orphan, expires_in_seconds=30)
-
-
-@pytest.mark.parametrize("node_index", [0, 1])
-def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
-    tmp_path: Path, node_index: int
-) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True
-    )
-    installation = installed_recipe(
-        service, mapping_id, build_id, nodes, request_id="7" * 36
-    )
-    start = started_recipe(
-        sessions,
-        service,
-        installation.owner_id,
-        nodes,
-        request_id="8" * 36,
-        alias="observed-exact",
-    )
-    observation_node = nodes[node_index]
-    certificate_serial = f"serial-{node_index}"
-    with sessions() as session:
-        run = _required(session.get(RecipeRun, start.owner_id))
-        installed = _required(session.get(RecipeInstallation, run.installation_id))
-        run_node = _required(
-            session.scalar(
-                select(RunNode).where(
-                    RunNode.run_id == run.id, RunNode.node_id == observation_node
-                )
-            )
-        )
-        start_job = _required(session.get(Job, start.id))
-        launch_evidence = require_mapping(
-            _required(start_job.result)["launch_evidence"], "launch evidence"
-        )
-        launch = require_mapping(
-            launch_evidence[observation_node], "node launch evidence"
-        )
-        assert (run_node.endpoint is not None) is (node_index == 0)
-        identity = {
-            "schema_version": 1,
-            "node_id": observation_node,
-            "run_id": run.id,
-            "installation_id": run.installation_id,
-            "recipe_revision_id": installed.recipe_revision_id,
-            "recipe_content_sha256": launch["recipe_content_sha256"],
-            "mapping_id": run.mapping_id,
-            "mapping_generation": run.mapping_generation,
-            "run_generation": run.run_generation,
-            "image_digest": installed.image_digest.removeprefix("sha256:"),
-            "artifact_set_digest": launch["artifact_set_digest"],
-            "model_identity": launch["model_identity"],
-            "rank": run_node.rank,
-            "role": run_node.role,
-            "world_size": launch["world_size"],
-            "local_address": launch["local_address"],
-            "master_address": launch["master_address"],
-            "master_port": launch["master_port"],
-            "port": run_node.port,
-            "runtime_arguments_sha256": launch["runtime_arguments_sha256"],
-        }
-    authority = HostRuntimeAuthorityService(
-        sessions,
-        HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=lambda: NOW),
-        clock=lambda: NOW,
-    )
-    identity_sha256, grant = authority.issue_recipe_run_observation_grant(
-        node_id=observation_node,
-        certificate_serial=certificate_serial,
-        identity=identity,
-        job_id=start.owner_id,
-        operation_id=str(uuid.uuid4()),
-        attempt=1,
-        fence=str(uuid.uuid4()),
-        request_sha256="d" * 64,
-        expires_in_seconds=10,
-    )
-    operation = grant.claims.operation
-    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
-    assert operation.observation_identity_sha256 == identity_sha256
-    with pytest.raises(HostHelperAuthorityError, match="pending"):
-        authority.issue_recipe_run_observation_grant(
-            node_id=observation_node,
-            certificate_serial=certificate_serial,
-            identity=identity,
-            job_id=start.owner_id,
-            operation_id=str(uuid.uuid4()),
-            attempt=1,
-            fence=str(uuid.uuid4()),
-            request_sha256="e" * 64,
-            expires_in_seconds=10,
-        )
-    forged_receipt = signed_observation_receipt(
-        grant,
-        identity_sha256,
-        node_id=observation_node,
-        observed_at=NOW,
-    )
-    forged_receipt = forged_receipt.model_copy(
-        update={
-            "signature": HostHelperSignature(
-                algorithm="ed25519",
-                key_id=forged_receipt.signature.key_id,
-                value="0" * 128,
-            )
-        }
-    )
-    with (
-        sessions.begin() as session,
-        pytest.raises(HostHelperAuthorityError, match="signature"),
-    ):
-        authority.consume_recipe_run_observation_grant(
-            session,
-            node_id=observation_node,
-            certificate_serial=certificate_serial,
-            identity=identity,
-            observed_at=NOW,
-            received_at=NOW,
-            signed_grant=grant,
-            helper_receipt=forged_receipt,
-        )
-    with sessions.begin() as session:
-        assert authority.consume_recipe_run_observation_grant(
-            session,
-            node_id=observation_node,
-            certificate_serial=certificate_serial,
-            identity=identity,
-            observed_at=NOW,
-            received_at=NOW,
-            signed_grant=grant,
-            helper_receipt=signed_observation_receipt(
-                grant,
-                identity_sha256,
-                node_id=observation_node,
-                observed_at=NOW,
-            ),
-        ) == (
-            identity_sha256,
-            True,
-            hashlib.sha256(
-                canonical_message(
-                    signed_observation_receipt(
-                        grant,
-                        identity_sha256,
-                        node_id=observation_node,
-                        observed_at=NOW,
-                    )
-                )
-            ).hexdigest(),
-        )
-    with (
-        sessions.begin() as session,
-        pytest.raises(HostHelperAuthorityError, match="replayed"),
-    ):
-        authority.consume_recipe_run_observation_grant(
-            session,
-            node_id=observation_node,
-            certificate_serial=certificate_serial,
-            identity=identity,
-            observed_at=NOW + timedelta(seconds=1),
-            received_at=NOW + timedelta(seconds=1),
-            signed_grant=grant,
-            helper_receipt=signed_observation_receipt(
-                grant,
-                identity_sha256,
-                node_id=observation_node,
-                observed_at=NOW + timedelta(seconds=1),
-            ),
-        )
-
-    second_identity_sha256, second_grant = authority.issue_recipe_run_observation_grant(
-        node_id=observation_node,
-        certificate_serial=certificate_serial,
-        identity=identity,
-        job_id=start.owner_id,
-        operation_id=str(uuid.uuid4()),
-        attempt=1,
-        fence=str(uuid.uuid4()),
-        request_sha256="f" * 64,
-        expires_in_seconds=10,
-    )
-    assert second_identity_sha256 == identity_sha256
-    assert second_grant.claims.request_id != grant.claims.request_id
-    with sessions.begin() as session:
-        assert authority.consume_recipe_run_observation_grant(
-            session,
-            node_id=observation_node,
-            certificate_serial=certificate_serial,
-            identity=identity,
-            observed_at=NOW,
-            received_at=NOW,
-            signed_grant=second_grant,
-            helper_receipt=signed_observation_receipt(
-                second_grant,
-                second_identity_sha256,
-                node_id=observation_node,
-                observed_at=NOW,
-                outcome="not-running",
-            ),
-        )[:2] == (identity_sha256, False)
-
-    _, stale_grant = authority.issue_recipe_run_observation_grant(
-        node_id=observation_node,
-        certificate_serial=certificate_serial,
-        identity=identity,
-        job_id=start.owner_id,
-        operation_id=str(uuid.uuid4()),
-        attempt=1,
-        fence=str(uuid.uuid4()),
-        request_sha256="1" * 64,
-        expires_in_seconds=10,
-    )
-    with (
-        sessions.begin() as session,
-        pytest.raises(HostHelperAuthorityError, match="stale"),
-    ):
-        authority.consume_recipe_run_observation_grant(
-            session,
-            node_id=observation_node,
-            certificate_serial=certificate_serial,
-            identity=identity,
-            observed_at=NOW - timedelta(seconds=1),
-            received_at=NOW,
-            signed_grant=stale_grant,
-            helper_receipt=signed_observation_receipt(
-                stale_grant,
-                identity_sha256,
-                node_id=observation_node,
-                observed_at=NOW - timedelta(seconds=1),
-            ),
-        )
-    with sessions() as session:
-        worker = _required(
-            session.scalar(
-                select(RunNode).where(
-                    RunNode.run_id == start.owner_id,
-                    RunNode.node_id == observation_node,
-                )
-            )
-        )
-        assert (worker.endpoint is not None) is (node_index == 0)
-
-
-@pytest.mark.parametrize(
-    "tamper", ["generation", "compiled-argv", "malformed-owner-endpoint"]
-)
-def test_exact_rank_inspection_rejects_self_consistent_child_tampering(
-    tmp_path: Path, tamper: str
-) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True
-    )
-    installation = installed_recipe(
-        service, mapping_id, build_id, nodes, request_id="6" * 36
-    )
-    start = started_recipe(
-        sessions,
-        service,
-        installation.owner_id,
-        nodes,
-        request_id="5" * 36,
-        alias="tampered-observation",
-    )
-    node_index = 0 if tamper == "malformed-owner-endpoint" else 1
-    observation_node = nodes[node_index]
-    certificate_serial = f"serial-{node_index}"
-    with sessions() as session:
-        run = _required(session.get(RecipeRun, start.owner_id))
-        installed = _required(session.get(RecipeInstallation, run.installation_id))
-        run_node = _required(
-            session.scalar(
-                select(RunNode).where(
-                    RunNode.run_id == run.id, RunNode.node_id == observation_node
-                )
-            )
-        )
-        start_job = _required(session.get(Job, start.id))
-        launch_evidence = require_mapping(
-            _required(start_job.result)["launch_evidence"], "launch evidence"
-        )
-        launch = require_mapping(
-            launch_evidence[observation_node], "node launch evidence"
-        )
-        identity = {
-            "schema_version": 1,
-            "node_id": observation_node,
-            "run_id": run.id,
-            "installation_id": run.installation_id,
-            "recipe_revision_id": installed.recipe_revision_id,
-            "recipe_content_sha256": launch["recipe_content_sha256"],
-            "mapping_id": run.mapping_id,
-            "mapping_generation": run.mapping_generation,
-            "run_generation": run.run_generation,
-            "image_digest": installed.image_digest.removeprefix("sha256:"),
-            "artifact_set_digest": launch["artifact_set_digest"],
-            "model_identity": launch["model_identity"],
-            "rank": run_node.rank,
-            "role": run_node.role,
-            "world_size": launch["world_size"],
-            "local_address": launch["local_address"],
-            "master_address": launch["master_address"],
-            "master_port": launch["master_port"],
-            "port": run_node.port,
-            "runtime_arguments_sha256": launch["runtime_arguments_sha256"],
-        }
-
-    with sessions.begin() as session:
-        parent = _required(session.get(Job, start.id))
-        child = _required(
-            session.scalar(
-                select(AgentOperation).where(
-                    AgentOperation.parent_job_id == parent.id,
-                    AgentOperation.node_id == observation_node,
-                    AgentOperation.payload["phase"].as_string() == "rank-launch",
-                )
-            )
-        )
-        if tamper == "malformed-owner-endpoint":
-            run_node = _required(
-                session.scalar(
-                    select(RunNode).where(
-                        RunNode.run_id == start.owner_id,
-                        RunNode.node_id == observation_node,
-                    )
-                )
-            )
-            run_node.endpoint = {"url": "not-an-endpoint"}
-        else:
-            child_payload = json.loads(canonical_message(child.payload))
-        if tamper == "generation":
-            child_payload["run_generation"] += 1
-        elif tamper == "compiled-argv":
-            child_payload["compiled_execution_plan"]["runtime"]["argv"][0] = (
-                "unreviewed-runtime-command"
-            )
-        if tamper != "malformed-owner-endpoint":
-            parent_payload = json.loads(canonical_message(parent.payload))
-            parent_item = next(
-                item
-                for phase in parent_payload["phases"]
-                for item in phase
-                if item["operation_id"] == child.id
-            )
-            parent_item["payload"] = child_payload
-            child.payload = child_payload
-            child.payload_digest = hashlib.sha256(
-                canonical_message(child_payload)
-            ).hexdigest()
-            parent.payload = parent_payload
-            parent.payload_digest = hashlib.sha256(
-                canonical_message(parent_payload)
-            ).hexdigest()
-
-    authority = HostRuntimeAuthorityService(
-        sessions,
-        HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=lambda: NOW),
-        clock=lambda: NOW,
-    )
-    with pytest.raises(HostHelperAuthorityError, match="launch evidence"):
-        authority.issue_recipe_run_observation_grant(
-            node_id=observation_node,
-            certificate_serial=certificate_serial,
-            identity=identity,
-            job_id=start.owner_id,
-            operation_id=str(uuid.uuid4()),
-            attempt=1,
-            fence=str(uuid.uuid4()),
-            request_sha256="a" * 64,
-            expires_in_seconds=10,
-        )
-
-
-@pytest.mark.parametrize("tamper", [None, "stop-actor", "start-actor"])
-def test_exact_rank_inspection_binds_distributed_recovery_provenance(
-    tmp_path: Path, tamper: str | None
-) -> None:
-    (
-        sessions,
-        service,
-        routes,
-        _publisher,
-        started,
-        restart,
-        worker_start,
-        nodes,
-    ) = _queued_distributed_recovery_restart(tmp_path)
-    service.record_node_result(
-        restart.id,
-        nodes[1],
-        succeeded=True,
-        evidence=start_evidence(worker_start.payload),
-    )
-    with sessions() as session:
-        owner_start = _required(
-            session.scalar(
-                select(AgentOperation).where(
-                    AgentOperation.parent_job_id == restart.id,
-                    AgentOperation.node_id == nodes[0],
-                    AgentOperation.payload["phase"].as_string() == "rank-launch",
-                )
-            )
-        )
-    service.record_node_result(
-        restart.id,
-        nodes[0],
-        succeeded=True,
-        evidence=start_evidence(owner_start.payload),
-    )
-    complete_collective_readiness(sessions, service, restart.id, nodes[0])
-    routes.publish_run(started.owner_id)
-
-    observation_node = nodes[1]
-    with sessions.begin() as session:
-        run = _required(session.get(RecipeRun, started.owner_id))
-        installed = _required(session.get(RecipeInstallation, run.installation_id))
-        run_node = _required(
-            session.scalar(
-                select(RunNode).where(
-                    RunNode.run_id == run.id, RunNode.node_id == observation_node
-                )
-            )
-        )
-        restart_job = _required(session.get(Job, restart.id))
-        launch_evidence = require_mapping(
-            _required(restart_job.result)["launch_evidence"], "launch evidence"
-        )
-        launch = require_mapping(
-            launch_evidence[observation_node], "node launch evidence"
-        )
-        assert run.run_generation == 2
-        identity = {
-            "schema_version": 1,
-            "node_id": observation_node,
-            "run_id": run.id,
-            "installation_id": run.installation_id,
-            "recipe_revision_id": installed.recipe_revision_id,
-            "recipe_content_sha256": launch["recipe_content_sha256"],
-            "mapping_id": run.mapping_id,
-            "mapping_generation": run.mapping_generation,
-            "run_generation": run.run_generation,
-            "image_digest": installed.image_digest.removeprefix("sha256:"),
-            "artifact_set_digest": launch["artifact_set_digest"],
-            "model_identity": launch["model_identity"],
-            "rank": run_node.rank,
-            "role": run_node.role,
-            "world_size": launch["world_size"],
-            "local_address": launch["local_address"],
-            "master_address": launch["master_address"],
-            "master_port": launch["master_port"],
-            "port": run_node.port,
-            "runtime_arguments_sha256": launch["runtime_arguments_sha256"],
-        }
-        if tamper == "stop-actor":
-            stop = _required(
-                session.scalar(
-                    select(Job).where(
-                        Job.kind == "recipe.stop",
-                        Job.payload["owner_id"].as_string() == run.id,
-                    )
-                )
-            )
-            stop.actor = "admin"
-        elif tamper == "start-actor":
-            restart_job.actor = "admin"
-
-    authority = HostRuntimeAuthorityService(
-        sessions,
-        HostHelperGrantIssuer(ed25519.Ed25519PrivateKey.generate(), clock=lambda: NOW),
-        clock=lambda: NOW,
-    )
-    if tamper is not None:
-        with pytest.raises(HostHelperAuthorityError, match="launch evidence"):
-            authority.issue_recipe_run_observation_grant(
-                node_id=observation_node,
-                certificate_serial="serial-1",
-                identity=identity,
-                job_id=started.owner_id,
-                operation_id=str(uuid.uuid4()),
-                attempt=2,
-                fence=str(uuid.uuid4()),
-                request_sha256="b" * 64,
-                expires_in_seconds=10,
-            )
-    else:
-        _identity_digest, grant = authority.issue_recipe_run_observation_grant(
-            node_id=observation_node,
-            certificate_serial="serial-1",
-            identity=identity,
-            job_id=started.owner_id,
-            operation_id=str(uuid.uuid4()),
-            attempt=2,
-            fence=str(uuid.uuid4()),
-            request_sha256="c" * 64,
-            expires_in_seconds=10,
-        )
-        operation = grant.claims.operation
-        assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
-        assert operation.attempt == 2
 
 
 def _recovery_deadline(job: Job) -> datetime:

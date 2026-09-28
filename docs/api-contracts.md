@@ -289,11 +289,9 @@ recipe revision, runtime compiler, or harness configuration changes.
   rank-launch/collective-readiness starts, distribution manifests, heartbeat
   directives, bootstrap, enrollment, certificate renewal, build/import evidence,
   inventory, artifact jobs, and telemetry. The host-helper bridge passes an
-  actual API-issued grant through the Rust verifier and receipt signer and
-  verifies that receipt through the Python contract. The complete persisted
-  signed-observation workflow has its own integration check; a signature
-  round trip alone does not establish run readiness. No old heartbeat response
-  shape is accepted.
+  actual API-issued grant through the Rust verifier. The complete persisted
+  run-observation workflow has its own integration check. No old heartbeat
+  response shape is accepted.
   The same required job runs the complete `agent_protocol/tests` suite,
   including schema-derived required-field, type, nullable, unknown-field and
   vocabulary checks through the Rust parser. These cover the declared fields

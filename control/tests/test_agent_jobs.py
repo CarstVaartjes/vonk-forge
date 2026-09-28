@@ -731,7 +731,6 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
         "build_digest": "sha256:" + "f" * 64,
         "semantic_version": "0.1.0",
         "self_test_passed": True,
-        "observation_receipt_public_key": "d" * 64,
     }
     capabilities = ["agent.runtime.rust.v1", "agent.upgrade.v1"]
     older = first = None
@@ -992,60 +991,6 @@ def test_service_claim_requires_rust_capability_with_packaged_runtime_identity(
         )
 
 
-def test_signed_observation_receipt_key_is_bound_on_upgrade_and_immutable(
-    service,
-) -> None:
-    jobs, sessions, _clock = service
-    receipt_identity = {
-        **PACKAGED_RUNTIME_IDENTITY,
-        "observation_receipt_public_key": "1" * 64,
-    }
-
-    assert (
-        jobs.claim(
-            NODE_A,
-            "serial-a",
-            30,
-            capabilities=[
-                "agent.runtime.rust.v1",
-                "recipe.run.inspect.receipt.v1",
-            ],
-            runtime_identity=receipt_identity,
-        )
-        is None
-    )
-    with sessions() as session:
-        assert session.get(AgentNode, NODE_A).observation_receipt_public_key == "1" * 64
-
-    with pytest.raises(ValueError, match="receipt key changed"):
-        jobs.claim(
-            NODE_A,
-            "serial-a",
-            30,
-            capabilities=[
-                "agent.runtime.rust.v1",
-                "recipe.run.inspect.receipt.v1",
-            ],
-            runtime_identity={
-                **receipt_identity,
-                "observation_receipt_public_key": "2" * 64,
-            },
-        )
-    incomplete_identity = dict(PACKAGED_RUNTIME_IDENTITY)
-    incomplete_identity.pop("observation_receipt_public_key")
-    with pytest.raises(ValueError, match="runtime identity is invalid"):
-        jobs.claim(
-            NODE_B,
-            "serial-b",
-            30,
-            capabilities=[
-                "agent.runtime.rust.v1",
-                "recipe.run.inspect.receipt.v1",
-            ],
-            runtime_identity=incomplete_identity,
-        )
-
-
 def test_package_operation_is_not_a_control_plane_queue_operation(service) -> None:
     jobs, sessions, clock = service
 
@@ -1247,7 +1192,6 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
             "binary_digest": "e" * 64,
             "semantic_version": "1.2.3",
             "self_test_passed": True,
-            "observation_receipt_public_key": "d" * 64,
         },
     )
 
@@ -2055,7 +1999,6 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
         build_digest="sha256:" + "c" * 64,
         semantic_version="1.2.3",
         self_test_passed=True,
-        observation_receipt_public_key="d" * 64,
     )
 
     assert (
@@ -2079,7 +2022,6 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
             "build_digest": node.build_digest,
             "semantic_version": node.semantic_version,
             "self_test_passed": node.self_test_passed,
-            "observation_receipt_public_key": node.observation_receipt_public_key,
         } == runtime_identity.model_dump(exclude={"package_activation"})
         assert node.contact_observation_digest is not None
         assert re.fullmatch(r"[0-9a-f]{64}", node.contact_observation_digest)
@@ -2099,7 +2041,6 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
         "build_digest": "sha256:" + "c" * 64,
         "semantic_version": "1.2.3",
         "self_test_passed": True,
-        "observation_receipt_public_key": "d" * 64,
     }
 
     with pytest.raises(ValueError, match="runtime identity"):

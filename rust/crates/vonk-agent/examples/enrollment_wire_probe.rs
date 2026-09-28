@@ -19,7 +19,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let bytes = match arguments.as_slice() {
             [mode] if mode == "--request" => {
                 let request: EnrollmentRequest = parse_strict(line.as_bytes())?;
-                request.evidence.validate()?;
                 canonical_json(&request)?
             }
             [mode, node_id] if mode == "--issued" => {

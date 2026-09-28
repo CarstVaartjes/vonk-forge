@@ -1081,8 +1081,7 @@ class RecipeRouteService:
                 for node in nodes:
                     if (
                         node.observed_run_generation != run.run_generation
-                        or not isinstance(node.observation_receipt_sha256, str)
-                        or _DIGEST.fullmatch(node.observation_receipt_sha256) is None
+                        or node.observation_observed_at is None
                     ):
                         raise RecipeRouteNotReady(
                             "recipe rank is awaiting current exact observation",

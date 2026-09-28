@@ -18,7 +18,6 @@ class AgentRuntimeIdentity(WireModel):
     build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     binary_digest: Digest
     self_test_passed: Literal[True]
-    observation_receipt_public_key: Digest
     package_activation: PackageActivationReceipt | None = None
 
 

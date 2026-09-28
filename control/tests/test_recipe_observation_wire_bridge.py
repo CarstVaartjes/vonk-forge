@@ -5,7 +5,6 @@ import json
 import multiprocessing
 import os
 import subprocess
-import tempfile
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -21,7 +20,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     RecipeRunObservationsWire,
     RecipeRunObservationWire,
-    SignedHostHelperGrant,
     canonical_message,
 )
 from vonk_control.agent_api import AgentApiServices
@@ -42,7 +40,6 @@ from vonk_control.models import (
     Job,
     RecipeInstallation,
     RecipeRun,
-    RecipeRunObservationGrant,
     RunNode,
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
@@ -142,11 +139,6 @@ def _singleton_recovery_process_tick(database_url: str, now_value: str) -> None:
 @pytest.fixture(scope="session")
 def recipe_observation_wire_probe() -> Path:
     return prebuilt_probe("VONK_RECIPE_OBSERVATION_WIRE_PROBE")
-
-
-@pytest.fixture(scope="session")
-def host_helper_wire_probe() -> Path:
-    return prebuilt_probe("VONK_HOST_HELPER_WIRE_PROBE")
 
 
 @overload
@@ -307,18 +299,13 @@ def _production_controller_app(
                 started.id, child.node_id, succeeded=True, evidence=evidence
             )
             completed.add(child.id)
-    receipt_seed = ed25519.Ed25519PrivateKey.from_private_bytes(bytes([23]) * 32)
     with sessions.begin() as session:
         node = session.get(AgentNode, node_ids[0])
         assert node is not None
         node.capabilities = list(node.capabilities or ()) + [
             "recipe.run.inspect.exact.v1",
-            "recipe.run.inspect.receipt.v1",
             "recipe.stop",
         ]
-        node.observation_receipt_public_key = (
-            receipt_seed.public_key().public_bytes_raw().hex()
-        )
     grant_seed = ed25519.Ed25519PrivateKey.from_private_bytes(bytes([29]) * 32)
     authority = HostRuntimeAuthorityService(
         sessions,
@@ -361,24 +348,10 @@ def _production_controller_app(
             if isinstance(item, dict)
         }
     assert set(plan_nodes) == set(node_ids)
-    if nodes == 1:
-        binding = require_mapping(
-            captured[node_ids[0]]["binding"], "recipe run inspection binding"
-        )
-        assert plan_nodes[node_ids[0]]["endpoint_owner"] is True
-        assert binding["local_address"] is None
-        assert binding["master_address"] is None
-        assert binding["master_port"] is None
-    else:
-        owner = next(item for item in plan_nodes.values() if item["endpoint_owner"])
-        assert sum(item["endpoint_owner"] for item in plan_nodes.values()) == 1
-        for node_id, produced in captured.items():
-            binding = require_mapping(
-                produced["binding"], "recipe run inspection binding"
-            )
-            assert binding["local_address"] == plan_nodes[node_id]["fabric_address"]
-            assert binding["master_address"] == owner["fabric_address"]
-            assert binding["master_port"] == owner["rendezvous_port"]
+    for node_id, produced in captured.items():
+        binding = require_mapping(produced["binding"], "recipe run observation")
+        assert binding["run_id"] == started.owner_id
+        assert binding["endpoint_owner"] is plan_nodes[node_id]["endpoint_owner"]
     result = (
         app,
         sessions,
@@ -393,14 +366,12 @@ def _production_controller_app(
     return result
 
 
-def _submit_signed_observation(
+def _submit_observation(
     app,
     sessions,
     *,
     identity,
-    grant_public_key,
     recipe_observation_wire_probe,
-    host_helper_wire_probe,
     observed_at,
     process_running: bool = True,
     endpoint_ready: bool | None = None,
@@ -408,124 +379,44 @@ def _submit_signed_observation(
 ):
     from fastapi.testclient import TestClient
 
-    run_id = identity["run_id"]
-    node_id = identity["node_id"]
-    operation_id = str(uuid.uuid4())
-    fence = str(uuid.uuid4())
-    request = {
-        **identity,
-        "job_id": run_id,
-        "operation_id": operation_id,
-        "attempt": identity["run_generation"],
-        "fence": fence,
-        "request_sha256": "d" * 64,
-        "expires_in_seconds": 10,
-    }
     headers = {
-        "x-vonk-agent-node": node_id,
+        "x-vonk-agent-node": identity["node_id"],
         "x-vonk-agent-serial": "serial-0",
         "x-vonk-agent-fingerprint": "fingerprint-0",
         "x-vonk-agent-verified": "1",
         "x-vonk-agent-proxy-auth": "p" * 32,
         "x-vonk-agent-source": "10.0.0.42",
     }
+    run = {
+        "run_id": identity["run_id"],
+        "run_generation": identity["run_generation"],
+        "process_running": process_running,
+        "endpoint_ready": (
+            endpoint_ready
+            if endpoint_ready is not None
+            else True
+            if identity["endpoint_owner"]
+            else None
+        ),
+    }
+    # A report can race a run leaving this node; such an item is not
+    # evidence for any current run and must not discard its siblings.
+    runs = [run, *({**run, "run_id": other} for other in unassigned_run_ids)]
+    rust = subprocess.run(
+        [str(recipe_observation_wire_probe), "serialize"],
+        input=json.dumps(
+            {"observed_at": observed_at.isoformat(), "runs": runs},
+            separators=(",", ":"),
+        )
+        + "\n",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert rust.returncode == 0, rust.stderr
+    envelope = json.loads(rust.stdout)
+    assert RecipeRunObservationsWire.parse(envelope).runs[0].run_id == run["run_id"]
     with TestClient(app) as client:
-        grant_response = client.post(
-            "/agent/recipe-runs/observation-grants", headers=headers, json=request
-        )
-        assert grant_response.status_code == 200, grant_response.text
-        grant = SignedHostHelperGrant.parse(grant_response.json()["grant"])
-        from tests.subprocess_environment import isolated_environment
-
-        with tempfile.TemporaryDirectory(prefix="vonk-host-helper-") as child_home:
-            helper = subprocess.run(
-                [str(host_helper_wire_probe)],
-                input=canonical_message(grant.to_mapping()).decode() + "\n",
-                text=True,
-                capture_output=True,
-                env=isolated_environment(
-                    Path(child_home),
-                    extra={
-                        "VONK_HOST_HELPER_GRANT_PUBLIC_KEY": grant_public_key.hex(),
-                        "VONK_HOST_HELPER_WIRE_NOW": str(
-                            int(observed_at.timestamp()) - 1
-                        ),
-                        "VONK_HOST_HELPER_WIRE_OUTCOME": (
-                            "running" if process_running else "not-running"
-                        ),
-                    },
-                ),
-                check=False,
-            )
-        assert helper.returncode == 0, helper.stderr
-        receipt = json.loads(helper.stdout)
-        payload = {
-            **identity,
-            "observed_at": observed_at.isoformat(),
-            "endpoint_ready": (
-                endpoint_ready
-                if endpoint_ready is not None
-                else True
-                if identity["role"] == "entrypoint"
-                else None
-            ),
-            "observation_identity_sha256": grant_response.json()[
-                "observation_identity_sha256"
-            ],
-            "grant": grant.to_mapping(),
-            "helper_receipt": receipt,
-            "observation_receipt_public_key": bytes([0]) * 0,
-        }
-        with sessions() as session:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            payload["observation_receipt_public_key"] = (
-                node.observation_receipt_public_key
-            )
-        rust = subprocess.run(
-            [str(recipe_observation_wire_probe), "serialize"],
-            input=json.dumps(
-                {
-                    "node_id": node_id,
-                    "observed_at": observed_at.isoformat(),
-                    "runs": [payload],
-                },
-                separators=(",", ":"),
-            )
-            + "\n",
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert rust.returncode == 0, rust.stderr
-        envelope = json.loads(rust.stdout)
-        parsed = RecipeRunObservationsWire.parse(envelope)
-        assert parsed.runs[0].world_size == identity["world_size"]
-        # A snapshot can race a run leaving this node; such an item is not
-        # evidence for any current run and must not discard its siblings.
-        from vonk_agent_protocol.recipe_observations import (
-            RecipeRunObservationIdentity,
-        )
-
-        for other in unassigned_run_ids:
-            stale = json.loads(json.dumps(envelope["runs"][0]))
-            stale["run_id"] = other
-            digest = hashlib.sha256(
-                canonical_message(
-                    RecipeRunObservationIdentity.model_validate(
-                        {
-                            name: stale[name]
-                            for name in RecipeRunObservationIdentity.model_fields
-                        }
-                    ).model_dump(mode="json")
-                )
-            ).hexdigest()
-            stale["observation_identity_sha256"] = digest
-            operation = stale["grant"]["claims"]["operation"]
-            operation["job_id"] = other
-            operation["observation_identity_sha256"] = digest
-            stale["helper_receipt"]["claims"]["observation_identity_sha256"] = digest
-            envelope["runs"].append(stale)
         consumed = client.post(
             "/agent/recipe-runs/observations", headers=headers, json=envelope
         )
@@ -574,11 +465,10 @@ def _persisted_recipe_start_evidence(
     return require_mapping(json.loads(persisted.stdout), "persisted start binding")
 
 
-def _signed_absent_singleton(
+def _absent_singleton(
     tmp_path: Path,
     *,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     engine: Engine,
     hook_phase: Literal["pre_start", "post_stop"] | None = None,
 ):
@@ -617,15 +507,13 @@ def _signed_absent_singleton(
     binding = dict(
         require_mapping(produced["binding"], "recipe run inspection binding")
     )
-    identity = {"schema_version": 1, "node_id": node_id, **binding}
+    identity = {"node_id": node_id, **binding}
     now[0] = NOW + timedelta(seconds=1)
-    _submit_signed_observation(
+    _submit_observation(
         app,
         sessions,
         identity=identity,
-        grant_public_key=grant_public_key,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         observed_at=now[0],
     )
     bound_service, routes = bind_route_publications(
@@ -636,13 +524,11 @@ def _signed_absent_singleton(
     now[0] = NOW + timedelta(seconds=2)
     routes.publish_run(run_id)
     now[0] = NOW + timedelta(seconds=3)
-    _submit_signed_observation(
+    _submit_observation(
         app,
         sessions,
         identity=identity,
-        grant_public_key=grant_public_key,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         observed_at=now[0],
         process_running=False,
         endpoint_ready=False,
@@ -666,24 +552,21 @@ def _signed_absent_singleton(
 
 
 @pytest.mark.parametrize("nodes", [1, 2])
-@pytest.mark.parametrize("same_second", [False, True])
-def test_production_start_grant_helper_receipt_rust_and_controller_consume(
+def test_production_start_rust_observation_and_controller_consume(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     nodes: int,
-    same_second: bool,
 ) -> None:
-    """Connect the Controller start evidence, typed helper, Rust wire, and consume route."""
+    """Connect the Controller start evidence, the Rust report and the consume route."""
     from fastapi.testclient import TestClient
 
-    app, sessions, run_id, start_job_id, node_id, grant_public_key, produced = (
+    app, sessions, run_id, start_job_id, node_id, _grant_public_key, produced = (
         _production_controller_app(
             tmp_path, nodes=nodes, producer=recipe_observation_wire_probe
         )
     )
-    binding = require_mapping(produced["binding"], "recipe run inspection binding")
-    identity = {"schema_version": 1, "node_id": node_id, **binding}
+    binding = require_mapping(produced["binding"], "recipe run observation")
+    identity = {"node_id": node_id, **binding}
     with sessions() as session:
         job = session.get(Job, start_job_id)
         assert job is not None and isinstance(job.result, dict)
@@ -695,42 +578,15 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
             launch == require_mapping(produced["evidence"], "start result")["evidence"]
         )
         run = session.get(RecipeRun, run_id)
-        installation = session.get(RecipeInstallation, binding["installation_id"])
-        run_node = (
-            session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
-        )
-        assert run is not None and installation is not None
+        assert run is not None
         assert binding["run_id"] == run.id
-        assert binding["installation_id"] == installation.id
-        assert binding["recipe_revision_id"] == installation.recipe_revision_id
-        assert binding["mapping_id"] == run.mapping_id
-        assert binding["mapping_generation"] == run.mapping_generation
         assert binding["run_generation"] == run.run_generation
-        assert binding["rank"] == run_node.rank
-        assert binding["role"] == run_node.role
-        assert binding["port"] == run_node.port
-        assert binding["world_size"] == launch["world_size"]
-        assert binding["recipe_content_sha256"] == launch["recipe_content_sha256"]
-        assert f"sha256:{binding['image_digest']}" == launch["image_digest"]
-        assert binding["artifact_set_digest"] == launch["artifact_set_digest"]
-        assert binding["runtime_arguments_sha256"] == launch["runtime_arguments_sha256"]
-        assert binding["local_address"] == launch.get("local_address")
-        assert binding["master_address"] == launch.get("master_address")
-        assert binding["master_port"] == launch.get("master_port")
-    if same_second:
-        with sessions.begin() as session:
-            node = (
-                session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
-            )
-            node.updated_at = NOW + timedelta(microseconds=500_000)
-    observed_at = NOW + timedelta(seconds=0 if same_second else 1)
-    envelope, headers = _submit_signed_observation(
+    observed_at = NOW + timedelta(seconds=1)
+    envelope, headers = _submit_observation(
         app,
         sessions,
         identity=identity,
-        grant_public_key=grant_public_key,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         observed_at=observed_at,
         unassigned_run_ids=(str(uuid.uuid4()),),
     )
@@ -738,24 +594,18 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         assert node.observed_run_generation == identity["run_generation"]
         assert node.state == "running"
-        assert node.updated_at.replace(tzinfo=UTC) == max(
-            observed_at, NOW + timedelta(microseconds=500_000) if same_second else NOW
-        )
-        accepted_receipt = node.observation_receipt_sha256
-        accepted_at = node.updated_at
-        pending = session.get(RecipeRunObservationGrant, node.id)
-        assert pending is not None and pending.consumed is True
+        assert node.observation_observed_at is not None
+        assert node.observation_observed_at.replace(tzinfo=UTC) == observed_at
     with TestClient(app) as client:
-        replay = client.post(
-            "/agent/recipe-runs/observations", headers=headers, json=envelope
+        stale_generation = json.loads(json.dumps(envelope))
+        stale_generation["runs"] = [
+            {**envelope["runs"][0], "run_generation": identity["run_generation"] + 1}
+        ]
+        rejected = client.post(
+            "/agent/recipe-runs/observations", headers=headers, json=stale_generation
         )
-        assert replay.status_code == 422
-        assert "replayed" in replay.json()["detail"]
-    with sessions() as session:
-        node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
-        assert node.state == "running"
-        assert node.observation_receipt_sha256 == accepted_receipt
-        assert node.updated_at == accepted_at
+        assert rejected.status_code == 422
+        assert "generation is stale" in rejected.json()["detail"]
     with sessions.begin() as session:
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         node.state = "failed"
@@ -764,13 +614,11 @@ def test_production_start_grant_helper_receipt_rust_and_controller_consume(
     with sessions() as session:
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         assert node.state == "failed"
-        assert node.observation_receipt_sha256 is None
 
 
-def test_signed_singleton_absence_reboots_through_new_controller_processes(
+def test_singleton_absence_reboots_through_new_controller_processes(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
 ) -> None:
     """A stored exact absence drives one Stop then an exact next-generation Start."""
@@ -785,7 +633,7 @@ def test_signed_singleton_absence_reboots_through_new_controller_processes(
         run_id,
         original_start_id,
         node_id,
-        grant_public_key,
+        _grant_public_key,
         binding,
         _service,
         queue,
@@ -793,25 +641,24 @@ def test_signed_singleton_absence_reboots_through_new_controller_processes(
         node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
-    identity = {"schema_version": 1, "node_id": node_id, **binding}
+    identity = {"node_id": node_id, **binding}
     with sessions() as session:
         stored_run = session.get(RecipeRun, run_id)
         stored_node = session.query(RunNode).filter_by(run_id=run_id).one()
         assert stored_run is not None
         assert stored_node.observation_process_running is False
         assert stored_node.observation_observed_at == now[0]
-        assert len(stored_node.observation_receipt_sha256 or "") == 64
         assert _proves_fresh_absence(stored_run, stored_node, now[0])
         assert not _proves_fresh_absence(
             stored_run, stored_node, now[0] + timedelta(hours=1)
         )
         accepted_plan_digest = stored_run.plan_digest
+        accepted_installation_id = stored_run.installation_id
         original_start = session.get(Job, original_start_id)
         assert original_start is not None and original_start.state == "succeeded"
         original_start_operation = session.scalar(
@@ -957,7 +804,7 @@ def test_signed_singleton_absence_reboots_through_new_controller_processes(
         assert run is not None and run.state == "running"
         assert run.run_generation == 2
         assert run.route_state == "pending"
-        assert run.installation_id == binding["installation_id"]
+        assert run.installation_id == accepted_installation_id
         assert run.plan_digest == accepted_plan_digest
         claims = tuple(
             session.scalars(
@@ -969,20 +816,18 @@ def test_signed_singleton_absence_reboots_through_new_controller_processes(
         )
         assert claims and all(claim.state == "active" for claim in claims)
 
-    # A current-generation signed running observation allows the route to
+    # A current-generation running observation allows the route to
     # publish again after the exact accepted image and plan restart.
     binding = dict(
         require_mapping(recovery_produced["binding"], "recovery inspection binding")
     )
-    identity = {"schema_version": 1, "node_id": node_id, **binding}
+    identity = {"node_id": node_id, **binding}
     now[0] = NOW + timedelta(seconds=5)
-    _submit_signed_observation(
+    _submit_observation(
         app,
         sessions,
         identity=identity,
-        grant_public_key=grant_public_key,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         observed_at=now[0],
     )
     now[0] = NOW + timedelta(seconds=6)
@@ -995,13 +840,11 @@ def test_signed_singleton_absence_reboots_through_new_controller_processes(
         assert node.observation_process_running is True
 
     now[0] = NOW + timedelta(seconds=7)
-    _submit_signed_observation(
+    _submit_observation(
         app,
         sessions,
         identity=identity,
-        grant_public_key=grant_public_key,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         observed_at=now[0],
         process_running=False,
         endpoint_ready=False,
@@ -1048,7 +891,6 @@ def test_signed_singleton_absence_reboots_through_new_controller_processes(
 def test_singleton_recovery_stop_grant_survives_start_deadline(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
 ) -> None:
     """An elapsed future-Start deadline cannot refuse exact old-run cleanup."""
@@ -1068,10 +910,9 @@ def test_singleton_recovery_stop_grant_survives_start_deadline(
         _node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
     now[0] = NOW + timedelta(seconds=4)
@@ -1120,10 +961,9 @@ def test_singleton_recovery_stop_grant_survives_start_deadline(
         assert parent.authority_revision == run.plan_digest.removeprefix("sha256:")
 
 
-def test_newer_workload_intent_wins_over_signed_singleton_reboot_recovery(
+def test_newer_workload_intent_wins_over_singleton_reboot_recovery(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
 ) -> None:
     from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
@@ -1144,10 +984,9 @@ def test_newer_workload_intent_wins_over_signed_singleton_reboot_recovery(
         _node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
     with sessions.begin() as session:
@@ -1195,7 +1034,6 @@ def test_newer_workload_intent_wins_over_signed_singleton_reboot_recovery(
 def test_uncertain_singleton_recovery_stop_retains_run_claims(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
 ) -> None:
     from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
@@ -1216,10 +1054,9 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
         node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
     now[0] = NOW + timedelta(seconds=4)
@@ -1269,7 +1106,6 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
 def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
 ) -> None:
     (
@@ -1287,10 +1123,9 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
         _node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
     with sessions.begin() as session:
@@ -1321,7 +1156,7 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
         run = session.get(RecipeRun, run_id)
         assert run is not None and run.recovery_attempts == 0
         assert run.route_next_attempt_at == now[0] + timedelta(seconds=5)
-        assert "fresh exact signed absence" in (run.route_error or "")
+        assert "fresh exact absence" in (run.route_error or "")
         assert not session.scalar(
             select(Job.id).where(
                 Job.kind == "recipe.start",
@@ -1334,7 +1169,6 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
 def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
 ) -> None:
     from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
@@ -1346,7 +1180,7 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
         run_id,
         _original_start_id,
         node_id,
-        grant_public_key,
+        _grant_public_key,
         binding,
         _service,
         queue,
@@ -1354,13 +1188,12 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
         _node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
-    identity = {"schema_version": 1, "node_id": node_id, **binding}
+    identity = {"node_id": node_id, **binding}
     recovery = DistributedRecoveryCoordinator(
         sessions,
         routes=routes,
@@ -1371,7 +1204,7 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
     )
 
     # The first exact proof aged beyond the route evidence window. The run
-    # stays current, but the coordinator must wait for a new signed inspection.
+    # stays current, but the coordinator must wait for a new inspection.
     now[0] = NOW + timedelta(seconds=124)
     assert recovery.tick() is True
     with sessions() as session:
@@ -1379,18 +1212,16 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
         node = session.query(RunNode).filter_by(run_id=run_id).one()
         assert run is not None and run.state == "running"
         assert run.route_state == "withdrawn"
-        assert "fresh exact signed absence" in (run.route_error or "")
+        assert "fresh exact absence" in (run.route_error or "")
         assert run.route_next_attempt_at == now[0] + timedelta(seconds=5)
         assert node.state == "failed"
 
     now[0] = NOW + timedelta(seconds=125)
-    _submit_signed_observation(
+    _submit_observation(
         app,
         sessions,
         identity=identity,
-        grant_public_key=grant_public_key,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         observed_at=now[0],
         process_running=False,
         endpoint_ready=False,
@@ -1420,7 +1251,6 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
 def test_stale_presence_waits_then_recovery_resumes_without_new_run(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
 ) -> None:
     from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
@@ -1440,10 +1270,9 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
         _node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
     with sessions.begin() as session:
@@ -1500,7 +1329,6 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
 def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
 ) -> None:
     from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
@@ -1520,15 +1348,12 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
         _node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
-    wait_reason = (
-        "singleton recovery waits for a fresh exact signed absence observation"
-    )
+    wait_reason = "singleton recovery waits for a fresh exact absence observation"
     stale_id = str(uuid.uuid4())
     with sessions.begin() as session:
         current = session.get(RecipeRun, run_id)
@@ -1569,7 +1394,6 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
                 observed_memory_bytes=None,
                 endpoint=None,
                 observed_run_generation=None,
-                observation_receipt_sha256=None,
                 observation_process_running=None,
                 observation_observed_at=None,
                 observation_endpoint_ready=None,
@@ -1619,7 +1443,6 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
 def test_singleton_recovery_fails_closed_before_effects_for_lifecycle_hooks(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
     hook_phase: Literal["pre_start", "post_stop"],
 ) -> None:
@@ -1641,10 +1464,9 @@ def test_singleton_recovery_fails_closed_before_effects_for_lifecycle_hooks(
         _node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
         hook_phase=hook_phase,
     )
@@ -1687,7 +1509,6 @@ def test_singleton_recovery_fails_closed_before_effects_for_lifecycle_hooks(
 def test_singleton_recovery_checks_compiled_lifecycle_authority(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
     authority_copy: Literal["installed", "accepted-start"],
 ) -> None:
@@ -1709,10 +1530,9 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
         _node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
     with sessions.begin() as session:
@@ -1782,7 +1602,6 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
 def test_singleton_recovery_refuses_per_node_start_for_another_plan(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
 ) -> None:
     """The Job binds the run plan; the replayed per-node payload must too."""
@@ -1804,10 +1623,9 @@ def test_singleton_recovery_refuses_per_node_start_for_another_plan(
         _node_ids,
         bound_service,
         routes,
-    ) = _signed_absent_singleton(
+    ) = _absent_singleton(
         tmp_path,
         recipe_observation_wire_probe=recipe_observation_wire_probe,
-        host_helper_wire_probe=host_helper_wire_probe,
         engine=postgres_engine,
     )
     with sessions.begin() as session:
@@ -1852,17 +1670,16 @@ def test_singleton_recovery_refuses_per_node_start_for_another_plan(
 
 
 @pytest.mark.parametrize("schedule", [(120,), (121,), (0, 60, 121)])
-def test_signed_observation_deadline_applies_to_first_receipt_not_renewal(
+def test_observation_deadline_applies_to_first_observation_not_renewal(
     tmp_path: Path,
     recipe_observation_wire_probe: Path,
-    host_helper_wire_probe: Path,
     postgres_engine,
     schedule: tuple[int, ...],
 ) -> None:
     # Wrong implementation: every renewal overwrites updated_at, so a healthy
-    # rank with timely signed evidence is killed at the initial grace deadline.
+    # rank with timely evidence is killed at the initial grace deadline.
     now = [NOW]
-    app, sessions, run_id, _job_id, node_id, public_key, produced = (
+    app, sessions, run_id, _job_id, node_id, _public_key, produced = (
         _production_controller_app(
             tmp_path,
             nodes=1,
@@ -1872,24 +1689,22 @@ def test_signed_observation_deadline_applies_to_first_receipt_not_renewal(
         )
     )
     binding = require_mapping(produced["binding"], "recipe run inspection binding")
-    identity = {"schema_version": 1, "node_id": node_id, **binding}
+    identity = {"node_id": node_id, **binding}
     first_late = schedule[0] > 120
     for elapsed in schedule:
         now[0] = NOW + timedelta(seconds=elapsed)
-        _submit_signed_observation(
+        _submit_observation(
             app,
             sessions,
             identity=identity,
-            grant_public_key=public_key,
             recipe_observation_wire_probe=recipe_observation_wire_probe,
-            host_helper_wire_probe=host_helper_wire_probe,
             observed_at=now[0],
         )
     with sessions() as session:
         rank = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         assert rank.state == ("failed" if first_late else "running")
         assert rank.observed_run_generation == identity["run_generation"]
-        assert rank.observation_receipt_sha256 is not None
+        assert rank.observation_observed_at is not None
     # The worker re-reads PostgreSQL after a process restart; it must preserve
     # timely, continuously renewed observations while publication is pending.
     if not first_late:
@@ -1908,59 +1723,21 @@ def test_signed_observation_deadline_applies_to_first_receipt_not_renewal(
             assert run is not None and run.route_state == "pending"
 
 
-@pytest.mark.parametrize("singleton", [False, True])
+@pytest.mark.parametrize("endpoint_ready", [None, True])
 def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
     recipe_observation_wire_probe: Path,
-    singleton: bool,
+    endpoint_ready: bool | None,
 ) -> None:
-    fixture = (
-        Path(__file__).parents[2]
-        / "agent_protocol"
-        / "fixtures"
-        / "recipe-run-observation.json"
-    )
-    payload = json.loads(fixture.read_text())
-    if singleton:
-        payload.update(
-            {
-                "rank": 0,
-                "role": "entrypoint",
-                "world_size": 1,
-                "local_address": None,
-                "master_address": None,
-                "master_port": None,
-                "endpoint_ready": True,
-            }
-        )
-        identity = {
-            key: value
-            for key, value in payload.items()
-            if key
-            not in {
-                "observed_at",
-                "endpoint_ready",
-                "observation_identity_sha256",
-                "grant",
-                "helper_receipt",
-                "observation_receipt_public_key",
-            }
-        }
-        identity_sha256 = hashlib.sha256(canonical_message(identity)).hexdigest()
-        payload["observation_identity_sha256"] = identity_sha256
-        payload["grant"]["claims"]["operation"]["observation_identity_sha256"] = (
-            identity_sha256  # type: ignore[index]
-        )
-        payload["helper_receipt"]["claims"]["observation_identity_sha256"] = (
-            identity_sha256  # type: ignore[index]
-        )
+    payload = {
+        "run_id": str(uuid.uuid4()),
+        "run_generation": 3,
+        "process_running": True,
+        "endpoint_ready": endpoint_ready,
+    }
     completed = subprocess.run(
         [str(recipe_observation_wire_probe), "serialize"],
         input=json.dumps(
-            {
-                "node_id": payload["node_id"],
-                "observed_at": payload["observed_at"],
-                "runs": [payload],
-            },
+            {"observed_at": NOW.isoformat(), "runs": [payload]},
             separators=(",", ":"),
         )
         + "\n",
@@ -1972,14 +1749,12 @@ def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
     output = [line for line in completed.stdout.splitlines() if line.strip()]
     assert len(output) == 1
     parsed = RecipeRunObservationsWire.parse(json.loads(output[0]))
-    assert parsed.schema_version == 2
     assert len(parsed.runs) == 1
-    assert parsed.runs[0].helper_receipt.signature.algorithm == "ed25519"
-    assert parsed.runs[0].world_size == (1 if singleton else 2)
+    assert parsed.runs[0].endpoint_ready is endpoint_ready
     wire_observation = json.loads(output[0])["runs"][0]
     # Derive the missing-field cases from the canonical definition, including
-    # the singleton's explicit nulls. Rust Option must not turn omission into
-    # an accepted null that Python rejects.
+    # the explicit null. Rust Option must not turn omission into an accepted
+    # null that Python rejects.
     for field in RecipeRunObservationWire.model_json_schema()["required"]:
         incomplete = dict(wire_observation)
         del incomplete[field]

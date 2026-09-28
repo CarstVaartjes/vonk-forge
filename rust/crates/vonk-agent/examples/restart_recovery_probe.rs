@@ -165,7 +165,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 data_root: &request.data_root,
             },
             runtime_root: &request.data_root,
-            observation_receipt_public_key: [0; 32],
         };
         run_once(
             &loop_client,

@@ -32,8 +32,6 @@ from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionP
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
-    HostHelperGrantClaims,
-    HostHelperSignature,
     InstallVonkDebOperation,
     PackageRollbackAuthority,
     RecipeStopPayload,
@@ -60,7 +58,6 @@ from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
-    RecipeRunObservationPendingError,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -156,7 +153,6 @@ PACKAGED_RUNTIME_IDENTITY = {
     "build_digest": "sha256:" + "b" * 64,
     "semantic_version": "1.2.3",
     "self_test_passed": True,
-    "observation_receipt_public_key": "d" * 64,
 }
 
 
@@ -1144,11 +1140,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
     agent_system,
 ) -> None:
     client, _services, _, clock = agent_system
-    payload = {
-        "schema_version": 2,
-        "observed_at": clock.now.isoformat(),
-        "runs": [],
-    }
+    payload = {"observed_at": clock.now.isoformat(), "runs": []}
 
     assert (
         client.post(
@@ -1165,7 +1157,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
         client.post(
             "/agent/recipe-runs/observations",
             headers=agent_headers(NODE_A, "serial-a"),
-            json=payload | {"schema_version": 1},
+            json=payload | {"observed_at": clock.now.replace(tzinfo=None).isoformat()},
         ).status_code
         == 422
     )
@@ -1578,7 +1570,6 @@ def valid_enrollment_body(token: str) -> bytes:
                 "hardware_fingerprint": "hardware",
                 "agent_digest": "a" * 64,
                 "boot_id": "boot",
-                "observation_receipt_public_key": "d" * 64,
             },
         }
     ).encode("utf-8")
@@ -1848,7 +1839,6 @@ def test_claim_rejects_retired_supervisor_identity_fields(
         "build_digest": "sha256:" + "c" * 64,
         "semantic_version": "1.2.3",
         "self_test_passed": True,
-        "observation_receipt_public_key": "d" * 64,
         removed_field: removed_value,
     }
 
@@ -1882,7 +1872,6 @@ def test_claim_accepts_independently_valid_packaged_build_and_binary_digests(
                 "build_digest": "sha256:" + "b" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
-                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1941,7 +1930,6 @@ def test_claim_api_rejects_noncanonical_runtime_architecture(
                 "build_digest": "sha256:" + "c" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
-                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -1966,7 +1954,6 @@ def test_unauthenticated_claim_cannot_change_runtime_architecture(agent_system) 
                 "build_digest": "sha256:" + "b" * 64,
                 "semantic_version": "1.2.3",
                 "self_test_passed": True,
-                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -2472,10 +2459,8 @@ def test_bootstrap_requires_the_host_helper_authority(
 def test_recipe_run_disposition_names_only_runs_the_controller_never_owned(
     agent_system,
 ) -> None:
-    # Live regression: a Spark kept a run directory whose metadata the agent
-    # could no longer parse, so it could not build an observation binding and
-    # skipped the run every sweep forever.  The run id alone must answer
-    # whether an owner exists, and a known run must never be named unowned.
+    # A Spark can retain a run this Controller never owned; the run id alone
+    # must answer whether an owner exists, and a known run is never unowned.
     client, services, _, clock = agent_system
     known_run_id = "70000000-0000-4000-8000-000000000071"
     with services.sessions.begin() as session:
@@ -2515,217 +2500,23 @@ def test_recipe_run_disposition_names_only_runs_the_controller_never_owned(
     assert anonymous.status_code == 401
 
 
-def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
+def test_recipe_run_observation_report_applies_process_state_per_run(
     agent_system,
 ) -> None:
     client, services, _, clock = agent_system
-
-    class ExactObservationAuthority:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, object]] = []
-            self.probes: list[dict[str, object]] = []
-            self.pending = False
-            self.unowned = False
-
-        def issue_unowned_recipe_run_probe_grant(self, **values):
-            self.probes.append(values)
-            if not self.unowned:
-                return None
-            self.unowned = False
-            return self.issue_recipe_run_observation_grant(**values)
-
-        def issue_recipe_run_observation_grant(self, **values):
-            self.calls.append(values)
-            if self.pending:
-                raise RecipeRunObservationPendingError(
-                    "recipe run observation grant is already pending"
-                )
-            assert values["certificate_serial"] == "serial-a"
-            assert values["expires_in_seconds"] == 10
-            return "f" * 64, SignedHostHelperGrant(
-                schema_version=1,
-                claims=HostHelperGrantClaims(
-                    schema_version=1,
-                    authority="vonk.host-maintenance-helper",
-                    request_id="70000000-0000-4000-8000-000000000007",
-                    node_id=NODE_A,
-                    issued_at=1_800_000_000,
-                    expires_at=1_800_000_010,
-                    operation=ExecuteContainerRuntimeRequestOperation(
-                        type="execute-container-runtime-request",
-                        action="run-inspect",
-                        job_id=values["job_id"],
-                        operation_id=values["operation_id"],
-                        attempt=values["attempt"],
-                        fence=values["fence"],
-                        request_sha256=values["request_sha256"],
-                        observation_identity_sha256="f" * 64,
-                    ),
-                ),
-                signature=HostHelperSignature(
-                    algorithm="ed25519", key_id="0" * 64, value="0" * 128
-                ),
-            )
-
-    authority = ExactObservationAuthority()
-    object.__setattr__(services, "host_runtime_authority", authority)
-    run_id = "10000000-0000-4000-8000-000000000001"
-    request = {
-        "schema_version": 1,
-        "node_id": NODE_A,
-        "run_id": run_id,
-        "installation_id": "20000000-0000-4000-8000-000000000002",
-        "recipe_revision_id": "30000000-0000-4000-8000-000000000003",
-        "recipe_content_sha256": "a" * 64,
-        "mapping_id": "40000000-0000-4000-8000-000000000004",
-        "mapping_generation": 2,
-        "run_generation": 3,
-        "image_digest": "b" * 64,
-        "artifact_set_digest": "c" * 64,
-        "model_identity": "publisher/model@revision",
-        "rank": 1,
-        "role": "worker",
-        "world_size": 2,
-        "local_address": "192.168.100.3",
-        "master_address": "192.168.100.2",
-        "master_port": 29500,
-        "port": 8888,
-        "runtime_arguments_sha256": "d" * 64,
-        "job_id": run_id,
-        "operation_id": "50000000-0000-4000-8000-000000000005",
-        "attempt": 3,
-        "fence": "60000000-0000-4000-8000-000000000006",
-        "request_sha256": "e" * 64,
-        "expires_in_seconds": 10,
-    }
-
-    accepted = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=request,
-    )
-    wrong_node = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={**request, "node_id": NODE_B},
-    )
-    unknown_field = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={**request, "command": "docker inspect"},
-    )
-    maximum_model_identity = "p/" + "m" * 951 + "@" + "r" * 70
-    maximum_identity = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={**request, "model_identity": maximum_model_identity},
-    )
-    oversized_identity = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={**request, "model_identity": maximum_model_identity + "x"},
-    )
-
-    assert accepted.status_code == 200
-    assert accepted.json() == {
-        "schema_version": 1,
-        "observation_identity_sha256": "f" * 64,
-        "grant": {
-            "schema_version": 1,
-            "claims": {
-                "schema_version": 1,
-                "authority": "vonk.host-maintenance-helper",
-                "request_id": "70000000-0000-4000-8000-000000000007",
-                "node_id": NODE_A,
-                "issued_at": 1_800_000_000,
-                "expires_at": 1_800_000_010,
-                "operation": {
-                    "type": "execute-container-runtime-request",
-                    "action": "run-inspect",
-                    "job_id": run_id,
-                    "operation_id": request["operation_id"],
-                    "attempt": request["attempt"],
-                    "fence": request["fence"],
-                    "request_sha256": request["request_sha256"],
-                    "observation_identity_sha256": "f" * 64,
-                },
-            },
-            "signature": {
-                "algorithm": "ed25519",
-                "key_id": "0" * 64,
-                "value": "0" * 128,
-            },
-        },
-    }
-    assert wrong_node.status_code == 409
-    assert unknown_field.status_code == 422
-    assert maximum_identity.status_code == 200
-    assert oversized_identity.status_code == 422
-    assert len(maximum_model_identity) == 1024
-    assert len(authority.calls) == 2
-    assert len(authority.probes) == 2
-    assert "x-vonk-recipe-run-disposition" not in accepted.headers
-
-    # A run this Controller has no record of gets a read-only probe, named so
-    # the agent can retire its local lifecycle instead of asking forever.
-    authority.unowned = True
-    unowned = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=request,
-    )
-    assert unowned.status_code == 200
-    assert unowned.headers["x-vonk-recipe-run-disposition"] == "unowned"
-    assert unowned.json() == accepted.json()
-    assert len(authority.calls) == 3
-
-    identity_fields = {
-        key: value
-        for key, value in request.items()
-        if key
-        not in {
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "request_sha256",
-            "expires_in_seconds",
-        }
-    }
-    naive_item_time = client.post(
-        "/agent/recipe-runs/observations",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json={
-            "schema_version": 2,
-            "observed_at": clock.now.isoformat(),
-            "runs": [
-                {
-                    **identity_fields,
-                    "observed_at": clock.now.replace(tzinfo=None).isoformat(),
-                    "observation_identity_sha256": "f" * 64,
-                    "endpoint_ready": None,
-                    "grant": {"schema_version": 1},
-                    "helper_receipt": {"schema_version": 1},
-                }
-            ],
-        },
-    )
-    assert naive_item_time.status_code == 422
-    assert "timezone-aware" in naive_item_time.text
-
-    starting_run_id = "70000000-0000-4000-8000-000000000007"
+    run_id = "70000000-0000-4000-8000-000000000007"
     with services.sessions.begin() as session:
         session.add(
             RecipeRun(
-                id=starting_run_id,
+                id=run_id,
                 installation_id="80000000-0000-4000-8000-000000000008",
                 mapping_id="90000000-0000-4000-8000-000000000009",
                 mapping_generation=1,
-                run_generation=1,
-                alias="starting-exact",
+                run_generation=2,
+                alias="observed",
                 plan_digest="1" * 64,
                 plan={"schema_version": 1, "observation_schema_version": 2},
-                state="starting",
+                state="running",
                 route_state="withdrawn",
                 actor="admin",
                 created_at=clock.now,
@@ -2734,50 +2525,50 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
         )
         session.add(
             RunNode(
-                run_id=starting_run_id,
+                run_id=run_id,
                 node_id=NODE_A,
                 rank=0,
-                role="entrypoint",
-                state="starting",
+                role="worker",
+                state="running",
                 port=8888,
                 reserved_memory_bytes=1,
-                updated_at=clock.now,
+                updated_at=clock.now - timedelta(seconds=1),
             )
         )
-    starting_request = {
-        **request,
-        "run_id": starting_run_id,
-        "job_id": starting_run_id,
-        "run_generation": 1,
-        "attempt": 1,
-    }
-    too_early = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=starting_request,
-    )
-    assert too_early.status_code == 425
-    assert too_early.json() == {"detail": "recipe run observation is not ready"}
-    assert len(authority.calls) == 3
 
-    # An unconsumed grant for the same run is the authority's bounded "not
-    # yet".  It must stay distinguishable from a rejected request, or the
-    # agent reads a live run as unauthorized and abandons the whole sweep.
-    authority.pending = True
-    already_pending = client.post(
-        "/agent/recipe-runs/observation-grants",
-        headers=agent_headers(NODE_A, "serial-a"),
-        json=request,
-    )
-    authority.pending = False
-    assert already_pending.status_code == 409
-    assert (
-        already_pending.headers["x-vonk-error-code"]
-        == "controller.recipe_run.observation_pending"
-    )
-    assert already_pending.json() == {
-        "detail": "recipe run observation grant is already pending"
+    def report(*runs: dict[str, object], observed_at: datetime = clock.now):
+        return client.post(
+            "/agent/recipe-runs/observations",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json={"observed_at": observed_at.isoformat(), "runs": list(runs)},
+        )
+
+    run: dict[str, object] = {
+        "run_id": run_id,
+        "run_generation": 2,
+        "process_running": False,
+        "endpoint_ready": None,
     }
+    stale_generation = report(run | {"run_generation": 1})
+    assert stale_generation.status_code == 422
+    assert "generation is stale" in stale_generation.text
+    unassigned = report(run | {"run_id": str(uuid.uuid4())})
+    assert unassigned.status_code == 422
+    assert "not assigned" in unassigned.text
+
+    # A report taken before the rank last changed never overwrites it.
+    stale_report = report(run, observed_at=clock.now - timedelta(seconds=2))
+    assert stale_report.status_code == 422
+    assert "stale" in stale_report.text
+
+    assert report(run | {"run_id": str(uuid.uuid4())}, run).status_code == 204
+    with services.sessions() as session:
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert node is not None
+        assert node.state == "failed"
+        assert node.observed_run_generation == 2
+        assert node.observation_process_running is False
+        assert node.observation_observed_at is not None
 
 
 def test_rust_agent_enrollment_shape_remains_controller_compatible(
@@ -3119,7 +2910,6 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
             "hardware_fingerprint": "hardware",
             "agent_digest": "a" * 64,
             "boot_id": "boot",
-            "observation_receipt_public_key": "d" * 64,
         },
     }
     issued = client.post("/agent/enroll", json=body)
@@ -4060,32 +3850,6 @@ def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:
     assert response.status_code == 403
 
 
-def test_enrollment_rejects_malformed_observation_receipt_public_key(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-    token = enrollment_grant(services)
-    body = json.loads(valid_enrollment_body(token))
-    body["evidence"]["observation_receipt_public_key"] = "not-lower-hex"
-
-    response = client.post("/agent/enroll", json=body)
-
-    assert response.status_code == 403
-    assert_grant_consumed(services, token)
-
-
-def test_enrollment_rejects_receipt_less_evidence(agent_system) -> None:
-    client, services, _, _ = agent_system
-    token = enrollment_grant(services)
-    body = json.loads(valid_enrollment_body(token))
-    body["evidence"].pop("observation_receipt_public_key")
-
-    response = client.post("/agent/enroll", json=body)
-
-    assert response.status_code == 403
-    assert_grant_consumed(services, token)
-
-
 def test_artifact_access_is_owned_content_addressed_and_range_bounded(
     agent_system,
 ) -> None:
@@ -4402,7 +4166,6 @@ def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None
         "protocol_version",
         "runtime_identity",
         "wait_seconds",
-        "observation_receipt_public_key",
     ),
 )
 def test_claim_requires_the_current_agent_document(agent_system, missing: str) -> None:
@@ -4415,10 +4178,7 @@ def test_claim_requires_the_current_agent_document(agent_system, missing: str) -
         "runtime_identity": dict(PACKAGED_RUNTIME_IDENTITY),
         "wait_seconds": 0,
     }
-    if missing == "observation_receipt_public_key":
-        del body["runtime_identity"][missing]
-    else:
-        del body[missing]
+    del body[missing]
     # Use the raw request method: the convenience test client must not refill
     # deliberately missing fields and hide a production boundary regression.
     response = client.request(

@@ -207,7 +207,6 @@ _OPTIONAL_CAPABILITIES = frozenset(
         AgentOperation.RUNTIME_PREFLIGHT.value,
         "recipe.start.two-phase.v1",
         "recipe.run.inspect.exact.v1",
-        "recipe.run.inspect.receipt.v1",
         EXACT_LIFECYCLE_RESUME_CAPABILITY,
         RECIPE_RECONCILE_FEATURE_CAPABILITY,
     }
@@ -4243,12 +4242,6 @@ class AgentJobService:
             or "agent.runtime.rust.v1" not in capabilities
         ):
             raise ValueError("Rust agent capability negotiation is incomplete")
-        receipt_key = runtime_identity.observation_receipt_public_key
-        receipt_capable = "recipe.run.inspect.receipt.v1" in capabilities
-        if receipt_capable and not (
-            isinstance(receipt_key, str) and len(receipt_key) == 64
-        ):
-            raise ValueError("agent observation receipt identity is incomplete")
 
     @staticmethod
     def _record_contact(
@@ -4281,20 +4274,6 @@ class AgentJobService:
             if profile is not None and profile.hostname != hostname:
                 profile.hostname = hostname
         if runtime_identity is not None:
-            receipt_key = runtime_identity.observation_receipt_public_key
-            if (
-                receipt_key is not None
-                and node.observation_receipt_public_key is not None
-                and node.observation_receipt_public_key != receipt_key
-            ):
-                raise ValueError("agent observation receipt key changed")
-            if (
-                isinstance(receipt_key, str)
-                and node.observation_receipt_public_key is None
-            ):
-                # The first authenticated contact binds the immutable receipt
-                # identity; subsequent contacts remain change-protected above.
-                node.observation_receipt_public_key = receipt_key
             node.architecture = runtime_identity.architecture
             node.semantic_version = runtime_identity.semantic_version
             node.build_digest = runtime_identity.build_digest

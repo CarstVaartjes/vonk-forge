@@ -17,7 +17,6 @@ fn identity(build: char, binary: char) -> AgentRuntimeIdentity {
         architecture: AgentRuntimeIdentityArchitecture::LinuxAmd64,
         self_test_passed: true,
         package_activation: None,
-        observation_receipt_public_key: "d".repeat(64),
     }
 }
 

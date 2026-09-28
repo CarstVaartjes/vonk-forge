@@ -43,7 +43,6 @@ pub const CLAIM_CAPABILITIES: &[&str] = &[
     "recipe.start",
     "recipe.start.two-phase.v1",
     "recipe.run.inspect.exact.v1",
-    "recipe.run.inspect.receipt.v1",
     "recipe.stop",
     "recipe.uninstall",
     "recipe.reconcile",

@@ -279,7 +279,7 @@ pub(crate) fn validate_helper_response(
     expected_request_id: &str,
     expected_package_sha256: &str,
 ) -> Result<(), AgentUpgradeError> {
-    if response.schema_version != 1 || response.observation_receipt.is_some() {
+    if response.schema_version != 1 || response.process_running.is_some() {
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     if response.status == "rejected" {
@@ -370,7 +370,7 @@ mod tests {
             evidence_sha256: None,
             error_code: None,
             exit_code: None,
-            observation_receipt: None,
+            process_running: None,
         }
     }
 
@@ -392,14 +392,10 @@ mod tests {
     }
 
     #[test]
-    fn package_context_rejects_the_shared_observation_receipt_field() {
-        let receipt = serde_json::from_str(include_str!(
-            "../../../../agent_protocol/fixtures/recipe-run-observation-receipt.json"
-        ))
-        .unwrap();
+    fn package_context_rejects_the_shared_inspection_outcome_field() {
         let mut response = response("package-installed");
         response.evidence_sha256 = Some(package_evidence_sha256());
-        response.observation_receipt = Some(receipt);
+        response.process_running = Some(true);
         let mut response: HelperResponse =
             parse_strict(&canonical_generated_json(&response).unwrap()).unwrap();
         assert!(matches!(

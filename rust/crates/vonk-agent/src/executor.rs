@@ -183,7 +183,6 @@ pub struct RecipeExecutor<'a, R> {
     pub client: &'a AgentHttpClient,
     pub runtime: OciRuntime<'a, R>,
     pub runtime_root: &'a Path,
-    pub observation_receipt_public_key: [u8; 32],
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -200,19 +199,6 @@ pub enum RecipeObservationError {
     Inspection(#[from] crate::host_runtime::HostRuntimeError),
     #[error("exact recipe run observation could not be reported: {0}")]
     Report(#[from] ClientError),
-    #[error("exact recipe run snapshot expired before reporting")]
-    StaleSnapshot,
-}
-
-impl RecipeObservationError {
-    pub fn not_ready(&self) -> bool {
-        matches!(
-            self,
-            Self::Inspection(crate::host_runtime::HostRuntimeError::Controller(
-                ClientError::ObservationNotReady
-            ))
-        )
-    }
 }
 
 pub struct ControlExecutor<'a, R> {
@@ -272,6 +258,7 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
 /// on the Controller. Only a successfully collected empty set reports absence.
 async fn report_complete_recipe_run_observations(
     client: &AgentHttpClient,
+    observed_at: DateTime<Utc>,
     results: Vec<Result<ExactRecipeRunObservation, RecipeObservationError>>,
 ) -> Result<usize, RecipeObservationError> {
     let mut observations = Vec::with_capacity(results.len());
@@ -286,38 +273,13 @@ async fn report_complete_recipe_run_observations(
             // it must never hide the observations of owned runs.
             Err(RecipeObservationError::UnownedRun) => {}
             Err(error) => {
-                if failure
-                    .as_ref()
-                    .is_none_or(RecipeObservationError::not_ready)
-                {
-                    failure = Some(error);
-                }
+                failure.get_or_insert(error);
             }
         }
     }
-    // Bounded concurrent inspections can finish in different batches. Retain
-    // each still-authorized receipt even when another inspection expired.
-    // The Controller remains the authority for receipt age and authorization.
-    let now = Utc::now().timestamp();
-    observations.retain(|observation| {
-        if now <= observation.grant.claims.expires_at {
-            return true;
-        }
-        eprintln!(
-            "vonk-agent: exact recipe run {} receipt expired during collection",
-            observation.run_id
-        );
-        if failure
-            .as_ref()
-            .is_none_or(RecipeObservationError::not_ready)
-        {
-            failure = Some(RecipeObservationError::StaleSnapshot);
-        }
-        false
-    });
     if !observations.is_empty() || (failure.is_none() && !skipped_run) {
         client
-            .report_exact_recipe_run_observations(&observations)
+            .report_exact_recipe_run_observations(observed_at, &observations)
             .await?;
     }
     match failure {
@@ -347,12 +309,10 @@ impl<R> RecipeExecutor<'_, R> {
     /// the Controller confirms it has no record of that run.
     ///
     /// Such metadata (for example a lifecycle written by an older agent)
-    /// can never yield the exact binding an observation, probe or stop
-    /// needs, so skipping it only repeats the same diagnostic every sweep.
-    /// The existing retirement path removes just the lifecycle; the run
-    /// directory stays as history and no process is touched.  A run the
-    /// Controller knows keeps its integrity failure visible, and any other
-    /// local error (storage, bounds, binding mismatch) is never retired.
+    /// can never be inspected or stopped, so skipping it only repeats the
+    /// same diagnostic every sweep.  A run the Controller knows keeps its
+    /// integrity failure visible, and any other local error (storage,
+    /// bounds, binding mismatch) is never retired.
     async fn retire_unparseable_unowned_run(&self, run_id: &str, error: &OciError) -> bool
     where
         R: ProcessRunner,
@@ -360,6 +320,17 @@ impl<R> RecipeExecutor<'_, R> {
         if !matches!(error, OciError::Json(_)) {
             return false;
         }
+        self.retire_unowned_run(run_id, "unparseable managed metadata")
+            .await
+    }
+
+    /// Retire the local lifecycle of a run the Controller has no record of.
+    /// Only the lifecycle is removed; the run directory stays as history and
+    /// no process is touched.
+    async fn retire_unowned_run(&self, run_id: &str, reason: &str) -> bool
+    where
+        R: ProcessRunner,
+    {
         let Ok(id) = uuid::Uuid::parse_str(run_id) else {
             return false;
         };
@@ -367,7 +338,7 @@ impl<R> RecipeExecutor<'_, R> {
             Ok(RecipeRunDisposition::Unowned) => match self.runtime.complete_stop(run_id) {
                 Ok(()) => {
                     eprintln!(
-                        "vonk-agent: retired exact recipe run {run_id}: unparseable managed metadata and unknown to the Controller"
+                        "vonk-agent: retired exact recipe run {run_id}: {reason} and unknown to the Controller"
                     );
                     true
                 }
@@ -395,6 +366,9 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
+        // Taken before the local runs are listed: the Controller never lets
+        // this report overwrite a rank it changed after this instant.
+        let observed_at = Utc::now();
         let plans = self.runtime.recipe_run_inspection_results()?;
         let results = stream::iter(plans)
             .filter_map(|plan| async move {
@@ -420,62 +394,29 @@ impl<R> RecipeExecutor<'_, R> {
                     client: self.client,
                     request_root: &request_root,
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
-                    observation_receipt_public_key: self.observation_receipt_public_key,
                 };
-                let endpoint = plan.endpoint_address;
-                let outcome = boundary
-                    .inspect_recipe_run(plan.binding.clone(), plan.arguments)
+                let process_running = boundary
+                    .inspect_recipe_run(plan.run_id, plan.run_generation, plan.arguments)
                     .await
                     .inspect_err(|error| {
-                        if !matches!(
-                            error,
-                            crate::host_runtime::HostRuntimeError::Controller(
-                                ClientError::ObservationNotReady
-                            )
-                        ) {
-                            eprintln!(
-                                "vonk-agent: exact recipe run {} inspection failed: {}",
-                                plan.binding.run_id,
-                                error.preflight_code()
-                            );
-                        }
-                    })?;
-                if outcome.unowned {
-                    let run_id = plan.binding.run_id.to_string();
-                    if outcome.process_running {
-                        // Only an owned stop may end a process; an unowned one
-                        // is left untouched and never reported as owned.
                         eprintln!(
-                            "vonk-agent: exact recipe run {run_id} is unknown to the Controller and still running; left untouched"
+                            "vonk-agent: exact recipe run {} inspection failed: {}",
+                            plan.run_id,
+                            error.preflight_code()
                         );
-                    } else {
-                        // The helper's signed receipt proves the process is
-                        // gone and the Controller has no record of the run, so
-                        // retiring the local lifecycle loses nothing: it only
-                        // stops asking for an observation that can never be
-                        // accepted.  The run directory stays as history.
-                        match self.runtime.complete_stop(&run_id) {
-                            Ok(()) => eprintln!(
-                                "vonk-agent: retired exact recipe run {run_id}: unknown to the Controller and not running"
-                            ),
-                            Err(error) => eprintln!(
-                                "vonk-agent: exact recipe run {run_id} is unknown to the Controller; retirement failed ({})",
-                                error.safe_category()
-                            ),
-                        }
-                    }
+                    })?;
+                // A stopped process of a run this Controller never owned (for
+                // example after its database was rebuilt) is retired locally
+                // instead of being reported forever.
+                if !process_running
+                    && self
+                        .retire_unowned_run(&plan.run_id.to_string(), "not running")
+                        .await
+                {
                     return Err(RecipeObservationError::UnownedRun);
                 }
-                // This timestamp is part of the signed-grant freshness proof.
-                // Capture it immediately after the local privileged inspection;
-                // an owner-only HTTP probe follows and remains independently
-                // bounded to five seconds.
-                let observed_at = DateTime::from_timestamp(outcome.receipt.claims.observed_at, 0)
-                    .ok_or(crate::host_runtime::HostRuntimeError::HelperProtocol(
-                    crate::host_runtime::HelperProtocolCause::ObservationTimestamp,
-                ))?;
-                let endpoint_ready = endpoint.map(|address| {
-                    outcome.process_running
+                let endpoint_ready = plan.endpoint_address.map(|address| {
+                    process_running
                         && self.runtime.readiness_request(
                             address,
                             plan.endpoint_port,
@@ -483,40 +424,16 @@ impl<R> RecipeExecutor<'_, R> {
                         )
                 });
                 Ok::<_, RecipeObservationError>(ExactRecipeRunObservation {
-                    schema_version: 1,
-                    node_id: self.client.node_id().to_owned(),
-                    observed_at: observed_at.into(),
-                    artifact_set_digest: plan.binding.artifact_set_digest,
-                    image_digest: plan.binding.image_digest,
-                    installation_id: plan.binding.installation_id,
-                    local_address: plan.binding.local_address,
-                    mapping_generation: plan.binding.mapping_generation,
-                    mapping_id: plan.binding.mapping_id,
-                    master_address: plan.binding.master_address,
-                    master_port: plan.binding.master_port,
-                    model_identity: plan.binding.model_identity,
-                    port: plan.binding.port,
-                    rank: plan.binding.rank,
-                    recipe_content_sha256: plan.binding.recipe_content_sha256,
-                    recipe_revision_id: plan.binding.recipe_revision_id,
-                    role: plan.binding.role,
-                    run_generation: plan.binding.run_generation,
-                    run_id: plan.binding.run_id,
-                    runtime_arguments_sha256: plan.binding.runtime_arguments_sha256,
-                    world_size: plan.binding.world_size,
+                    run_id: plan.run_id,
+                    run_generation: plan.run_generation,
+                    process_running,
                     endpoint_ready,
-                    grant: outcome.grant,
-                    observation_identity_sha256: outcome.observation_identity_sha256,
-                    helper_receipt: outcome.receipt,
-                    observation_receipt_public_key: hex::encode(
-                        self.observation_receipt_public_key,
-                    ),
                 })
             })
             .buffer_unordered(8)
             .collect::<Vec<_>>()
             .await;
-        report_complete_recipe_run_observations(self.client, results).await
+        report_complete_recipe_run_observations(self.client, observed_at, results).await
     }
 
     async fn execute_host_runtime_outcome(
@@ -540,7 +457,6 @@ impl<R> RecipeExecutor<'_, R> {
             client: self.client,
             request_root: &request_root,
             helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
-            observation_receipt_public_key: self.observation_receipt_public_key,
         }
         .execute(claim, action, arguments)
         .await
@@ -579,7 +495,6 @@ impl<R> RecipeExecutor<'_, R> {
             client: self.client,
             request_root: &request_root,
             helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
-            observation_receipt_public_key: self.observation_receipt_public_key,
         }
         .execute_plan(claim, arguments, plan)
         .await
@@ -612,7 +527,6 @@ impl<R> RecipeExecutor<'_, R> {
             client: self.client,
             request_root: &request_root,
             helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
-            observation_receipt_public_key: self.observation_receipt_public_key,
         }
         .cleanup_installation(claim, installation_id)
         .await
@@ -635,7 +549,6 @@ impl<R> RecipeExecutor<'_, R> {
             client: self.client,
             request_root: &request_root,
             helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
-            observation_receipt_public_key: self.observation_receipt_public_key,
         }
         .reconcile_installation(claim, identity)
         .await
@@ -2157,10 +2070,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let placement = spec.runtime.placement.clone();
                 let run_id = request.run_id.to_string();
                 let inspection_identity = Some(RecipeRunStartIdentity {
-                    mapping_generation: request.mapping_generation,
-                    mapping_id: request.mapping_id,
-                    recipe_content_sha256: request.recipe_content_sha256.clone(),
-                    recipe_revision_id: request.recipe_revision_id,
                     run_generation: u64::from(request.run_generation),
                 });
                 let collective_readiness =
@@ -3153,7 +3062,6 @@ fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFailureKind {
             }
         }
         ClientError::ResultRejected(_) | ClientError::Protocol => AgentFailureKind::InvalidContract,
-        ClientError::ObservationNotReady => AgentFailureKind::ResourcePrerequisite,
         ClientError::ResultSuperseded => AgentFailureKind::UncertainEffect,
         _ => AgentFailureKind::IntegrityFailure,
     }
@@ -3926,9 +3834,7 @@ fn stable_runtime_helper_error_code(value: &str) -> bool {
             | "runtime_helper_request_argument_nul_byte"
             | "runtime_helper_request_storage_invalid"
             | "runtime_helper_system_clock_invalid"
-            | "runtime_helper_inspection_receipt_invalid"
-            | "runtime_helper_observation_receipt_invalid"
-            | "runtime_helper_observation_timestamp_invalid"
+            | "runtime_helper_inspection_outcome_invalid"
             | "runtime_helper_stop_uncertain"
     )
 }
@@ -4000,7 +3906,6 @@ fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailure {
         | ClientError::Protocol
         | ClientError::ResultSuperseded
         | ClientError::ResultRejected(_)
-        | ClientError::ObservationNotReady
         | ClientError::Pin => HeartbeatFailure::Terminal,
     }
 }
@@ -4433,18 +4338,12 @@ mod tests {
     }
 
     fn exact_observation(run_id: Uuid) -> crate::client::ExactRecipeRunObservation {
-        let mut value: Value = serde_json::from_str(include_str!(
-            "../../../../agent_protocol/fixtures/recipe-run-observation.json"
-        ))
-        .unwrap();
-        let now = Utc::now().timestamp();
-        value["run_id"] = json!(run_id);
-        value["grant"]["claims"]["operation"]["job_id"] = json!(run_id);
-        value["grant"]["claims"]["issued_at"] = json!(now - 1);
-        value["grant"]["claims"]["expires_at"] = json!(now + 10);
-        value["helper_receipt"]["claims"]["observed_at"] = json!(now);
-        value["observed_at"] = json!(DateTime::from_timestamp(now, 0).unwrap());
-        serde_json::from_value(value).unwrap()
+        crate::client::ExactRecipeRunObservation {
+            run_id,
+            run_generation: 3,
+            process_running: true,
+            endpoint_ready: None,
+        }
     }
 
     #[tokio::test]
@@ -4456,14 +4355,14 @@ mod tests {
             .map(|id| Ok(exact_observation(id)))
             .collect();
         assert_eq!(
-            report_complete_recipe_run_observations(&server.client, results)
+            report_complete_recipe_run_observations(&server.client, Utc::now(), results)
                 .await
                 .unwrap(),
             2
         );
         let reports = server.finish();
         assert_eq!(reports.len(), 1);
-        assert_eq!(reports[0]["schema_version"], 2);
+        assert!(reports[0]["observed_at"].is_string());
         let runs = reports[0]["runs"].as_array().unwrap();
         assert_eq!(runs.len(), 2);
         for id in ids {
@@ -4477,6 +4376,7 @@ mod tests {
             let server = ObservationServer::new(status);
             let error = report_complete_recipe_run_observations(
                 &server.client,
+                Utc::now(),
                 vec![Ok(exact_observation(Uuid::new_v4()))],
             )
             .await
@@ -4494,9 +4394,8 @@ mod tests {
         // current healthy receipts, eventually expiring that unrelated run.
         for error in [
             crate::host_runtime::HostRuntimeError::HelperProtocol(
-                crate::host_runtime::HelperProtocolCause::ObservationTimestamp,
+                crate::host_runtime::HelperProtocolCause::InspectionOutcome,
             ),
-            crate::host_runtime::HostRuntimeError::Controller(ClientError::ObservationNotReady),
             crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(Box::new(
                 crate::client::ControllerError::from_status(403),
             ))),
@@ -4505,6 +4404,7 @@ mod tests {
             let current_run = Uuid::new_v4();
             let result = report_complete_recipe_run_observations(
                 &server.client,
+                Utc::now(),
                 vec![
                     Ok(exact_observation(current_run)),
                     Err(RecipeObservationError::Inspection(error)),
@@ -4526,6 +4426,7 @@ mod tests {
         let valid_run = Uuid::new_v4();
         let result = report_complete_recipe_run_observations(
             &server.client,
+            Utc::now(),
             vec![
                 Ok(exact_observation(valid_run)),
                 Err(RecipeObservationError::SkippedRun),
@@ -4543,6 +4444,7 @@ mod tests {
         assert_eq!(
             report_complete_recipe_run_observations(
                 &server.client,
+                Utc::now(),
                 vec![Err(RecipeObservationError::SkippedRun)],
             )
             .await
@@ -4560,6 +4462,7 @@ mod tests {
         let valid_run = Uuid::new_v4();
         let result = report_complete_recipe_run_observations(
             &server.client,
+            Utc::now(),
             vec![
                 Err(RecipeObservationError::UnownedRun),
                 Ok(exact_observation(valid_run)),
@@ -4578,6 +4481,7 @@ mod tests {
         assert_eq!(
             report_complete_recipe_run_observations(
                 &server.client,
+                Utc::now(),
                 vec![Err(RecipeObservationError::UnownedRun)],
             )
             .await
@@ -4594,46 +4498,15 @@ mod tests {
         let server = ObservationServer::new(Some(204));
         let result = report_complete_recipe_run_observations(
             &server.client,
+            Utc::now(),
             vec![Err(RecipeObservationError::Inspection(
-                crate::host_runtime::HostRuntimeError::Controller(ClientError::ObservationNotReady),
+                crate::host_runtime::HostRuntimeError::HelperProtocol(
+                    crate::host_runtime::HelperProtocolCause::InspectionOutcome,
+                ),
             ))],
         )
         .await;
         assert!(matches!(result, Err(RecipeObservationError::Inspection(_))));
-        assert!(server.finish().is_empty());
-    }
-
-    #[tokio::test]
-    async fn exact_snapshot_does_not_submit_receipts_expired_during_collection() {
-        let server = ObservationServer::new(Some(204));
-        let mut stale = exact_observation(Uuid::new_v4());
-        stale.grant.claims.issued_at = Utc::now().timestamp() - 20;
-        stale.grant.claims.expires_at = Utc::now().timestamp() - 10;
-        stale.helper_receipt.claims.observed_at = stale.grant.claims.issued_at;
-        stale.observed_at = DateTime::from_timestamp(stale.grant.claims.issued_at, 0)
-            .unwrap()
-            .into();
-        stale.validate().unwrap();
-        let fresh = exact_observation(Uuid::new_v4());
-        assert!(matches!(
-            report_complete_recipe_run_observations(
-                &server.client,
-                vec![Ok(stale.clone()), Ok(fresh.clone())]
-            )
-            .await,
-            Err(RecipeObservationError::StaleSnapshot)
-        ));
-        let reports = server.finish();
-        assert_eq!(reports.len(), 1);
-        let runs = reports[0]["runs"].as_array().unwrap();
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0]["run_id"], fresh.run_id.to_string());
-
-        let server = ObservationServer::new(Some(204));
-        assert!(matches!(
-            report_complete_recipe_run_observations(&server.client, vec![Ok(stale)]).await,
-            Err(RecipeObservationError::StaleSnapshot)
-        ));
         assert!(server.finish().is_empty());
     }
 
@@ -4650,7 +4523,6 @@ mod tests {
                 data_root: data.path(),
             },
             runtime_root: runtime.path(),
-            observation_receipt_public_key: [0; 32],
         };
         assert_eq!(
             executor
@@ -4661,7 +4533,7 @@ mod tests {
         );
         let reports = server.finish();
         assert_eq!(reports.len(), 1);
-        assert_eq!(reports[0]["schema_version"], 2);
+        assert!(reports[0]["observed_at"].is_string());
         assert_eq!(reports[0]["runs"], json!([]));
     }
 
@@ -4684,7 +4556,6 @@ mod tests {
                 data_root: data.path(),
             },
             runtime_root: runtime.path(),
-            observation_receipt_public_key: [0; 32],
         };
         assert_eq!(
             executor
@@ -4723,7 +4594,6 @@ mod tests {
                 data_root: data.path(),
             },
             runtime_root: runtime.path(),
-            observation_receipt_public_key: [0; 32],
         };
         assert_eq!(
             executor
@@ -4747,7 +4617,7 @@ mod tests {
             json!({ "disposition": format!("/agent/recipe-runs/{run_id}/disposition") })
         );
         for report in &requests[1..] {
-            assert_eq!(report["schema_version"], 2);
+            assert!(report["observed_at"].is_string());
             assert_eq!(report["runs"], json!([]));
         }
         // Only the unusable lifecycle is retired; the run stays as history.
@@ -5039,7 +4909,6 @@ mod tests {
                 data_root: data.path(),
             },
             runtime_root: runtime_root.path(),
-            observation_receipt_public_key: [0; 32],
         };
         let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(claim.deadline);
         let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
@@ -5816,9 +5685,7 @@ mod tests {
             crate::host_runtime::HelperProtocolCause::RequestArgumentNulByte,
             crate::host_runtime::HelperProtocolCause::RequestStorage,
             crate::host_runtime::HelperProtocolCause::SystemClock,
-            crate::host_runtime::HelperProtocolCause::InspectionReceipt,
-            crate::host_runtime::HelperProtocolCause::ObservationReceipt,
-            crate::host_runtime::HelperProtocolCause::ObservationTimestamp,
+            crate::host_runtime::HelperProtocolCause::InspectionOutcome,
         ]
         .into_iter()
         .map(crate::host_runtime::HostRuntimeError::HelperProtocol)
@@ -6791,7 +6658,6 @@ mod tests {
         for terminal in [
             ClientError::Identity,
             ClientError::Protocol,
-            ClientError::ObservationNotReady,
             ClientError::Pin,
         ] {
             assert_eq!(

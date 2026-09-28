@@ -29,7 +29,10 @@ REQUIRED_ELF = {
     "usr/lib/vonk-forge/vonk-runtime-probe",
     "usr/lib/vonk-forge/oras",
 }
-REPAIR_ELF_REMOVALS = {"usr/lib/vonk-forge/vonk-build-egress", "usr/lib/vonk-forge/vonk-runtime-probe"}
+REPAIR_ELF_REMOVALS = {
+    "usr/lib/vonk-forge/vonk-build-egress",
+    "usr/lib/vonk-forge/vonk-runtime-probe",
+}
 REQUIRED_EXECUTABLE = {
     *REQUIRED_ELF,
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
@@ -375,12 +378,12 @@ def _verify_members(
     members: dict[str, tarfile.TarInfo], *, repair: bool = False
 ) -> None:
     files = {name for name, member in members.items() if member.isfile()}
-    required_payload = (REQUIRED_PAYLOAD - (REPAIR_ELF_REMOVALS if repair else set())) | (
-        REPAIR_PAYLOAD_ADDITIONS if repair else set()
-    )
-    required_executable = (REQUIRED_EXECUTABLE - (REPAIR_ELF_REMOVALS if repair else set())) | (
-        {REPAIR_STANDARD_RUNNER} if repair else set()
-    )
+    required_payload = (
+        REQUIRED_PAYLOAD - (REPAIR_ELF_REMOVALS if repair else set())
+    ) | (REPAIR_PAYLOAD_ADDITIONS if repair else set())
+    required_executable = (
+        REQUIRED_EXECUTABLE - (REPAIR_ELF_REMOVALS if repair else set())
+    ) | ({REPAIR_STANDARD_RUNNER} if repair else set())
     missing = required_payload - files
     if missing:
         raise VerificationError(f"package payload is incomplete: {sorted(missing)}")
@@ -455,8 +458,7 @@ def _verify_control(
                 or stat.S_IMODE(member.mode)
                 != (
                     0o755
-                    if name
-                    in {"preinst", "postinst", "prerm", REPAIR_PROBE_CONTROL}
+                    if name in {"preinst", "postinst", "prerm", REPAIR_PROBE_CONTROL}
                     else 0o644
                 )
                 for name, member in archive_members.items()
@@ -528,13 +530,6 @@ def _verify_control(
         for required in (
             "VONK_REPAIR_POSTINST_V1",
             "VONK_FORGE_PACKAGE_REPAIR_NONCE",
-            "observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8",
-            "observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub",
-            "openssl genpkey -algorithm ED25519 -outform DER",
-            "openssl pkey -inform DER",
-            "tail -c 32",
-            "root:vonk-agent:640:1",
-            "ensure_observation_receipt_key",
         ):
             if required not in postinst:
                 raise VerificationError("repair postinst lifecycle is incomplete")
@@ -545,13 +540,6 @@ def _verify_control(
             "usermod --add-subgids",
             "machine_evidence=/var/lib/vonk-forge-agent/machine-evidence",
             "openssl rand -hex 32",
-            "observation_receipt_private=/var/lib/vonk-forge/helper/observation-receipt.pk8",
-            "observation_receipt_public=/etc/vonk-forge-agent/observation-receipt.pub",
-            "openssl genpkey -algorithm ED25519 -outform DER",
-            "openssl pkey -inform DER",
-            "tail -c 32",
-            "root:vonk-agent:640:1",
-            "ensure_observation_receipt_key",
             "install -o root -g vonk-agent -m 0640",
             "deb-systemd-helper enable vonk-forge-agent.service",
             "daemon-reload",
@@ -659,9 +647,13 @@ def _verify_payload(
     expected_binary_source_revision: str | None = None,
     expected_packaging_source_revision: str | None = None,
 ) -> dict[str, str] | None:
-    if not repair and (
-        payload / "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"
-    ).read_bytes() != (control / "preinst").read_bytes():
+    if (
+        not repair
+        and (
+            payload / "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"
+        ).read_bytes()
+        != (control / "preinst").read_bytes()
+    ):
         raise VerificationError("preinst and durable recovery runner differ")
     for forbidden in (
         "lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service",
@@ -684,7 +676,10 @@ def _verify_payload(
             or struct.unpack_from("<H", raw, 18)[0] != ARCHITECTURES[architecture]
         ):
             raise VerificationError(f"binary architecture is invalid: {name}")
-        if name in {"usr/lib/vonk-forge/vonk-build-egress", "usr/lib/vonk-forge/vonk-runtime-probe"}:
+        if name in {
+            "usr/lib/vonk-forge/vonk-build-egress",
+            "usr/lib/vonk-forge/vonk-runtime-probe",
+        }:
             program_offset = struct.unpack_from("<Q", raw, 32)[0]
             program_size = struct.unpack_from("<H", raw, 54)[0]
             program_count = struct.unpack_from("<H", raw, 56)[0]
@@ -946,9 +941,7 @@ def _git_source(revision: str, relative: str) -> bytes:
     )
 
 
-def _render_standard_recovery_runner(
-    revision: str, authority: dict[str, str]
-) -> bytes:
+def _render_standard_recovery_runner(revision: str, authority: dict[str, str]) -> bytes:
     source_preinst = _git_source(revision, "packaging/debian/preinst")
     capsule_placeholders = (
         b"@RECOVERY_CAPSULE_UNIT_SHA256@",
@@ -965,10 +958,7 @@ def _render_standard_recovery_runner(
         )
         or source_preinst.count(b'intent_text="schema_version=2\n') != 1
         or source_preinst.count(b'capsule_manifest_text="schema_version=2\n') != 1
-        or source_preinst.count(
-            b'[ "$(/usr/bin/wc -l < "$intent")" -eq 17 ]'
-        )
-        != 1
+        or source_preinst.count(b'[ "$(/usr/bin/wc -l < "$intent")" -eq 17 ]') != 1
     ):
         raise VerificationError(
             "repair source runner does not implement schema-2 recovery"
@@ -1039,10 +1029,7 @@ def _verify_exact_repair_scripts(
     agent = (payload / "usr/lib/vonk-forge/vonk-agent").read_bytes()
     helper = (payload / "usr/lib/vonk-forge/vonk-agent-helper").read_bytes()
     repair_probe = (control / REPAIR_PROBE_CONTROL).read_bytes()
-    if (
-        hashlib.sha256(repair_probe).hexdigest()
-        != authority["repair_probe_sha256"]
-    ):
+    if hashlib.sha256(repair_probe).hexdigest() != authority["repair_probe_sha256"]:
         raise VerificationError("repair helper probe does not match authority")
     target_agent_unit = (
         payload / "lib/systemd/system/vonk-forge-agent.service"
@@ -1219,9 +1206,7 @@ def _read_repair_authority(
             re.fullmatch(r"[0-9a-f]{64}", document.get(field, "")) is None
             for field in digest_fields
         )
-        or re.fullmatch(
-            r"[0-9A-Za-z.+~:-]+", document.get("util_linux_version", "")
-        )
+        or re.fullmatch(r"[0-9A-Za-z.+~:-]+", document.get("util_linux_version", ""))
         is None
         or repair_version is None
         or repair_version.group("source") != document.get("source_target_version")

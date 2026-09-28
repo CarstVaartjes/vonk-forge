@@ -17,16 +17,13 @@ use url::Url;
 use vonk_agent_protocol::generated::{
     ActivateRequest, AgentUpgradeGrantRequest, ClaimRequest, HostHelperGrantResponse,
     HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
-    PackageActivationGrantRequest, RecipeRunObservationGrantRequest, RecipeRunObservationGrantWire,
-    RenewRequest, TelemetryRequest,
+    PackageActivationGrantRequest, RenewRequest, TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
-    HostHelperContainerRuntimeAction, HostHelperOperation, HostRuntimeAction, HostRuntimeRequest,
-    InventoryRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
-    RecipeRunObservationsWire, SignedHostHelperGrant, canonical_generated_json, canonical_json,
-    hex_sha256, parse_strict,
+    HostRuntimeAction, HostRuntimeRequest, InventoryRequest,
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES, RecipeRunObservationWire, RecipeRunObservationsWire,
+    SignedHostHelperGrant, canonical_generated_json, canonical_json, hex_sha256, parse_strict,
 };
 
 use crate::{
@@ -120,8 +117,6 @@ pub enum ClientError {
     // and keeps the rest of the loop alive instead of exiting.
     #[error("controller refused the result as invalid")]
     ResultRejected(Box<ControllerError>),
-    #[error("exact recipe run observation is not ready for authorization")]
-    ObservationNotReady,
     #[error("controller CA pin is invalid")]
     Pin,
 }
@@ -279,9 +274,6 @@ pub fn claim_request_document(
     if !runtime_identity.self_test_passed {
         return Err(ClientError::Protocol);
     }
-    runtime_identity
-        .observation_receipt_public_key()
-        .map_err(|_| ClientError::Protocol)?;
     canonical_generated_json(&ClaimRequest {
         capabilities: capabilities
             .iter()
@@ -299,70 +291,28 @@ pub fn claim_request_document(
 
 pub type ExactRecipeRunObservation = RecipeRunObservationWire;
 
-/// Validate and construct the one current snapshot envelope used by both the
-/// production executor and the Linux wire probe.
+/// Validate and construct the one current observation report used by both
+/// the production executor and the Linux wire probe.
 pub fn build_exact_recipe_run_observations(
-    node_id: &str,
     observed_at: chrono::DateTime<chrono::Utc>,
     observations: &[ExactRecipeRunObservation],
 ) -> Result<RecipeRunObservationsWire, ClientError> {
     if observations.len() > MAX_MANAGED_RECIPE_RUNS {
         return Err(ClientError::Protocol);
     }
-    if !valid_node_id(node_id) {
-        return Err(ClientError::Protocol);
-    }
     let mut run_ids = std::collections::BTreeSet::new();
     for observation in observations {
-        observation.validate().map_err(|_| ClientError::Protocol)?;
-        if observation.node_id != node_id || !run_ids.insert(observation.run_id) {
-            return Err(ClientError::Protocol);
-        }
-        let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
-        let (grant_job_id, grant_request_sha256) = match &observation.grant.claims.operation {
-            HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => {
-                (&operation.job_id, &operation.request_sha256)
-            }
-            _ => return Err(ClientError::Protocol),
-        };
-        if observation.schema_version != 1
-            || !valid_sha256(&observation.observation_identity_sha256)
-            || observation.helper_receipt.validate().is_err()
-            || observation.helper_receipt.claims.node_id != node_id
-            || observation
-                .helper_receipt
-                .claims
-                .observation_identity_sha256
-                != observation.observation_identity_sha256
-            || hex::decode(&observation.observation_receipt_public_key)
-                .ok()
-                .filter(|key| key.len() == 32)
-                .map(|key| hex_sha256(&key))
-                != Some(observation.helper_receipt.signature.key_id.clone())
-            || *grant_job_id != observation.run_id
-            || grant_request_sha256 != &observation.helper_receipt.claims.request_sha256
-            || observation.grant.claims.request_id.to_string() != receipt_request_id
-            || observation.observed_at.timestamp() != observation.helper_receipt.claims.observed_at
-            || (observation.local_address == observation.master_address)
-                != observation.endpoint_ready.is_some()
+        if observation.run_generation == 0
+            || observation.run_generation > i32::MAX as u32
+            || !run_ids.insert(observation.run_id)
         {
             return Err(ClientError::Protocol);
         }
     }
     Ok(RecipeRunObservationsWire {
-        schema_version: RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
         observed_at: observed_at.into(),
         runs: observations.to_vec(),
     })
-}
-
-#[derive(Debug)]
-pub struct RecipeRunInspectionGrant {
-    pub grant: SignedHostHelperGrant,
-    pub observation_identity_sha256: String,
-    /// The Controller has no record of this run: the grant authorizes only a
-    /// read-only probe, and no observation of the run can ever be accepted.
-    pub unowned: bool,
 }
 
 /// The Controller's answer for one locally retained run, by id alone.
@@ -498,6 +448,7 @@ impl AgentHttpClient {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn node_id(&self) -> &str {
         &self.node_id
     }
@@ -778,126 +729,6 @@ impl AgentHttpClient {
             }
             Some(_) => Err(ClientError::Protocol),
         }
-    }
-
-    pub async fn recipe_run_inspection_grant(
-        &self,
-        binding: &RecipeRunInspectionBinding,
-        request: &HostRuntimeRequest,
-        request_sha256: &str,
-    ) -> Result<RecipeRunInspectionGrant, ClientError> {
-        binding.validate().map_err(|_| ClientError::Protocol)?;
-        request.validate().map_err(|_| ClientError::Protocol)?;
-        let expected_attempt = binding.run_generation;
-        if request.action != HostRuntimeAction::RunInspect
-            || request.job_id != binding.run_id
-            || request.attempt != expected_attempt
-            || request.observation.as_ref() != Some(binding)
-            || !valid_sha256(request_sha256)
-            || hex_sha256(&canonical_json(request).map_err(|_| ClientError::Protocol)?)
-                != request_sha256
-        {
-            return Err(ClientError::Protocol);
-        }
-        let body = canonical_generated_json(&RecipeRunObservationGrantRequest {
-            schema_version: 1,
-            node_id: self.node_id.clone(),
-            run_id: binding.run_id,
-            installation_id: binding.installation_id,
-            recipe_revision_id: binding.recipe_revision_id,
-            recipe_content_sha256: binding.recipe_content_sha256.clone(),
-            mapping_id: binding.mapping_id,
-            mapping_generation: binding.mapping_generation,
-            run_generation: binding.run_generation,
-            image_digest: binding.image_digest.clone(),
-            artifact_set_digest: binding.artifact_set_digest.clone(),
-            model_identity: binding.model_identity.clone(),
-            rank: binding.rank,
-            role: binding.role.clone(),
-            world_size: binding.world_size,
-            local_address: binding.local_address,
-            master_address: binding.master_address,
-            master_port: binding.master_port,
-            port: binding.port,
-            runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
-            job_id: request.job_id,
-            operation_id: request.operation_id,
-            attempt: request.attempt,
-            fence: request.fence,
-            request_sha256: request_sha256.to_owned(),
-            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS as u8,
-        })
-        .map_err(|_| ClientError::Protocol)?;
-        let response = self
-            .current_client()
-            .await
-            .post(self.endpoint("/agent/recipe-runs/observation-grants")?)
-            .header("content-type", "application/json")
-            .body(body)
-            .send()
-            .await?;
-        if response.status() == StatusCode::TOO_EARLY {
-            return Err(ClientError::ObservationNotReady);
-        }
-        // An unconsumed grant from the previous sweep is the controller's
-        // bounded "not yet", not a lost authorization.  Reading it as a hard
-        // failure abandoned every other run's observation for that tick and
-        // slowed the claim cadence to the idle one.
-        if response.status() == StatusCode::CONFLICT
-            && response
-                .headers()
-                .get("x-vonk-error-code")
-                .and_then(|value| value.to_str().ok())
-                == Some("controller.recipe_run.observation_pending")
-        {
-            return Err(ClientError::ObservationNotReady);
-        }
-        classify_response(&response)?;
-        let unowned = match response.headers().get(RECIPE_RUN_DISPOSITION_HEADER) {
-            None => false,
-            Some(value) if value.as_bytes() == RECIPE_RUN_UNOWNED.as_bytes() => true,
-            Some(_) => return Err(ClientError::Protocol),
-        };
-        let body = bounded_body(response).await?;
-        let response: RecipeRunObservationGrantWire =
-            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
-        if response.schema_version != 1
-            || !valid_sha256(&response.observation_identity_sha256)
-            || response.grant.validate().is_err()
-            || response.grant.claims.node_id != self.node_id
-        {
-            return Err(ClientError::Protocol);
-        }
-        let operation = match &response.grant.claims.operation {
-            HostHelperOperation::ExecuteContainerRuntimeRequestOperation(operation) => (
-                &operation.action,
-                &operation.job_id,
-                &operation.operation_id,
-                &operation.attempt,
-                &operation.fence,
-                &operation.request_sha256,
-                operation
-                    .observation_identity_sha256
-                    .as_ref()
-                    .ok_or(ClientError::Protocol)?,
-            ),
-            _ => return Err(ClientError::Protocol),
-        };
-        if *operation.0 != HostHelperContainerRuntimeAction::RunInspect
-            || operation.1 != &request.job_id
-            || operation.2 != &request.operation_id
-            || *operation.3 != request.attempt
-            || operation.4 != &request.fence
-            || operation.5 != request_sha256
-            || operation.6 != &response.observation_identity_sha256
-        {
-            return Err(ClientError::Protocol);
-        }
-        Ok(RecipeRunInspectionGrant {
-            grant: response.grant,
-            observation_identity_sha256: response.observation_identity_sha256,
-            unowned,
-        })
     }
 
     pub async fn package_activation_grant(
@@ -1837,10 +1668,10 @@ impl AgentHttpClient {
 
     pub async fn report_exact_recipe_run_observations(
         &self,
+        observed_at: chrono::DateTime<chrono::Utc>,
         observations: &[ExactRecipeRunObservation],
     ) -> Result<(), ClientError> {
-        let envelope =
-            build_exact_recipe_run_observations(&self.node_id, chrono::Utc::now(), observations)?;
+        let envelope = build_exact_recipe_run_observations(observed_at, observations)?;
         let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
@@ -2655,14 +2486,6 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
-fn valid_node_id(value: &str) -> bool {
-    value.len() == 36
-        && value.starts_with("spk_")
-        && value[4..]
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-}
-
 fn local_hostname() -> Option<String> {
     let raw = fs::read_to_string("/proc/sys/kernel/hostname").ok()?;
     let hostname = raw.trim();
@@ -2722,16 +2545,12 @@ mod tests {
     use url::Url;
     use uuid::Uuid;
     use vonk_agent_protocol::generated::{
-        AgentClaimPayload, AgentOperation, DistributionObjectKind,
-        ExecuteContainerRuntimeRequestOperation, OperationProgress, RecipeImageImportRequest,
+        AgentClaimPayload, AgentOperation, DistributionObjectKind, OperationProgress,
+        RecipeImageImportRequest,
     };
     use vonk_agent_protocol::{
-        AgentClaim, AgentDirective, AgentProgress, HostHelperContainerRuntimeAction,
-        HostHelperGrantClaims, HostHelperGrantSignature, HostHelperOperation, HostRuntimeAction,
-        HostRuntimeRequest, RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunInspectionBinding,
-        RecipeRunObservationOutcome, RecipeRunObservationReceipt,
-        RecipeRunObservationReceiptClaims, RecipeRunObservationReceiptSignature,
-        SignedHostHelperGrant, canonical_json, hex_sha256,
+        AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, HostRuntimeRequest,
+        canonical_json, hex_sha256,
     };
 
     struct NoProcess;
@@ -2815,59 +2634,6 @@ mod tests {
             _: Duration,
         ) -> Result<ProcessOutput, ProcessError> {
             panic!("distribution/install handoff test must not launch a process");
-        }
-    }
-
-    fn inspection_binding() -> RecipeRunInspectionBinding {
-        RecipeRunInspectionBinding {
-            artifact_set_digest: "a".repeat(64),
-            image_digest: "b".repeat(64),
-            installation_id: Uuid::new_v4(),
-            local_address: Some("192.168.100.11".parse().unwrap()),
-            master_address: Some("192.168.100.10".parse().unwrap()),
-            master_port: Some(29500),
-            mapping_generation: 4,
-            mapping_id: Uuid::new_v4(),
-            model_identity: "example/model@immutable".to_owned(),
-            port: 8000,
-            rank: 1,
-            recipe_content_sha256: "c".repeat(64),
-            recipe_revision_id: Uuid::new_v4(),
-            role: "worker".to_owned(),
-            run_id: Uuid::new_v4(),
-            run_generation: 3,
-            runtime_arguments_sha256: hex_sha256(
-                &canonical_json(&vec![
-                    format!("sha256:{}", "b".repeat(64)),
-                    "run".to_owned(),
-                ])
-                .unwrap(),
-            ),
-            world_size: 2,
-        }
-    }
-
-    fn observation_receipt(
-        node_id: &str,
-        observation_identity_sha256: &str,
-    ) -> RecipeRunObservationReceipt {
-        RecipeRunObservationReceipt {
-            schema_version: 1,
-            claims: RecipeRunObservationReceiptClaims {
-                schema_version: 1,
-                authority: RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY.to_owned(),
-                node_id: node_id.to_owned(),
-                request_id: Uuid::new_v4(),
-                request_sha256: "f".repeat(64),
-                observation_identity_sha256: observation_identity_sha256.to_owned(),
-                outcome: RecipeRunObservationOutcome::NotRunning,
-                observed_at: Utc::now().timestamp(),
-            },
-            signature: RecipeRunObservationReceiptSignature {
-                algorithm: "ed25519".to_owned(),
-                key_id: hex_sha256(&[0; 32]),
-                value: "b".repeat(128),
-            },
         }
     }
 
@@ -4757,7 +4523,6 @@ mod tests {
             fence: claim.fence,
             arguments: vec!["image-import".to_owned()],
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: None,
@@ -4816,7 +4581,6 @@ mod tests {
             fence: Uuid::parse_str(claim["fence"].as_str().unwrap()).unwrap(),
             arguments: vec!["job-run".to_owned()],
             job_plan: Some(plan.clone()),
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(plan.run_generation),
@@ -4898,7 +4662,6 @@ mod tests {
             fence: Uuid::parse_str(claim["fence"].as_str().unwrap()).unwrap(),
             arguments: Vec::new(),
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: Some(stop_plan.run_generation),
@@ -4943,229 +4706,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_inspection_grant_binds_fresh_envelope_and_full_identity() {
-        let binding = inspection_binding();
-        let request = HostRuntimeRequest {
-            schema_version: 1,
-            action: HostRuntimeAction::RunInspect,
-            job_id: binding.run_id,
-            operation_id: Uuid::new_v4(),
-            attempt: binding.run_generation,
-            fence: Uuid::new_v4(),
-            arguments: vec![format!("sha256:{}", binding.image_digest), "run".to_owned()],
-            job_plan: None,
-            observation: Some(binding.clone()),
-            installation_id: None,
-            reconciliation_identity: None,
-            run_generation: None,
-            start_plan: None,
-            stop_plan: None,
-        };
-        let digest = hex_sha256(&canonical_json(&request).unwrap());
-        let request_id = Uuid::new_v4();
-        let response = serde_json::to_vec(&serde_json::json!({
-            "schema_version": 1,
-            "observation_identity_sha256": "e".repeat(64),
-            "grant": {
-                "schema_version": 1,
-                "claims": {
-                    "schema_version": 1,
-                    "authority": "vonk.host-maintenance-helper",
-                    "request_id": request_id,
-                    "node_id": "spk_0123456789abcdef0123456789abcdef",
-                    "issued_at": 1_788_000_000,
-                    "expires_at": 1_788_000_010,
-                    "operation": {
-                        "type": "execute-container-runtime-request",
-                        "action": "run-inspect",
-                        "job_id": binding.run_id,
-                        "operation_id": request.operation_id,
-                        "attempt": request.attempt,
-                        "fence": request.fence,
-                        "request_sha256": digest,
-                        "observation_identity_sha256": "e".repeat(64)
-                    }
-                },
-                "signature": {
-                    "algorithm": "ed25519",
-                    "key_id": "f".repeat(64),
-                    "value": "e".repeat(128)
-                }
-            }
-        }))
-        .unwrap();
-        let (client, server) = request_capture_client(200, vec![], response.clone(), None);
-
-        let owned = client
-            .recipe_run_inspection_grant(&binding, &request, &digest)
-            .await
-            .unwrap();
-        assert!(!owned.unowned);
-        let raw = server.join().unwrap();
-        let (headers, body) = raw
-            .windows(4)
-            .position(|value| value == b"\r\n\r\n")
-            .map(|index| (&raw[..index], &raw[index + 4..]))
-            .unwrap();
-        assert!(
-            std::str::from_utf8(headers)
-                .unwrap()
-                .starts_with("POST /agent/recipe-runs/observation-grants HTTP/1.1\r\n")
-        );
-        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
-        assert_eq!(body["node_id"], client.node_id);
-        assert_eq!(body["job_id"], binding.run_id.to_string());
-        assert_eq!(body["attempt"], binding.run_generation);
-        assert_eq!(body["run_generation"], binding.run_generation);
-        assert_eq!(body["request_sha256"], digest);
-        assert_eq!(body["expires_in_seconds"], 10);
-
-        // A run the Controller has no record of gets a read-only probe grant
-        // that names itself, so the agent can retire the stopped run.
-        let (client, server) = request_capture_client(
-            200,
-            vec!["x-vonk-recipe-run-disposition: unowned".to_owned()],
-            response.clone(),
-            None,
-        );
-        assert!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await
-                .unwrap()
-                .unowned
-        );
-        server.join().unwrap();
-        // Any other disposition is outside the contract and never guessed at.
-        let (client, server) = request_capture_client(
-            200,
-            vec!["x-vonk-recipe-run-disposition: retired".to_owned()],
-            response,
-            None,
-        );
-        assert!(matches!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await,
-            Err(ClientError::Protocol)
-        ));
-        server.join().unwrap();
-
-        let (client, server) = request_capture_client(425, vec![], vec![], None);
-        assert!(matches!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await,
-            Err(ClientError::ObservationNotReady)
-        ));
-        server.join().unwrap();
-
-        // An outstanding unconsumed grant is the same bounded "not yet" as the
-        // 425 above: the run is authorized, its inspection is just in flight.
-        let (client, server) = request_capture_client(
-            409,
-            vec!["x-vonk-error-code: controller.recipe_run.observation_pending".to_owned()],
-            vec![],
-            None,
-        );
-        assert!(matches!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await,
-            Err(ClientError::ObservationNotReady)
-        ));
-        server.join().unwrap();
-
-        // A conflict the controller did not classify as pending stays a hard
-        // failure: an authority rejection must never read as a retry.
-        let (client, server) = request_capture_client(
-            409,
-            vec!["x-vonk-error-code: controller.conflict".to_owned()],
-            vec![],
-            None,
-        );
-        assert!(matches!(
-            client
-                .recipe_run_inspection_grant(&binding, &request, &digest)
-                .await,
-            Err(ClientError::Controller(_))
-        ));
-        server.join().unwrap();
-    }
-
-    #[tokio::test]
     async fn exact_worker_observation_reports_process_without_endpoint_result() {
-        let binding = inspection_binding();
-        let helper_receipt =
-            observation_receipt("spk_0123456789abcdef0123456789abcdef", &"e".repeat(64));
+        let run_id = Uuid::new_v4();
         let observations = vec![ExactRecipeRunObservation {
-            schema_version: 1,
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            observed_at: chrono::DateTime::from_timestamp(helper_receipt.claims.observed_at, 0)
-                .unwrap()
-                .into(),
-            artifact_set_digest: binding.artifact_set_digest.clone(),
-            image_digest: binding.image_digest.clone(),
-            installation_id: binding.installation_id,
-            local_address: binding.local_address,
-            mapping_generation: binding.mapping_generation,
-            mapping_id: binding.mapping_id,
-            master_address: binding.master_address,
-            master_port: binding.master_port,
-            model_identity: binding.model_identity.clone(),
-            port: binding.port,
-            rank: binding.rank,
-            recipe_content_sha256: binding.recipe_content_sha256.clone(),
-            recipe_revision_id: binding.recipe_revision_id,
-            role: binding.role.clone(),
-            run_generation: binding.run_generation,
-            run_id: binding.run_id,
-            runtime_arguments_sha256: binding.runtime_arguments_sha256.clone(),
-            world_size: binding.world_size,
+            run_id,
+            run_generation: 3,
+            process_running: false,
             endpoint_ready: None,
-            grant: SignedHostHelperGrant {
-                schema_version: 1,
-                claims: HostHelperGrantClaims {
-                    schema_version: 1,
-                    authority: "vonk.host-maintenance-helper".to_owned(),
-                    request_id: helper_receipt.claims.request_id,
-                    node_id: helper_receipt.claims.node_id.clone(),
-                    issued_at: helper_receipt.claims.observed_at - 1,
-                    expires_at: helper_receipt.claims.observed_at + 60,
-                    operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
-                        ExecuteContainerRuntimeRequestOperation {
-                            action: HostHelperContainerRuntimeAction::RunInspect,
-                            type_: "execute-container-runtime-request".to_owned(),
-                            job_id: binding.run_id,
-                            operation_id: Uuid::new_v4(),
-                            attempt: binding.run_generation,
-                            fence: Uuid::new_v4(),
-                            request_sha256: helper_receipt.claims.request_sha256.clone(),
-                            observation_identity_sha256: Some("e".repeat(64)),
-                            installation_id: None,
-                            reconciliation_identity: None,
-                            start_plan_sha256: None,
-                            stop_plan_sha256: None,
-                            run_generation: None,
-                            runtime_run_id: None,
-                            runtime_target_id: None,
-                            runtime_installation_id: None,
-                        },
-                    ),
-                },
-                signature: HostHelperGrantSignature {
-                    algorithm: "ed25519".to_owned(),
-                    key_id: "f".repeat(64),
-                    value: "e".repeat(128),
-                },
-            },
-            observation_identity_sha256: "e".repeat(64),
-            helper_receipt,
-            observation_receipt_public_key: "00".repeat(32),
         }];
         let (client, server) = observation_client(204);
         client
-            .report_exact_recipe_run_observations(&observations)
+            .report_exact_recipe_run_observations(Utc::now(), &observations)
             .await
             .unwrap();
         let raw = server.join().unwrap();
@@ -5175,15 +4726,11 @@ mod tests {
             .map(|index| &raw[index + 4..])
             .unwrap();
         let body: serde_json::Value = serde_json::from_slice(body).unwrap();
-        assert_eq!(body["schema_version"], 2);
-        assert!(body["runs"][0].get("process_running").is_none());
-        assert_eq!(
-            body["runs"][0]["helper_receipt"]["claims"]["outcome"],
-            "not-running"
-        );
+        assert!(body["observed_at"].is_string());
+        assert_eq!(body["runs"][0]["run_id"], run_id.to_string());
+        assert_eq!(body["runs"][0]["process_running"], false);
         assert_eq!(body["runs"][0]["endpoint_ready"], serde_json::Value::Null);
         assert_eq!(body["runs"][0]["run_generation"], 3);
-        assert!(body["runs"][0]["observed_at"].is_string());
     }
 
     #[tokio::test]

@@ -243,7 +243,7 @@ class DistributedRecoveryCoordinator:
                     worked = (
                         _schedule_singleton_recovery_wait(
                             run,
-                            "singleton recovery waits for a fresh exact signed "
+                            "singleton recovery waits for a fresh exact "
                             "absence observation",
                             now,
                         )
@@ -269,7 +269,6 @@ class DistributedRecoveryCoordinator:
                         run.plan = run_plan_document(run_plan)
                         for node in run_nodes:
                             node.observed_run_generation = None
-                            node.observation_receipt_sha256 = None
                             node.observation_process_running = None
                             node.observation_observed_at = None
                             node.observation_endpoint_ready = None
@@ -289,7 +288,6 @@ class DistributedRecoveryCoordinator:
                         run_plan["run_generation"] = run.run_generation
                         run.plan = run_plan_document(run_plan)
                         run_nodes[0].observed_run_generation = None
-                        run_nodes[0].observation_receipt_sha256 = None
                         run_nodes[0].observation_process_running = None
                         run_nodes[0].observation_observed_at = None
                         run_nodes[0].observation_endpoint_ready = None
@@ -455,14 +453,13 @@ def enforce_recovery_deadline(
 
 
 def _proves_fresh_absence(run: RecipeRun, node: RunNode, now: datetime) -> bool:
-    """Require a current-generation signed receipt that reports no process."""
+    """Require a current-generation observation that reports no process."""
 
     if (
         node.state != "failed"
         or node.observed_run_generation != run.run_generation
         or node.observation_process_running is not False
-        or not isinstance(node.observation_receipt_sha256, str)
-        or _DIGEST.fullmatch(node.observation_receipt_sha256) is None
+        or node.observation_observed_at is None
     ):
         return False
     try:
@@ -521,7 +518,7 @@ def _singleton_recovery_authority(
     next_run_generation: int,
     start_timeout_seconds: int,
 ) -> dict[str, object] | None:
-    """Rebuild one exact accepted persistent Start after signed absence."""
+    """Rebuild one exact accepted persistent Start after observed absence."""
 
     if not _proves_fresh_absence(run, run_node, now):
         return None
@@ -646,16 +643,14 @@ def _singleton_recovery_authority(
     required_capabilities = {
         "recipe.stop",
         _EXACT_RUN_INSPECTION_CAPABILITY,
-        "recipe.run.inspect.receipt.v1",
     }
     if (
         agent_node is None
         or agent_node.state != "active"
         or not required_capabilities <= set(agent_node.capabilities or ())
-        or not isinstance(agent_node.observation_receipt_public_key, str)
     ):
         raise DistributedLifecycleError(
-            "singleton recovery requires exact Stop and signed observation support"
+            "singleton recovery requires exact Stop and observation support"
         )
     presence = session.scalar(
         select(AgentPresence)

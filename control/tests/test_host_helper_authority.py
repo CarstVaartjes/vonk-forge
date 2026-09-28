@@ -1277,7 +1277,6 @@ def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity()
         build_digest="sha256:" + "d" * 64,
         binary_digest="c" * 64,
         self_test_passed=True,
-        observation_receipt_public_key="4" * 64,
     )
     grant = service.issue_package_activation_grant(
         node_id=receipt.node_id,

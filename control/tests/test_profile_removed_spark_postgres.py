@@ -31,7 +31,6 @@ from vonk_control.models import (
 
 from .test_profile_capacity_admission import _capacity_profile
 from .test_recipe_operations import (
-    RECEIPT_SIGNER,
     installed_recipe,
     started_recipe,
 )
@@ -127,9 +126,6 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     state="active",
                     protocol_version=1,
                     architecture=template.architecture,
-                    observation_receipt_public_key=RECEIPT_SIGNER.public_key()
-                    .public_bytes_raw()
-                    .hex(),
                     capabilities=list(capabilities),
                     last_seen_at=now,
                 )

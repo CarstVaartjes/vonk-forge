@@ -170,8 +170,6 @@ def _fail_child(sessions, pending, now, *, reason, result):
         "helper_request_replayed",
         "helper_request_installation_identity_invalid",
         "helper_request_plan_binding_invalid",
-        "helper_inspection_receipt_invalid",
-        "helper_observation_receipt_invalid",
         "helper_operation_invalid_artifact",
         "helper_runtime_image_identity_invalid",
         # Helper wire rejection codes carried verbatim.
@@ -182,8 +180,6 @@ def _fail_child(sessions, pending, now, *, reason, result):
         "request_replayed",
         "operation_invalid_artifact",
         "runtime_image_identity_invalid",
-        "runtime_helper_inspection_receipt_invalid",
-        "runtime_helper_observation_receipt_invalid",
         # Controller/agent authentication, enrollment and identity codes.
         "controller.authentication_required",
         "controller.request_rejected",

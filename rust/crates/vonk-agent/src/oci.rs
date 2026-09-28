@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::{
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES, RecipeReconciliationIdentity,
-    RecipeRunInspectionBinding, canonical_json as canonical_protocol_json,
+    canonical_json as canonical_protocol_json,
     compiled_oci::{
         CompiledOciPaths, hook_arguments as projected_hook_arguments,
         start_arguments_for_paths as projected_start_arguments_for_paths,
@@ -118,7 +118,8 @@ const MAX_RUN_DIRECTORY_ENTRIES: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct RecipeRunInspectionPlan {
-    pub binding: RecipeRunInspectionBinding,
+    pub run_id: uuid::Uuid,
+    pub run_generation: u32,
     pub arguments: Vec<String>,
     pub endpoint_address: Option<IpAddr>,
     pub endpoint_port: u16,
@@ -129,15 +130,13 @@ type LoadedRunLifecycle = (
     CompiledExecutionPlan,
     String,
     CompiledRuntimePlacement,
-    Option<RecipeRunInspectionBinding>,
+    Option<u32>,
 );
 
+/// The Controller run generation a service start is launched for; it is
+/// persisted with the lifecycle so every later observation names it.
 #[derive(Debug, Clone)]
 pub struct RecipeRunStartIdentity {
-    pub mapping_generation: u64,
-    pub mapping_id: uuid::Uuid,
-    pub recipe_content_sha256: String,
-    pub recipe_revision_id: uuid::Uuid,
     pub run_generation: u64,
 }
 
@@ -263,7 +262,7 @@ struct RunLifecycle {
     installation_id: String,
     placement: CompiledRuntimePlacement,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    observation: Option<RecipeRunInspectionBinding>,
+    run_generation: Option<u32>,
 }
 
 pub struct RuntimeStartPlan {
@@ -1073,74 +1072,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 .map(|hook| hook_arguments(&main, &runtime_image_reference, hook))
                 .collect::<Result<Vec<_>, _>>()
         })?;
-        let observation = identity
+        let run_generation = identity
             .map(|identity| {
-                let (local_address, master_address, master_port) = if placement.world_size == 1 {
-                    (None, None, None)
-                } else {
-                    (
-                        Some(placement.local_address.ok_or(OciError::Artifact)?),
-                        Some(placement.master_address.ok_or(OciError::Artifact)?),
-                        Some(placement.master_port.ok_or(OciError::Artifact)?),
-                    )
-                };
-                if identity.mapping_generation == 0
-                    || identity.run_generation == 0
-                    || identity.recipe_content_sha256 != self.recipe_digest(installation_id)?
-                {
-                    return Err(OciError::Artifact);
-                }
-                let registry_index_digest = spec
-                    .runtime_image
-                    .registry_manifest_digest
-                    .clone()
-                    .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone());
-                let platform_manifest_digest = spec.runtime_image.platform_manifest_digest.clone();
-                let mut arguments = vec![
-                    spec.runtime_image.oci_layout_sha256.clone(),
-                    registry_index_digest,
-                    platform_manifest_digest,
-                    runtime_image_reference.clone(),
-                ];
-                arguments.extend(main.clone());
-                let binding = RecipeRunInspectionBinding {
-                    artifact_set_digest: self.artifact_set_digest(installation_id)?,
-                    image_digest: runtime_image_digest[7..].to_owned(),
-                    installation_id: uuid::Uuid::parse_str(installation_id)
-                        .map_err(|_| OciError::Artifact)?,
-                    local_address,
-                    master_address,
-                    master_port,
-                    mapping_generation: identity.mapping_generation,
-                    mapping_id: identity.mapping_id,
-                    model_identity: spec
-                        .artifacts
-                        .first()
-                        .map(|artifact| {
-                            format!(
-                                "{}/{}@{}",
-                                artifact.model.publisher,
-                                artifact.model.slug,
-                                artifact.model.content_sha256
-                            )
-                        })
-                        .ok_or(OciError::Artifact)?,
-                    port: placement.port.ok_or(OciError::Artifact)?,
-                    rank: u32::try_from(placement.rank).map_err(|_| OciError::Artifact)?,
-                    recipe_content_sha256: identity.recipe_content_sha256.clone(),
-                    recipe_revision_id: identity.recipe_revision_id,
-                    role: placement.role.clone(),
-                    run_id: uuid::Uuid::parse_str(run_id).map_err(|_| OciError::Artifact)?,
-                    run_generation: u32::try_from(identity.run_generation)
-                        .map_err(|_| OciError::Artifact)?,
-                    runtime_arguments_sha256: protocol_sha256(
-                        &canonical_protocol_json(&arguments).map_err(|_| OciError::Artifact)?,
-                    ),
-                    world_size: u32::try_from(placement.world_size)
-                        .map_err(|_| OciError::Artifact)?,
-                };
-                binding.validate().map_err(|_| OciError::Artifact)?;
-                Ok(binding)
+                u32::try_from(identity.run_generation)
+                    .ok()
+                    .filter(|generation| *generation != 0)
+                    .ok_or(OciError::Artifact)
             })
             .transpose()
             .map_err(|source| OciError::Start {
@@ -1154,7 +1091,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 &serde_json::to_vec(&RunLifecycle {
                     installation_id: installation_id.to_owned(),
                     placement: placement.clone(),
-                    observation,
+                    run_generation,
                 })?,
             )
         })?;
@@ -1251,15 +1188,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         identity: &RecipeRunStartIdentity,
     ) -> Result<RuntimeStartPlan, OciError> {
         let plan = self.prepare_retained_start(spec, installation_id, run_id, placement)?;
-        let Some((_, _, _, Some(binding))) = self.load_run_lifecycle(run_id)? else {
+        let Some((_, _, _, Some(run_generation))) = self.load_run_lifecycle(run_id)? else {
             return Err(OciError::Runtime);
         };
-        if binding.mapping_id != identity.mapping_id
-            || binding.mapping_generation != identity.mapping_generation
-            || binding.recipe_revision_id != identity.recipe_revision_id
-            || binding.recipe_content_sha256 != identity.recipe_content_sha256
-            || u64::from(binding.run_generation) != identity.run_generation
-        {
+        if u64::from(run_generation) != identity.run_generation {
             return Err(OciError::Runtime);
         }
         Ok(plan)
@@ -1509,60 +1441,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         run_id: &str,
     ) -> Result<Option<RecipeRunInspectionPlan>, OciError> {
         // Stopped run directories intentionally outlive their lifecycle. A
-        // missing lifecycle or inspection binding is historical; malformed
+        // missing lifecycle or run generation is historical; malformed
         // metadata is returned to the caller as this run's isolated failure.
-        let Some((spec, installation_id, placement, observation)) =
+        let Some((spec, installation_id, placement, Some(run_generation))) =
             self.load_run_lifecycle(run_id)?
         else {
             return Ok(None);
         };
-        let Some(binding) = observation else {
-            return Ok(None);
-        };
-        binding.validate().map_err(|_| OciError::Artifact)?;
-        if binding.run_id.to_string() != run_id
-            || binding.installation_id.to_string() != installation_id
-            || u64::from(binding.rank) != placement.rank
-            || binding.role != placement.role
-            || u64::from(binding.world_size) != placement.world_size
-            || binding.local_address
-                != if placement.world_size == 1 {
-                    None
-                } else {
-                    placement.local_address
-                }
-            || binding.master_address
-                != if placement.world_size == 1 {
-                    None
-                } else {
-                    placement.master_address
-                }
-            || binding.master_port
-                != if placement.world_size == 1 {
-                    None
-                } else {
-                    placement.master_port
-                }
-            || Some(binding.port) != placement.port
-            || binding.recipe_content_sha256 != self.recipe_digest(&installation_id)?
-            || binding.artifact_set_digest != self.artifact_set_digest(&installation_id)?
-            || binding.image_digest != spec.runtime_image.image_digest[7..]
-            || binding.model_identity
-                != spec
-                    .artifacts
-                    .first()
-                    .map(|artifact| {
-                        format!(
-                            "{}/{}@{}",
-                            artifact.model.publisher,
-                            artifact.model.slug,
-                            artifact.model.content_sha256
-                        )
-                    })
-                    .ok_or(OciError::Artifact)?
-        {
-            return Err(OciError::Artifact);
-        }
         let retained = self.prepare_retained_start(&spec, &installation_id, run_id, &placement)?;
         let mut arguments = vec![
             retained.archive_sha256.clone(),
@@ -1571,14 +1456,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             retained.image_reference.clone(),
         ];
         arguments.extend(retained.main);
-        if binding.runtime_arguments_sha256
-            != protocol_sha256(
-                &canonical_protocol_json(&arguments).map_err(|_| OciError::Artifact)?,
-            )
-        {
-            return Err(OciError::Artifact);
-        }
-        let endpoint_owner = binding.local_address == binding.master_address;
+        let endpoint_owner =
+            placement.world_size == 1 || placement.local_address == placement.master_address;
         let health_path = spec
             .endpoint
             .as_ref()
@@ -1586,7 +1465,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .health_path
             .clone();
         Ok(Some(RecipeRunInspectionPlan {
-            binding,
+            run_id: uuid::Uuid::parse_str(run_id).map_err(|_| OciError::Artifact)?,
+            run_generation,
             arguments,
             endpoint_address: if endpoint_owner {
                 Some(placement.endpoint_address.ok_or(OciError::Artifact)?)
@@ -1669,7 +1549,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             spec,
             record.installation_id,
             record.placement,
-            record.observation,
+            record.run_generation,
         )))
     }
 
@@ -3469,20 +3349,13 @@ mod tests {
     }
 
     #[test]
-    fn singleton_start_persists_authoritative_observation_binding_without_rendezvous_defaults() {
+    fn service_start_persists_its_run_generation_for_observation() {
         let data = tempdir().unwrap();
         let (installation_id, installation, plan) = persisted_installation(data.path());
-        let recipe_digest = "9".repeat(64);
-        authorize_installation(&installation, &recipe_digest);
+        authorize_installation(&installation, &"9".repeat(64));
         let run_id = Uuid::new_v4().to_string();
         let placement = plan.runtime.placement.clone();
-        let identity = super::RecipeRunStartIdentity {
-            mapping_generation: 12,
-            mapping_id: Uuid::new_v4(),
-            recipe_content_sha256: recipe_digest,
-            recipe_revision_id: Uuid::new_v4(),
-            run_generation: 7,
-        };
+        let identity = super::RecipeRunStartIdentity { run_generation: 7 };
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
 
@@ -3506,15 +3379,7 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let observation = lifecycle["observation"].clone();
-        assert!(observation["local_address"].is_null());
-        assert!(observation["master_address"].is_null());
-        assert!(observation["master_port"].is_null());
-        assert_eq!(observation["run_generation"], 7);
-        assert_eq!(observation["mapping_generation"], 12);
-        let binding: vonk_agent_protocol::RecipeRunInspectionBinding =
-            serde_json::from_value(observation).unwrap();
-        binding.validate().unwrap();
+        assert_eq!(lifecycle["run_generation"], 7);
     }
 
     #[test]
@@ -3612,7 +3477,6 @@ mod tests {
             client: &client,
             runtime,
             runtime_root: &runtime_root,
-            observation_receipt_public_key: [0; 32],
         };
         let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(
             chrono::DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),

@@ -86,7 +86,6 @@ mod tests {
             fence: uuid::Uuid::new_v4(),
             arguments: vec![],
             job_plan: None,
-            observation: None,
             installation_id: None,
             reconciliation_identity: None,
             run_generation: None,

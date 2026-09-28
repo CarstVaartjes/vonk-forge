@@ -4549,7 +4549,6 @@ class RecipeOperationService:
                         select(RunNode).where(RunNode.run_id == owner_id)
                     ):
                         started_node.observed_run_generation = None
-                        started_node.observation_receipt_sha256 = None
                         started_node.observation_process_running = None
                         started_node.observation_observed_at = None
                         started_node.observation_endpoint_ready = None
@@ -8010,11 +8009,10 @@ def prepare_exact_recipe_run_observation_nodes(
     observed_at: datetime,
     included_run_ids: set[str],
 ) -> tuple[RunNode, ...]:
-    """Partition one exact-v2 partial or explicit-empty failure snapshot."""
+    """Lock this node's running ranks; an empty report fails every older one."""
 
     assigned = tuple(
-        node
-        for node in session.scalars(
+        session.scalars(
             select(RunNode)
             .join(RecipeRun, RecipeRun.id == RunNode.run_id)
             .where(
@@ -8024,10 +8022,6 @@ def prepare_exact_recipe_run_observation_nodes(
             .order_by(RunNode.run_id)
             .with_for_update(of=RunNode)
         )
-        if (
-            (run := session.get(RecipeRun, node.run_id)) is not None
-            and _stored_run_plan(run.plan).get("observation_schema_version") == 2
-        )
     )
     if included_run_ids - {node.run_id for node in assigned}:
         raise ValueError("recipe run observation is not assigned")
@@ -8036,7 +8030,6 @@ def prepare_exact_recipe_run_observation_nodes(
             if _aware(node.updated_at) < observed_at:
                 node.state = "failed"
                 node.observed_run_generation = None
-                node.observation_receipt_sha256 = None
                 node.observation_process_running = None
                 node.observation_observed_at = None
                 node.observation_endpoint_ready = None

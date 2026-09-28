@@ -296,10 +296,6 @@ class AgentNode(Base):
             "architecture IS NULL OR architecture IN ('linux-amd64', 'linux-arm64')",
             name="ck_agent_nodes_architecture",
         ),
-        CheckConstraint(
-            _nullable_lower_hex("observation_receipt_public_key", 64),
-            name="ck_agent_nodes_observation_receipt_public_key",
-        ),
     )
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workload_intent_ordinal: Mapped[int] = mapped_column(
@@ -314,7 +310,6 @@ class AgentNode(Base):
     self_test_passed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
-    observation_receipt_public_key: Mapped[str | None] = mapped_column(String(64))
     contact_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     contact_observation_digest: Mapped[str | None] = mapped_column(String(64))
     capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
@@ -640,10 +635,6 @@ class AgentEnrollment(Base):
             "state IN ('issuing', 'certificate_issued')",
             name="ck_agent_enrollments_state",
         ),
-        CheckConstraint(
-            _nullable_lower_hex("observation_receipt_public_key", 64),
-            name="ck_agent_enrollments_observation_receipt_public_key",
-        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -662,7 +653,6 @@ class AgentEnrollment(Base):
     hardware_fingerprint: Mapped[str] = mapped_column(String(512), nullable=False)
     agent_digest: Mapped[str] = mapped_column(String(128), nullable=False)
     boot_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    observation_receipt_public_key: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
@@ -2066,10 +2056,6 @@ class RunNode(Base):
             "observed_run_generation IS NULL OR observed_run_generation>=1",
             name="ck_run_nodes_observed_run_generation",
         ),
-        CheckConstraint(
-            _nullable_lower_hex("observation_receipt_sha256", 64),
-            name="ck_run_nodes_observation_receipt",
-        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -2090,44 +2076,17 @@ class RunNode(Base):
     observed_memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
     endpoint: Mapped[dict[str, object] | None] = mapped_column(JSON)
     observed_run_generation: Mapped[int | None] = mapped_column(BigInteger)
-    observation_receipt_sha256: Mapped[str | None] = mapped_column(String(64))
-    #: Process presence comes only from the consumed signed helper receipt.
-    #: ``None`` means the current exact observation did not prove either state.
+    #: Process presence from the agent's current-generation observation.
+    #: ``None`` means no current observation has been applied.
     observation_process_running: Mapped[bool | None] = mapped_column(Boolean)
-    #: Signed observation time is separate from row updates so unrelated
-    #: lifecycle writes cannot make an old absence receipt look fresh.
+    #: Observation time is separate from row updates so unrelated lifecycle
+    #: writes cannot make an old absence observation look fresh.
     observation_observed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
     observation_endpoint_ready: Mapped[bool | None] = mapped_column(Boolean)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
-    )
-
-
-class RecipeRunObservationGrant(Base):
-    """Current exact-inspection grant nonce for one retained local rank."""
-
-    __tablename__ = "recipe_run_observation_grants"
-    __table_args__ = (
-        CheckConstraint(
-            _lower_hex("identity_sha256", 64),
-            name="ck_recipe_run_observation_grants_identity",
-        ),
-        CheckConstraint(
-            "expires_at >= issued_at",
-            name="ck_recipe_run_observation_grants_expiry",
-        ),
-    )
-    run_node_id: Mapped[str] = mapped_column(
-        ForeignKey("run_nodes.id", ondelete="CASCADE"), primary_key=True
-    )
-    request_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
-    identity_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    issued_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    expires_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    consumed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
     )
 
 

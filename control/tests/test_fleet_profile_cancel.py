@@ -495,10 +495,6 @@ def _agent_service_and_target_claim(
         node = session.get(AgentNode, node_id)
         assert node is not None
         identity = {**PACKAGED_RUNTIME_IDENTITY, "architecture": node.architecture}
-        if node.observation_receipt_public_key is not None:
-            identity["observation_receipt_public_key"] = (
-                node.observation_receipt_public_key
-            )
     claim = claim_agent(
         jobs,
         node_id,

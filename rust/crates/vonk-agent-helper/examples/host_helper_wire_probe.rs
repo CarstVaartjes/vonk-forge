@@ -1,10 +1,9 @@
 use std::io::{self, Read};
 
-use ring::signature::Ed25519KeyPair;
 use vonk_agent_helper::protocol::{
-    ContainerRuntimeAction, GrantVerifier, PeerIdentity, parse_request, sign_observation_receipt,
+    ContainerRuntimeAction, GrantVerifier, PeerIdentity, parse_request,
 };
-use vonk_agent_protocol::{RecipeRunObservationOutcome, canonical_json};
+use vonk_agent_protocol::canonical_json;
 
 const ALLOWED_GID: u32 = 971;
 
@@ -38,30 +37,12 @@ fn main() {
         vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 action: ContainerRuntimeAction::RunInspect,
-                request_sha256,
-                observation_identity_sha256: Some(observation_identity_sha256),
                 ..
             },
         ) => {
-            let signer = Ed25519KeyPair::from_seed_unchecked(&[23; 32]).unwrap();
-            let outcome = match std::env::var("VONK_HOST_HELPER_WIRE_OUTCOME").as_deref() {
-                Ok("running") | Err(_) => RecipeRunObservationOutcome::Running,
-                Ok("not-running") => RecipeRunObservationOutcome::NotRunning,
-                Ok(_) => panic!("unsupported host helper wire outcome"),
-            };
-            let receipt = sign_observation_receipt(
-                &signer,
-                &grant.claims.node_id,
-                grant.claims.request_id,
-                request_sha256,
-                observation_identity_sha256,
-                outcome,
-                now + 1,
-            )
-            .unwrap();
             println!(
                 "{}",
-                String::from_utf8(canonical_json(&receipt).unwrap()).unwrap()
+                String::from_utf8(canonical_json(&grant).unwrap()).unwrap()
             );
         }
         vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(

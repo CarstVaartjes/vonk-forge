@@ -233,8 +233,6 @@ export VONK_HELPER_SOCKET=/run/vonk-forge-package-helper/package-helper.sock
 export VONK_HELPER_REQUEST_ROOT=/run/vonk-forge-agent/runtime-requests
 
 "$probe_binary" setup >"$report_root/setup.log"
-chown root:vonk-agent /etc/vonk-forge-agent/observation-receipt.pub
-chmod 0640 /etc/vonk-forge-agent/observation-receipt.pub
 for ref in "$image_ref" "$local_image" "$image_platform" "$image_name"; do
   docker image rm "$ref" >>"$report_root/source-image-removal.log" 2>&1 || true
 done
