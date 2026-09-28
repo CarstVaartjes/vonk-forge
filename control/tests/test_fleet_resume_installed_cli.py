@@ -17,7 +17,6 @@ from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.jobs import JobService
@@ -99,7 +98,6 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
     app = create_app(
         jobs=JobService(sessions, clock=clock),
         tokens=tokens,
-        audits=MemoryAuditStore(),
         fleet_projection=FleetProjection(_Authority(), sessions, clock=clock),
         fleet_services=FleetOperatorServices(upgrades=upgrades),
         operations=projected,

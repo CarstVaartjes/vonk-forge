@@ -1006,23 +1006,11 @@ def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation()
         },
         "recovery": {"actions": ["inspect"]},
     }
-    audit = {
-        "id": "audit:55555555-5555-4555-8555-555555555555",
-        "kind": "audit.fleet.read",
-        "state": "completed",
-        "created_at": "2026-08-05T12:00:00Z",
-        "node_ids": [target],
-        "owner": {
-            "kind": "audit-event",
-            "id": "55555555-5555-4555-8555-555555555555",
-            "request_id": request_id,
-        },
-    }
     output = StringIO()
     with redirect_stdout(output):
         render_payload(
             {
-                "operations": [operation, audit],
+                "operations": [operation],
                 "total": 3,
                 "next_cursor": "opaque+token",
             },
@@ -1037,10 +1025,9 @@ def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation()
         )
 
     rendered = output.getvalue()
-    assert "2 of 3 references" in rendered
+    assert "1 of 3 references" in rendered
     assert "Owner: job job-owner-1" in rendered
     assert "vonkctl fleet progress job-owner-1 --follow" in rendered
-    assert "vonkctl fleet activity --request-id " + request_id in rendered
     assert "More results are available" in rendered
     assert (
         "vonkctl fleet activity --limit 1 --cursor opaque+token --state "

@@ -1069,16 +1069,6 @@ def _activity(
                         owner_id,
                         "--follow",
                     ]
-                elif owner_kind == "audit-event" and isinstance(
-                    owner.get("request_id"), str
-                ):
-                    reconnect = [
-                        "vonkctl",
-                        "fleet",
-                        "activity",
-                        "--request-id",
-                        owner["request_id"],
-                    ]
             _field(
                 "Reconnect",
                 "unavailable" if reconnect is None else shlex.join(reconnect),

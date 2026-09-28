@@ -5,12 +5,11 @@ from __future__ import annotations
 import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from .audit import AuditRecord
 from .auth import ADMIN_ROLE, Actor, AdministratorRole, TokenCodec
 from .browser_auth import (
     BrowserAuthenticationError,
@@ -23,10 +22,6 @@ _COOKIE_MAX_AGE = 43_200
 _CLI_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 _SESSION_COOKIE = "vonk_session"
 _CSRF_COOKIE = "vonk_csrf"
-
-
-class AuditSink(Protocol):
-    def append(self, event: AuditRecord) -> None: ...
 
 
 class LoginRequest(BaseModel):
@@ -60,7 +55,6 @@ class LoginRequestInvalid(BaseModel):
 def install_auth_routes(
     app: FastAPI,
     service: BrowserAuthService,
-    audits: AuditSink,
     actor_dependency: Any,
     tokens: TokenCodec,
     now: Callable[[], int],
@@ -90,9 +84,6 @@ def install_auth_routes(
             role=actor.role,
             expires_at=identity.expires_at,
         )
-
-    def audit(request: Request, actor: str, action: str) -> None:
-        audits.append(AuditRecord(request.state.request_id, actor, action, None, ()))
 
     def cookie_identity(request: Request) -> BrowserIdentity:
         token = request.cookies.get(_SESSION_COOKIE, "")
@@ -127,13 +118,11 @@ def install_auth_routes(
         try:
             issued = service.login(body.subject, body.password)
         except BrowserAuthenticationThrottledError:
-            audit(request, "anonymous", "auth.login.throttled")
             raise HTTPException(
                 status_code=429,
                 detail="authentication temporarily unavailable",
             ) from None
         except BrowserAuthenticationError:
-            audit(request, "anonymous", "auth.login.failed")
             raise HTTPException(
                 status_code=401, detail="authentication failed"
             ) from None
@@ -147,7 +136,6 @@ def install_auth_routes(
             f"{_CSRF_COOKIE}={issued.csrf}; Max-Age={_COOKIE_MAX_AGE}; Path=/; "
             "SameSite=strict; Secure",
         )
-        audit(request, issued.identity.actor.subject, "auth.login.succeeded")
         return summary(issued.identity)
 
     @app.get(
@@ -173,7 +161,7 @@ def install_auth_routes(
         _authenticated_actor: Actor = authenticated,
     ) -> None:
         require_csrf(request)
-        identity = cookie_identity(request)
+        cookie_identity(request)
         service.logout(request.cookies[_SESSION_COOKIE])
         response.delete_cookie(
             _SESSION_COOKIE,
@@ -189,7 +177,6 @@ def install_auth_routes(
             httponly=False,
             samesite="strict",
         )
-        audit(request, identity.actor.subject, "auth.logout")
 
     @app.post(
         "/api/auth/cli-token",
@@ -231,7 +218,6 @@ def install_auth_routes(
             .isoformat()
             .replace("+00:00", "Z")
         )
-        audit(request, identity.actor.subject, "auth.cli_token.issued")
         return Response(
             content=f"{token}\n",
             media_type="text/plain",

@@ -24,7 +24,6 @@ from vonk_agent_protocol import (
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import AgentSource, TokenCodec
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
@@ -1022,7 +1021,6 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
     app = create_app(
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
-        audits=MemoryAuditStore(),
         now=lambda: 0,
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,

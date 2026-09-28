@@ -15,7 +15,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.db import session_factory
@@ -1169,7 +1168,6 @@ def _browser_client() -> tuple[TestClient, str, str, ApiStream]:
     app = create_app(
         jobs=Jobs(),
         tokens=tokens,
-        audits=MemoryAuditStore(),
         fleet_projection=Projection(),
         fleet_stream=api_stream,
         now=lambda: 10,

@@ -13,7 +13,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.jobs import JobService
@@ -90,7 +89,6 @@ def test_installed_recipe_cancel_recovers_dropped_acceptance_and_settles(
     app = create_app(
         jobs=JobService(sessions, clock=lambda: now),
         tokens=codec,
-        audits=MemoryAuditStore(),
         fleet_profiles=FleetProfileService(sessions, clock=lambda: now),
         recipe_image_availability=service,
         now=lambda: 1,

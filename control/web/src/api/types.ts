@@ -21,8 +21,6 @@ export type JobSummary = components["schemas"]["JobSummary"];
 export type JobsResponse = components["schemas"]["JobsResponse"];
 export type OperationDetail = components["schemas"]["OperationDetailResponse"];
 export type OperationsResponse = components["schemas"]["OperationsResponse"];
-export type AuditSummary = components["schemas"]["AuditEventResponse"];
-export type AuditResponse = components["schemas"]["AuditResponse"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
 export type ModelStatus = components["schemas"]["ModelLibraryResponse"];
@@ -190,5 +188,4 @@ export interface ControlApi extends LibraryApi {
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;
-  audit(signal?: AbortSignal): Promise<AuditResponse>;
 }

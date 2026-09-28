@@ -12,7 +12,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor
 from vonk_control.models import AgentEnrollmentGrant
 from vonk_control.operator_projection_api import build_fleet_operator_services
@@ -38,7 +37,6 @@ def test_installed_enrollment_keeps_private_grant_and_original_identity(
         create_app(
             jobs=Jobs(),
             tokens=codec,
-            audits=MemoryAuditStore(),
             now=lambda: 0,
             fleet_services=build_fleet_operator_services(
                 agent_services=services, upgrades=None
@@ -140,7 +138,6 @@ def test_installed_enrollment_process_death_recovers_original_grant_identity(
         create_app(
             jobs=Jobs(),
             tokens=codec,
-            audits=MemoryAuditStore(),
             now=lambda: 0,
             fleet_services=build_fleet_operator_services(
                 agent_services=services, upgrades=None

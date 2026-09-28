@@ -150,21 +150,6 @@ class JobLogEntry(Base):
     )
 
 
-class AuditEvent(Base):
-    __tablename__ = "audit_events"
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    request_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    actor: Mapped[str] = mapped_column(String(200), nullable=False)
-    action: Mapped[str] = mapped_column(String(120), nullable=False)
-    authority_revision: Mapped[str | None] = mapped_column(String(128))
-    targets: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    occurred_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-
-
 class ControlAuthorityRevision(Base):
     """Immutable control-plane authority document revision in PostgreSQL."""
 

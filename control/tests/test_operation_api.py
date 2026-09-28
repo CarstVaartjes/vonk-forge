@@ -21,7 +21,6 @@ from vonk_control.agent_upgrade_status import (
     operator_agent_upgrade_reason,
 )
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import BoundedJSONError
 from vonk_control.fleet_profile_contract import (
@@ -40,7 +39,6 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AuditEvent,
     Base,
     FleetProfile,
     FleetProfileApplication,
@@ -190,11 +188,9 @@ class ProjectedFleet:
 
 def _client(*, fleet_projection=None, operations=None, role="operator", jobs=None):
     codec = TokenCodec(b"k" * 32)
-    audits = MemoryAuditStore()
     app = create_app(
         jobs=Jobs() if jobs is None else jobs,
         tokens=codec,
-        audits=audits,
         fleet_projection=fleet_projection or ProjectedFleet(),
         now=lambda: 10,
         operations=operations,
@@ -204,7 +200,6 @@ def _client(*, fleet_projection=None, operations=None, role="operator", jobs=Non
         TestClient(app),
         {"Authorization": f"Bearer {token}"},
         None,
-        audits,
     )
 
 
@@ -777,7 +772,7 @@ def test_fleet_exposes_typed_visual_state() -> None:
 
 
 def test_job_status_has_typed_progress_fields_without_payloads() -> None:
-    client, operator, _reconciler, _audits = _client()
+    client, operator, _reconciler = _client()
 
     response = client.get(
         "/api/jobs/11111111-1111-4111-8111-111111111111",
@@ -803,7 +798,7 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
     assert "result" not in encoded
 
 
-def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
+def test_operator_resume_is_rbac_guarded_and_strict() -> None:
     resumed: list[str] = []
     services = OperationApiServices(
         endpoint=lambda _alias, _gateway: {},
@@ -813,7 +808,7 @@ def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
         ),
         resume_job=resumed.append,
     )
-    client, operator, _reconciler, audits = _client(operations=services)
+    client, operator, _reconciler = _client(operations=services)
     job_id = "11111111-1111-4111-8111-111111111111"
 
     unexpected = client.post(
@@ -834,7 +829,6 @@ def test_operator_resume_is_rbac_guarded_strict_and_audited() -> None:
     assert response.status_code == 202
     assert response.json() == {"id": job_id, "state": "queued"}
     assert resumed == [job_id]
-    assert audits.for_request(request_id).action == "job.resume"
 
 
 def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
@@ -889,9 +883,7 @@ def test_resume_action_disappearing_after_preflight_is_refused(
     claim = _claim_parked(jobs)
     assert claim is not None
     jobs.wait_for_operator(claim, "operator must inspect the effect")
-    client, operator, _reconciler, _audits = _durable_client(
-        sessions, services, clock=clock
-    )
+    client, operator, _reconciler = _durable_client(sessions, services, clock=clock)
 
     preflight = client.get(f"/api/jobs/{job_id}", headers=operator)
     assert preflight.status_code == 200
@@ -1023,9 +1015,7 @@ def test_durable_retire_refuses_live_current_attempt_without_transition(
         assert attempt is not None
         attempt.state = "running"
         attempt.lease_deadline = clock.now + timedelta(seconds=30)
-    client, operator, _reconciler, audits = _durable_client(
-        sessions, services, clock=clock
-    )
+    client, operator, _reconciler = _durable_client(sessions, services, clock=clock)
 
     response = client.post(
         f"/api/jobs/{job_id}/resume",
@@ -1047,7 +1037,6 @@ def test_durable_retire_refuses_live_current_attempt_without_transition(
         assert parent is not None and parent.state == "waiting-for-operator"
         assert stored is not None and stored.state == "waiting-for-operator"
         assert current_attempt is not None and current_attempt.state == "running"
-    assert audits.list() == []
 
 
 def test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue(
@@ -1215,28 +1204,6 @@ def test_activity_sql_pages_equal_timestamps_and_binds_request_filter(tmp_path) 
                 updated_at=now,
             )
         )
-        session.add_all(
-            [
-                AuditEvent(
-                    id="33333333-3333-4333-8333-333333333333",
-                    request_id=request_id,
-                    actor="operator",
-                    action="job.resume",
-                    authority_revision=COMMIT,
-                    targets=[NODE_ID],
-                    occurred_at=now,
-                ),
-                AuditEvent(
-                    id="44444444-4444-4444-8444-444444444444",
-                    request_id=other_request_id,
-                    actor="operator",
-                    action="fleet.read",
-                    authority_revision=None,
-                    targets=[NODE_ID],
-                    occurred_at=now,
-                ),
-            ]
-        )
         session.flush()
         for suffix in ("001", "002", "003"):
             session.add(
@@ -1299,7 +1266,7 @@ def test_activity_sql_pages_equal_timestamps_and_binds_request_filter(tmp_path) 
             params["cursor"] = cursor
         page = client.get("/api/operations", headers=operator, params=params)
         assert page.status_code == 200
-        assert page.json()["total"] == 6
+        assert page.json()["total"] == 5
         all_ids.extend(item["id"] for item in page.json()["operations"])
         cursor = page.json().get("next_cursor")
         if cursor is None:
@@ -1316,76 +1283,15 @@ def test_activity_sql_pages_equal_timestamps_and_binds_request_filter(tmp_path) 
     }
     assert unbound.status_code == 422
     assert filtered.status_code == 200
-    assert filtered.json()["total"] == 1
-    audit = filtered.json()["operations"][0]
-    assert audit["owner"] == {
-        "kind": "audit-event",
-        "id": "44444444-4444-4444-8444-444444444444",
-        "request_id": other_request_id,
-    }
+    assert filtered.json()["total"] == 0
     assert target_filtered.status_code == 200
-    assert target_filtered.json()["total"] == 5
+    assert target_filtered.json()["total"] == 4
     assert all(
         NODE_ID in row["node_ids"] for row in target_filtered.json()["operations"]
     )
     assert all_ids == sorted(all_ids, reverse=True)
-    assert len(all_ids) == len(set(all_ids)) == 6
+    assert len(all_ids) == len(set(all_ids)) == 5
     assert any(item_id.startswith("job:") for item_id in all_ids)
-    assert any(item_id.startswith("audit:") for item_id in all_ids)
-
-
-def test_activity_keeps_good_audit_refs_visible_beside_malformed_history(
-    tmp_path,
-) -> None:
-    now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
-    engine = create_engine(f"sqlite:///{tmp_path / 'activity-malformed.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    good_request = "66666666-6666-4666-8666-666666666666"
-    malformed_request = "77777777-7777-4777-8777-777777777777"
-    with sessions.begin() as session:
-        session.add_all(
-            [
-                AuditEvent(
-                    id="88888888-8888-4888-8888-888888888888",
-                    request_id=good_request,
-                    actor="operator",
-                    action="fleet.read",
-                    authority_revision=None,
-                    targets=[NODE_ID],
-                    occurred_at=now,
-                ),
-                AuditEvent(
-                    id="99999999-9999-4999-8999-999999999999",
-                    request_id=malformed_request,
-                    actor="operator",
-                    action="fleet.read",
-                    authority_revision=None,
-                    targets=cast(list[str], {"invalid": "targets"}),
-                    occurred_at=now,
-                ),
-            ]
-        )
-    services = durable_operation_services(
-        sessions,
-        tmp_path / "routes",
-        clock=lambda: now,
-        cursors=TokenCodec(b"m" * 32).cursor_codec(),
-    )
-    client, operator, *_ = _durable_client(sessions, services, clock=MutableClock(now))
-
-    response = client.get("/api/operations", headers=operator)
-    denied = client.get("/api/operations")
-
-    assert response.status_code == 200
-    assert response.json()["total"] == 2
-    items = {row["owner"]["request_id"]: row for row in response.json()["operations"]}
-    assert items[good_request]["kind"] == "audit.fleet.read"
-    assert items[malformed_request]["state"] == "unavailable"
-    assert items[malformed_request]["failure"]["error_code"] == (
-        "operation_history_unreadable"
-    )
-    assert denied.status_code == 401
 
 
 def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
@@ -1666,7 +1572,7 @@ def test_durable_operation_cursor_rejects_cross_job_replay_and_tampering(
 
 
 def test_target_cursor_rejects_cross_job_and_cross_resource_replay() -> None:
-    client, operator, _reconciler, _audits = _client()
+    client, operator, _reconciler = _client()
     codec = TokenCodec(b"k" * 32).cursor_codec()
     job_id = EnqueuedJob.id
     other_job_cursor = codec.encode(
@@ -2121,7 +2027,7 @@ def test_durable_resume_is_never_refused_for_earlier_failed_attempts(
         assert parent is not None and parent.state == "queued"
 
 
-def test_operator_retire_is_a_distinct_audited_disposition() -> None:
+def test_operator_retire_is_a_distinct_disposition() -> None:
     """Retirement is requested explicitly; the default request still resumes."""
 
     resumed: list[str] = []
@@ -2135,7 +2041,7 @@ def test_operator_retire_is_a_distinct_audited_disposition() -> None:
         resume_job=resumed.append,
         retire_job=retired.append,
     )
-    client, operator, _reconciler, audits = _client(operations=services)
+    client, operator, _reconciler = _client(operations=services)
     job_id = "11111111-1111-4111-8111-111111111111"
 
     resumed_request = "33333333-3333-4333-8333-333333333333"
@@ -2156,8 +2062,6 @@ def test_operator_retire_is_a_distinct_audited_disposition() -> None:
     assert retired == [job_id]
     assert retired_response.status_code == 202
     assert retired_response.json() == {"id": job_id, "state": "failed"}
-    assert audits.for_request(resumed_request).action == "job.resume"
-    assert audits.for_request(retired_request).action == "job.retire"
 
 
 def test_operator_retire_reports_a_live_operation_refusal() -> None:

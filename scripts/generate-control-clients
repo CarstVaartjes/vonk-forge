@@ -55,7 +55,6 @@ class _SchemaJobs:
 def _schema(*, include_browser_auth: bool) -> dict[str, object]:
     from sqlalchemy.orm import sessionmaker
     from vonk_control.api import create_app
-    from vonk_control.audit import MemoryAuditStore
     from vonk_control.auth import TokenCodec
     from vonk_control.browser_auth import BrowserAuthService
     from vonk_control.operation_api import admin_openapi_schema
@@ -64,7 +63,6 @@ def _schema(*, include_browser_auth: bool) -> dict[str, object]:
     app = create_app(
         jobs=_SchemaJobs(),
         tokens=TokenCodec(signing_key),
-        audits=MemoryAuditStore(),
         browser_auth=(
             BrowserAuthService(
                 sessionmaker(),

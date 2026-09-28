@@ -12,7 +12,6 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.jobs import JobService
@@ -58,7 +57,6 @@ def _client(
     app = create_app(
         jobs=JobService(sessions, clock=lambda: datetime(2026, 9, 10, tzinfo=UTC)),
         tokens=codec,
-        audits=MemoryAuditStore(),
         now=lambda: 1,
         fleet_profiles=profiles
         or FleetProfileService(

@@ -6,7 +6,6 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor
 from vonk_control.catalog_api import (
     ManagedCatalogSyncProblem,
@@ -55,7 +54,6 @@ def _sync_client(error: Exception) -> TestClient:
     install_catalog_routes(
         app,
         actor_dependency=Depends(_administrator),
-        audits=MemoryAuditStore(),
         service=None,
         managed_sync=_FailingSync(error),
     )
@@ -67,7 +65,6 @@ def test_source_bundle_download_preserves_raw_bytes() -> None:
     install_catalog_routes(
         app,
         actor_dependency=Depends(_administrator),
-        audits=MemoryAuditStore(),
         service=_BundleService(),
     )
 
@@ -85,7 +82,6 @@ def test_catalog_api_exposes_only_canonical_bundle_and_sync_routes() -> None:
     install_catalog_routes(
         app,
         actor_dependency=Depends(_administrator),
-        audits=MemoryAuditStore(),
         service=None,
     )
     paths = app.openapi()["paths"]

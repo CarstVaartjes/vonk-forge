@@ -10,7 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import AgentCertificate, AgentNode, AgentNodeProfile
@@ -97,7 +96,6 @@ def test_installed_fleet_remove_requires_consent_and_uses_canonical_node(
         create_app(
             jobs=Jobs(),
             tokens=codec,
-            audits=MemoryAuditStore(),
             now=lambda: 0,
             fleet_projection=FleetProjection(_RevisionSource(), sessions, clock=clock),
             fleet_services=build_fleet_operator_services(

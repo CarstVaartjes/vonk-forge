@@ -62,11 +62,7 @@ from .models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
-    AuditEvent,
-    FleetProfileApplication,
     Job,
-    ModelCacheOperation,
-    RecipeLibrarySyncRun,
     RecipeRouteAuthority,
     RoutePublication,
     RoutePublicationOwner,
@@ -118,8 +114,6 @@ _ADMIN_OPERATION_IDS = {
     ("get", "/api/endpoints/{alias}"): "getPublishedEndpoint",
     ("get", "/api/jobs"): "listJobs",
     ("get", "/api/operations"): "listOperations",
-    ("get", "/api/audit"): "listAuditEvents",
-    ("get", "/api/identity-history"): "listIdentityHistory",
     ("get", "/api/jobs/{job_id}"): "getJob",
     ("get", "/api/operations/{operation_id}"): "getOperation",
     ("post", "/api/jobs/{job_id}/resume"): "resumeJob",
@@ -236,33 +230,6 @@ class ReadyzResponse(StrictModel):
 class JobResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
     state: str = Field(min_length=1, max_length=80)
-
-
-class AuditEventResponse(StrictModel):
-    request_id: str = Field(min_length=1, max_length=128)
-    actor: str = Field(min_length=1, max_length=128)
-    action: str = Field(min_length=1, max_length=128)
-    authority_revision: str | None = Field(default=None, max_length=128)
-    targets: list[BoundedIdentifier] = Field(max_length=64)
-    occurred_at: str | None = Field(default=None, max_length=64)
-
-
-class AuditResponse(StrictModel):
-    events: list[AuditEventResponse] = Field(max_length=100)
-
-
-class IdentityHistoryItem(StrictModel):
-    node_id: str = Field(pattern=NODE_PATTERN)
-    agent_state: str = Field(min_length=1, max_length=80)
-    certificate_serial: str | None = Field(default=None, max_length=256)
-    certificate_fingerprint: str | None = Field(default=None, max_length=256)
-    certificate_generation: int | None = Field(default=None, ge=0)
-    enrolled_at: datetime | None = None
-    revoked_at: datetime | None = None
-
-
-class IdentityHistoryResponse(StrictModel):
-    identities: list[IdentityHistoryItem] = Field(max_length=100)
 
 
 def bounded_error_responses(*status_codes: int) -> dict[int | str, dict[str, Any]]:
@@ -679,7 +646,6 @@ _ACTIVITY_TARGET = re.compile(
 )
 _ACTIVITY_STRINGS = TypeAdapter(list[StrictStr], config=ConfigDict(strict=True))
 _JOB_ACTIVITY_PREFIX = "job:"
-_AUDIT_ACTIVITY_PREFIX = "audit:"
 
 
 def _activity_keyset_filter(
@@ -879,160 +845,6 @@ class _StandaloneJobActivityProjection:
                 "retryable": False,
             },
             "status_reason": "Stored job history is malformed.",
-        }
-
-
-class _AuditActivityProjection:
-    """Project orphan audit records without duplicating a durable owner."""
-
-    def __init__(self, sessions: sessionmaker[Session]) -> None:
-        self._sessions = sessions
-
-    @staticmethod
-    def _unowned_request_filter() -> ColumnElement[bool]:
-        return ~or_(
-            select(Job.id).where(Job.request_id == AuditEvent.request_id).exists(),
-            select(FleetProfileApplication.id)
-            .where(FleetProfileApplication.request_key == AuditEvent.request_id)
-            .exists(),
-            select(ModelCacheOperation.id)
-            .where(ModelCacheOperation.request_key == AuditEvent.request_id)
-            .exists(),
-            select(RecipeLibrarySyncRun.id)
-            .where(RecipeLibrarySyncRun.request_key == AuditEvent.request_id)
-            .exists(),
-        )
-
-    def _base_filters(self, query: OperationQuery) -> list[ColumnElement[bool]]:
-        filters: list[ColumnElement[bool]] = [self._unowned_request_filter()]
-        # Audit references describe completed recorded actions.
-        if query.state is not None and query.state != "completed":
-            filters.append(false())
-        if query.request_id is not None:
-            filters.append(AuditEvent.request_id == query.request_id)
-        if query.node_id is not None:
-            filters.append(
-                cast(AuditEvent.targets, String).contains(f'"{query.node_id}"')
-            )
-        return filters
-
-    def list_operations(self, query: OperationQuery) -> OperationListPage:
-        if not 1 <= query.limit <= 101:
-            raise ValueError("operation provider page limit is invalid")
-        base_filters = self._base_filters(query)
-        page_filters = list(base_filters)
-        boundary = _activity_keyset_filter(
-            AuditEvent.occurred_at, AuditEvent.id, _AUDIT_ACTIVITY_PREFIX, query.after
-        )
-        if boundary is not None:
-            page_filters.append(boundary)
-        with self._sessions() as session:
-            total = int(
-                session.scalar(
-                    select(func.count()).select_from(AuditEvent).where(*base_filters)
-                )
-                or 0
-            )
-            events = session.scalars(
-                select(AuditEvent)
-                .where(*page_filters)
-                .order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc())
-                .limit(query.limit)
-            )
-            return OperationListPage(
-                tuple(self._item(event) for event in events), None, total
-            )
-
-    def get_operation(self, operation_id: str) -> Mapping[str, object]:
-        if not operation_id.startswith(_AUDIT_ACTIVITY_PREFIX):
-            raise KeyError(operation_id)
-        event_id = operation_id[len(_AUDIT_ACTIVITY_PREFIX) :]
-        with self._sessions() as session:
-            event = session.get(AuditEvent, event_id)
-            if event is None:
-                raise KeyError(operation_id)
-            # A request with a durable operation owner is shown through that
-            # exact owner and is not repeated as an audit-only Activity row.
-            if not session.scalar(
-                select(AuditEvent.id)
-                .where(
-                    AuditEvent.id == event_id,
-                    self._unowned_request_filter(),
-                )
-                .limit(1)
-            ):
-                raise KeyError(operation_id)
-            return self._item(event)
-
-    def _item(self, event: AuditEvent) -> Mapping[str, object]:
-        activity_id = f"{_AUDIT_ACTIVITY_PREFIX}{event.id}"
-        request_id = _activity_owner_request_id(event.request_id)
-        try:
-            if (
-                not isinstance(event.id, str)
-                or not 1 <= len(activity_id) <= 128
-                or request_id is None
-                or not isinstance(event.actor, str)
-                or not 1 <= len(event.actor) <= 200
-                or not isinstance(event.action, str)
-                or not 1 <= len(event.action) <= 120
-                or not isinstance(event.occurred_at, datetime)
-            ):
-                raise ValueError("stored audit activity is malformed")
-            node_ids = _activity_node_ids(event.targets, limit=64)
-        except (AttributeError, TypeError, ValueError, ValidationError):
-            return self._unreadable_item(event, activity_id, request_id)
-        action = (
-            event.action
-            if re.fullmatch(r"[a-z][a-z0-9._-]{0,73}", event.action)
-            else "event"
-        )
-        return {
-            "id": activity_id,
-            "job_id": None,
-            "parent_id": None,
-            "owner": {
-                "kind": "audit-event",
-                "id": event.id,
-                "request_id": request_id,
-            },
-            "node_ids": node_ids,
-            "kind": f"audit.{action}",
-            "state": "completed",
-            "attempt": 0,
-            "progress": None,
-            "created_at": _aware(event.occurred_at).isoformat(),
-            "updated_at": _aware(event.occurred_at).isoformat(),
-            "supported_actions": [],
-            "status_reason": f"Audited request {request_id}",
-        }
-
-    def _unreadable_item(
-        self, event: AuditEvent, activity_id: str, request_id: str | None
-    ) -> Mapping[str, object]:
-        return {
-            "id": activity_id,
-            "job_id": None,
-            "parent_id": None,
-            "owner": {
-                "kind": "audit-event",
-                "id": event.id,
-                "request_id": request_id,
-            },
-            "node_ids": [],
-            "kind": "audit-history-unreadable",
-            "state": "unavailable",
-            "attempt": 0,
-            "progress": None,
-            "created_at": _aware(event.occurred_at).isoformat(),
-            "updated_at": _aware(event.occurred_at).isoformat(),
-            "supported_actions": [],
-            "failure": {
-                "error_code": "operation_history_unreadable",
-                "summary": "Stored audit history is malformed",
-                "retryable": False,
-            },
-            "status_reason": "Stored audit history is malformed.",
         }
 
 
@@ -2488,7 +2300,6 @@ def durable_operation_services(
         profile_endpoint_intent=profile_endpoint_intent,
     )
     standalone_jobs = _StandaloneJobActivityProjection(sessions, operation_providers)
-    audit_events = _AuditActivityProjection(sessions)
 
     def resume_job(job_id: str) -> None:
         with sessions() as session:
@@ -2518,11 +2329,6 @@ def durable_operation_services(
                 family="job",
                 list_operations=standalone_jobs.list_operations,
                 get_operation=standalone_jobs.get_operation,
-            ),
-            OperationProvider(
-                family="audit-event",
-                list_operations=audit_events.list_operations,
-                get_operation=audit_events.get_operation,
             ),
             OperationProvider(
                 family="agent",

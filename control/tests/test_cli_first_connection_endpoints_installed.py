@@ -17,7 +17,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -99,7 +98,6 @@ def _api(
     app = create_app(
         jobs=JobService(sessions, clock=clock),
         tokens=codec,
-        audits=MemoryAuditStore(),
         fleet_projection=FleetProjection(_Authority(), sessions, clock=clock),
         operations=operations,
         fleet_profiles=profile_service,

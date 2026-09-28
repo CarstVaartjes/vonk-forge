@@ -10,7 +10,6 @@ from fastapi import FastAPI, HTTPException, Path, Request
 from pydantic import ConfigDict, Field
 from starlette.responses import JSONResponse, Response
 
-from .audit import AuditRecord
 from .auth import Actor
 from .catalog_service import (
     CatalogConflict,
@@ -60,10 +59,6 @@ CATALOG_OPERATION_IDS = {
         "/api/catalog/managed-recipes/sync-status",
     ): "getManagedRecipeCatalogSyncStatus",
 }
-
-
-class AuditSink(Protocol):
-    def append(self, event: AuditRecord) -> None: ...
 
 
 class ManagedRecipeCatalogSync(Protocol):
@@ -212,7 +207,6 @@ def install_catalog_routes(
     app: FastAPI,
     *,
     actor_dependency: Any,
-    audits: AuditSink,
     service: CatalogService | None,
     managed_sync: ManagedRecipeCatalogSync | None = None,
 ) -> None:
@@ -316,15 +310,6 @@ def install_catalog_routes(
                 result = catalog().store_source_bundle(sha256, payload, actor.subject)
             except CatalogError as error:
                 return _problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.source_bundle.upload",
-                None,
-                (sha256, str(result.archive_bytes)),
-            )
-        )
         return {
             "sha256": result.sha256,
             "archive_bytes": result.archive_bytes,
@@ -378,15 +363,6 @@ def install_catalog_routes(
             return _problem(request, error)
         except RecipeLibraryError as error:
             return _recipe_library_problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.managed.sync",
-                value.commit,
-                (value.id, value.repository, value.commit or ""),
-            )
-        )
         return _managed_sync(value)
 
     @app.get(

@@ -12,7 +12,6 @@ from pathlib import Path
 import uvicorn
 from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.jobs import JobService
@@ -32,7 +31,6 @@ def _app(trace_path: Path):
     app = create_app(
         jobs=JobService(sessions, clock=clock),
         tokens=codec,
-        audits=MemoryAuditStore(),
         now=lambda: 1,
         fleet_profiles=FleetProfileService(
             sessions, clock=clock, switch_adapter=_SwitchAdapter()

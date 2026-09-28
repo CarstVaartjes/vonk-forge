@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Path, Request, status
+from fastapi import FastAPI, HTTPException, Path, status
 
-from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .logging import redact_text
 from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
@@ -38,7 +37,6 @@ def install_installation_reconciliation_routes(
     *,
     actor_dependency: Any,
     operations: Any | None,
-    audits: Any,
 ) -> None:
     """Expose the existing Run/Switch owner without adding another planner."""
 
@@ -55,17 +53,6 @@ def install_installation_reconciliation_routes(
     def require_apply(actor: Actor) -> None:
         if actor.role not in MUTATION_ROLES[("POST", _APPLY_PATH)]:
             raise HTTPException(status_code=403, detail="insufficient role")
-
-    def audit(request: Request, actor: Actor, targets: tuple[str, ...]) -> None:
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "recipe.installation.reconcile",
-                None,
-                targets,
-            )
-        )
 
     def require_reconcile_mode(body: object, installation_id: str) -> None:
         if getattr(body, "installation_id", None) != installation_id:
@@ -158,7 +145,6 @@ def install_installation_reconciliation_routes(
         operation_id="applyRecipeInstallationReconciliation",
     )
     def apply_installation_reconciliation(
-        request: Request,
         installation_id: Annotated[str, Path(pattern=_UUID)],
         body: RunSwitchCleanupApplyRequest,
         actor: Actor = authenticated,
@@ -186,11 +172,6 @@ def install_installation_reconciliation_routes(
             ) from None
         except RunSwitchOperationConflict as error:
             raise HTTPException(status_code=409, detail=refusal_detail(error)) from None
-        audit(
-            request,
-            actor,
-            (installation_id, operation.operation_id, operation.request_key),
-        )
         return operation
 
     @app.get(

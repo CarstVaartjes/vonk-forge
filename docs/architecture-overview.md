@@ -135,7 +135,7 @@ binding. Model availability and the runtime-image receipt already live in
 managed storage. Deployed recovery and physical Spark acceptance remain separate
 checks. Future ownership changes must update all consumers and retire the old
 path together, while retaining control intent, exact selected identities,
-authorization, reservations, and audit.
+authorization, and reservations.
 
 ## Artifact recovery
 
@@ -382,9 +382,9 @@ fabric recovery, and explicit break-glass inspection.
 | Component | Responsibility |
 | --- | --- |
 | Caddy | Tailnet web/API routing, distinct enrollment and agent SNI boundaries, agent mTLS verification, and denial of internal routes. |
-| Control API | Admin API/web backend, PostgreSQL authority and policy, trusted profile-cache resolution and admission, desired-state planning, agent enrollment/claims/results, audit, and metrics. |
+| Control API | Admin API/web backend, PostgreSQL authority and policy, trusted profile-cache resolution and admission, desired-state planning, agent enrollment/claims/results, and metrics. |
 | Control worker | Durable reconciliation, dependency waves, compensation, fail-closed withdrawal, and atomic route/LiteLLM publication. |
-| PostgreSQL | Control intent, immutable resolved plans, operation/attempt fences, identity, authorization, reservations, cancellation, audit, and retained telemetry; current artifact bookkeeping awaits the ownership cutover above. |
+| PostgreSQL | Control intent, immutable resolved plans, operation/attempt fences, identity, authorization, reservations, cancellation, and retained telemetry; current artifact bookkeeping awaits the ownership cutover above. |
 | Managed artifact storage | Model files, runnable image archives, and native transfer caches; target owner of typed verification manifests and local recovery checkpoints. |
 | LiteLLM | OpenAI-compatible aliases and quotas generated only from an acknowledged, unexpired publication bundle. |
 | Hermes Agent | Persistent tools/UI service that reaches inference only through the Caddy-gated LiteLLM route published by an exact v1 `RecipeRun` named `hermes-agent`. |

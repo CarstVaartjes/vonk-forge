@@ -55,7 +55,6 @@ from .agent_jobs import OperatorRetirementRefused
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_job_api import install_artifact_job_routes
 from .artifact_jobs import ArtifactJobService
-from .audit import AuditRecord, IdentityHistoryRecord
 from .auth import (
     MUTATION_ROLES,
     Actor,
@@ -99,13 +98,9 @@ from .model_cache_api import (
     register_model_cache_operation_provider,
 )
 from .operation_api import (
-    AuditEventResponse,
-    AuditResponse,
     BoundedErrorResponse,
     ErrorContextResponse,
     HealthzResponse,
-    IdentityHistoryItem,
-    IdentityHistoryResponse,
     JobDetailResponse,
     JobLogsResponse,
     JobProgress,
@@ -489,12 +484,6 @@ class JobQueue(Protocol):
     ) -> tuple[list[Any], str | None, int]: ...
 
 
-class AuditSink(Protocol):
-    def append(self, event: AuditRecord) -> None: ...
-    def list(self, *, limit: int = 100) -> list[AuditRecord]: ...
-    def identity_history(self, *, limit: int = 100) -> list[IdentityHistoryRecord]: ...
-
-
 def refresh_fleet_metrics(
     metrics: MetricsRegistry,
     fleet_snapshot: FleetSnapshot,
@@ -508,7 +497,6 @@ def create_app(
     *,
     jobs: JobQueue,
     tokens: TokenCodec,
-    audits: AuditSink,
     fleet_projection: Any | None = None,
     fleet_services: FleetOperatorServices | None = None,
     failure_evidence: FailureEvidenceService | None = None,
@@ -818,7 +806,6 @@ def create_app(
 
     install_agent_routes(
         app,
-        audits=audits,
         services=agent,
         enrollment_rate_limiter=enrollment_rate_limiter,
     )
@@ -830,7 +817,6 @@ def create_app(
         install_auth_routes(
             app,
             browser_auth,
-            audits,
             authenticated_actor,
             tokens=tokens,
             now=now,
@@ -839,7 +825,6 @@ def create_app(
     install_catalog_routes(
         app,
         actor_dependency=authenticated_actor,
-        audits=audits,
         service=catalog,
         managed_sync=managed_catalog_sync,
     )
@@ -848,13 +833,11 @@ def create_app(
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
         operations=operations,
-        audits=audits,
     )
     install_profile_application_cancel_route(
         app,
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
-        audits=audits,
     )
     install_gateway_key_routes(
         app, actor_dependency=authenticated_actor, service=gateway_keys
@@ -873,7 +856,6 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         service=model_cache,
-        audits=audits,
     )
     from .recipe_image_availability_api import install_recipe_operator_routes
 
@@ -881,13 +863,11 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         service=recipe_image_availability,
-        audits=audits,
     )
     install_installation_reconciliation_routes(
         app,
         actor_dependency=authenticated_actor,
         operations=run_switch_operations,
-        audits=audits,
     )
 
     @app.get("/api/healthz", response_model=HealthzResponse)
@@ -970,7 +950,6 @@ def create_app(
         fleet_projection=fleet_projection,
         library_projection=library_projection,
         fleet_services=fleet_services,
-        audits=audits,
     )
 
     @app.get(
@@ -1190,57 +1169,6 @@ def create_app(
             ) from None
 
     @app.get(
-        "/api/audit",
-        response_model=AuditResponse,
-        responses=bounded_error_responses(401),
-        operation_id="listAuditEvents",
-    )
-    def audit_view(_actor: Actor = authenticated_actor) -> AuditResponse:
-        return AuditResponse(
-            events=[
-                AuditEventResponse(
-                    request_id=event.request_id,
-                    actor=event.actor,
-                    action=event.action,
-                    authority_revision=event.authority_revision,
-                    targets=list(event.targets),
-                    occurred_at=(
-                        event.occurred_at.isoformat()
-                        if event.occurred_at is not None
-                        else None
-                    ),
-                )
-                for event in audits.list()
-            ]
-        )
-
-    @app.get(
-        "/api/identity-history",
-        response_model=IdentityHistoryResponse,
-        responses=bounded_error_responses(401),
-        operation_id="listIdentityHistory",
-    )
-    def identity_history_view(
-        _actor: Actor = authenticated_actor,
-    ) -> IdentityHistoryResponse:
-        return IdentityHistoryResponse(
-            identities=[
-                IdentityHistoryItem.model_validate(
-                    {
-                        "node_id": record.node_id,
-                        "agent_state": record.agent_state,
-                        "certificate_serial": record.certificate_serial,
-                        "certificate_fingerprint": record.certificate_fingerprint,
-                        "certificate_generation": record.certificate_generation,
-                        "enrolled_at": record.enrolled_at,
-                        "revoked_at": record.revoked_at,
-                    }
-                )
-                for record in audits.identity_history()
-            ]
-        )
-
-    @app.get(
         "/api/jobs/{job_id}",
         response_model=JobDetailResponse,
         responses=bounded_error_responses(401, 404, 422, 503),
@@ -1296,7 +1224,6 @@ def create_app(
         operation_id="resumeJob",
     )
     def resume_job(
-        request: Request,
         job_id: str,
         body: Annotated[JobResumeRequest | None, Body()] = None,
         authenticated: Actor = authenticated_actor,
@@ -1321,15 +1248,6 @@ def create_app(
                 raise HTTPException(
                     status_code=409, detail="job is not waiting for operator"
                 ) from None
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    authenticated.subject,
-                    "job.retire",
-                    None,
-                    (),
-                )
-            )
             return JobResumeResponse(id=job_id, state="failed")
         try:
             operations.resume_job(job_id)
@@ -1339,15 +1257,6 @@ def create_app(
             raise HTTPException(
                 status_code=409, detail="job is not waiting for operator"
             ) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "job.resume",
-                None,
-                (),
-            )
-        )
         return JobResumeResponse(id=job_id, state="queued")
 
     @app.get(
@@ -1412,7 +1321,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from vonk_forge_contracts import RecipeDefinition, content_sha256
 
     from .agent_upgrades import AgentUpgradeService
-    from .audit import SqlAuditStore
     from .availability_production import build_recipe_image_availability
     from .database_authority import (
         DatabaseAuthorityService,
@@ -1773,7 +1681,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         max_parallel=RECIPE_IMAGE_PARALLEL_PREPARATIONS,
         max_parallel_builds=RECIPE_BUILD_PARALLEL_PREPARATIONS,
     )
-    audits_store = SqlAuditStore(sessions, clock)
 
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()
@@ -1861,7 +1768,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     app = create_app(
         jobs=job_service,
         tokens=token_codec,
-        audits=audits_store,
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,

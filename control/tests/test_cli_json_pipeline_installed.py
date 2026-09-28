@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.jobs import JobService
@@ -80,7 +79,6 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
     app = create_app(
         jobs=JobService(sessions, clock=lambda: now),
         tokens=tokens,
-        audits=MemoryAuditStore(),
         fleet_projection=FleetProjection(_Authority(), sessions, clock=lambda: now),
         now=lambda: 100,
     )

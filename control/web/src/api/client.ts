@@ -4,7 +4,6 @@ import type {paths} from "./generated";
 import type {
   AuthSession,
   CliTokenDownload,
-  AuditResponse,
   ControlApi,
   FleetProfileInput,
   FleetProfileList,
@@ -518,9 +517,5 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.POST("/api/jobs/{job_id}/resume", {
       params: {path: {job_id: jobId}},
     }));
-  }
-
-  async audit(signal?: AbortSignal): Promise<AuditResponse> {
-    return resultData(await this.generated.GET("/api/audit", {signal}));
   }
 }

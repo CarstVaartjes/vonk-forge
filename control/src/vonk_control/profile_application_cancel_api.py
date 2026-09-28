@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Path, Request, status
+from fastapi import FastAPI, HTTPException, Path, status
 
-from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
 from .fleet_profile_contract import (
     FleetProfileApplicationCancelRequest,
@@ -27,7 +26,6 @@ def install_profile_application_cancel_route(
     *,
     actor_dependency: Any,
     profiles: Any | None,
-    audits: Any,
 ) -> None:
     from .operation_api import _ADMIN_OPERATION_IDS
 
@@ -80,7 +78,6 @@ def install_profile_application_cancel_route(
         operation_id="cancelProfileApplication",
     )
     def cancel_profile_application(
-        request: Request,
         body: FleetProfileApplicationCancelRequest,
         application_id: str = Path(pattern=_UUID),
         actor: Actor = actor_dependency,
@@ -108,13 +105,4 @@ def install_profile_application_cancel_route(
             raise HTTPException(
                 status_code=503, detail="Profile cancellation unavailable"
             ) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "profile.application.cancel",
-                None,
-                (str(body.profile_number), result.id, body.request_key),
-            )
-        )
         return result

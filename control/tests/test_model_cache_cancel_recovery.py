@@ -80,7 +80,6 @@ def _api(service: ModelCacheService) -> TestClient:
         app,
         actor_dependency=Depends(lambda: Actor("operator", "operator")),
         service=service,
-        audits=None,
     )
     return TestClient(app)
 

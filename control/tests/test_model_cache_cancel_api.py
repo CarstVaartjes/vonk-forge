@@ -38,7 +38,6 @@ def _client(service, role="administrator"):
         app,
         actor_dependency=Depends(lambda: Actor("test", role)),
         service=service,
-        audits=[],
     )
     return TestClient(app)
 

@@ -42,7 +42,7 @@ additional recipe documents for users to maintain.
 Storage ownership is separate from schema ownership. Follow the
 [architecture boundary](architecture-overview.md#state-ownership): canonical
 typed artifact records belong in managed storage, while SQL keeps coordinated intent,
-authorization, exact references, and audit. A shared DTO is not permission to
+authorization, and exact references. A shared DTO is not permission to
 persist two authoritative copies of its availability or checkpoint fields.
 Regenerate connected clients/wire schemas when contracts change; validate
 filesystem records with the same canonical JSON semantics as other producers.
