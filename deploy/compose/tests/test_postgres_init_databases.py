@@ -84,7 +84,9 @@ def test_database_initializer_rejects_an_invalid_password(tmp_path: Path) -> Non
     assert result.stderr == "LiteLLM database password is invalid\n"
 
 
-def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None:
+@pytest.fixture(scope="module")
+def postgres_image() -> str:
+    """Pull the pinned image once, outside the test's time budget."""
     if shutil.which("docker") is None:
         _docker_unavailable("Docker is required for the fresh PostgreSQL test")
     docker_info = subprocess.run(
@@ -96,6 +98,20 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
     )
     if docker_info.returncode != 0:
         _docker_unavailable("Docker is unavailable for the fresh PostgreSQL test")
+    pulled = subprocess.run(
+        ["docker", "pull", "--quiet", POSTGRES_IMAGE],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert pulled.returncode == 0, pulled.stderr
+    return POSTGRES_IMAGE
+
+
+def test_fresh_postgres_owns_a_distinct_litellm_database(
+    tmp_path: Path, postgres_image: str
+) -> None:
     password_file = tmp_path / "litellm-password"
     password_file.write_text("b" * 64 + "\n", encoding="ascii")
     password_file.chmod(0o600)
@@ -127,7 +143,7 @@ def test_fresh_postgres_owns_a_distinct_litellm_database(tmp_path: Path) -> None
                 f"{ENTRYPOINT}:/usr/local/bin/vonk-postgres-entrypoint:ro",
                 "--entrypoint",
                 "/usr/local/bin/vonk-postgres-entrypoint",
-                POSTGRES_IMAGE,
+                postgres_image,
                 "postgres",
             ],
             check=True,
