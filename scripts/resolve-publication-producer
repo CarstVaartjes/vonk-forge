@@ -72,12 +72,18 @@ def resolve(
     ]
     exact.sort(key=lambda r: (r.get("created_at", ""), r.get("id", 0)), reverse=True)
     if exact:
-        latest = exact[0]
-        if latest.get("status") != "completed":
+        # Evidence from a successful run for this exact source stays valid; a
+        # later failed or running re-run (for example an operator dispatch
+        # that raced the push build) must not revoke it.
+        for run_record in exact:
+            if (
+                run_record.get("status") == "completed"
+                and run_record.get("conclusion") == "success"
+            ):
+                return 0, (run_record["id"], run_record["run_number"], source)
+        if any(run_record.get("status") != "completed" for run_record in exact):
             return 2, None
-        if latest.get("conclusion") != "success":
-            return 1, None
-        return 0, (latest["id"], latest["run_number"], source)
+        return 1, None
     pages = json.loads(
         run(
             "gh",
