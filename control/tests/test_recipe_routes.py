@@ -54,6 +54,7 @@ from vonk_control.recipe_routes import (
 from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
+    RouteUpdateFenced,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
@@ -967,67 +968,47 @@ def test_temporary_publication_failure_stays_pending_and_converges(
         assert run.route_error is None
 
 
-def test_invalid_route_contract_is_not_retried_as_a_temporary_failure(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError("supervisor socket unavailable"),
+        RuntimeError("recipe route document is invalid"),
+    ],
+)
+def test_route_publication_keeps_retrying_at_a_capped_rate_until_it_converges(
+    tmp_path: Path, error: BaseException
 ) -> None:
-    """An unrecognised route error stays one precise blocked reason."""
+    """A serving run is never left permanently unlisted by publication errors."""
 
-    service, _publisher, _applied, run_id = setup(tmp_path)
+    clock = MutableClock(NOW)
+    service, _publisher, _applied, run_id = setup(tmp_path, clock=clock)
     with service.sessions.begin() as session:
         _recipe_run(session, run_id).route_state = "pending"
-    now = [NOW]
-    routes = _TransientFirstPublish(
-        service, RuntimeError("recipe route document is invalid")
-    )
-    worker = RecipeOperationWorker(service.sessions, routes, clock=lambda: now[0])
+    routes = _TransientFirstPublish(service, error, failures=12)
+    worker = RecipeOperationWorker(service.sessions, routes, clock=clock)
 
+    for attempt in range(1, 13):
+        assert worker.tick() is True
+        with service.sessions() as session:
+            run = _recipe_run(session, run_id)
+            assert run.route_state == "pending"
+            assert run.route_attempts == attempt
+            assert str(error) in (run.route_error or "")
+            assert run.route_next_attempt_at is not None
+            due_at = _aware(run.route_next_attempt_at)
+        assert timedelta(0) < due_at - clock.now <= timedelta(seconds=60)
+        clock.now = due_at + timedelta(seconds=1)
+
+    # Node evidence ages with the simulated clock; refresh it like heartbeats.
+    with service.sessions.begin() as session:
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.updated_at = clock.now
     assert worker.tick() is True
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
-        assert run.route_state == "failed"
-        assert run.route_next_attempt_at is None
-        assert run.route_error == "RuntimeError: recipe route document is invalid"
-
-    now[0] = NOW + timedelta(hours=1)
-    assert worker.tick() is False
-    assert routes.attempts == 1
-
-
-def test_route_publication_attempt_budget_ends_in_one_blocked_reason(
-    tmp_path: Path,
-) -> None:
-    """A dependency that never returns exhausts, it does not retry forever."""
-
-    service, _publisher, _applied, run_id = setup(tmp_path)
-    with service.sessions.begin() as session:
-        _recipe_run(session, run_id).route_state = "pending"
-    now = [NOW]
-    routes = _TransientFirstPublish(
-        service, OSError("supervisor socket unavailable"), failures=99
-    )
-    worker = RecipeOperationWorker(service.sessions, routes, clock=lambda: now[0])
-
-    for _ in range(20):
-        if worker.tick() is False:
-            break
-        with service.sessions() as session:
-            run = _recipe_run(session, run_id)
-            if run.route_state != "pending":
-                break
-            pending_until = run.route_next_attempt_at
-        assert pending_until is not None
-        now[0] = _aware(pending_until) + timedelta(seconds=1)
-
-    with service.sessions() as session:
-        run = _recipe_run(session, run_id)
-        assert run.route_state == "failed"
-        assert run.route_attempts == 6
-        assert run.route_next_attempt_at is None
-        assert run.route_error is not None
-        assert "did not converge after 6 attempts" in run.route_error
-
-    # The exhausted run is no longer a publication candidate.
-    assert worker.tick() is False
+        assert run.route_state == "published", run.route_error
+        assert run.route_attempts == 0
+        assert run.route_error is None
 
 
 def test_acknowledgement_failure_after_activation_is_temporary() -> None:
@@ -1055,6 +1036,7 @@ def test_acknowledgement_failure_after_activation_is_temporary() -> None:
         routes_module.publication_is_temporary(RecipeRouteNotReady("waiting")) is True
     )
     assert routes_module.publication_is_temporary(OSError("socket")) is True
+    assert routes_module.publication_is_temporary(RouteUpdateFenced("updating")) is True
     assert routes_module.publication_is_temporary(LiteLlmPolicyError("bad")) is False
     assert (
         routes_module.publication_is_temporary(RuntimeError("invalid document"))
@@ -1085,7 +1067,8 @@ def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> N
     ).tick()
     with failed_service.sessions() as session:
         failed = _recipe_run(session, failed_run)
-        assert failed.route_state == "failed"
+        assert failed.route_state == "pending"
+        assert failed.route_next_attempt_at is not None
         assert failed.route_error is not None
         assert "LiteLlmPolicyError" in failed.route_error
 
@@ -1963,3 +1946,61 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     else:
         assert final_marker.generation == 1
         assert acknowledgements == [1]
+
+
+def _live_models(root: Path) -> list[str]:
+    marker = json.loads((root / "activation.json").read_text())
+    config = json.loads(
+        (root / "generations" / marker["directory"] / "litellm.json").read_text()
+    )
+    return [entry["model_name"] for entry in config["model_list"]]
+
+
+@pytest.mark.parametrize("run_state", ["lost", "stopping", "running"])
+def test_last_route_withdrawn_outside_publication_empties_litellm(
+    tmp_path: Path, run_state: str
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(run_id)
+    assert _live_models(tmp_path / "live") == ["qwen"]
+
+    # Lifecycle paths (lost agent, cancelled start, observation deadline) mark
+    # the route withdrawn in the database without publishing a new bundle.
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        run.state = run_state
+        run.route_state = "withdrawn"
+
+    clock.now += timedelta(seconds=1)
+    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+    assert _live_models(tmp_path / "live") == []
+    with service.sessions() as session:
+        owner = _publication_owner(session)
+        assert _publication(session, owner.authority_id).state == "routes-withdrawn"
+    clock.now += timedelta(seconds=1)
+    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is False
+
+
+def test_one_run_with_an_invalid_endpoint_does_not_expire_the_other_routes(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, healthy_run = setup(tmp_path / "database", clock=clock)
+    broken_run = add_running_run(
+        base, healthy_run, alias="broken", route_state="pending", identity=3
+    )
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(healthy_run)
+    service.publish_run(broken_run)
+    assert sorted(_live_models(tmp_path / "live")) == ["broken", "qwen"]
+    with service.sessions.begin() as session:
+        node = session.query(RunNode).filter_by(run_id=broken_run).one()
+        node.endpoint = {"url": "http://192.0.2.9:8000"}
+
+    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+    assert _live_models(tmp_path / "live") == ["qwen"]
+    with service.sessions() as session:
+        assert _recipe_run(session, healthy_run).route_state == "published"
+        assert _recipe_run(session, broken_run).route_state == "withdrawn"
