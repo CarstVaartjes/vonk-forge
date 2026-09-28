@@ -112,7 +112,6 @@ def _installation_node() -> models.InstallationNode:
         state="planned",
         required_bytes=1000,
         installed_bytes=0,
-        evidence_digest="e" * 64,
         updated_at=NOW,
     )
 
