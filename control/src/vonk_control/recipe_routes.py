@@ -48,7 +48,11 @@ from .recipe_execution_contract import (
     parse_stored_run_endpoint,
     run_plan_document,
 )
-from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
+from .route_runtime import (
+    RECIPE_ROUTE_AUTHORITY_ID,
+    ActivationMarker,
+    RouteUpdateFenced,
+)
 from .routes import RouteState
 
 _ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
@@ -105,7 +109,8 @@ def publication_is_temporary(error: BaseException) -> bool:
         # The generation is activated but its supervisor acknowledgement was
         # not confirmed, so a later attempt reconciles that same generation.
         return True
-    return isinstance(error, OSError)
+    # A Controller update fence lifts once the update finishes.
+    return isinstance(error, OSError | RouteUpdateFenced)
 
 
 @dataclass(frozen=True)
@@ -925,6 +930,20 @@ class RecipeRouteService:
         )
         if candidate.included or candidate.endpoints or candidate.state.aliases:
             return False
+        owner = session.get(RoutePublicationOwner, 1)
+        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+        if (
+            owner is not None
+            and owner.authority_id == RECIPE_ROUTE_AUTHORITY_ID
+            and publication is not None
+            and publication.state == "completed"
+            and publication.generation == owner.owner_generation
+        ):
+            # The live bundle still lists models although no run is published:
+            # a lifecycle path withdrew the last route only in the database.
+            withdrawal = self.prepare_withdrawal_in_session(session, frozenset())
+            self._publish_withdrawal_in_session(session, withdrawal)
+            return True
         current = self._current_empty_publication(
             session,
             route_digest=candidate.state.digest,
@@ -1224,11 +1243,16 @@ class RecipeRouteService:
                     )
                 evidence_times.append(observed)
                 node_ids.add(node.node_id)
-            endpoint = _endpoint(
-                endpoint_owner,
-                self._management_policy,
-                operation_id=f"recipe:{run.id}:rank:{endpoint_owner.rank}",
-            )
+            try:
+                endpoint = _endpoint(
+                    endpoint_owner,
+                    self._management_policy,
+                    operation_id=f"recipe:{run.id}:rank:{endpoint_owner.rank}",
+                )
+            except RecipeRouteError as error:
+                # Bind the failure to its run so one bad endpoint withdraws
+                # only that route instead of blocking every other one.
+                raise RecipeRouteError(str(error), run_id=run.id) from error
             aliases[run.alias] = endpoint.api_base
             upstream_models[run.alias] = upstream_model
             included.add(run.id)
