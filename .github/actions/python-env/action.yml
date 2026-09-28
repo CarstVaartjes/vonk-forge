@@ -25,3 +25,6 @@ runs:
     - name: Sync the locked control environment
       shell: bash
       run: scripts/retry-dependency-fetch uv sync --project control --frozen
+    - name: Sync the CLI's own dependencies for the installed-CLI tests
+      shell: bash
+      run: scripts/sync-cli-dependencies

@@ -106,6 +106,7 @@ run_python_suites() {
         marker_args=(-m "$marker_expression")
     fi
     use_recipe_library
+    scripts/sync-cli-dependencies
     if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
         scripts/pull-test-images postgres caddy step-ca tailscale python
     fi

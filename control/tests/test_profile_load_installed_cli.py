@@ -264,12 +264,6 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
         extra={
             "VONK_BUILD_SOURCE_SHA": "d" * 40,
             "VONK_BUILD_RELEASE_VERSION": "0.1.1",
-            # The offline install reads the dependency wheels from the cache
-            # the test environment itself was synced from.
-            "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR")
-            or subprocess.run(
-                [uv, "cache", "dir"], capture_output=True, text=True, check=True
-            ).stdout.strip(),
         },
     )
     built = subprocess.run(
@@ -294,43 +288,9 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
     wheels = list(wheel_directory.glob("vonk_cluster_profiles-*-py3-none-any.whl"))
     assert len(wheels) == 1
     venv = workspace / "venv"
-    created = subprocess.run(
-        [uv, "venv", "--python", sys.executable, str(venv)],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert created.returncode == 0, created.stderr
-    python = venv / "bin" / "python"
-    installed = subprocess.run(
-        [
-            uv,
-            "pip",
-            "install",
-            "--offline",
-            "--compile-bytecode",
-            "--python",
-            str(python),
-            str(wheels[0]),
-        ],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
-    if installed.returncode != 0 and (
-        "not found in the cache" in installed.stderr
-        or "network was disabled" in installed.stderr
-    ):
-        from tests.subprocess_environment import prerequisite_unavailable
+    from tests.subprocess_environment import install_cli_wheel
 
-        prerequisite_unavailable(
-            "needs_uv_cache: offline installed-CLI setup requires dependency wheels in the uv cache"
-        )
-    assert installed.returncode == 0, installed.stderr
+    python = install_cli_wheel(uv, venv, wheels[0], environment)
     executable = venv / "bin" / "vonkctl"
     assert executable.is_file()
     isolated_import = subprocess.run(

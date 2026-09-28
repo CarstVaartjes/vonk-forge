@@ -134,8 +134,8 @@ so the root project's `dev` group carries the repository's ruff pin.
 
 Tests never download, build an environment or pull an image. A test that needs
 a wheel builds it with the locked `hatchling` in the running interpreter; one
-that installs a wheel into a scratch venv installs `--offline` from the uv cache
-the environment was synced from; Docker-backed tests use the pinned images
+that installs a wheel into a scratch venv installs it `--no-deps` and links the
+CLI's own locked dependencies, which `scripts/sync-cli-dependencies` prepares; Docker-backed tests use the pinned images
 `scripts/pull-test-images` pulls beforehand (CI does the same, with retries).
 
 Use a writable, task-specific uv cache. Replace `vonk-example-change` in these
@@ -145,6 +145,7 @@ cache paths with the task name. Run from the active task worktree:
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 export UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache
 scripts/build-control-wheel
+scripts/sync-cli-dependencies
 
 # Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
 uv run --project control --frozen pytest -q control/tests -m "not lane" -n auto --dist loadfile
