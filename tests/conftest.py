@@ -17,6 +17,14 @@ from pathlib import Path
 
 import pytest
 
+from tools import pytest_budget
+
+
+def pytest_addoption(
+    parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager
+) -> None:
+    pytest_budget.register(pluginmanager)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def hermetic_git_config() -> Iterator[None]:

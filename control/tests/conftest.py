@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -15,10 +16,12 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from .api_response_witness import (  # noqa: F401 - pytest discovers imported hooks.
-    pytest_addoption,
     pytest_runtest_teardown,
     pytest_sessionfinish,
     pytest_terminal_summary,
+)
+from .api_response_witness import (
+    pytest_addoption as _api_response_addoption,
 )
 from .api_response_witness import (
     pytest_configure as _api_response_pytest_configure,
@@ -43,6 +46,31 @@ _REGISTERED_MARKERS = (
     "needs_uv_cache: requires cached wheels for offline installed-CLI tests",
     "postgres: provisions a disposable PostgreSQL server through Docker",
 )
+
+
+def _load_budget_plugin():
+    """Load the shared per-test budget without exposing the repository root.
+
+    The repository root also has a ``tests`` package, so it cannot go on this
+    suite's import path.
+    """
+
+    name = "vonk_pytest_budget"
+    if name not in sys.modules:
+        path = Path(__file__).resolve().parents[2] / "tools" / "pytest_budget.py"
+        spec = importlib.util.spec_from_file_location(name, path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def pytest_addoption(
+    parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager
+) -> None:
+    _api_response_addoption(parser)
+    _load_budget_plugin().register(pluginmanager)
 
 
 def pytest_configure(config: pytest.Config) -> None:
