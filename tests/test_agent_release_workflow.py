@@ -416,7 +416,6 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "cargo clippy --workspace --all-targets --locked -- -D warnings" in security
     assert "cargo test --workspace --locked" in security
     assert "tests/scripts/test_agent_deb.py" in security
-    assert "tests/acceptance/test_rust_agent_parity.py" in security
     assert "scripts/verify-agent-systemd" in text
     assert "scripts/materialize-agent-tools --output-root target" in text
     materializer = (ROOT / "scripts/materialize-agent-tools").read_text()

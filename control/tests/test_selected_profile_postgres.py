@@ -177,7 +177,6 @@ def test_selected_empty_profile_keeps_new_spark_idle_after_restart_and_saved_edi
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -256,7 +255,6 @@ def test_blocked_roster_preview_retries_without_advancing_selection(
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -321,7 +319,6 @@ def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recover
                 state="active",
                 protocol_version=1,
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )

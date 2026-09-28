@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from uuid import uuid4
-
 import pytest
 from pydantic import BaseModel
 from vonk_agent_protocol import (
@@ -16,13 +13,6 @@ from vonk_agent_protocol import (
 def _assignment() -> DistributionAssignment:
     return DistributionAssignment.parse(
         {
-            "schema_version": 2,
-            "assignment_id": str(uuid4()),
-            "plan_digest": "a" * 64,
-            "generation": 3,
-            "node_id": "spk_" + "b" * 32,
-            "expires_at": datetime(2026, 9, 5, 12, tzinfo=UTC).isoformat(),
-            "model_artifact_set_sha256": "c" * 64,
             "objects": [
                 {
                     "name": "weights/model.bin",
@@ -100,24 +90,10 @@ def test_distribution_preserves_safe_object_names(name: str) -> None:
     assert DistributionAssignment.parse(wire).objects[0].name == name
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("schema_version", 2.0),
-        ("schema_version", True),
-        ("generation", True),
-        ("generation", 3.0),
-        ("expires_at", "2026-09-05T12:00:00"),
-        ("expires_at", "2026-09-05T12:00:00+02:00"),
-    ],
-)
-def test_distribution_rejects_wrong_json_types_and_non_utc_expiry(
-    field: str, value: object
-) -> None:
+def test_distribution_assignment_carries_only_the_object_set() -> None:
     wire = _assignment().to_mapping()
-    wire[field] = value
     with pytest.raises(AgentProtocolError):
-        DistributionAssignment.parse(wire)
+        DistributionAssignment.parse(wire | {"node_id": "spk_" + "b" * 32})
 
 
 def test_compiled_distribution_reuses_the_assignment_object_contract() -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import importlib.resources
 import json
 from collections.abc import Callable
@@ -36,50 +35,25 @@ def valid_claim() -> dict[str, object]:
         ).read_text(encoding="utf-8")
     )
     payload = RecipeStopPayload(
-        schema_version=2,
         run_id="00000000-0000-4000-8000-000000000004",
         target_runtime_id="00000000-0000-4000-8000-000000000004",
         run_generation=1,
-        node_id="spk_00000000000000000000000000000001",
         installation_id="00000000-0000-4000-8000-000000000005",
         recipe_revision_id="00000000-0000-4000-8000-000000000006",
-        recipe_content_sha256=compiled_plan["identity"]["recipe_revision_sha256"],
         mapping_id="00000000-0000-4000-8000-000000000007",
-        mapping_generation=1,
         plan_digest="a" * 64,
-        rank=0,
-        role="entrypoint",
-        world_size=1,
         compiled_execution_plan=compiled_plan,
     ).model_dump(mode="json")
     return {
-        "schema_version": 1,
-        "job_id": "00000000-0000-4000-8000-000000000001",
-        "operation_id": "00000000-0000-4000-8000-000000000002",
-        "attempt": 1,
         "fence": "00000000-0000-4000-8000-000000000003",
-        "node_id": "spk_00000000000000000000000000000001",
         "operation": "recipe.stop",
-        "authority_revision": "a" * 64,
-        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
         "payload": payload,
         "deadline": "2026-08-03T12:00:00+00:00",
     }
 
 
 def valid_attempt() -> dict[str, object]:
-    return {
-        key: valid_claim()[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    }
+    return {"fence": valid_claim()["fence"]}
 
 
 def claim_with_payload(payload: dict[str, str]) -> dict[str, object]:
@@ -90,11 +64,7 @@ def claim_with_payload(payload: dict[str, str]) -> dict[str, object]:
 def claim_for_operation(
     operation: str, payload: dict[str, object]
 ) -> dict[str, object]:
-    return valid_claim() | {
-        "operation": operation,
-        "payload": payload,
-        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
-    }
+    return valid_claim() | {"operation": operation, "payload": payload}
 
 
 def recipe_build_vectors() -> dict[str, object]:
@@ -108,26 +78,9 @@ def recipe_build_vectors() -> dict[str, object]:
 
 
 def recipe_start_result(
-    *, endpoint: str = "http://[fd00::211]:8000", model_identity: str | None = None
+    *, endpoint: str = "http://[fd00::211]:8000"
 ) -> dict[str, object]:
-    evidence = {
-        "recipe_revision_id": "00000000-0000-4000-8000-000000000006",
-        "recipe_content_sha256": "a" * 64,
-        "image_digest": "sha256:" + "b" * 64,
-        "artifact_set_digest": "c" * 64,
-        "model_identity": model_identity,
-        "rank": 0,
-        "world_size": 1,
-        "memory_reservation_bytes": 1024,
-        "endpoint": endpoint,
-        "ready": True,
-        "run_generation": 1,
-        "runtime_arguments_sha256": "e" * 64,
-        "local_address": None,
-        "master_address": None,
-        "master_port": None,
-    }
-    return {"endpoint": endpoint, "evidence": evidence}
+    return {"endpoint": endpoint}
 
 
 def apply_vector_changes(
@@ -237,11 +190,6 @@ def test_protocol_rejects_client_selected_parameter_path(
         AgentClaim.parse(claim_with_payload({"artifact_path": target}))
 
 
-def test_claim_rejects_changed_payload_digest() -> None:
-    with pytest.raises(AgentProtocolError, match="digest"):
-        AgentClaim.parse(valid_claim() | {"payload": {"healthy": True}})
-
-
 @pytest.mark.parametrize(
     "deadline",
     ["2026-08-03T12:00:00", "2026-08-03T12:00:00+02:00"],
@@ -257,9 +205,6 @@ def test_claim_copies_canonical_payload_before_becoming_frozen() -> None:
     source = valid_claim() | {
         "payload": payload | {"run_id": "00000000-0000-4000-8000-000000000005"}
     }
-    source["payload_digest"] = hashlib.sha256(
-        canonical_message(source["payload"])
-    ).hexdigest()
     claim = AgentClaim.parse(source)
     source["payload"]["run_id"] = "00000000-0000-4000-8000-000000000006"  # type: ignore[index]
 
@@ -268,7 +213,7 @@ def test_claim_copies_canonical_payload_before_becoming_frozen() -> None:
         == "00000000-0000-4000-8000-000000000005"
     )
     with pytest.raises(ValidationError):
-        claim.attempt = 2  # type: ignore[misc]
+        claim.fence = "00000000-0000-4000-8000-000000000009"  # type: ignore[misc]
 
 
 def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -> None:
@@ -276,18 +221,9 @@ def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -
 
     with pytest.raises(ValidationError, match="unsafe"):
         AgentClaim(
-            schema_version=1,
-            job_id=raw["job_id"],
-            operation_id=raw["operation_id"],
-            attempt=1,
             fence=raw["fence"],
-            node_id=raw["node_id"],
             operation=AgentOperation.RECIPE_STOP,
-            authority_revision="a" * 64,
-            payload_digest=hashlib.sha256(
-                canonical_message({"schema_version": 1, "command": "unsafe"})
-            ).hexdigest(),
-            payload={"schema_version": 1, "command": "unsafe"},
+            payload={"command": "unsafe"},
             deadline=datetime(2026, 8, 3, 12, tzinfo=UTC),
         )
 
@@ -303,37 +239,12 @@ def test_direct_result_construction_rejects_client_filesystem_paths() -> None:
         )
 
 
-def test_recipe_start_result_accepts_only_typed_endpoint_and_model_identity_uris() -> (
-    None
-):
-    raw = valid_attempt()
-    revision = "sha256:" + "a" * 64
-    result = recipe_start_result(
-        model_identity=(
-            "https://models.example.invalid/organization/model.bin?download=true@"
-            + revision
-        )
+def test_recipe_start_result_accepts_only_a_typed_endpoint_uri() -> None:
+    parsed = AgentResult.parse(
+        valid_attempt() | {"state": "succeeded", "result": recipe_start_result()}
     )
 
-    parsed = AgentResult.parse(raw | {"state": "succeeded", "result": result})
-
     assert parsed.result["endpoint"] == "http://[fd00::211]:8000"
-
-
-@pytest.mark.parametrize(
-    "model_identity",
-    [
-        "Qwen/Qwen3-8B@" + "a" * 40,
-        "ghcr.io/vonkforge/model@sha256:" + "a" * 64,
-        "https://example.invalid/model.bin?download=true@sha256:" + "a" * 64,
-    ],
-)
-def test_recipe_result_accepts_each_authorized_model_identity_form(
-    model_identity: str,
-) -> None:
-    result = recipe_start_result(model_identity=model_identity)
-
-    AgentResult.parse(valid_attempt() | {"state": "succeeded", "result": result})
 
 
 @pytest.mark.parametrize(
@@ -343,26 +254,12 @@ def test_recipe_result_accepts_each_authorized_model_identity_form(
         ("endpoint", "http://192.168.1.211:8000/private"),
         ("endpoint", "http://worker.example.invalid:8000"),
         ("endpoint", "http://192.168.1.211:0"),
-        ("model_identity", "/models/private@sha256:" + "a" * 64),
-        ("model_identity", "../private@sha256:" + "a" * 64),
-        (
-            "model_identity",
-            "https://user:password@example.invalid/model@sha256:" + "a" * 64,
-        ),
-        (
-            "model_identity",
-            "https://example.invalid/model?access_token=unsafe@sha256:" + "a" * 64,
-        ),
     ],
 )
 def test_typed_recipe_result_uri_fields_reject_path_or_credential_confusion(
     field: str, value: str
 ) -> None:
-    result = recipe_start_result()
-    if field == "model_identity":
-        result["evidence"][field] = value  # type: ignore[index]
-    else:
-        result[field] = value
+    result = recipe_start_result() | {field: value}
 
     with pytest.raises(AgentProtocolError, match="path|credential|endpoint"):
         AgentResult.parse(valid_attempt() | {"state": "succeeded", "result": result})
@@ -507,7 +404,6 @@ def test_agent_upgrade_success_uses_the_current_typed_result() -> None:
         "build_digest": "sha256:" + "e" * 64,
         "package_sha256": "b" * 64,
         "package_version": "0.1.0~dev.330+g0123456789ab",
-        "self_test_passed": True,
         "status": "upgraded",
         "activation_receipt": {
             "schema_version": 2,
@@ -597,13 +493,11 @@ def test_safe_key_scanner_preserves_path_token_collisions(
     _validate_safe_keys({field: "release"})
 
 
-def test_progress_and_result_are_fenced_node_messages() -> None:
+def test_progress_and_result_are_fenced_messages() -> None:
     progress = AgentProgress.parse(valid_attempt() | {"progress": {"phase": "probe"}})
-    result = AgentResult.parse(
-        valid_attempt() | {"state": "succeeded", "result": {"stopped": True}}
-    )
+    result = AgentResult.parse(valid_attempt() | {"state": "succeeded", "result": {}})
 
-    assert progress.node_id == "spk_00000000000000000000000000000001"
+    assert progress.fence == result.fence
     assert result.state == "succeeded"
 
 
@@ -647,7 +541,6 @@ def test_operation_enum_contains_only_supported_operations() -> None:
 
 def test_removed_package_operation_strings_are_not_protocol_claims() -> None:
     payload = {
-        "schema_version": 1,
         "deployment_id": "sample-package",
         "release_digest": "a" * 64,
         "deployment_digest": "b" * 64,
@@ -656,38 +549,6 @@ def test_removed_package_operation_strings_are_not_protocol_claims() -> None:
 
     assert not schema("agent-job.schema.json").is_valid(raw)
     with pytest.raises(AgentProtocolError, match="operation"):
-        AgentClaim.parse(raw)
-
-
-def test_reconciliation_claim_node_must_match_its_bound_identity() -> None:
-    payload = {
-        "schema_version": 1,
-        "node_id": "spk_" + "1" * 32,
-        "installation_id": "00000000-0000-4000-8000-000000000001",
-        "install_operation_id": "00000000-0000-4000-8000-000000000002",
-        "install_operation_payload_sha256": "a" * 64,
-        "plan_digest": "b" * 64,
-        "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
-        "recipe_content_sha256": "c" * 64,
-        "compiled_spec_canonical_sha256": "d" * 64,
-    }
-    valid = claim_for_operation("recipe.reconcile", payload)
-    valid["node_id"] = payload["node_id"]
-    valid["payload_digest"] = hashlib.sha256(canonical_message(payload)).hexdigest()
-    AgentClaim.parse(valid)
-
-    mismatched = valid | {"node_id": "spk_" + "2" * 32}
-    with pytest.raises(AgentProtocolError, match="reconciliation node"):
-        AgentClaim.parse(mismatched)
-
-
-def test_recipe_stop_claim_node_must_match_the_typed_stop_plan() -> None:
-    raw = valid_claim()
-    payload = dict(raw["payload"])
-    payload["node_id"] = "spk_" + "2" * 32
-    raw = claim_for_operation("recipe.stop", payload)
-
-    with pytest.raises(AgentProtocolError, match="stop node"):
         AgentClaim.parse(raw)
 
 
@@ -735,15 +596,6 @@ def schema(name: str) -> Draft202012Validator:
             valid_attempt()
             | {"state": "succeeded", "result": {"log_path": "/tmp/log"}},
         ),
-        (
-            "agent-result.schema.json",
-            valid_attempt()
-            | {
-                "deadline": "2026-08-03T12:00:00+02:00",
-                "state": "succeeded",
-                "result": {},
-            },
-        ),
     ],
 )
 def test_schemas_reject_protocol_boundary_violations(
@@ -758,15 +610,6 @@ def test_schemas_reject_protocol_boundary_violations(
         (
             "agent-job.schema.json",
             valid_claim() | {"deadline": "2026-99-99T12:00:00+00:00"},
-        ),
-        (
-            "agent-result.schema.json",
-            valid_attempt()
-            | {
-                "deadline": "2026-99-99T12:00:00+00:00",
-                "state": "succeeded",
-                "result": {},
-            },
         ),
     ],
 )
@@ -792,10 +635,7 @@ def test_shared_schema_validator_and_parser_reject_oversized_canonical_documents
     )
     document = {"x": "x" * (maximum + 1)}
     if name == "agent-job.schema.json":
-        raw = valid_claim() | {
-            "payload": document,
-            "payload_digest": hashlib.sha256(canonical_message(document)).hexdigest(),
-        }
+        raw = valid_claim() | {"payload": document}
         parser = AgentClaim.parse
     else:
         raw = valid_attempt() | {"state": "succeeded", "result": document}
@@ -820,14 +660,10 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             / "compiled_plan_751.json"
         ).read_text(encoding="utf-8")
     )
-    placement = compiled_plan["runtime"]["placement"]
     if operation == "recipe.install":
         corpus_payload = {
-            "schema_version": 2,
             "installation_id": "00000000-0000-4000-8000-000000000004",
             "plan_digest": "b" * 64,
-            "rank": placement["rank"],
-            "role": placement["role"],
             "expected_bytes": compiled_plan["identity"]["model_artifact_bytes"],
             "compiled_execution_plan": compiled_plan,
         }
@@ -835,33 +671,14 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
         compiled_plan = deepcopy(compiled_plan)
         compiled_plan["runtime"]["placement"]["endpoint_address"] = "10.0.0.2"
         compiled_plan["security"]["network_mode"] = "bridge"
-        placement = compiled_plan["runtime"]["placement"]
         corpus_payload = {
-            "schema_version": 2,
             "run_id": "00000000-0000-4000-8000-000000000005",
             "installation_id": "00000000-0000-4000-8000-000000000004",
             "recipe_revision_id": "00000000-0000-4000-8000-000000000006",
-            "recipe_content_sha256": compiled_plan["identity"][
-                "recipe_revision_sha256"
-            ],
             "mapping_id": "00000000-0000-4000-8000-000000000007",
-            "mapping_generation": 1,
             "run_generation": 1,
-            "image_digest": compiled_plan["runtime"]["image_digest"],
             "plan_digest": "b" * 64,
-            "alias": "synthetic-tiny",
-            "rank": placement["rank"],
-            "role": placement["role"],
-            "port": placement["port"],
-            "reserved_memory_bytes": placement["reserved_memory_bytes"],
-            "memory_floor_bytes": placement["memory_floor_bytes"],
-            "memory_kind": placement["memory_kind"],
-            "endpoint_address": placement["endpoint_address"],
-            "world_size": placement["world_size"],
             "compiled_execution_plan": compiled_plan,
-            "local_address": placement["local_address"],
-            "master_address": placement["master_address"],
-            "master_port": placement["master_port"],
         }
 
     claim = AgentClaim.parse(claim_for_operation(operation, corpus_payload))
@@ -889,22 +706,17 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
 def test_core_schemas_are_derived_from_the_registry(name: str) -> None:
     validator = schema_validator(name)
     assert validator.schema["additionalProperties"] is False
-    assert "schema_version" in validator.schema["required"]
-    assert validator.schema["properties"]["attempt"]["minimum"] == 1
+    assert "fence" in validator.schema["required"]
 
 
 def test_known_operation_result_uses_its_typed_result_model() -> None:
     parsed = validate_result_for_operation(
-        AgentOperation.RECIPE_STOP,
-        {"stopped": True},
-        state="succeeded",
+        AgentOperation.RECIPE_STOP, {}, state="succeeded"
     )
     assert parsed is not None
     with pytest.raises(AgentProtocolError, match="typed model"):
         validate_result_for_operation(
-            AgentOperation.RECIPE_STOP,
-            {"stopped": "true"},
-            state="succeeded",
+            AgentOperation.RECIPE_STOP, {"stopped": True}, state="succeeded"
         )
 
 
@@ -913,17 +725,7 @@ def test_every_current_operation_has_a_result_model() -> None:
 
 
 def test_distribution_result_cannot_fall_through_to_generic_evidence() -> None:
-    complete = {
-        "assignment_id": "00000000-0000-4000-8000-000000000004",
-        "model_artifact_set_sha256": "a" * 64,
-        "verified": True,
-        "verified_digests": ["b" * 64],
-        "verified_image_digest": "sha256:" + "c" * 64,
-        "imported_image_digest": "sha256:" + "c" * 64,
-        "verified_oci_layout_sha256": "d" * 64,
-        "oci_image_digest": "sha256:" + "c" * 64,
-        "downloaded_bytes": 1024,
-    }
+    complete = {"downloaded_bytes": 1024}
     parsed = validate_result_for_operation(
         AgentOperation.ARTIFACT_DISTRIBUTION,
         complete,
@@ -934,29 +736,6 @@ def test_distribution_result_cannot_fall_through_to_generic_evidence() -> None:
         validate_result_for_operation(
             AgentOperation.ARTIFACT_DISTRIBUTION,
             complete | {"downloaded_bytes": "1024"},
-            state="succeeded",
-        )
-
-
-def test_result_from_an_agent_that_still_sends_evidence_digest_is_accepted() -> None:
-    """A fleet upgrade can briefly pair an older agent with this Controller."""
-
-    legacy = recipe_start_result()
-    legacy["evidence_digest"] = "f" * 64
-    legacy["evidence"] = dict(legacy["evidence"]) | {"evidence_digest": "d" * 64}
-    parsed = validate_result_for_operation(
-        AgentOperation.RECIPE_START, legacy, state="succeeded"
-    )
-    assert canonical_message(parsed) == canonical_message(
-        validate_result_for_operation(
-            AgentOperation.RECIPE_START, recipe_start_result(), state="succeeded"
-        )
-    )
-    assert b"evidence_digest" not in canonical_message(parsed)
-    with pytest.raises(AgentProtocolError, match="typed model"):
-        validate_result_for_operation(
-            AgentOperation.RECIPE_START,
-            recipe_start_result() | {"unexpected": "f" * 64},
             state="succeeded",
         )
 

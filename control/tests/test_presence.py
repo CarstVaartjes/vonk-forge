@@ -71,7 +71,7 @@ def presence_system(tmp_path):
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_ID, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_ID, state="active"))
         session.add(
             AgentCertificate(
                 serial="serial-a",

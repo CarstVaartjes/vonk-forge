@@ -118,27 +118,16 @@ class RecipeRunInspectionBinding(WireModel):
 
 
 class RecipeReconciliationIdentity(WireModel):
-    """Exact old install authority carried through the signed cleanup grant."""
+    """The install a reconciliation removes, carried through the cleanup grant."""
 
-    schema_version: Literal[1]
-    node_id: NodeId
     installation_id: Uuid4Text
-    install_operation_id: Uuid4Text
-    install_operation_payload_sha256: Digest
     plan_digest: Digest
-    recipe_revision_id: Uuid4Text
-    recipe_content_sha256: Digest
-    compiled_spec_canonical_sha256: Digest
 
 
 class HostRuntimeRequest(WireModel):
     """The complete bytes hashed by the agent and admitted by the root helper."""
 
-    schema_version: Literal[1]
     action: ContainerRuntimeActionName
-    job_id: Uuid4Text
-    operation_id: Uuid4Text
-    attempt: int = Field(ge=1, le=2**31 - 1)
     fence: Uuid4Text
     # One request carries the whole container command line. The authoritative
     # size limit is the canonical request byte ceiling
@@ -242,8 +231,6 @@ class HostRuntimeRequest(WireModel):
             raise ValueError("runtime request exceeds its canonical byte ceiling")
         if self.observation is not None and (
             self.action != "run-inspect"
-            or self.job_id != self.observation.run_id
-            or self.attempt != self.observation.run_generation
             or hashlib.sha256(canonical_message(self.arguments)).hexdigest()
             != self.observation.runtime_arguments_sha256
         ):
@@ -305,9 +292,6 @@ class ScheduleRebootOperation(_HostOperation):
 class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     type: Literal["execute-container-runtime-request"]
     action: ContainerRuntimeActionName
-    job_id: Uuid4Text
-    operation_id: Uuid4Text
-    attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
     fence: Uuid4Text
     request_sha256: Digest
     start_plan_sha256: Digest | None = Field(

@@ -21,7 +21,6 @@ from typing import BinaryIO, Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
-    DistributionAssignment,
     DistributionObject,
     canonical_message,
 )
@@ -35,6 +34,7 @@ from .artifact_lifecycle import (
 from .artifact_reference_scan import require_model_sets_open
 from .cached_file_verification import verified_files
 from .catalog_revision_contract import read_catalog_document
+from .distribution_assignment import NodeDistributionAssignment
 from .models import (
     ArtifactDistributionAssignment,
     CatalogDocumentRevision,
@@ -416,7 +416,7 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
         return super().verify_runtime_image(image_digest, archive_sha256)
 
     def verify_runtime_image_assignment(
-        self, assignment: DistributionAssignment
+        self, assignment: NodeDistributionAssignment
     ) -> bool:
         """Verify an assignment with its durable Run/Switch source binding."""
 
@@ -749,7 +749,7 @@ class DistributionService:
         self.source = source
         self.clock = clock
         self.sessions = sessions
-        self._assignments: dict[tuple[str, str], DistributionAssignment] = {}
+        self._assignments: dict[tuple[str, str], NodeDistributionAssignment] = {}
         self._lock = RLock()
 
     def attach_sessions(self, sessions: sessionmaker[Session]) -> DistributionService:
@@ -761,8 +761,8 @@ class DistributionService:
         self.sessions = sessions
         return self
 
-    def register(self, assignment: DistributionAssignment) -> None:
-        assignment = DistributionAssignment.parse(assignment.to_mapping())
+    def register(self, assignment: NodeDistributionAssignment) -> None:
+        assignment = NodeDistributionAssignment.parse(assignment.to_mapping())
         verifier = getattr(self.source, "verify_artifact_set", None)
         if verifier is None or not verifier(
             assignment.model_artifact_set_sha256, assignment.objects
@@ -852,10 +852,9 @@ class DistributionService:
                 )
 
     @staticmethod
-    def _from_row(row: ArtifactDistributionAssignment) -> DistributionAssignment:
-        return DistributionAssignment.parse(
+    def _from_row(row: ArtifactDistributionAssignment) -> NodeDistributionAssignment:
+        return NodeDistributionAssignment.parse(
             {
-                "schema_version": 2,
                 "assignment_id": row.id,
                 "plan_digest": row.plan_digest,
                 "generation": row.generation,
@@ -890,7 +889,9 @@ class DistributionService:
                 row.revoked_at = self.clock()
                 row.updated_at = self.clock()
 
-    def authorize(self, *, node_id: str, plan_digest: str) -> DistributionAssignment:
+    def authorize(
+        self, *, node_id: str, plan_digest: str
+    ) -> NodeDistributionAssignment:
         with self._lock:
             if self.sessions is None:
                 assignment = self._assignments.get((plan_digest, node_id))
@@ -961,7 +962,7 @@ class DistributionService:
 
     def open_object(
         self, *, node_id: str, plan_digest: str, digest: str
-    ) -> tuple[DistributionAssignment, DistributionObject, VerifiedObject]:
+    ) -> tuple[NodeDistributionAssignment, DistributionObject, VerifiedObject]:
         assignment = self.authorize(node_id=node_id, plan_digest=plan_digest)
         object_spec = next(
             (item for item in assignment.objects if item.sha256 == digest), None

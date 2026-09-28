@@ -111,14 +111,6 @@ def _prepare_exact_legacy_install_for_reconciliation(
             stored_plan["compiled_execution_plans"][operation.node_id] = compiled
             node = session.get(AgentNode, operation.node_id)
             assert node is not None
-            node.capabilities = sorted(
-                set(node.capabilities or [])
-                | {
-                    "agent.lifecycle.resume.exact.v1",
-                    "recipe.reconcile",
-                    "recipe.reconcile.v1",
-                }
-            )
         plan_digest = installation_plan_digest_from_stored_document(stored_plan)
         stored_plan["plan_digest"] = plan_digest
         installation.plan_digest = plan_digest
@@ -317,26 +309,12 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
                 select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
             )
         )
-        install_operations = {
-            operation.id: operation
-            for operation in session.scalars(
-                select(AgentOperation).where(
-                    AgentOperation.kind == "recipe.install",
-                    AgentOperation.node_id.in_(nodes),
-                )
-            )
-        }
     assert child_job is not None and child_job.kind == "recipe.reconcile"
     assert child_operations, "cleanup must dispatch lifecycle child operations"
     assert {item.node_id for item in child_operations} == set(nodes)
     for child in child_operations:
         payload = RecipeReconcilePayload.model_validate(child.payload)
         assert payload.installation_id == installation.owner_id
-        assert payload.node_id == child.node_id
-        assert payload.install_operation_id in install_operations
-        source = install_operations[payload.install_operation_id]
-        assert source.node_id == child.node_id
-        assert payload.install_operation_payload_sha256 == source.payload_digest
         assert (
             payload.plan_digest
             == preview["reconciliation_authority"]["original_plan_digest"]

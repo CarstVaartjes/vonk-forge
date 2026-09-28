@@ -70,7 +70,6 @@ def _seed(sessions: sessionmaker) -> None:
                     state="active",
                     protocol_version=2,
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW,
                 )
                 for node_id in (NODE_1, NODE_2)

@@ -145,7 +145,6 @@ def _prepared_successor(tmp_path, *, change="runtime"):
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.capabilities = [*node.capabilities, "runtime.vonk.v1"]
         session.add(
             AgentCertificate(
                 serial="revision-reuse-preflight",

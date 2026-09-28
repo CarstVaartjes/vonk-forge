@@ -555,7 +555,6 @@ def build_recipe_image_availability(
                             .order_by(AgentNode.node_id)
                         )
                         if candidate.architecture == "linux-arm64"
-                        and "recipe.build.v1" in (candidate.capabilities or ())
                     )
                     candidate_ids = tuple(candidate.node_id for candidate in candidates)
                     active_jobs = tuple(

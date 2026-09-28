@@ -69,7 +69,6 @@ from .conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
-from .distribution_assignment import DistributionAssignment
 from .distribution_object import DistributionObject
 from .distribution_object_kind import DistributionObjectKind
 from .effective_parallelism import EffectiveParallelism
@@ -310,6 +309,7 @@ from .node_connection_agent_state import NodeConnectionAgentState
 from .node_connection_certificate_state import NodeConnectionCertificateState
 from .node_connection_offline_reason_type_0 import NodeConnectionOfflineReasonType0
 from .node_connection_online_state import NodeConnectionOnlineState
+from .node_distribution_assignment import NodeDistributionAssignment
 from .node_profile_change import NodeProfileChange
 from .node_profile_payload import NodeProfilePayload
 from .operation_checkpoint import OperationCheckpoint
@@ -428,9 +428,7 @@ from .recipe_serving_validation import RecipeServingValidation
 from .recipe_serving_validation_interface import RecipeServingValidationInterface
 from .recipe_setting import RecipeSetting
 from .recipe_setting_change_effect import RecipeSettingChangeEffect
-from .recipe_start_collective_readiness_evidence import RecipeStartCollectiveReadinessEvidence
-from .recipe_start_rank_launch_evidence import RecipeStartRankLaunchEvidence
-from .recipe_start_single_evidence import RecipeStartSingleEvidence
+from .recipe_start_result import RecipeStartResult
 from .recipe_stop_result import RecipeStopResult
 from .recipe_topology import RecipeTopology
 from .recipe_topology_mode import RecipeTopologyMode
@@ -579,7 +577,6 @@ from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
 from .telemetry_workload import TelemetryWorkload
 from .telemetry_workload_state import TelemetryWorkloadState
-from .tensor_parallel_start_evidence import TensorParallelStartEvidence
 
 __all__ = (
     "AgentFailureKind",
@@ -651,7 +648,6 @@ __all__ = (
     "ControllerAssetState",
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
-    "DistributionAssignment",
     "DistributionObject",
     "DistributionObjectKind",
     "EffectiveParallelism",
@@ -892,6 +888,7 @@ __all__ = (
     "NodeConnectionCertificateState",
     "NodeConnectionOfflineReasonType0",
     "NodeConnectionOnlineState",
+    "NodeDistributionAssignment",
     "NodeProfileChange",
     "NodeProfilePayload",
     "OperationCheckpoint",
@@ -1010,9 +1007,7 @@ __all__ = (
     "RecipeServingValidationInterface",
     "RecipeSetting",
     "RecipeSettingChangeEffect",
-    "RecipeStartCollectiveReadinessEvidence",
-    "RecipeStartRankLaunchEvidence",
-    "RecipeStartSingleEvidence",
+    "RecipeStartResult",
     "RecipeStopResult",
     "RecipeTopology",
     "RecipeTopologyMode",
@@ -1161,5 +1156,4 @@ __all__ = (
     "TelemetryStateFreshness",
     "TelemetryWorkload",
     "TelemetryWorkloadState",
-    "TensorParallelStartEvidence",
 )

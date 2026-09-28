@@ -323,9 +323,6 @@ class HostRuntimeAuthorityService:
         self,
         *,
         node_id: str,
-        job_id: str,
-        operation_id: str,
-        attempt: int,
         fence: str,
         action: ContainerRuntimeAction,
         request_sha256: str,
@@ -344,9 +341,6 @@ class HostRuntimeAuthorityService:
             raise HostHelperAuthorityError("container runtime action is invalid")
         lease_deadline, plan_binding = self._check_attempt(
             node_id=node_id,
-            job_id=job_id,
-            operation_id=operation_id,
-            attempt=attempt,
             fence=fence,
             action=action,
             start_plan_sha256=start_plan_sha256,
@@ -365,9 +359,6 @@ class HostRuntimeAuthorityService:
             operation=ExecuteContainerRuntimeRequestOperation(
                 type=HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
                 action=action.value,
-                job_id=job_id,
-                operation_id=operation_id,
-                attempt=attempt,
                 fence=fence,
                 request_sha256=request_sha256,
                 start_plan_sha256=plan_binding.start_plan_sha256,
@@ -448,9 +439,6 @@ class HostRuntimeAuthorityService:
                 operation=ExecuteContainerRuntimeRequestOperation(
                     type=HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
                     action=ContainerRuntimeAction.RUN_INSPECT.value,
-                    job_id=job_id,
-                    operation_id=operation_id,
-                    attempt=attempt,
                     fence=fence,
                     request_sha256=request_sha256,
                     observation_identity_sha256=observation_identity,
@@ -519,7 +507,6 @@ class HostRuntimeAuthorityService:
                 or node is None
                 or node.state != "active"
                 or node.revoked_at is not None
-                or "recipe.run.inspect.exact.v1" not in set(node.capabilities or ())
                 or certificate is None
                 or certificate.node_id != node_id
                 or certificate.state != "active"
@@ -539,9 +526,6 @@ class HostRuntimeAuthorityService:
                 operation=ExecuteContainerRuntimeRequestOperation(
                     type=HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
                     action=ContainerRuntimeAction.RUN_INSPECT.value,
-                    job_id=job_id,
-                    operation_id=operation_id,
-                    attempt=attempt,
                     fence=fence,
                     request_sha256=request_sha256,
                     observation_identity_sha256=observation_identity,
@@ -613,9 +597,6 @@ class HostRuntimeAuthorityService:
         expected_operation = {
             "type": HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
             "action": ContainerRuntimeAction.RUN_INSPECT.value,
-            "job_id": identity["run_id"],
-            "operation_id": operation.operation_id,
-            "attempt": identity["run_generation"],
             "fence": operation.fence,
             "request_sha256": operation.request_sha256,
             "observation_identity_sha256": observation_identity,
@@ -720,7 +701,6 @@ class HostRuntimeAuthorityService:
             or revision.schema_version != 2
             or revision.state != "active"
             or mapping.state != "ready"
-            or "recipe.run.inspect.exact.v1" not in set(node.capabilities or ())
             or certificate.node_id != node_id
             or certificate.state != "active"
             or certificate.revoked_at is not None
@@ -804,9 +784,6 @@ class HostRuntimeAuthorityService:
         self,
         *,
         node_id: str,
-        job_id: str,
-        operation_id: str,
-        attempt: int,
         fence: str,
         package_sha256: str,
         package_signature: str,
@@ -815,12 +792,15 @@ class HostRuntimeAuthorityService:
     ) -> SignedHostHelperGrant:
         now = self._clock()
         with self._sessions.begin() as session:
-            operation = session.get(StoredAgentOperation, operation_id)
             current = session.scalar(
                 select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == operation_id,
-                    AgentOperationAttempt.attempt == attempt,
+                    AgentOperationAttempt.fence == fence
                 )
+            )
+            operation = (
+                None
+                if current is None
+                else session.get(StoredAgentOperation, current.operation_id)
             )
             lease_deadline = (
                 None
@@ -833,14 +813,12 @@ class HostRuntimeAuthorityService:
                 operation is None
                 or current is None
                 or operation.node_id != node_id
-                or operation.parent_job_id != job_id
                 or operation.kind != "agent.upgrade.v1"
                 or operation.payload.get("package_sha256") != package_sha256
                 or operation.payload.get("package_signature") != package_signature
                 or operation.state != "running"
-                or operation.current_attempt != attempt
+                or operation.current_attempt != current.attempt
                 or current.state != "running"
-                or current.fence != fence
                 or current.agent_certificate_serial != certificate_serial
                 or lease_deadline is None
                 or lease_deadline <= now
@@ -914,7 +892,6 @@ class HostRuntimeAuthorityService:
                 or runtime_identity.binary_digest != payload.target_binary_digest
                 or runtime_identity.build_digest != payload.target_build_digest
                 or runtime_identity.architecture != payload.architecture
-                or runtime_identity.self_test_passed is not True
             ):
                 raise HostHelperAuthorityError(
                     "candidate activation identity is invalid"
@@ -933,9 +910,6 @@ class HostRuntimeAuthorityService:
         self,
         *,
         node_id: str,
-        job_id: str,
-        operation_id: str,
-        attempt: int,
         fence: str,
         action: ContainerRuntimeAction,
         start_plan_sha256: str | None,
@@ -951,8 +925,19 @@ class HostRuntimeAuthorityService:
     ) -> tuple[datetime, RuntimePlanBinding]:
         now = self._clock()
         with self._sessions() as session:
-            operation = session.get(StoredAgentOperation, operation_id)
-            parent = session.get(Job, job_id)
+            current = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.fence == fence
+                )
+            )
+            operation = (
+                None
+                if current is None
+                else session.get(StoredAgentOperation, current.operation_id)
+            )
+            parent = (
+                None if operation is None else session.get(Job, operation.parent_job_id)
+            )
             node = session.get(AgentNode, node_id)
             certificate = session.get(AgentCertificate, certificate_serial)
             cancellation_requested = bool(
@@ -965,12 +950,6 @@ class HostRuntimeAuthorityService:
             )
             cancellation_deadline = superseded_cancellation_deadline(
                 parent.result if parent is not None else None
-            )
-            current = session.scalar(
-                select(AgentOperationAttempt).where(
-                    AgentOperationAttempt.operation_id == operation_id,
-                    AgentOperationAttempt.attempt == attempt,
-                )
             )
             lease_deadline = (
                 None
@@ -996,13 +975,11 @@ class HostRuntimeAuthorityService:
                 or _aware(certificate.not_before) > _aware(now)
                 or _aware(certificate.not_after) <= _aware(now)
                 or operation.node_id != node_id
-                or operation.parent_job_id != job_id
                 or operation.authority_revision != parent.authority_revision
                 or operation.kind not in self._ACTION_KINDS[action]
                 or operation.state != "running"
-                or operation.current_attempt != attempt
+                or operation.current_attempt != current.attempt
                 or current.state != "running"
-                or current.fence != fence
                 or current.agent_certificate_serial != certificate_serial
                 or lease_deadline is None
                 or lease_deadline <= now
@@ -1044,24 +1021,14 @@ class HostRuntimeAuthorityService:
                         payload = RecipeReconcilePayload.model_validate_json(
                             payload_bytes
                         )
-                        if (
-                            not isinstance(
-                                reconciliation_identity,
-                                RecipeReconciliationIdentity,
-                            )
-                            or payload.node_id != node_id
-                            or canonical_message(reconciliation_identity)
-                            != canonical_message(payload)
-                            or hashlib.sha256(payload_bytes).hexdigest()
-                            != operation.payload_digest
+                        if not isinstance(
+                            reconciliation_identity, RecipeReconciliationIdentity
+                        ) or canonical_message(reconciliation_identity) != (
+                            canonical_message(payload)
                         ):
                             raise ValueError("reconciliation identity differs")
                         expected_request = HostRuntimeRequest(
-                            schema_version=1,
                             action="installation-cleanup",
-                            job_id=job_id,
-                            operation_id=operation_id,
-                            attempt=attempt,
                             fence=fence,
                             arguments=[],
                             installation_id=installation_id,

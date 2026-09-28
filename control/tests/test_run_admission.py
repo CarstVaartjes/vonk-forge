@@ -1,7 +1,7 @@
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib import resources
 
 import pytest
@@ -38,7 +38,6 @@ def setup(
     tmp_path,
     *,
     free_memory=300,
-    capabilities=("runtime.vonk.v1",),
     port_reserved=False,
     system_reserve=0,
     memory_kind="unified",
@@ -102,7 +101,6 @@ def setup(
                 node_id=node,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["runtime.vonk.v1"],
             )
         )
         model_root = CatalogDocument(
@@ -164,6 +162,22 @@ def setup(
         session.add(revision)
         session.flush()
         revision_id = revision.id
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            node,
+            now,
+            1000,
+            500,
+            1000,
+            free_memory,
+            1000,
+            free_memory,
+            1,
+            False,
+            ("runtime.vonk.v1",),
+            memory_pool=memory_pool,
+        )
+    )
     mappings = ClusterMappingService(sessions)
     mapping_plan = mappings.preview(revision_id, (node,), {}, "admin")
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=now)
@@ -225,22 +239,6 @@ def setup(
                     created_at=now,
                 )
             )
-    InventoryRepository(sessions, clock=lambda: now).record(
-        InventorySnapshotInput(
-            node,
-            now,
-            1000,
-            500,
-            1000,
-            free_memory,
-            1000,
-            free_memory,
-            1,
-            False,
-            tuple(capabilities),
-            memory_pool=memory_pool,
-        )
-    )
     return sessions, now, node, installation.id
 
 
@@ -420,12 +418,26 @@ def test_stopped_run_can_repeat_the_same_plan_digest(tmp_path) -> None:
 
 
 def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
-    sessions, now, _node, installation = setup(
-        tmp_path,
-        free_memory=260,
-        capabilities=("runtime.sglang.v1",),
-        port_reserved=True,
+    sessions, now, node, installation = setup(
+        tmp_path, free_memory=260, port_reserved=True
     )
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            node,
+            now + timedelta(seconds=1),
+            1000,
+            500,
+            1000,
+            260,
+            1000,
+            260,
+            1,
+            False,
+            ("runtime.sglang.v1",),
+            memory_pool="shared",
+        )
+    )
+    now += timedelta(seconds=1)
     plan = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     ).plan_run(installation, "qwen", now=now)

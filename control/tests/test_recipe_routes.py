@@ -153,7 +153,6 @@ def setup(
                 node_id=node,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
             )
             for node in nodes
         )
@@ -477,7 +476,6 @@ def add_running_run(
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
             )
         )
         mapping = ClusterMapping(

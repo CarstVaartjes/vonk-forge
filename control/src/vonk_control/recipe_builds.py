@@ -1014,9 +1014,7 @@ class RecipeBuildService:
         called while the availability parent and builder rows are locked.
         """
         try:
-            acquire_admission_keys(
-                session, (node_admission_key(plan.builder_node_id),)
-            )
+            acquire_admission_keys(session, (node_admission_key(plan.builder_node_id),))
             locked = lock_admission_rows(
                 session,
                 (
@@ -1218,9 +1216,7 @@ class RecipeBuildService:
         request_id: str | None = None,
     ) -> None:
         try:
-            acquire_admission_keys(
-                session, (node_admission_key(plan.builder_node_id),)
-            )
+            acquire_admission_keys(session, (node_admission_key(plan.builder_node_id),))
             self._reserve_in_session(session, plan, now=now, request_id=request_id)
         except AdmissionLockBusy as error:
             raise RecipeBuildAdmissionBusy() from error
@@ -1252,9 +1248,7 @@ class RecipeBuildService:
                 AdmissionRowLock(
                     "build-builder-node",
                     AgentNode,
-                    select(AgentNode).where(
-                        AgentNode.node_id == plan.builder_node_id
-                    ),
+                    select(AgentNode).where(AgentNode.node_id == plan.builder_node_id),
                 ),
                 AdmissionRowLock(
                     "build-recipe-revision",
@@ -1477,11 +1471,7 @@ class RecipeBuildService:
                 # Docker cache state. Re-importing the immutable layout makes a
                 # new mapping self-healing after image pruning or runtime changes.
                 node = session.get(AgentNode, item.node_id)
-                if (
-                    node is None
-                    or node.state != "active"
-                    or "recipe.image.import.v1" not in node.capabilities
-                ):
+                if node is None or node.state != "active":
                     raise RecipeBuildError(
                         "build.import_capability_missing",
                         "a mapped GPU node cannot import the exact OCI result",
@@ -1518,7 +1508,6 @@ def _validate_builder(node: AgentNode) -> None:
         or node.architecture != "linux-arm64"
         or not isinstance(node.binary_digest, str)
         or _SHA256.fullmatch(node.binary_digest) is None
-        or "recipe.build.v1" not in node.capabilities
     ):
         raise RecipeBuildError(
             "build.node_incompatible", "builder GPU node is inactive or incompatible"
@@ -1614,8 +1603,7 @@ def _available_build_memory(
             - capacity.occupied_bytes
             - capacity.unmaterialized_bytes
             - sum(
-                residual.maximum_bytes
-                for residual in capacity.unknown_run_residuals
+                residual.maximum_bytes for residual in capacity.unknown_run_residuals
             ),
         )
         - floor

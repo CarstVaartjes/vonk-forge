@@ -774,7 +774,7 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
     engine, sessions, repository = _production_stream_store()
     sample_ids = [f"00000000-0000-4000-8000-{value:012x}" for value in range(1, 129)]
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_ID, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_ID, state="active"))
         session.add_all(
             NodeTelemetrySample(
                 id=sample_id,

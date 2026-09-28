@@ -2469,9 +2469,7 @@ class SparkLifecycle:
         # serialize complete operation results, signed grants, or credentials.
         query = (
             "SELECT json_build_object('node_id',r.key,"
-            "'current_fingerprint',(SELECT substring(c from 31) FROM "
-            "jsonb_array_elements_text(n.capabilities::jsonb) c "
-            "WHERE c LIKE 'runtime.preflight.fingerprint.%' LIMIT 1),"
+            "'current_fingerprint',n.preflight_fingerprint,"
             "'receipt_fingerprint',r.value->>'fingerprint',"
             "'request_sha256',r.value->>'request_sha256',"
             "'payload_sha256',a.payload_digest,"
@@ -3229,7 +3227,7 @@ class SparkLifecycle:
                     )
                 rows = self._psql(
                     "SELECT architecture,semantic_version,build_digest,binary_digest,"
-                    "self_test_passed::int,contact_certificate_serial "
+                    "contact_certificate_serial "
                     f"FROM agent_nodes WHERE node_id='{node_id}'"
                 )
                 expected_row = [
@@ -3237,12 +3235,11 @@ class SparkLifecycle:
                     expected_semantic,
                     str(self_test["build_digest"]),
                     str(self_test["binary_digest"]),
-                    "1",
                 ]
                 row_mismatches = []
                 if len(rows) != 1:
                     row_mismatches.append("row_count")
-                elif rows[0][:5] != expected_row:
+                elif rows[0][:4] != expected_row:
                     row_mismatches.extend(
                         field
                         for index, field in enumerate(
@@ -3251,15 +3248,14 @@ class SparkLifecycle:
                                 "semantic_version",
                                 "build_digest",
                                 "binary_digest",
-                                "self_test_passed",
                             )
                         )
                         if len(rows[0]) <= index
                         or rows[0][index] != expected_row[index]
                     )
-                if len(rows) == 1 and len(rows[0]) != 6:
+                if len(rows) == 1 and len(rows[0]) != 5:
                     row_mismatches.append("column_count")
-                elif len(rows) == 1 and SERIAL.fullmatch(rows[0][5]) is None:
+                elif len(rows) == 1 and SERIAL.fullmatch(rows[0][4]) is None:
                     row_mismatches.append("contact_certificate_serial")
                 if row_mismatches:
                     raise LifecycleError(

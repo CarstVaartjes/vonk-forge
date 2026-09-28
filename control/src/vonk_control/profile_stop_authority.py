@@ -166,8 +166,7 @@ class ProfileJobRunStopJob(StrictJSONModel):
             or len(child_keys) != len(set(child_keys))
             or set(child_keys) != target_keys
             or any(
-                item.payload.node_id != item.node_id
-                or item.payload.cancel_pending_start is not True
+                item.payload.cancel_pending_start is not True
                 for item in parent.flattened_phase_items
             )
         ):
@@ -470,7 +469,7 @@ def validate_profile_jobrun_stop_target(
         or source_job.payload.get("owner_kind") != "artifact-job"
         or source_job.payload.get("owner_id") != artifact.id
         or source_job.authority_revision
-        != stop.recipe_content_sha256.removeprefix("sha256:")
+        != stop.compiled_execution_plan.identity.recipe_revision_sha256
         or source_job.payload_digest
         != hashlib.sha256(canonical_message(source_job.payload)).hexdigest()
         or source_operation.parent_job_id != source_job.id
@@ -497,9 +496,7 @@ def validate_profile_jobrun_stop_target(
         request = RecipeJobRunRequest.model_validate_json(
             canonical_message(source_operation.payload)
         )
-        expected = stop_payload_from_job_run(
-            request, target.node_id, cancel_pending_start=True
-        )
+        expected = stop_payload_from_job_run(request, cancel_pending_start=True)
     except (TypeError, ValueError) as error:
         raise ProfileStopAuthorityError("source JobRun request is invalid") from error
     if (
@@ -507,9 +504,7 @@ def validate_profile_jobrun_stop_target(
         or request.run_id != run.id
         or request.installation_id != run.installation_id
         or request.mapping_id != run.mapping_id
-        or request.mapping_generation != run.mapping_generation
         or request.plan_digest != run.plan_digest
-        or stop.node_id != target.node_id
         or stop.cancel_pending_start is not True
         or canonical_message(stop) != canonical_message(expected)
         or hashlib.sha256(canonical_message(stop)).hexdigest()

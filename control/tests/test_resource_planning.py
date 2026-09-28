@@ -225,7 +225,9 @@ def test_unknown_run_residual_uses_full_upper_bound_and_warns_when_safe() -> Non
     assert "full upper bound" in warning.detail
 
 
-def test_possible_zero_resident_use_refuses_when_only_the_peak_upper_bound_fails() -> None:
+def test_possible_zero_resident_use_refuses_when_only_the_peak_upper_bound_fails() -> (
+    None
+):
     settings = resolve_effective_settings(
         _recipe_document(_recipe_settings(context=65_536))
     ).settings

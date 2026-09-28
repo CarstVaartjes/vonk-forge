@@ -13,13 +13,12 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_agent_protocol import (
-    DistributionAssignment,
     OperationProgress,
-    RecipeReconcileResult,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 
+from .distribution_assignment import NodeDistributionAssignment
 from .lifecycle_preflight import LifecyclePreflightCheckpoint
 from .model_cache_contract import ModelCacheDownloadResult
 from .preparation_contract import RolloutPreparation
@@ -272,32 +271,20 @@ class InstallationReconcileRequest(_StrictModel):
 
 
 class RunSwitchReconciliationTarget(_StrictModel):
-    """One exact rank and its current cleanup receipt state."""
+    """One exact rank and whether its cleanup already succeeded."""
 
     node_id: NodeId
     rank: int = Field(ge=0, le=31)
     role: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     installed_bytes: int = Field(ge=0)
-    install_operation_id: UuidId
-    install_operation_payload_sha256: Digest
-    compiled_spec_canonical_sha256: Digest
     state: Literal["pending", "reconciled"]
-    cleanup_receipt_sha256: Digest | None = None
-
-    @model_validator(mode="after")
-    def receipt_matches_state(self) -> RunSwitchReconciliationTarget:
-        if (self.state == "reconciled") != (self.cleanup_receipt_sha256 is not None):
-            raise ValueError("reconciliation receipt does not match target state")
-        return self
 
 
 class RunSwitchReconciliationAuthority(_StrictModel):
-    """Controller-owned identity and effect binding for installation repair.
+    """Controller-owned identity of the installation a repair removes.
 
-    The accepted installation plan remains opaque.  This authority records its
-    canonical fingerprint and binds each target to the successful original
-    ``recipe.install`` operation that supplied the persisted compiled spec.
-    It never claims that malformed launch metadata is executable.
+    The accepted installation plan remains opaque; it never claims that
+    malformed launch metadata is executable.
     """
 
     schema_version: Literal[2] = 2
@@ -310,7 +297,6 @@ class RunSwitchReconciliationAuthority(_StrictModel):
     recipe_build_id: UuidId | None
     image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
     model_content_sha256: Digest | None
-    stored_plan_canonical_sha256: Digest
     targets: list[RunSwitchReconciliationTarget] = Field(min_length=1, max_length=32)
 
     @model_validator(mode="after")
@@ -777,17 +763,8 @@ class ArtifactVerificationEvidence(_StrictModel):
     """One node's immutable artifact handoff evidence."""
 
     node_id: NodeId
-    verified: bool | None = None
-    verified_digests: list[Digest] = Field(default_factory=list, max_length=256)
     downloaded_bytes: int | None = Field(default=None, ge=0)
     copied_bytes: int | None = Field(default=None, ge=0)
-    verified_image_digest: (
-        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
-    ) = None
-    imported_image_digest: (
-        Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
-    ) = None
-    verified_oci_layout_sha256: Digest | None = None
     error: Annotated[str, StringConstraints(max_length=512)] | None = None
     reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     uncertain: bool = False
@@ -963,22 +940,13 @@ class RunSwitchTargetTransferResult(_RunSwitchPhaseBase):
     phase: Literal["transfer"]
     subphase: Literal["target-copy"]
     cached_nodes: list[NodeId] = Field(default_factory=list, max_length=32)
-    assignments: dict[NodeId, DistributionAssignment] = Field(min_length=1)
+    assignments: dict[NodeId, NodeDistributionAssignment] = Field(min_length=1)
 
 
 class RunSwitchTargetTransferEvidenceResult(_RunSwitchPhaseBase):
     phase: Literal["transfer"]
     subphase: Literal["target-copy"]
     node_id: NodeId
-    verified: Literal[True]
-    verified_digests: list[Digest] = Field(min_length=1, max_length=256)
-    verified_image_digest: Annotated[
-        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ]
-    imported_image_digest: Annotated[
-        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ]
-    verified_oci_layout_sha256: Digest
     downloaded_bytes: int | None = Field(default=None, ge=0)
     copied_bytes: int | None = Field(default=None, ge=0)
 
@@ -1075,33 +1043,13 @@ class RunSwitchCleanupVerifyResult(_RunSwitchPhaseBase):
         Annotated[str, StringConstraints(min_length=1, max_length=24)] | None
     ) = None
     reconciliation_request_id: UuidId | None = None
-    exact_reconciliation_receipts: bool | None = None
-    reconciliation_receipts: list[RecipeReconcileResult] = Field(
-        default_factory=list, max_length=32
-    )
 
     @model_validator(mode="after")
-    def cleanup_receipts_match_mode(self) -> RunSwitchCleanupVerifyResult:
-        if self.cleanup_mode == "uninstall":
-            if (
-                self.reconciliation_request_id is not None
-                or self.exact_reconciliation_receipts is not None
-                or self.reconciliation_receipts
-            ):
-                raise ValueError(
-                    "ordinary uninstall cannot carry reconciliation receipts"
-                )
-            return self
-        node_ids = [receipt.node_id for receipt in self.reconciliation_receipts]
-        if (
-            self.reconciliation_request_id is None
-            or self.exact_reconciliation_receipts is None
-            or node_ids != sorted(set(node_ids))
-            or (self.final_verified and not self.exact_reconciliation_receipts)
-            or (self.exact_reconciliation_receipts and not node_ids)
-            or (not self.exact_reconciliation_receipts and node_ids)
+    def reconciliation_matches_mode(self) -> RunSwitchCleanupVerifyResult:
+        if (self.cleanup_mode == "reconcile") != (
+            self.reconciliation_request_id is not None
         ):
-            raise ValueError("reconciliation completion lacks exact ordered receipts")
+            raise ValueError("only a reconciliation cleanup names its request")
         return self
 
 

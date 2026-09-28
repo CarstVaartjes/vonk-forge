@@ -184,7 +184,6 @@ def setup(tmp_path: Path):
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["agent.runtime.rust.v1", "runtime.vonk.v1"],
             )
             for node_id in node_ids
         )

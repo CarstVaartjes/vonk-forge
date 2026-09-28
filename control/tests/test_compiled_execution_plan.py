@@ -824,7 +824,7 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
     effective_execution_key = payload_wire.identity.execution_sha256
     runtime_image = payload_wire.runtime_image
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=node_id, state="active"))
         session.add(
             AgentCertificate(
                 serial=serial,

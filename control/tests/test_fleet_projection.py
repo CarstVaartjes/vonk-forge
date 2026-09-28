@@ -274,7 +274,6 @@ def test_fleet_contains_registered_node_absent_from_repository() -> None:
             AgentNode(
                 node_id=NODE_A,
                 state="active",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -295,7 +294,6 @@ def test_fleet_excludes_revoked_agent_nodes() -> None:
             AgentNode(
                 node_id=NODE_A,
                 state="revoked",
-                capabilities=[],
                 last_seen_at=NOW,
                 revoked_at=NOW,
             )
@@ -327,21 +325,18 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                     node_id=NODE_A,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=["runtime.vonk.v1"],
                     last_seen_at=NOW - timedelta(seconds=5),
                 ),
                 AgentNode(
                     node_id=NODE_B,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=["runtime.vonk.v1"],
                     last_seen_at=NOW - timedelta(seconds=7),
                 ),
                 AgentNode(
                     node_id=EXTRA_NODE,
                     state="revoked",
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW,
                     revoked_at=NOW,
                 ),
@@ -607,7 +602,7 @@ def test_display_name_update_preserves_identity_and_emits_projection_refresh() -
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        node = AgentNode(node_id=NODE_A, state="active", capabilities=[])
+        node = AgentNode(node_id=NODE_A, state="active")
         session.add(node)
         session.flush()
         session.add(
@@ -845,63 +840,53 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
                 AgentNode(
                     node_id=node_ids[1],
                     state="revoked",
-                    capabilities=[],
                     last_seen_at=NOW,
                     revoked_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[2],
                     state="pending",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[3],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[4],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[5],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[6],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=node_ids[7],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
-                AgentNode(node_id=node_ids[8], state="active", capabilities=[]),
+                AgentNode(node_id=node_ids[8], state="active"),
                 AgentNode(
                     node_id=node_ids[9],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW + timedelta(microseconds=1),
                 ),
                 AgentNode(
                     node_id=node_ids[10],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW - timedelta(seconds=151),
                 ),
                 AgentNode(
                     node_id=node_ids[11],
                     state="active",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
             ]
@@ -995,7 +980,6 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
                     node_id=node_id,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW
                     - timedelta(seconds=150 if node_id != NODE_D else 151),
                 )
@@ -1074,14 +1058,12 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
                     node_id=NODE_A,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
                 AgentNode(
                     node_id=NODE_B,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=[],
                     last_seen_at=NOW,
                 ),
             ]
@@ -1531,7 +1513,6 @@ def test_a_damaged_active_revision_fails_the_read_instead_of_emptying_the_fleet(
                 node_id=NODE_A,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -1719,7 +1700,7 @@ def test_frozen_metrics_project_authoritative_identity_without_mutating_source(
     sample.metrics["capabilities"] = [{**metric, "supported": True}]
     source_document = json.loads(json.dumps(sample.metrics))
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_A, state="active"))
         session.add(sample)
         session.flush()
         session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=sample.id))
@@ -1750,7 +1731,7 @@ def test_non_rfc_non_nil_boot_id_flows_through_snapshot() -> None:
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=NODE_A, state="active"))
         sample = _telemetry(
             NODE_A,
             "00000000-0000-4000-8000-000000000299",
@@ -1785,7 +1766,6 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
                 node_id=NODE_A,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )
@@ -1899,7 +1879,6 @@ def test_projection_rejects_more_than_500_registered_nodes_before_state_queries(
                 AgentNode(
                     node_id=f"spk_{index:032x}",
                     state="active",
-                    capabilities=[],
                 )
                 for index in range(1, 502)
             ]
@@ -2009,7 +1988,6 @@ def _installed_byte_group(
                 node_id=NODE_A,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=NOW,
             )
         )

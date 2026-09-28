@@ -10,15 +10,11 @@ from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DistributionObject
-from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.api import create_app
-from vonk_control.auth import AgentSource, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -42,7 +38,6 @@ from vonk_control.models import (
     RecipeInstallation,
     RuntimeImageAuthorization,
 )
-from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract import (
@@ -65,7 +60,6 @@ from vonk_control.runtime_image_preparation import (
     persist_runtime_image_receipt,
     prepare_runtime_image,
 )
-from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .canonical_recipe_fixtures import canonical_example
@@ -333,11 +327,9 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
         evidence = [
             {
                 "node_id": node_id,
-                "verified": True,
-                "verified_digests": [MODEL_DIGEST],
-                "verified_image_digest": assignment["oci_image_digest"],
-                "imported_image_digest": assignment["oci_image_digest"],
-                "verified_oci_layout_sha256": assignment["oci_archive_sha256"],
+                "downloaded_bytes": sum(
+                    item["bytes"] for item in assignment["objects"]
+                ),
             }
             for node_id, assignment in self.assignments.items()
         ]
@@ -409,7 +401,6 @@ def _seed(
                     node_id=node_id,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=capabilities,
                 )
             )
             session.flush()
@@ -939,8 +930,6 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
     # Advance once more so the actual lifecycle queues the Spark install child
     # after the persisted Controller spec and target verification.
     service._advance(operation.operation_id)
-    installation_id = None
-    compiled_spec = None
     with sessions() as session:
         operation_row = session.get(Job, operation.operation_id)
         assert operation_row is not None
@@ -957,19 +946,8 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
         )
         compiled = require_mapping(compiled_plans[NODE_ID], "compiled plan")
         assert validate_compiled_launch_payload(compiled) == compiled
-        installation_id = installation.id
-        compiled_spec = compiled
-
-    assert installation_id is not None
-    response = _read_spec_endpoint(sessions, tmp_path, installation_id)
-    assert response.status_code == 200
-    assert response.json() == compiled_spec
-    assert (
-        response.json()["runtime_image"]["registry_manifest_digest"] == REGISTRY_DIGEST
-    )
-    assert (
-        response.json()["runtime_image"]["platform_manifest_digest"] == PLATFORM_DIGEST
-    )
+        assert compiled["runtime_image"]["registry_manifest_digest"] == REGISTRY_DIGEST
+        assert compiled["runtime_image"]["platform_manifest_digest"] == PLATFORM_DIGEST
 
     assert executor.assignments[NODE_ID]["oci_image_digest"] == PLATFORM_DIGEST
     assert executor.assignments[NODE_ID]["oci_archive_sha256"] == ARCHIVE_DIGEST
@@ -1002,53 +980,6 @@ class _NoopJobs:
 
     def list_page(self, **_kwargs):
         return [], None, 0
-
-
-def _read_spec_endpoint(
-    sessions: sessionmaker[Session], tmp_path: Path, installation_id: str
-):
-    presence = AgentPresenceService(
-        sessions,
-        ManagementAddressPolicy.parse("10.0.0.0/24"),
-        clock=lambda: NOW,
-    )
-    operations = AgentJobService(sessions, clock=lambda: NOW)
-
-    def observe_contact(session: Session, source: AgentSource) -> None:
-        presence.observe_in_session(session, source)
-
-    operations.set_contact_consumer(observe_contact)
-    root = tmp_path / "agent-api"
-    services = AgentApiServices(
-        enrollment=None,
-        operations=operations,
-        sessions=sessions,
-        clock=lambda: NOW,
-        presence=presence,
-        artifact_root=root / "artifacts",
-        source_bundles=SourceBundleStore(root / "source-bundles"),
-    )
-    services.artifact_root.mkdir(parents=True)
-    app = create_app(
-        jobs=_NoopJobs(),
-        tokens=TokenCodec(b"k" * 32),
-        now=lambda: int(NOW.timestamp()),
-        agent=services,
-        trusted_agent_proxy_auth=b"p" * 32,
-    )
-    headers = {
-        "x-vonk-agent-node": NODE_ID,
-        "x-vonk-agent-serial": "serial-direct",
-        "x-vonk-agent-fingerprint": "fingerprint-direct",
-        "x-vonk-agent-verified": "1",
-        "x-vonk-agent-proxy-auth": "p" * 32,
-        "x-vonk-agent-source": "10.0.0.42",
-    }
-    with TestClient(app) as client:
-        return client.get(
-            f"/agent/recipe-installations/{installation_id}/spec",
-            headers=headers,
-        )
 
 
 def test_direct_run_switch_accepts_the_receipt_recorded_by_availability(

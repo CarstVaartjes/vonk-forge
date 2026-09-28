@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import uuid
@@ -11,18 +10,12 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
-    AgentOperation as ProtocolAgentOperation,
-)
-from vonk_agent_protocol import (
-    AgentProtocolError,
     AgentResult,
     DistributionAssignment,
-    RecipeOperationRequest,
     RecipeStartResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import TensorParallelStartEvidence
 from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.models import AgentOperation, InstallationNode, RunNode
 
 from tests.wire_probes import prebuilt_probe
@@ -46,15 +39,8 @@ def install_start_wire_probe() -> Path:
 
 def _claim(row: AgentOperation) -> dict[str, Any]:
     return {
-        "schema_version": 1,
-        "job_id": row.parent_job_id,
-        "operation_id": row.id,
-        "attempt": 1,
         "fence": str(uuid.uuid4()),
-        "node_id": row.node_id,
         "operation": row.kind,
-        "authority_revision": row.authority_revision,
-        "payload_digest": row.payload_digest,
         "payload": dict(row.payload),
         "deadline": (NOW + timedelta(hours=1)).isoformat(),
     }
@@ -90,45 +76,12 @@ def _bridge(probe: Path, rows: tuple[AgentOperation, ...]) -> tuple[AgentResult,
     parsed = tuple(AgentResult.parse(json.loads(line)) for line in output_lines)
     for row, result in zip(rows, parsed, strict=True):
         assert result.state == "succeeded"
-        evidence = result.result.get("evidence", result.result)
+        document = result.result.model_dump(mode="json", exclude_none=True)
         if row.kind == "recipe.install":
-            assert set(result.result) == {"installed_bytes"}
-        elif row.kind == "recipe.stop":
-            assert result.result.model_dump(mode="json") == {"stopped": True}
-        elif row.kind == "recipe.uninstall":
-            assert set(result.result) == {"uninstalled", "removed_model_bytes"}
-            assert result.result.model_dump(mode="json") == {
-                "uninstalled": True,
-                "removed_model_bytes": 0,
-            }
-        else:
-            assert "evidence" in result.result
-        if "image_digest" in evidence:
-            assert evidence["image_digest"] == row.payload["image_digest"]
-        if "model_identity" in evidence:
-            assert "@" in evidence["model_identity"]
+            assert set(document) == {"installed_bytes"}
+        elif row.kind in {"recipe.stop", "recipe.uninstall"}:
+            assert document == {}
     return parsed
-
-
-def _assert_omitted_start_field_rejected(
-    probe: Path, row: AgentOperation, field: str
-) -> None:
-    payload = dict(row.payload)
-    payload.pop(field)
-    claim = _claim(row)
-    claim["payload"] = payload
-    claim["payload_digest"] = hashlib.sha256(canonical_message(payload)).hexdigest()
-    with pytest.raises(AgentProtocolError):
-        RecipeOperationRequest.parse(ProtocolAgentOperation.RECIPE_START, payload)
-    completed = subprocess.run(
-        [str(probe)],
-        input=json.dumps(claim, separators=(",", ":")) + "\n",
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert completed.returncode != 0
-    assert not completed.stdout
 
 
 def _project(
@@ -138,7 +91,6 @@ def _project(
     results: tuple[AgentResult, ...],
 ) -> None:
     for row, result in zip(rows, results, strict=True):
-        assert result.operation_id == row.id
         with sessions.begin() as session:
             operation = session.get(AgentOperation, row.id)
             assert operation is not None
@@ -183,10 +135,7 @@ def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
     start_rows = _queued_children(sessions, start_operation.id)
     assert len(start_rows) == 1
     start_results = _bridge(install_start_wire_probe, start_rows)
-    for field in ("local_address", "master_address", "master_port"):
-        _assert_omitted_start_field_rejected(
-            install_start_wire_probe, start_rows[0], field
-        )
+    assert RecipeStartResult.model_validate(start_results[0].result).endpoint
     _project(service, sessions, start_rows, start_results)
     assert service.get(start_operation.id).state == "succeeded"
     with sessions() as session:
@@ -300,7 +249,7 @@ def test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back
         assert {node.state for node in nodes_after_readiness} == {"running"}
 
 
-def test_controller_tensor_parallel_result_uses_shared_rust_evidence_contract(
+def test_controller_tensor_parallel_start_reports_only_the_serving_endpoint(
     tmp_path: Path, install_start_wire_probe: Path
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -324,15 +273,14 @@ def test_controller_tensor_parallel_result_uses_shared_rust_evidence_contract(
     while rows := _queued_children(sessions, start_operation.id):
         assert len(rows) == 1
         row = rows[0]
-        role = row.payload["role"]
+        role = row.payload["compiled_execution_plan"]["runtime"]["placement"]["role"]
         assert isinstance(role, str)
         seen_roles.append(role)
         assert row.payload.get("phase") is None
         results = _bridge(install_start_wire_probe, rows)
         for result in results:
             envelope = RecipeStartResult.model_validate(result.result)
-            assert isinstance(envelope.evidence, TensorParallelStartEvidence)
-            assert envelope.evidence.run_generation == 1
+            assert (envelope.endpoint is not None) == (role == "entrypoint")
         _project(service, sessions, rows, results)
 
     assert seen_roles == ["worker", "entrypoint"]
@@ -360,7 +308,7 @@ def test_controller_distribution_http_response_round_trips_through_rust(
     initializer = objects[1]
     assert isinstance(initializer, dict)
     initializer["name"] = "__init__.py"
-    assignment = DistributionAssignment.parse(document)
+    assignment = NodeDistributionAssignment.parse(document)
     source.register_artifact_set(
         assignment.model_artifact_set_sha256, assignment.objects
     )
@@ -382,4 +330,6 @@ def test_controller_distribution_http_response_round_trips_through_rust(
         text=True,
         check=True,
     )
-    assert DistributionAssignment.model_validate_json(result.stdout) == assignment
+    assert DistributionAssignment.model_validate_json(result.stdout) == (
+        assignment.wire()
+    )

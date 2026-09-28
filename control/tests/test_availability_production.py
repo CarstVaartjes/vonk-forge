@@ -534,7 +534,6 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
                 node_id="builder-node-000000000000000000000000000000",
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.build.v1"],
             )
         )
         session.add(
@@ -790,7 +789,6 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
                 node_id=builder_node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.build.v1"],
             )
         )
 
@@ -1050,7 +1048,6 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                     node_id=node_id,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=["recipe.build.v1"],
                 )
                 for node_id in node_ids
             ]
@@ -1427,7 +1424,6 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
                 node_id="spk_" + "7" * 32,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.build.v1"],
             )
         )
         session.commit()

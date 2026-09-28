@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 
 from .models import (
     AgentCertificate,
@@ -570,8 +571,8 @@ class OperationalMetricsCollector:
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime],
-        protocol_minimum: int = 3,
-        protocol_maximum: int = 3,
+        protocol_minimum: int = AGENT_PROTOCOL_VERSION,
+        protocol_maximum: int = AGENT_PROTOCOL_VERSION,
     ) -> None:
         if protocol_minimum < 1 or protocol_maximum < protocol_minimum:
             raise ValueError("supported protocol range is invalid")

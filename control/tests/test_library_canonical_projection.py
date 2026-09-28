@@ -493,7 +493,7 @@ def test_database_local_projection_reads_cache_build_and_spark_evidence(
     )
     with sessions.begin() as session:
         session.add(old_revision)
-        session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=node_id, state="active"))
         session.add(
             ModelCacheSet(
                 artifact_set_sha256="b" * 64,

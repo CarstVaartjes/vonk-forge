@@ -250,7 +250,6 @@ class AgentSummary(StrictModel):
     )
     build_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     binary_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
-    capabilities: list[str] = Field(max_length=128)
     last_seen_at: str | None = Field(default=None, max_length=64)
     last_seen_age_seconds: float | None = Field(default=None, ge=0)
     stale: bool
@@ -1713,11 +1712,6 @@ class _DurableOperationProjection:
             not_after = None if certificate is None else _aware(certificate.not_after)
             projected.append(
                 {
-                    "capabilities": [
-                        capability[:80]
-                        for capability in node.capabilities[:64]
-                        if isinstance(capability, str)
-                    ],
                     "certificate_expires_at": (
                         None if not_after is None else not_after.isoformat()
                     ),

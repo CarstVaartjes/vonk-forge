@@ -111,13 +111,6 @@ def test_actual_snapshot_producer_uses_the_same_native_timestamp_bytes() -> None
 def test_actual_distribution_producer_uses_the_same_native_timestamp_bytes() -> None:
     value = DistributionAssignment.parse(
         {
-            "schema_version": 2,
-            "assignment_id": "10000000-0000-4000-8000-000000000001",
-            "plan_digest": "a" * 64,
-            "generation": 1,
-            "node_id": "spk_" + "b" * 32,
-            "expires_at": "2026-09-08T15:00:00.123000+00:00",
-            "model_artifact_set_sha256": "c" * 64,
             "objects": [
                 {"name": "model.bin", "sha256": "d" * 64, "bytes": 1, "kind": "model"},
                 {

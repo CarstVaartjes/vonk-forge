@@ -16,10 +16,11 @@ from vonk_agent_protocol import (
     recipe_job_manifest_sha256,
 )
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.models import AgentNode, AgentOperation
+from vonk_control.models import AgentOperation
 
 from tests.wire_probes import prebuilt_probe
 
+from .agent_fences import fenced_operation
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import running_artifact_service
 from .test_recipe_operations import NOW
@@ -70,20 +71,16 @@ def test_controller_artifact_job_result_crosses_rust_and_python(
         content=b"png",
     )
     service.finalize(job.id)
-    with sessions.begin() as session:
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        node.capabilities = [*node.capabilities, "recipe.job.run.v1"]
     service.submit(
         job.id,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000153",
     )
-    claim = claim_agent(agent_jobs, node_id, "serial-0", 3600)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
     claim_document = json.loads(canonical_message(claim))
     typed_request = RecipeJobRunRequest.parse(claim.payload)
-    child_operation_id = claim.operation_id
+    child_operation_id = fenced_operation(sessions, claim).id
 
     output = b"done"
     output_sha256 = hashlib.sha256(output).hexdigest()
@@ -102,13 +99,7 @@ def test_controller_artifact_job_result_crosses_rust_and_python(
         sha256=output_sha256,
     )
     result_document = {
-        "schema_version": 1,
-        "job_id": claim.job_id,
-        "operation_id": claim.operation_id,
-        "attempt": 1,
         "fence": claim.fence,
-        "node_id": claim.node_id,
-        "deadline": claim_document["deadline"],
         "state": "succeeded",
         "result": {
             "schema_version": 1,

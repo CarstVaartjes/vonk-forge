@@ -45,7 +45,6 @@ def _add_disjoint_profile_node(
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=capabilities,
             )
         )
         session.flush()

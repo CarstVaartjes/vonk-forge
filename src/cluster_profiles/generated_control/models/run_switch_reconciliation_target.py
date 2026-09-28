@@ -10,7 +10,6 @@ from ..types import UNSET, Unset
 
 from ..models.run_switch_reconciliation_target_state import check_run_switch_reconciliation_target_state
 from ..models.run_switch_reconciliation_target_state import RunSwitchReconciliationTargetState
-from ..types import UNSET, Unset
 from typing import cast
 
 
@@ -24,41 +23,27 @@ T = TypeVar("T", bound="RunSwitchReconciliationTarget")
 
 @_attrs_define
 class RunSwitchReconciliationTarget:
-    """ One exact rank and its current cleanup receipt state.
+    """ One exact rank and whether its cleanup already succeeded.
 
         Attributes:
-            compiled_spec_canonical_sha256 (str):
-            install_operation_id (str):
-            install_operation_payload_sha256 (str):
             installed_bytes (int):
             node_id (str):
             rank (int):
             role (str):
             state (RunSwitchReconciliationTargetState):
-            cleanup_receipt_sha256 (None | str | Unset):
      """
 
-    compiled_spec_canonical_sha256: str
-    install_operation_id: str
-    install_operation_payload_sha256: str
     installed_bytes: int
     node_id: str
     rank: int
     role: str
     state: RunSwitchReconciliationTargetState
-    cleanup_receipt_sha256: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        compiled_spec_canonical_sha256 = self.compiled_spec_canonical_sha256
-
-        install_operation_id = self.install_operation_id
-
-        install_operation_payload_sha256 = self.install_operation_payload_sha256
-
         installed_bytes = self.installed_bytes
 
         node_id = self.node_id
@@ -69,27 +54,16 @@ class RunSwitchReconciliationTarget:
 
         state: str = self.state
 
-        cleanup_receipt_sha256: None | str | Unset
-        if isinstance(self.cleanup_receipt_sha256, Unset):
-            cleanup_receipt_sha256 = UNSET
-        else:
-            cleanup_receipt_sha256 = self.cleanup_receipt_sha256
-
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "compiled_spec_canonical_sha256": compiled_spec_canonical_sha256,
-            "install_operation_id": install_operation_id,
-            "install_operation_payload_sha256": install_operation_payload_sha256,
             "installed_bytes": installed_bytes,
             "node_id": node_id,
             "rank": rank,
             "role": role,
             "state": state,
         })
-        if cleanup_receipt_sha256 is not UNSET:
-            field_dict["cleanup_receipt_sha256"] = cleanup_receipt_sha256
 
         return field_dict
 
@@ -98,12 +72,6 @@ class RunSwitchReconciliationTarget:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        compiled_spec_canonical_sha256 = d.pop("compiled_spec_canonical_sha256")
-
-        install_operation_id = d.pop("install_operation_id")
-
-        install_operation_payload_sha256 = d.pop("install_operation_payload_sha256")
-
         installed_bytes = d.pop("installed_bytes")
 
         node_id = d.pop("node_id")
@@ -117,26 +85,12 @@ class RunSwitchReconciliationTarget:
 
 
 
-        def _parse_cleanup_receipt_sha256(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        cleanup_receipt_sha256 = _parse_cleanup_receipt_sha256(d.pop("cleanup_receipt_sha256", UNSET))
-
-
         run_switch_reconciliation_target = cls(
-            compiled_spec_canonical_sha256=compiled_spec_canonical_sha256,
-            install_operation_id=install_operation_id,
-            install_operation_payload_sha256=install_operation_payload_sha256,
             installed_bytes=installed_bytes,
             node_id=node_id,
             rank=rank,
             role=role,
             state=state,
-            cleanup_receipt_sha256=cleanup_receipt_sha256,
         )
 
         return run_switch_reconciliation_target

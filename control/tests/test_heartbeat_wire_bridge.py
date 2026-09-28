@@ -24,7 +24,7 @@ def test_controller_heartbeat_response_crosses_rust_directive_parser(
     agent_system, heartbeat_wire_probe: Path
 ) -> None:
     client, services, _, clock = agent_system
-    operation = services.operations.enqueue(
+    services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
         "recipe.stop",
@@ -34,20 +34,11 @@ def test_controller_heartbeat_response_crosses_rust_directive_parser(
     claim = client.post(
         "/agent/claim",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"protocol_version": 3},
+        json={"protocol_version": 4},
     ).json()
-    progress = {
-        key: claim[key]
-        for key in (
-            "schema_version",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "node_id",
-            "deadline",
-        )
-    } | {"progress": {"phase": "checking"}}
+    progress = {key: claim[key] for key in ("fence",)} | {
+        "progress": {"phase": "checking"}
+    }
 
     response = client.post(
         "/agent/heartbeat",
@@ -59,7 +50,7 @@ def test_controller_heartbeat_response_crosses_rust_directive_parser(
     )
     assert response.status_code == 200
     produced = AgentDirective.parse(response.json())
-    assert produced.operation_id == operation.id
+    assert produced.fence == claim["fence"]
 
     parsed = subprocess.run(
         [str(heartbeat_wire_probe)],

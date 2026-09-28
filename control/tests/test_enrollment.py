@@ -45,6 +45,7 @@ from vonk_control.models import (
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 
+from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
@@ -707,7 +708,6 @@ def test_staged_rotation_releases_an_idle_claim_before_certificate_expiry(
             jobs,
             NODE_ID,
             issued.serial,
-            60,
             wait_seconds=60,
             source=source,
             runtime_identity={
@@ -789,7 +789,6 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
         jobs,
         NODE_ID,
         issued.serial,
-        60,
         source=old_source,
         runtime_identity={
             **PACKAGED_RUNTIME_IDENTITY,
@@ -822,7 +821,9 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
             else:
                 previous.not_after = clock.now
         elif attempt_state in {"superseded", "finished-operation"}:
-            operation = session.get(AgentOperation, claim.operation_id)
+            operation = session.get(
+                AgentOperation, fenced_operation(sessions, claim).id
+            )
             assert operation is not None
             if attempt_state == "superseded":
                 operation.current_attempt += 1
@@ -857,15 +858,9 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
     jobs.record_result(
         AgentResult.model_validate(
             {
-                "schema_version": claim.schema_version,
-                "job_id": claim.job_id,
-                "operation_id": claim.operation_id,
-                "node_id": claim.node_id,
-                "attempt": claim.attempt,
                 "fence": claim.fence,
-                "deadline": claim.deadline,
                 "state": "succeeded",
-                "result": {"stopped": True},
+                "result": {},
             }
         ),
         source=new_source,
@@ -1074,7 +1069,7 @@ def test_renewal_persistence_ambiguity_is_terminal_without_reissue(service) -> N
     issued = enroll(enrollment)
     request = csr()
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=OTHER_NODE_ID, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=OTHER_NODE_ID, state="active"))
         session.add(
             AgentCertificate(
                 serial="serial-2",
@@ -1556,7 +1551,7 @@ def test_enrollment_persistence_failure_stays_recoverable_without_reissuing(
 ) -> None:
     enrollment, sessions, clock, authority = service
     with sessions.begin() as session:
-        session.add(AgentNode(node_id=OTHER_NODE_ID, state="active", capabilities=[]))
+        session.add(AgentNode(node_id=OTHER_NODE_ID, state="active"))
         session.add(
             AgentCertificate(
                 serial="serial-1",

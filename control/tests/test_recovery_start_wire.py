@@ -8,7 +8,6 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentOperation,
     RecipeOperationRequest,
-    RecipeStartPayload,
     canonical_message,
 )
 from vonk_control.distributed_lifecycle import DistributedLifecycleError
@@ -120,12 +119,8 @@ def _queued_recovery_restart(tmp_path: Path):
     )
     for _node_id, payload in (item for group in produced_phases for item in group):
         RecipeOperationRequest.parse(AgentOperation.RECIPE_START, payload)
-    service.record_node_result(
-        stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
-    )
-    service.record_node_result(
-        stop_job.id, nodes[1], succeeded=True, evidence={"stopped": True}
-    )
+    service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
+    service.record_node_result(stop_job.id, nodes[1], succeeded=True, evidence={})
     with sessions() as session:
         restart = session.scalar(
             select(Job).where(
@@ -212,45 +207,24 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
             AgentOperation.RECIPE_START,
             child.payload,
         )
-        assert parsed.schema_version == 2
         assert parsed.run_id == started.owner_id
         assert parsed.mapping_id == run.mapping_id
-        assert parsed.mapping_generation == run.mapping_generation
         assert parsed.run_generation == run.run_generation
         assert parsed.plan_digest == run.plan_digest
         assert parsed.recipe_revision_id == run.plan["recipe_revision_id"]
-        assert parsed.rank == child.payload["rank"]
-        assert parsed.role == child.payload["role"]
-        expected_floor = next(
-            item.memory_floor_bytes
+        planned = next(
+            item
             for item in parse_stored_run_plan(run.plan).nodes
             if item.node_id == child.node_id
         )
-        assert parsed.memory_floor_bytes == expected_floor
-        expected_kind = next(
-            item.memory_kind
-            for item in parse_stored_run_plan(run.plan).nodes
-            if item.node_id == child.node_id
-        )
-        assert isinstance(parsed.payload, RecipeStartPayload)
-        assert parsed.payload.memory_kind == expected_kind
         assert parsed.compiled_execution_plan is not None
         persisted = persisted_plans[child.node_id]
         assert isinstance(persisted, dict)
         assert parsed.compiled_execution_plan["identity"] == persisted["identity"]
         placement = parsed.compiled_execution_plan["runtime"]["placement"]
-        assert placement["rank"] == child.payload["rank"]
-        assert placement["role"] == child.payload["role"]
-        assert placement["world_size"] == child.payload["world_size"]
-        assert placement["port"] == child.payload["port"]
-        assert (
-            placement["reserved_memory_bytes"] == child.payload["reserved_memory_bytes"]
-        )
-        assert placement["memory_floor_bytes"] == child.payload["memory_floor_bytes"]
-        assert placement["memory_kind"] == expected_kind
-        assert placement["local_address"] == child.payload["local_address"]
-        assert placement["master_address"] == child.payload["master_address"]
-        assert placement["master_port"] == child.payload["master_port"]
+        assert (placement["rank"], placement["role"]) == (planned.rank, planned.role)
+        assert placement["memory_floor_bytes"] == planned.memory_floor_bytes
+        assert placement["memory_kind"] == planned.memory_kind
         assert parsed.compiled_execution_plan["security"]["network_mode"] == "host"
         assert "expected_bytes" not in child.payload
         assert "kind" not in child.payload

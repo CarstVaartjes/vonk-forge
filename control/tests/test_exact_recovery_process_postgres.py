@@ -13,6 +13,7 @@ from vonk_agent_protocol import AgentResult
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import AgentOperation, AgentOperationAttempt, Job
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs_postgres import (
@@ -26,12 +27,6 @@ from .test_agent_jobs_postgres import (
     service as postgres_agent_service,  # noqa: F401 - shared PostgreSQL fixture.
 )
 from .test_latest_workload_intent_recovery import _result
-
-_CAPABILITIES = [
-    "agent.runtime.rust.v1",
-    "recipe.stop",
-    "agent.lifecycle.resume.exact.v1",
-]
 
 
 def _commit_result_then_die(database_url: str, now: str, result: str) -> None:
@@ -94,13 +89,10 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
             jobs,
             NODE_A,
             "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=_CAPABILITIES,
         )
         assert claim is not None
-        assert claim.operation_id == operation.id
-        assert claim.attempt == failure_number
+        assert fenced_operation(sessions, claim).id == operation.id
+        assert fenced_attempt(sessions, claim).attempt == failure_number
         first = claim if first is None else first
         last = claim
         interrupted = _result(
@@ -134,7 +126,7 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
     # A fresh worker uses the committed cooldown, and a different Spark keeps
     # progressing while the interrupted request waits for that deadline.
     jobs = AgentJobService(sessions, clock=clock)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30, capabilities=_CAPABILITIES) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
     unrelated_request = parent(sessions, clock)
     unrelated = jobs.enqueue(
         unrelated_request.id,
@@ -143,20 +135,25 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
         COMMIT,
         recipe_stop_payload(NODE_B, plan_digest=COMMIT),
     )
-    other_claim = claim_agent(jobs, NODE_B, "serial-b", 30, capabilities=_CAPABILITIES)
-    assert other_claim is not None and other_claim.operation_id == unrelated.id
+    other_claim = claim_agent(jobs, NODE_B, "serial-b")
+    assert (
+        other_claim is not None
+        and fenced_operation(sessions, other_claim).id == unrelated.id
+    )
     jobs.succeed(other_claim, STOP_RESULT)
     with sessions() as session:
         completed = session.get(Job, unrelated_request.id)
         assert completed is not None and completed.state == "succeeded"
 
     clock.now = due
-    recovered = claim_agent(jobs, NODE_A, "serial-a", 30, capabilities=_CAPABILITIES)
+    recovered = claim_agent(jobs, NODE_A, "serial-a")
     assert recovered is not None and first is not None and last is not None
-    assert recovered.operation_id == first.operation_id
+    assert fenced_operation(sessions, recovered).id == operation.id
     assert recovered.payload == first.payload
-    assert recovered.payload_digest == first.payload_digest
-    assert recovered.attempt == last.attempt + 1
+    assert (
+        fenced_attempt(sessions, recovered).attempt
+        == fenced_attempt(sessions, last).attempt + 1
+    )
     assert recovered.fence != last.fence
     with pytest.raises(StaleAgentAttempt):
         jobs.succeed(last, STOP_RESULT)
@@ -166,7 +163,7 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
     jobs = AgentJobService(sessions, clock=clock)
     with pytest.raises(StaleAgentAttempt):
         jobs.record_result(completed_result)
-    assert claim_agent(jobs, NODE_A, "serial-a", 30, capabilities=_CAPABILITIES) is None
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
     with sessions() as session:
         completed_request = session.get(Job, request.id)
         assert completed_request is not None
@@ -187,5 +184,5 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
                 .order_by(AgentOperationAttempt.attempt)
             )
         )
-        assert len(attempts) == recovered.attempt
+        assert len(attempts) == fenced_attempt(sessions, recovered).attempt
         assert attempts[-1].state == "succeeded"

@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import DistributionAssignment, DistributionObject
+from vonk_agent_protocol import DistributionObject
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution import (
     CompositeVerifiedObjectSource,
@@ -20,6 +20,7 @@ from vonk_control.distribution import (
     ModelCacheVerifiedObjectSource,
     RecipeBuildVerifiedObjectSource,
 )
+from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheResolutionError,
@@ -51,8 +52,8 @@ def controller(tmp_path: Path):
     with sessions.begin() as session:
         session.add_all(
             [
-                AgentNode(node_id=NODE_A, state="active", capabilities=[]),
-                AgentNode(node_id=NODE_B, state="active", capabilities=[]),
+                AgentNode(node_id=NODE_A, state="active"),
+                AgentNode(node_id=NODE_B, state="active"),
             ]
         )
     cache = ModelCacheService(
@@ -251,10 +252,9 @@ def _assignment(
     archive_sha256: str,
     archive_bytes: int,
     image_digest: str,
-) -> DistributionAssignment:
-    return DistributionAssignment.parse(
+) -> NodeDistributionAssignment:
+    return NodeDistributionAssignment.parse(
         {
-            "schema_version": 2,
             "assignment_id": str(uuid4()),
             "plan_digest": plan_digest,
             "generation": 1,
@@ -400,7 +400,7 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
                     == payload
                 )
 
-        wrong_set = DistributionAssignment.parse(
+        wrong_set = NodeDistributionAssignment.parse(
             assignments[0].to_mapping() | {"model_artifact_set_sha256": "f" * 64}
         )
         with pytest.raises(DistributionError) as error:

@@ -51,8 +51,8 @@ def telemetry(tmp_path):
     with sessions.begin() as session:
         session.add_all(
             (
-                AgentNode(node_id=NODE_A, state="active", capabilities=[]),
-                AgentNode(node_id=NODE_B, state="active", capabilities=[]),
+                AgentNode(node_id=NODE_A, state="active"),
+                AgentNode(node_id=NODE_B, state="active"),
             )
         )
     clock = Clock()
@@ -305,8 +305,8 @@ def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
     with sessions.begin() as session:
         session.add_all(
             (
-                AgentNode(node_id=NODE_A, state="active", capabilities=[]),
-                AgentNode(node_id=NODE_B, state="active", capabilities=[]),
+                AgentNode(node_id=NODE_A, state="active"),
+                AgentNode(node_id=NODE_B, state="active"),
             )
         )
         row = NodeTelemetrySample(

@@ -341,9 +341,12 @@ def test_active_run_peak_upper_bound_reduces_build_physical_free_capacity(
         # observed free path must reserve the full 225-byte residual upper
         # bound plus the 50-byte system floor. Ignoring that range would
         # incorrectly offer 225 bytes to an unrelated source build.
-        assert memory_reservations(
-            session, node_id, memory_pool="shared"
-        ).unknown_run_residuals_by_kind["unified-memory"][0].maximum_bytes == 225
+        assert (
+            memory_reservations(session, node_id, memory_pool="shared")
+            .unknown_run_residuals_by_kind["unified-memory"][0]
+            .maximum_bytes
+            == 225
+        )
         assert _available_build_memory(session, snapshot) == 0
 
 

@@ -70,7 +70,6 @@ def test_installed_no_input_fleet_json_pipeline_is_read_only(
                 node_id="spk_" + "1" * 32,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=[],
                 last_seen_at=now,
             )
         )

@@ -93,7 +93,6 @@ def test_running_image_replacement_executes_the_reviewed_build_receipt(
                     node_id=second_builder_id,
                     state="active",
                     binary_digest=builder.binary_digest,
-                    capabilities=list(builder.capabilities),
                     workload_intent_ordinal=1,
                 )
             )

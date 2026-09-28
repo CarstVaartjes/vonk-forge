@@ -313,15 +313,7 @@ def _active_nodes(
 def _topology_capabilities(
     session: Session, nodes: tuple[AgentNode, ...]
 ) -> dict[str, tuple[str, ...]]:
-    """Combine negotiated runtime support with latest inventory fabric evidence.
-
-    ``AgentNode.capabilities`` is refreshed by the claim lane and therefore only
-    contains protocol and operation capabilities accepted by the control plane.
-    Fabric capabilities are reported independently in authenticated inventory
-    snapshots.  Treating the claim row as hardware authority makes every real
-    distributed mapping fail even while Library correctly ranks the same nodes
-    from inventory evidence.
-    """
+    """Runtime and fabric capabilities from each node's latest inventory."""
 
     node_ids = tuple(node.node_id for node in nodes)
     ranked = (
@@ -351,15 +343,10 @@ def _topology_capabilities(
     }
     result: dict[str, tuple[str, ...]] = {}
     for node in nodes:
-        negotiated = {
-            capability
-            for capability in node.capabilities
-            if not capability.startswith("fabric.")
-        }
         inventory = inventories.get(node.node_id)
-        if inventory is not None:
-            negotiated.update(inventory.capabilities)
-        result[node.node_id] = tuple(sorted(negotiated))
+        result[node.node_id] = (
+            () if inventory is None else tuple(sorted(set(inventory.capabilities)))
+        )
     return result
 
 

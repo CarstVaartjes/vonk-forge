@@ -21,7 +21,6 @@ from vonk_agent_protocol import (
     AgentResult,
     RecipeBuildRequest,
     canonical_message,
-    canonical_payload,
 )
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
@@ -179,12 +178,6 @@ def setup(
         if existing_node:
             assert builder is not None
             builder.binary_digest = "1" * 64
-            builder.self_test_passed = True
-            builder.capabilities = [
-                *builder.capabilities,
-                "recipe.build.v1",
-                "recipe.image.import.v1",
-            ]
         else:
             session.add(
                 AgentNode(
@@ -194,11 +187,6 @@ def setup(
                     semantic_version="1.2.3",
                     build_digest="sha256:" + "a" * 64,
                     binary_digest="1" * 64,
-                    self_test_passed=True,
-                    capabilities=[
-                        "recipe.build.v1",
-                        "recipe.image.import.v1",
-                    ],
                     last_seen_at=now,
                 )
             )
@@ -230,6 +218,7 @@ def setup(
                 "recipe.build.v1",
                 "recipe.build.egress-proxy.v1",
                 "recipe.image.import.v1",
+                "runtime.vonk.v1",
             ),
             memory_pool="separate",
         )
@@ -899,8 +888,6 @@ def test_resolution_reuses_the_present_receipt_for_the_shared_identity(
                 semantic_version="1.2.3",
                 build_digest="sha256:" + "a" * 64,
                 binary_digest="1" * 64,
-                self_test_passed=True,
-                capabilities=["recipe.build.v1", "recipe.image.import.v1"],
                 last_seen_at=now,
             )
         )
@@ -1382,20 +1369,9 @@ def test_build_plan_passes_the_installed_agent_claim_boundary(tmp_path: Path) ->
     plan = RecipeBuildService(sessions, bundles=bundles).plan(
         revision.id, node_id, now=now
     )
-    payload_digest = hashlib.sha256(
-        canonical_payload(ProtocolOperation.RECIPE_BUILD, plan.agent_payload)
-    ).hexdigest()
-
     claim = AgentClaim(
-        schema_version=1,
-        job_id="00000000-0000-4000-8000-000000000001",
-        operation_id="00000000-0000-4000-8000-000000000002",
-        attempt=1,
         fence="00000000-0000-4000-8000-000000000003",
-        node_id=node_id,
         operation=ProtocolOperation.RECIPE_BUILD,
-        authority_revision="a" * 64,
-        payload_digest=payload_digest,
         payload=RecipeBuildRequest.model_validate(plan.agent_payload),
         deadline=now,
     )
@@ -1517,36 +1493,12 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
         stored_job.state = source_state
         child.current_attempt = 1
         child_id = child.id
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
-    if source_state == "waiting-for-operator":
-        with sessions.begin() as session:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            node.capabilities = [
-                capability
-                for capability in node.capabilities
-                if capability != "recipe.build.cleanup.v1"
-            ]
-        operations.cancel(
-            original.id,
-            actor="admin",
-            request_id="d75c1b26-f9f5-48b0-94a3-8190bf7c181f",
-            reason="remove recipe cache",
-        )
-        with sessions.begin() as session:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
-        assert operations.reconcile_cancelled_builds()
-    else:
-        operations.cancel(
-            original.id,
-            actor="admin",
-            request_id="d75c1b26-f9f5-48b0-94a3-8190bf7c181f",
-            reason="remove recipe cache",
-        )
+    operations.cancel(
+        original.id,
+        actor="admin",
+        request_id="d75c1b26-f9f5-48b0-94a3-8190bf7c181f",
+        reason="remove recipe cache",
+    )
     with sessions() as session:
         original_job = session.get(Job, original.id)
         assert original_job is not None and original_job.state == source_state
@@ -2121,18 +2073,11 @@ def test_build_plan_accepts_public_network_only_with_egress_boundary_capability(
         AgentJobService(sessions, clock=lambda: now).claim(
             node_id,
             "builder-serial",
-            30,
-            capabilities=[
-                "agent.runtime.rust.v1",
-                "recipe.build.v1",
-                "recipe.image.import.v1",
-            ],
             runtime_identity={
                 "architecture": "linux-arm64",
                 "semantic_version": "1.2.3",
                 "build_digest": "sha256:" + "a" * 64,
                 "binary_digest": "1" * 64,
-                "self_test_passed": True,
                 "observation_receipt_public_key": "d" * 64,
             },
         )
@@ -2297,13 +2242,7 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
 
     message = AgentResult.parse(
         {
-            "schema_version": 1,
-            "job_id": operation_view.id,
-            "operation_id": operation_id,
-            "attempt": 1,
             "fence": "33333333-3333-4333-8333-333333333333",
-            "node_id": node_id,
-            "deadline": "2026-08-11T20:30:00+00:00",
             "state": "succeeded",
             "result": {
                 "build_input_sha256": plan.build_input_sha256,
@@ -2405,7 +2344,6 @@ def test_distribution_reimports_one_build_digest_for_every_mapped_node(
                 node_id=target,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.image.import.v1"],
             )
         )
         session.add(
@@ -2491,7 +2429,6 @@ def test_image_distribution_replans_when_the_submitted_digest_is_stale(
                 node_id=target,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["recipe.image.import.v1"],
             )
         )
         mapping = ClusterMapping(

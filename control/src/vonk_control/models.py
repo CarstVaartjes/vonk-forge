@@ -300,6 +300,10 @@ class AgentNode(Base):
             _nullable_lower_hex("observation_receipt_public_key", 64),
             name="ck_agent_nodes_observation_receipt_public_key",
         ),
+        CheckConstraint(
+            _nullable_lower_hex("preflight_fingerprint", 64),
+            name="ck_agent_nodes_preflight_fingerprint",
+        ),
     )
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workload_intent_ordinal: Mapped[int] = mapped_column(
@@ -311,13 +315,12 @@ class AgentNode(Base):
     semantic_version: Mapped[str | None] = mapped_column(String(32))
     build_digest: Mapped[str | None] = mapped_column(String(71))
     binary_digest: Mapped[str | None] = mapped_column(String(64))
-    self_test_passed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
     observation_receipt_public_key: Mapped[str | None] = mapped_column(String(64))
     contact_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     contact_observation_digest: Mapped[str | None] = mapped_column(String(64))
-    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # The host-runtime fingerprint the agent's last claim reported; a runtime
+    # preflight proof is current only while it matches.
+    preflight_fingerprint: Mapped[str | None] = mapped_column(String(64))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

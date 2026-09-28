@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import os
 import subprocess
@@ -15,13 +14,11 @@ from vonk_agent_protocol import (
     CompiledExecutionPlan,
     RecipeOperationRequest,
     RecipeStartResult,
-    canonical_message,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_MOUNTS,
     CompiledJobInput,
 )
-from vonk_agent_protocol.contracts import TensorParallelStartEvidence
 
 PLAN = json.loads(
     (Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json").read_text()
@@ -34,11 +31,8 @@ MAPPING_ID = "00000000-0000-4000-8000-000000000007"
 
 def _install() -> dict[str, object]:
     return {
-        "schema_version": 2,
         "installation_id": INSTALLATION_ID,
         "plan_digest": "b" * 64,
-        "rank": 0,
-        "role": "entrypoint",
         "expected_bytes": 1,
         "compiled_execution_plan": copy.deepcopy(PLAN),
     }
@@ -49,28 +43,12 @@ def _start() -> dict[str, object]:
     plan["runtime"]["placement"]["endpoint_address"] = "100.100.20.30"
     plan["security"]["network_mode"] = "bridge"
     return {
-        "schema_version": 2,
         "run_id": RUN_ID,
         "installation_id": INSTALLATION_ID,
         "recipe_revision_id": REVISION_ID,
-        "recipe_content_sha256": PLAN["identity"]["recipe_revision_sha256"],
         "mapping_id": MAPPING_ID,
-        "mapping_generation": 1,
-        "image_digest": PLAN["runtime"]["image_digest"],
         "plan_digest": "c" * 64,
-        "alias": "test-model",
-        "rank": 0,
-        "role": "entrypoint",
-        "port": 8000,
-        "reserved_memory_bytes": 67108864,
-        "memory_floor_bytes": plan["runtime"]["placement"]["memory_floor_bytes"],
-        "memory_kind": plan["runtime"]["placement"]["memory_kind"],
-        "endpoint_address": "100.100.20.30",
-        "world_size": 1,
         "compiled_execution_plan": plan,
-        "local_address": None,
-        "master_address": None,
-        "master_port": None,
         "run_generation": 1,
     }
 
@@ -95,13 +73,6 @@ def _distributed_start() -> dict[str, object]:
         "phase": "rank-launch",
         "start_deadline": "2026-09-07T12:05:00+00:00",
         "run_generation": 1,
-        "rank": 1,
-        "role": "worker",
-        "world_size": 2,
-        "endpoint_address": "100.100.20.31",
-        "local_address": "100.100.20.31",
-        "master_address": "100.100.20.30",
-        "master_port": 29500,
         "compiled_execution_plan": plan,
     }
 
@@ -110,45 +81,16 @@ def test_sanitized_compiled_plan_and_current_outer_payloads_round_trip() -> None
     assert CompiledExecutionPlan.parse(PLAN).endpoint is not None
     install = RecipeOperationRequest.parse(AgentOperation.RECIPE_INSTALL, _install())
     start = RecipeOperationRequest.parse(AgentOperation.RECIPE_START, _start())
-    assert install.schema_version == start.schema_version == 2
+    assert install.installation_id == start.installation_id == INSTALLATION_ID
     assert start.mapping_id == MAPPING_ID
 
 
-def test_tensor_parallel_start_result_requires_exact_run_identity_fields() -> None:
-    evidence = {
-        "recipe_revision_id": REVISION_ID,
-        "recipe_content_sha256": PLAN["identity"]["recipe_revision_sha256"],
-        "image_digest": PLAN["runtime"]["image_digest"],
-        "artifact_set_digest": "d" * 64,
-        "model_identity": "vonk-forge/synthetic-tiny-fp16@" + "e" * 64,
-        "rank": 1,
-        "world_size": 2,
-        "memory_reservation_bytes": 67108864,
-        "endpoint": "http://100.100.20.31:8000",
-        "ready": True,
-        "run_generation": 1,
-        "runtime_arguments_sha256": "a" * 64,
-        "local_address": "100.100.20.31",
-        "master_address": "100.100.20.30",
-        "master_port": 29500,
-    }
-    result = RecipeStartResult.model_validate(
-        {
-            "endpoint": evidence["endpoint"],
-            "evidence": evidence,
-        }
-    )
-    assert isinstance(result.evidence, TensorParallelStartEvidence)
-    for field in ("run_generation", "runtime_arguments_sha256"):
-        missing = dict(evidence)
-        missing.pop(field)
-        with pytest.raises(ValueError):
-            RecipeStartResult.model_validate(
-                {
-                    "endpoint": evidence["endpoint"],
-                    "evidence": missing,
-                }
-            )
+def test_start_result_carries_only_the_serving_endpoint() -> None:
+    assert RecipeStartResult.model_validate({}).endpoint is None
+    served = RecipeStartResult.model_validate({"endpoint": "http://100.100.20.31:8000"})
+    assert served.endpoint == "http://100.100.20.31:8000"
+    with pytest.raises(ValueError):
+        RecipeStartResult.model_validate({"endpoint": None, "ready": True})
 
 
 @pytest.mark.parametrize(
@@ -197,33 +139,20 @@ def test_compiled_single_node_plan_rejects_rendezvous_addresses() -> None:
         CompiledExecutionPlan.parse(plan)
 
 
-def test_start_allows_controller_route_alias_distinct_from_engine_alias() -> None:
-    payload = _start()
-    payload["alias"] = "controller-route"
-    request = RecipeOperationRequest.parse(AgentOperation.RECIPE_START, payload)
-    assert request.alias == "controller-route"
-
-
 def test_agent_claim_dispatches_the_same_typed_install_and_start_models() -> None:
     for operation, payload in (
         (AgentOperation.RECIPE_INSTALL, _install()),
         (AgentOperation.RECIPE_START, _start()),
     ):
-        claim = {
-            "schema_version": 1,
-            "attempt": 1,
-            "deadline": "2026-09-07T12:05:00+00:00",
-            "fence": "00000000-0000-4000-8000-000000000011",
-            "job_id": "00000000-0000-4000-8000-000000000012",
-            "operation": operation.value,
-            "operation_id": "00000000-0000-4000-8000-000000000013",
-            "node_id": "spk_11111111111111111111111111111111",
-            "authority_revision": "a" * 64,
-            "payload": payload,
-        }
-        claim["payload_digest"] = hashlib.sha256(canonical_message(payload)).hexdigest()
-        claim = AgentClaim.parse(claim)
-        assert claim.payload["schema_version"] == 2
+        claim = AgentClaim.parse(
+            {
+                "deadline": "2026-09-07T12:05:00+00:00",
+                "fence": "00000000-0000-4000-8000-000000000011",
+                "operation": operation.value,
+                "payload": payload,
+            }
+        )
+        assert claim.payload.installation_id == INSTALLATION_ID
 
 
 def test_plan_rejects_unsafe_paths() -> None:
@@ -573,7 +502,7 @@ def test_schema2_rejects_legacy_flat_install_and_missing_required_options() -> N
     with pytest.raises(AgentProtocolError):
         RecipeOperationRequest.parse(
             AgentOperation.RECIPE_INSTALL,
-            {"schema_version": 1, "installation_id": INSTALLATION_ID},
+            {"installation_id": INSTALLATION_ID},
         )
     value = _install()
     del value["compiled_execution_plan"]["job"]

@@ -153,17 +153,3 @@ def latest_result(
         return None
     # AgentOperationAttempt stores the validated result payload.
     return RuntimePreflightResult.model_validate(raw)
-
-
-def node_fingerprint(capabilities: list[str]) -> str | None:
-    """Current host observation arrives with each authenticated agent claim."""
-    import re
-
-    fingerprints = [
-        value.removeprefix("runtime.preflight.fingerprint.")
-        for value in capabilities
-        if value.startswith("runtime.preflight.fingerprint.")
-    ]
-    if len(fingerprints) == 1 and re.fullmatch(r"[0-9a-f]{64}", fingerprints[0]):
-        return fingerprints[0]
-    return None

@@ -48,7 +48,6 @@ from vonk_agent_protocol import (
     SignedHostHelperGrant,
     canonical_message,
 )
-from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
 from vonk_agent_protocol.claims import ClaimRequest
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
@@ -62,19 +61,13 @@ from vonk_agent_protocol.host_helper import (
     RecipeReconciliationIdentity,
 )
 from vonk_agent_protocol.telemetry import TelemetryRequest
-from vonk_forge_contracts import RecipeDefinition, content_sha256
 
-from .agent_jobs import AgentJobService, StaleAgentAttempt
+from .agent_jobs import CLAIM_LEASE_SECONDS, AgentJobService, StaleAgentAttempt
 from .auth import (
     AgentIdentity,
     AgentSource,
     agent_identity_from_scope,
     agent_source_from_scope,
-)
-from .compiled_execution_plan import (
-    MAX_COMPILED_EXECUTION_PLAN_BYTES,
-    CompiledExecutionPlanError,
-    validate_compiled_launch_payload,
 )
 from .contract_graph import raw_json_body
 from .distribution import DistributionError, DistributionService
@@ -103,30 +96,20 @@ from .models import (
     AgentCertificate,
     AgentNode,
     AgentOperation,
-    CatalogDocumentRevision,
     ClusterMapping,
-    ClusterMappingNode,
-    InstallationNode,
     RecipeBuild,
-    RecipeInstallation,
     RecipeRun,
     RecipeSourceBundle,
     RunNode,
-    RuntimeImageAuthorization,
 )
 from .operation_api import bounded_error_responses
 from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
-from .recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_installation_plan,
-)
 from .recipe_operations import (
     prepare_exact_recipe_run_observation_nodes,
 )
 from .runtime_image_preparation import (
     IMAGE_CACHE_DIRECTORY,
-    prefixed_image_digest,
 )
 from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
 from .strict_json import ControllerAPIRoute, StrictJSONModel
@@ -186,74 +169,6 @@ def _strict_json_datetime(value: object) -> object:
     if "T" not in value and "t" not in value:
         raise ValueError("observed time must be an RFC 3339 string")
     return parsed
-
-
-def _prefixed_text(value: object) -> str | None:
-    """Normalize a digest-shaped value that arrived as untyped JSON."""
-
-    return prefixed_image_digest(value) if isinstance(value, str) else None
-
-
-def _runtime_image_authorization_matches(
-    runtime_image: Mapping[str, object],
-    identity: Mapping[str, object],
-    authorization: object,
-    *,
-    revision_id: str,
-    revision_digest: str,
-    installation_image_digest: str,
-    installation_recipe_build_id: str | None,
-) -> bool:
-    """Bind one persisted launch image to its authorized Controller archive.
-
-    SQL owns the authorization decision; managed storage owns the verified
-    archive and its receipt. The authorization carries the archive identity, so
-    comparing it to the compiled launch image is the whole check.
-    """
-
-    if (
-        getattr(authorization, "state", None) != "authorized"
-        or identity.get("recipe_revision_sha256") != revision_digest
-        or getattr(authorization, "recipe_revision_id", None) != revision_id
-        or getattr(authorization, "effective_execution_key", None)
-        != identity.get("execution_sha256")
-        or runtime_image.get("image_digest") != installation_image_digest
-        # The compiled plan and the durable authorization spell image digests
-        # differently; compare them in one spelling.
-        or _prefixed_text(runtime_image.get("image_digest"))
-        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
-        or _prefixed_text(runtime_image.get("platform_manifest_digest"))
-        != _prefixed_text(getattr(authorization, "platform_manifest_digest", None))
-        or runtime_image.get("registry_manifest_digest")
-        != getattr(authorization, "registry_manifest_digest", None)
-        or runtime_image.get("local_image_config_id")
-        != getattr(authorization, "local_image_config_id", None)
-        or runtime_image.get("oci_layout_sha256")
-        != getattr(authorization, "oci_archive_sha256", None)
-        or runtime_image.get("image_bytes")
-        != getattr(authorization, "image_bytes", None)
-        # Architecture and runtime-interface labels are compiled launch facts,
-        # not authorization columns; the plan's own validation owns them.
-        or runtime_image.get("source") != getattr(authorization, "source", None)
-        or runtime_image.get("build_id") != getattr(authorization, "build_id", None)
-    ):
-        return False
-    source = runtime_image.get("source")
-    if source == "published":
-        return (
-            runtime_image.get("registry_manifest_digest") is not None
-            and getattr(authorization, "registry_manifest_digest", None) is not None
-            and runtime_image.get("build_id") is None
-            and getattr(authorization, "build_id", None) is None
-            and installation_recipe_build_id is None
-        )
-    if source == "controller-build":
-        return (
-            runtime_image.get("build_id") is not None
-            and getattr(authorization, "build_id", None) is not None
-            and getattr(authorization, "registry_manifest_digest", None) is None
-        )
-    return False
 
 
 @dataclass(frozen=True)
@@ -328,11 +243,9 @@ class EnrollmentGrantResponse(StrictJSONModel):
 
 
 class AgentGrantRequest(StrictJSONModel):
+    """A helper grant for the attempt the fence names; mTLS names the node."""
+
     model_config = ConfigDict(extra="forbid", strict=True)
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    job_id: str = Field(pattern=_UUID4_TEXT)
-    operation_id: str = Field(pattern=_UUID4_TEXT)
-    attempt: int = Field(ge=1, le=2**31 - 1)
     fence: str = Field(pattern=_UUID4_TEXT)
     expires_in_seconds: int = Field(ge=1, le=300)
 
@@ -391,7 +304,6 @@ class HostRuntimeGrantRequest(AgentGrantRequest):
         if self.reconciliation_identity is not None and (
             self.action != "installation-cleanup"
             or self.reconciliation_identity.installation_id != self.installation_id
-            or self.reconciliation_identity.node_id != self.node_id
         ):
             raise ValueError("host runtime reconciliation binding is invalid")
         return self
@@ -402,7 +314,6 @@ from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 
 
 class PackageActivationGrantRequest(StrictJSONModel):
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     receipt: PackageActivationReceipt
     runtime_identity: AgentRuntimeIdentity
 
@@ -1066,17 +977,14 @@ def install_agent_routes(
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        _body_node_matches(body.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
             result = required.operations.claim(
                 identity.node_id,
                 identity.certificate_serial,
-                body.lease_seconds,
                 body.wait_seconds,
-                body.protocol_version,
-                body.capabilities,
                 runtime_identity=body.runtime_identity.model_dump(),
+                preflight_fingerprint=body.preflight_fingerprint,
                 hostname=body.hostname,
                 source=source,
             )
@@ -1549,234 +1457,6 @@ def install_agent_routes(
             },
         )
 
-    @agent.get(
-        "/recipe-installations/{installation_id}/spec",
-        response_model=AgentCompiledExecutionPlan,
-    )
-    def recipe_spec(installation_id: str, request: Request) -> Response:
-        _scope_identity(request)
-        required = _require_services(services)
-        identity = _authenticated_identity(request, required)
-        if (
-            re.fullmatch(
-                r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
-                installation_id,
-            )
-            is None
-        ):
-            raise HTTPException(
-                status_code=404, detail="recipe specification does not exist"
-            )
-        with required.sessions() as session:
-            installation = session.get(RecipeInstallation, installation_id)
-            placement = session.scalar(
-                select(InstallationNode).where(
-                    InstallationNode.installation_id == installation_id,
-                    InstallationNode.node_id == identity.node_id,
-                )
-            )
-            if installation is None or placement is None:
-                raise HTTPException(
-                    status_code=404, detail="recipe specification does not exist"
-                )
-            revision = session.get(
-                CatalogDocumentRevision, installation.recipe_revision_id
-            )
-            mapping = session.get(ClusterMapping, installation.mapping_id)
-            mapping_node = session.scalar(
-                select(ClusterMappingNode).where(
-                    ClusterMappingNode.mapping_id == installation.mapping_id,
-                    ClusterMappingNode.node_id == identity.node_id,
-                )
-            )
-            if installation.state not in {"installing", "installed", "partial"}:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification installation is not ready",
-                )
-            if (
-                revision is None
-                or revision.kind != "recipe"
-                or revision.schema_version != 2
-                or revision.state != "active"
-                or mapping is None
-                or mapping_node is None
-                or mapping.state != "ready"
-                or mapping.generation != installation.mapping_generation
-                or placement.rank != mapping_node.rank
-                or placement.role != mapping_node.role
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification installation authority is stale",
-                )
-            try:
-                recipe = RecipeDefinition.model_validate(revision.document)
-            except (TypeError, ValueError):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification installation authority is stale",
-                ) from None
-            if content_sha256(recipe) != revision.content_digest:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification installation authority is stale",
-                )
-            try:
-                stored_installation_plan = parse_stored_installation_plan(
-                    installation.plan
-                )
-            except RecipeExecutionContractError:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification compiled execution plan is invalid",
-                ) from None
-            candidate_model = stored_installation_plan.compiled_execution_plans.get(
-                identity.node_id
-            )
-            if candidate_model is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification compiled execution plan is unavailable",
-                )
-            candidate = candidate_model.model_dump(mode="json")
-            candidate_identity = candidate.get("identity")
-            candidate_runtime_image = candidate.get("runtime_image")
-            effective_execution_key = (
-                candidate_identity.get("execution_sha256")
-                if isinstance(candidate_identity, Mapping)
-                else None
-            )
-            authorizations = (
-                session.scalars(
-                    select(RuntimeImageAuthorization).where(
-                        RuntimeImageAuthorization.recipe_revision_id
-                        == installation.recipe_revision_id,
-                        RuntimeImageAuthorization.effective_execution_key
-                        == effective_execution_key,
-                        RuntimeImageAuthorization.state == "authorized",
-                    )
-                ).all()
-                if isinstance(effective_execution_key, str)
-                else []
-            )
-            candidate_authorizations = list(authorizations)
-            candidate_source = (
-                candidate_runtime_image.get("source")
-                if isinstance(candidate_runtime_image, Mapping)
-                else None
-            )
-            candidate_build_id = (
-                candidate_runtime_image.get("build_id")
-                if isinstance(candidate_runtime_image, Mapping)
-                else None
-            )
-            build = (
-                session.get(RecipeBuild, candidate_build_id)
-                if candidate_source == "controller-build"
-                and isinstance(candidate_build_id, str)
-                else None
-            )
-            build_id = build.id if build is not None else None
-            build_state = build.state if build is not None else None
-            build_recipe_revision_id = (
-                build.recipe_revision_id if build is not None else None
-            )
-            build_image_digest = build.image_digest if build is not None else None
-            build_oci_layout_sha256 = (
-                build.oci_layout_sha256 if build is not None else None
-            )
-            build_image_bytes = build.image_bytes if build is not None else None
-            build_input_sha256 = build.build_input_sha256 if build is not None else None
-            installation_recipe_build_id = installation.recipe_build_id
-            revision_id = revision.id
-            revision_content_digest = revision.content_digest
-            installation_image_digest = installation.image_digest
-        try:
-            spec = validate_compiled_launch_payload(candidate)
-            typed_spec = AgentCompiledExecutionPlan.model_validate(spec)
-        except (CompiledExecutionPlanError, TypeError, ValueError):
-            # The candidate plan is caller-supplied, and a pydantic error string
-            # embeds the offending input, so the response names the fault
-            # without echoing the document back.
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification compiled execution plan is invalid",
-            ) from None
-        topology = spec.get("topology")
-        if not isinstance(topology, Mapping) or (
-            topology.get("rank") != placement.rank
-            or topology.get("role") != placement.role
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification placement does not match the installation",
-            )
-        identity_document = spec.get("identity")
-        runtime_image = spec.get("runtime_image")
-        if not isinstance(identity_document, Mapping) or not isinstance(
-            runtime_image, Mapping
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification execution receipts are stale",
-            )
-        if identity_document.get("recipe_revision_sha256") != revision_content_digest:
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification execution receipts are stale",
-            )
-        matching_authorizations = [
-            authorization
-            for authorization in candidate_authorizations
-            if _runtime_image_authorization_matches(
-                runtime_image,
-                identity_document,
-                authorization,
-                revision_id=revision_id,
-                revision_digest=revision_content_digest,
-                installation_image_digest=installation_image_digest,
-                installation_recipe_build_id=installation_recipe_build_id,
-            )
-        ]
-        if len(matching_authorizations) != 1:
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification execution receipts are stale",
-            )
-        receipt = matching_authorizations[0]
-        if runtime_image.get("source") == "controller-build":
-            if (
-                build_id != getattr(receipt, "build_id", None)
-                or build_id != installation_recipe_build_id
-                or build_state != "succeeded"
-                or build_recipe_revision_id != revision_id
-                or build_image_digest != installation_image_digest
-                or build_oci_layout_sha256
-                != getattr(receipt, "oci_archive_sha256", None)
-                or build_image_bytes != getattr(receipt, "image_bytes", None)
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification execution receipts are stale",
-                )
-            build_input = identity_document.get("build_input_sha256")
-            if build_input is not None and build_input != build_input_sha256:
-                raise HTTPException(
-                    status_code=409,
-                    detail="recipe specification execution receipts are stale",
-                )
-        encoded_spec = canonical_message(typed_spec)
-        if len(encoded_spec) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
-            raise HTTPException(
-                status_code=409,
-                detail="recipe specification compiled execution plan is too large",
-            )
-        return Response(
-            content=encoded_spec,
-            media_type="application/json",
-        )
-
     def helper_identity(request: Request) -> AgentIdentity:
         _scope_identity(request)
         required = _require_services(services)
@@ -1796,10 +1476,7 @@ def install_agent_routes(
         required = host_runtime_service()
         try:
             grant = required.issue_grant(
-                node_id=body.node_id,
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
+                node_id=identity.node_id,
                 fence=body.fence,
                 action=ContainerRuntimeAction(body.action),
                 request_sha256=body.request_sha256,
@@ -1827,11 +1504,9 @@ def install_agent_routes(
         body: PackageActivationGrantRequest, request: Request
     ) -> Response:
         identity = helper_identity(request)
-        if identity.node_id != body.node_id:
-            raise HTTPException(status_code=403, detail="activation node mismatch")
         try:
             grant = host_runtime_service().issue_package_activation_grant(
-                node_id=body.node_id,
+                node_id=identity.node_id,
                 receipt=body.receipt,
                 runtime_identity=body.runtime_identity,
                 certificate_serial=identity.certificate_serial,
@@ -1850,10 +1525,7 @@ def install_agent_routes(
         required = host_runtime_service()
         try:
             grant = required.issue_agent_upgrade_grant(
-                node_id=body.node_id,
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
+                node_id=identity.node_id,
                 fence=body.fence,
                 package_sha256=body.package_sha256,
                 package_signature=body.package_signature,
@@ -1872,13 +1544,12 @@ def install_agent_routes(
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
         message = body
-        _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
             response = required.operations.heartbeat(
                 message,
                 message.progress,
-                30,
+                CLAIM_LEASE_SECONDS,
                 source=source,
             )
         except StaleAgentAttempt as error:
@@ -1886,8 +1557,8 @@ def install_agent_routes(
                 message, source=source
             ):
                 logging.getLogger(__name__).info(
-                    "ignored heartbeat for superseded cancelled operation %s",
-                    message.operation_id,
+                    "ignored heartbeat for superseded cancelled fence %s",
+                    message.fence,
                 )
                 raise HTTPException(
                     status_code=409,
@@ -1895,8 +1566,6 @@ def install_agent_routes(
                     headers={"x-vonk-error-code": "superseded_operation_cancelled"},
                 ) from None
             required.operations.record_boundary_refusal(
-                str(message.operation_id),
-                message.attempt,
                 str(message.fence),
                 boundary="heartbeat",
                 check="stale-attempt",
@@ -1904,8 +1573,6 @@ def install_agent_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
         except ValueError as error:
             required.operations.record_boundary_refusal(
-                str(message.operation_id),
-                message.attempt,
                 str(message.fence),
                 boundary="heartbeat",
                 check="invalid-progress",
@@ -1919,7 +1586,6 @@ def install_agent_routes(
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
         message = body
-        _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
             # The failed-result identity rule (a failed status plus a stable
@@ -1933,8 +1599,6 @@ def install_agent_routes(
                 required.operations.record_late_result(message, source=source)
             except StaleAgentAttempt:
                 required.operations.record_boundary_refusal(
-                    str(message.operation_id),
-                    message.attempt,
                     str(message.fence),
                     boundary="result",
                     check="stale-attempt",
@@ -1942,8 +1606,6 @@ def install_agent_routes(
                 raise HTTPException(status_code=409, detail=str(error)) from None
             except ValueError as invalid:
                 required.operations.record_boundary_refusal(
-                    str(message.operation_id),
-                    message.attempt,
                     str(message.fence),
                     boundary="result",
                     check="late-result-invalid",
@@ -1952,8 +1614,6 @@ def install_agent_routes(
             return Response(status_code=status.HTTP_202_ACCEPTED)
         except ValueError as error:
             required.operations.record_boundary_refusal(
-                str(message.operation_id),
-                message.attempt,
                 str(message.fence),
                 boundary="result",
                 check="invalid-result",
@@ -2324,7 +1984,7 @@ def install_agent_routes(
             raise _distribution_error(error) from None
         response.headers["Cache-Control"] = "no-store"
         response.headers["ETag"] = f'"plan:{plan_digest}"'
-        return assignment
+        return assignment.wire()
 
     @agent.get(
         "/distribution/objects/{sha256}",

@@ -222,7 +222,6 @@ def test_cancelled_build_cleanup_crosses_the_real_wire_boundary(
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.capabilities = [*node.capabilities, "recipe.build.cleanup.v1"]
         child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == original.id)
         )
