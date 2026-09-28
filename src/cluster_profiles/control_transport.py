@@ -165,6 +165,12 @@ class HTTPSResponse(io.BufferedIOBase):
         try:
             self._runner.run(self._close())
         finally:
+            # Drop every object that references the loop, so the loop is freed
+            # here rather than by a later garbage collection, where a Ctrl-C
+            # landing in its finalizer would be swallowed.
+            self._body = None
+            self._response = None
+            self._client = None
             self._runner.close()
 
     def __enter__(self) -> Self:
