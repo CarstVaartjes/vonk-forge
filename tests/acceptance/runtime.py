@@ -210,10 +210,20 @@ def assert_bundle_contract(bundle: Path) -> None:
 
     compose_raw = compose.read_bytes()
     environment_raw = environment.read_bytes()
-    secret_files = sorted(path for path in secrets.rglob("*") if path.is_file())
+    # secrets/gateway is a Controller-written mount (group-writable, files owned
+    # by the Controller), not installer secret material.
+    gateway = secrets / "gateway"
+    if gateway.is_symlink() or not gateway.is_dir():
+        raise AcceptanceError("secrets/gateway is unsafe")
+    if gateway.stat().st_uid != bundle.stat().st_uid:
+        raise AcceptanceError("secrets/gateway must belong to the bundle owner")
+    secret_paths = [
+        path for path in secrets.rglob("*") if gateway not in (path, *path.parents)
+    ]
+    secret_files = sorted(path for path in secret_paths if path.is_file())
     if not secret_files:
         raise AcceptanceError("NAS bundle has no secrets")
-    for directory in [secrets, *(path for path in secrets.rglob("*") if path.is_dir())]:
+    for directory in [secrets, *(path for path in secret_paths if path.is_dir())]:
         if directory.is_symlink():
             raise AcceptanceError("secret directory is unsafe")
         _require_mode(directory, 0o700)

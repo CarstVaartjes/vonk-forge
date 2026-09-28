@@ -193,6 +193,7 @@ def test_bundle_contract_is_exact_and_contains_no_secret_values_in_compose(
     bundle = tmp_path / "vonk-forge"
     secrets = bundle / "secrets"
     secrets.mkdir(parents=True)
+    (secrets / "gateway").mkdir(mode=0o700)
     (bundle / "backups").mkdir(mode=0o700)
     (bundle / "docker-compose.yaml").write_text(
         "services:\n  api:\n    secrets: [token]\nsecrets:\n  token:\n    file: ./secrets/token\n"
@@ -204,6 +205,13 @@ def test_bundle_contract_is_exact_and_contains_no_secret_values_in_compose(
     secrets.chmod(0o700)
     (secrets / "token").chmod(0o600)
 
+    assert_bundle_contract(bundle)
+
+    # The Controller-written gateway mount is group-writable and holds
+    # Controller-owned keys; it is not installer secret material.
+    (secrets / "gateway").chmod(0o770)
+    (secrets / "gateway" / "client-key").write_text("sk-controller-owned\n")
+    (secrets / "gateway" / "client-key").chmod(0o640)
     assert_bundle_contract(bundle)
 
     (bundle / "backups").chmod(0o755)
@@ -225,6 +233,7 @@ def test_bundle_contract_allows_empty_optional_hugging_face_token(
     bundle = tmp_path / "vonk-forge"
     secrets = bundle / "secrets"
     secrets.mkdir(parents=True)
+    (secrets / "gateway").mkdir(mode=0o700)
     (bundle / "backups").mkdir(mode=0o700)
     (bundle / "docker-compose.yaml").write_text(
         "services: {}\nsecrets:\n  hf-token:\n    file: ./secrets/hf-token\n"
