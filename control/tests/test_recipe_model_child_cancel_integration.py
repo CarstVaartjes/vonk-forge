@@ -26,10 +26,10 @@ from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
 from .test_recipe_image_availability import (
-    Transport,
     _add_revision,
     _recipe,
     _runtime,
+    _service,
 )
 
 
@@ -325,11 +325,10 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
         del recipe_revision_id, force
         return recipe, _runtime()
 
-    service = RecipeImageAvailabilityService(
+    service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(image_root),
         authority=resolve_recipe_authority,
-        transport=Transport(),
         model_cache=CacheAdapter(),
         clock=lambda: now,
     )

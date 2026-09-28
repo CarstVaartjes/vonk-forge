@@ -122,7 +122,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
             capabilities = (
                 "runtime.vonk.v1",
                 "recipe.operations.v1",
-                "fabric.connected.mbps.1000",
+                "fabric.connected.mbps.200000",
             )
             session.add(
                 AgentNode(
@@ -169,7 +169,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                 capabilities=capabilities,
                 memory_pool="shared",
                 fabric_address=f"192.168.100.{4 + index}",
-                fabric_bandwidth_mbps=1000,
+                fabric_bandwidth_mbps=200000,
             )
         )
     profiles.update(

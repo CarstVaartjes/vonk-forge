@@ -5437,6 +5437,8 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
         )
         assert child is not None
         evidence = start_evidence(child.payload)
+    # Every rank launches in one phase; the last two results race.
+    service.record_node_result(start.id, nodes[0], succeeded=True, evidence={})
     barrier = threading.Barrier(2)
 
     def result(node_id: str, succeeded: bool) -> None:

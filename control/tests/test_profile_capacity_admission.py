@@ -794,7 +794,6 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
             None,
             None,
             None,
-            None,
         )
         heartbeat.flush()
 
