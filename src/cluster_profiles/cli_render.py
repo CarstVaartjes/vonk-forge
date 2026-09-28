@@ -1466,7 +1466,12 @@ def render_payload(
                 print("Labels: none")
             for key, value in labels.items():
                 _field("Label", f"{key}={_text(value)}")
-        elif action in {"detail", "rename"}:
+        elif action == "rename":
+            # The Controller answers a rename with the Spark's identity only.
+            print(
+                f"Renamed {_text(payload.get('id'))} to {_text(payload.get('display_name'))}."
+            )
+        elif action == "detail":
             _node(payload, detail=True)
         elif action == "progress":
             _job(payload)
