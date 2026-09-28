@@ -214,6 +214,9 @@ def _tls_request(
     return peer, bytes(response)
 
 
+# Slow by design: it generates the PKI in a container, then starts the real
+# Caddy image and waits for it to serve TLS on every SNI.
+@pytest.mark.slow(30)
 def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
     tmp_path: Path,
 ) -> None:

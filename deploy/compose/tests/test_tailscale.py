@@ -1094,6 +1094,9 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
     assert "GET / HTTP/1.1<CR>" in request_log
 
 
+# Slow by design: the real reconciler script polls once per second and the
+# test waits for four readiness transitions plus the drain on shutdown.
+@pytest.mark.slow(30)
 def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_safe(
     tmp_path: Path, short_socket_directory: Path
 ) -> None:
