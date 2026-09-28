@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 from uuid import uuid4
 
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -73,7 +76,6 @@ from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )
-from .workload_helper_authority import _load_private_key
 
 
 def _aware(value: datetime) -> datetime:
@@ -95,6 +97,50 @@ def recipe_run_known(session: Session, run_id: str) -> bool:
 
 class HostHelperAuthorityError(RuntimeError):
     """The host-helper grant could not be issued safely."""
+
+
+def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            Path(path), os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) & 0o077
+            or not 1 <= before.st_size <= 16 * 1024
+        ):
+            raise HostHelperAuthorityError("host helper private key is unsafe")
+        raw = os.read(descriptor, 16 * 1024 + 1)
+        after = os.fstat(descriptor)
+        identity = lambda value: (
+            value.st_dev,
+            value.st_ino,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+        if len(raw) > 16 * 1024 or identity(before) != identity(after):
+            raise HostHelperAuthorityError("host helper private key changed while read")
+    except HostHelperAuthorityError:
+        raise
+    except OSError as error:
+        raise HostHelperAuthorityError(
+            "host helper private key is unavailable"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    try:
+        key = serialization.load_pem_private_key(raw, password=None)
+    except (TypeError, ValueError) as error:
+        raise HostHelperAuthorityError("host helper private key is invalid") from error
+    if not isinstance(key, ed25519.Ed25519PrivateKey):
+        raise HostHelperAuthorityError("host helper private key must be Ed25519")
+    return key
 
 
 class RecipeRunObservationReplayError(HostHelperAuthorityError):

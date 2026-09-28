@@ -65,11 +65,10 @@ services:
     cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
     security_opt: [no-new-privileges:true]
     environment: *control-environment
-    secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
+    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
-      - workload-tuf-publication:/workload-tuf
       - route-publications:/routes
       - deployment-observations:/run/vonk-deployment-observations
       - litellm-supervisor-state:/supervisor
@@ -329,10 +328,6 @@ secrets:
     file: ./secrets/controller-server-key
   agent-proxy-auth:
     file: ./secrets/agent-proxy-auth
-  package-helper-grant-private-key:
-    file: ./secrets/package-helper-grant-private-key.pem
-  package-helper-receipt-private-key:
-    file: ./secrets/package-helper-receipt-private-key.pem
   host-runtime-grant-private-key:
     file: ./secrets/host-runtime-grant-private-key.pem
   agent-ca-credential:
@@ -374,7 +369,6 @@ volumes:
   grafana-data: {}
   registry-data: {}
   route-publications: {}
-  workload-tuf-publication: {}
   deployment-observations: {}
   normalized-private-keys: {}
   step-ca-data: {}

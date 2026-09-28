@@ -15,7 +15,7 @@ import tempfile
 import time
 import uuid
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -46,8 +46,6 @@ from vonk_agent_protocol import (
     RecipeRunObservationGrantWire,
     RecipeRunObservationsWire,
     SignedHostHelperGrant,
-    SignedPackageHelperGrant,
-    SignedPackageObjectReceipt,
     canonical_message,
 )
 from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
@@ -64,9 +62,6 @@ from vonk_agent_protocol.host_helper import (
     RecipeReconciliationIdentity,
 )
 from vonk_agent_protocol.telemetry import TelemetryRequest
-from vonk_agent_protocol.workload_packages import (
-    PackageHelperOperation,
-)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
@@ -141,10 +136,6 @@ from .telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
-from .workload_helper_authority import (
-    WorkloadHelperAuthorityError,
-    WorkloadHelperAuthorityService,
-)
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 #: Response header on an observation grant that names a run this Controller
@@ -167,11 +158,6 @@ _MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
 _MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
 _MAX_RANGE_BYTES = 8 * 1024 * 1024
-_WORKLOAD_TUF_METADATA_NAME = re.compile(
-    r"(?:[1-9][0-9]*\.root|timestamp|snapshot|targets|families|releases|"
-    r"[1-9][0-9]*\.(?:targets|families|releases))\.json\Z"
-)
-_WORKLOAD_TUF_TARGET_NAME = re.compile(r"releases/[0-9a-f]{64}\.json\Z")
 # A distribution refusal is returned as the agent's ``x-vonk-error-code`` so the
 # denying check is attributable.  The vocabulary is internal, but the header is
 # a wire surface, so it is validated before being reflected.
@@ -284,14 +270,9 @@ class AgentApiServices:
     presence: AgentPresenceService
     artifact_root: Path
     source_bundles: SourceBundleStoreProtocol
-    workload_tuf_metadata_root: Path = Path("/state/workload-tuf/metadata")
-    workload_tuf_target_root: Path = Path("/state/workload-tuf/targets")
     max_artifact_bytes: int = _MAX_ARTIFACT_BYTES
     max_recipe_image_bytes: int = MAX_RECIPE_IMAGE_BYTES
     max_range_bytes: int = _MAX_RANGE_BYTES
-    max_workload_tuf_metadata_bytes: int = 2 * 1024 * 1024
-    max_workload_tuf_target_bytes: int = 1024 * 1024
-    workload_helper_authority: WorkloadHelperAuthorityService | None = None
     host_runtime_authority: HostRuntimeAuthorityService | None = None
     fabric_policy: ManagementAddressPolicy | None = None
     bootstrap: EnrollmentBootstrapConfig | None = None
@@ -436,71 +417,13 @@ class AgentUpgradeGrantRequest(AgentGrantRequest):
     package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
 
 
-class PackageHelperReceiptObjectRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    object_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    size: int = Field(strict=True, gt=0, le=2**63 - 1)
-
-
-class PackageHelperReceiptsRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    job_id: str = Field(pattern=_UUID4_TEXT)
-    operation_id: str = Field(pattern=_UUID4_TEXT)
-    attempt: int = Field(ge=1, le=2**31 - 1)
-    fence: str = Field(pattern=_UUID4_TEXT)
-    release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    objects: list[PackageHelperReceiptObjectRequest] = Field(
-        min_length=1, max_length=256
-    )
-
-
-class PackageHelperGrantRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    request_id: str = Field(pattern=_UUID4_TEXT)
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    job_id: str = Field(pattern=_UUID4_TEXT)
-    operation_id: str = Field(pattern=_UUID4_TEXT)
-    attempt: int = Field(ge=1, le=2**31 - 1)
-    fence: str = Field(pattern=_UUID4_TEXT)
-    release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    generation: str = Field(strict=True, pattern=_IDENTIFIER_TEXT)
-    operation: Literal[
-        "prepare", "verify", "start", "health", "infer", "stop", "verify-release"
-    ]
-    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    expires_in_seconds: int = Field(ge=1, le=900)
-
-
-class PackageHelperGrantResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    grant: SignedPackageHelperGrant
-
-
 class HostHelperGrantResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     grant: SignedHostHelperGrant
 
 
-class PackageHelperReceiptsResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    receipts: list[SignedPackageObjectReceipt]
-
-
 def _host_grant_response(grant: SignedHostHelperGrant) -> HostHelperGrantResponse:
     return HostHelperGrantResponse(grant=grant)
-
-
-def _package_grant_response(
-    grant: SignedPackageHelperGrant,
-) -> PackageHelperGrantResponse:
-    return PackageHelperGrantResponse(grant=grant)
-
-
-def _package_receipts_response(
-    receipts: Sequence[SignedPackageObjectReceipt],
-) -> PackageHelperReceiptsResponse:
-    return PackageHelperReceiptsResponse(receipts=list(receipts))
 
 
 def _wire(value: object) -> object:
@@ -916,133 +839,6 @@ def _open_owned_artifact(
     except Exception:
         os.close(descriptor)
         raise
-
-
-def _read_tuf_file(root: Path, name: str, maximum: int) -> bytes:
-    root_flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-    )
-    file_flags = (
-        os.O_RDONLY
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NONBLOCK", 0)
-    )
-    components = name.split("/")
-    if not components or any(component in {"", ".", ".."} for component in components):
-        raise HTTPException(status_code=404, detail="TUF file not found")
-    directory_descriptor = -1
-    try:
-        root_metadata = root.lstat()
-        if (
-            not root.is_absolute()
-            or not stat.S_ISDIR(root_metadata.st_mode)
-            or stat.S_ISLNK(root_metadata.st_mode)
-            or root_metadata.st_uid not in {0, os.geteuid()}
-            or root_metadata.st_mode & 0o022
-        ):
-            raise OSError("unsafe TUF root")
-        directory_descriptor = os.open(os.fspath(root), root_flags)
-        try:
-            opened_root = os.fstat(directory_descriptor)
-
-            def root_identity(item: os.stat_result) -> tuple[int, int, int, int]:
-                return (item.st_dev, item.st_ino, item.st_mode, item.st_uid)
-
-            if root_identity(root_metadata) != root_identity(opened_root):
-                raise OSError("TUF root changed")
-            for component in components[:-1]:
-                nested_descriptor = os.open(
-                    component,
-                    root_flags,
-                    dir_fd=directory_descriptor,
-                )
-                try:
-                    nested = os.fstat(nested_descriptor)
-                    if (
-                        not stat.S_ISDIR(nested.st_mode)
-                        or nested.st_uid not in {0, os.geteuid()}
-                        or nested.st_mode & 0o022
-                    ):
-                        raise OSError("unsafe TUF directory")
-                except Exception:
-                    os.close(nested_descriptor)
-                    raise
-                os.close(directory_descriptor)
-                directory_descriptor = nested_descriptor
-            descriptor = os.open(
-                components[-1],
-                file_flags,
-                dir_fd=directory_descriptor,
-            )
-        finally:
-            if directory_descriptor >= 0:
-                os.close(directory_descriptor)
-    except OSError:
-        raise HTTPException(status_code=404, detail="TUF file not found") from None
-    try:
-        before = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or before.st_nlink != 1
-            or before.st_uid not in {0, os.geteuid()}
-            or before.st_mode & 0o022
-            or before.st_mode & 0o111
-        ):
-            raise HTTPException(status_code=404, detail="TUF file not found")
-        if not 0 < before.st_size <= maximum:
-            raise HTTPException(
-                status_code=413 if before.st_size > maximum else 404,
-                detail="TUF file is unavailable",
-            )
-        remaining = before.st_size
-        chunks: list[bytes] = []
-        first_digest = hashlib.sha256()
-        while remaining:
-            chunk = os.read(descriptor, min(64 * 1024, remaining))
-            if not chunk:
-                raise HTTPException(status_code=404, detail="TUF file changed")
-            chunks.append(chunk)
-            first_digest.update(chunk)
-            remaining -= len(chunk)
-        after = os.fstat(descriptor)
-
-        def identity(item: os.stat_result) -> tuple[int, ...]:
-            return (
-                item.st_dev,
-                item.st_ino,
-                item.st_mode,
-                item.st_uid,
-                item.st_nlink,
-                item.st_size,
-                item.st_mtime_ns,
-                item.st_ctime_ns,
-            )
-
-        if identity(before) != identity(after) or os.read(descriptor, 1):
-            raise HTTPException(status_code=404, detail="TUF file changed")
-        os.lseek(descriptor, 0, os.SEEK_SET)
-        remaining = before.st_size
-        second_digest = hashlib.sha256()
-        while remaining:
-            chunk = os.read(descriptor, min(64 * 1024, remaining))
-            if not chunk:
-                raise HTTPException(status_code=404, detail="TUF file changed")
-            second_digest.update(chunk)
-            remaining -= len(chunk)
-        rechecked = os.fstat(descriptor)
-        if (
-            not hmac.compare_digest(first_digest.digest(), second_digest.digest())
-            or identity(after) != identity(rechecked)
-            or os.read(descriptor, 1)
-        ):
-            raise HTTPException(status_code=404, detail="TUF file changed")
-        return b"".join(chunks)
-    finally:
-        os.close(descriptor)
 
 
 def _range(value: str | None, total: int, maximum: int) -> tuple[int, int] | None:
@@ -1629,7 +1425,7 @@ def install_agent_routes(
     def recipe_run_observation_grant(
         body: RecipeRunObservationGrantRequest, request: Request, response: Response
     ) -> RecipeRunObservationGrantWire:
-        identity = workload_helper_identity(request)
+        identity = helper_identity(request)
         required = host_runtime_service()
         if body.node_id != identity.node_id:
             raise HTTPException(
@@ -1748,7 +1544,7 @@ def install_agent_routes(
         visible.
         """
 
-        workload_helper_identity(request)
+        helper_identity(request)
         if _CANONICAL_UUID.fullmatch(run_id) is None:
             raise HTTPException(status_code=422, detail="recipe run id is invalid")
         with _require_services(services).sessions() as session:
@@ -2027,15 +1823,7 @@ def install_agent_routes(
             media_type="application/json",
         )
 
-    def workload_helper_service() -> WorkloadHelperAuthorityService:
-        required = services.workload_helper_authority if services is not None else None
-        if required is None:
-            raise HTTPException(
-                status_code=503, detail="workload helper authority unavailable"
-            )
-        return required
-
-    def workload_helper_identity(request: Request) -> AgentIdentity:
+    def helper_identity(request: Request) -> AgentIdentity:
         _scope_identity(request)
         required = _require_services(services)
         return _authenticated_identity(request, required)
@@ -2050,7 +1838,7 @@ def install_agent_routes(
 
     @agent.post("/host-runtime/grant", response_model=HostHelperGrantResponse)
     def host_runtime_grant(body: HostRuntimeGrantRequest, request: Request) -> Response:
-        identity = workload_helper_identity(request)
+        identity = helper_identity(request)
         required = host_runtime_service()
         try:
             grant = required.issue_grant(
@@ -2084,7 +1872,7 @@ def install_agent_routes(
     def package_activation_grant(
         body: PackageActivationGrantRequest, request: Request
     ) -> Response:
-        identity = workload_helper_identity(request)
+        identity = helper_identity(request)
         if identity.node_id != body.node_id:
             raise HTTPException(status_code=403, detail="activation node mismatch")
         try:
@@ -2104,7 +1892,7 @@ def install_agent_routes(
     def agent_upgrade_grant(
         body: AgentUpgradeGrantRequest, request: Request
     ) -> Response:
-        identity = workload_helper_identity(request)
+        identity = helper_identity(request)
         required = host_runtime_service()
         try:
             grant = required.issue_agent_upgrade_grant(
@@ -2122,58 +1910,6 @@ def install_agent_routes(
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="agent upgrade authority rejected request"
-            ) from None
-
-    @agent.post(
-        "/package-helper/receipts", response_model=PackageHelperReceiptsResponse
-    )
-    def package_helper_receipts(
-        body: PackageHelperReceiptsRequest, request: Request
-    ) -> Response:
-        identity = workload_helper_identity(request)
-        required = workload_helper_service()
-        try:
-            receipts = required.issue_receipts(
-                node_id=body.node_id,
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
-                fence=body.fence,
-                release_digest=body.release_digest,
-                objects=[item.model_dump() for item in body.objects],
-                certificate_serial=identity.certificate_serial,
-            )
-            return _json_response(_package_receipts_response(receipts))
-        except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
-            raise HTTPException(
-                status_code=409, detail="workload helper authority rejected request"
-            ) from None
-
-    @agent.post("/package-helper/grant", response_model=PackageHelperGrantResponse)
-    def package_helper_grant(
-        body: PackageHelperGrantRequest, request: Request
-    ) -> Response:
-        identity = workload_helper_identity(request)
-        required = workload_helper_service()
-        try:
-            grant = required.issue_grant(
-                request_id=body.request_id,
-                node_id=body.node_id,
-                job_id=body.job_id,
-                operation_id=body.operation_id,
-                attempt=body.attempt,
-                fence=body.fence,
-                release_digest=body.release_digest,
-                generation=body.generation,
-                operation=PackageHelperOperation(body.operation),
-                request_digest=body.request_digest,
-                certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.expires_in_seconds,
-            )
-            return _json_response(_package_grant_response(grant))
-        except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
-            raise HTTPException(
-                status_code=409, detail="workload helper authority rejected request"
             ) from None
 
     @agent.post("/heartbeat", response_model=AgentDirective)
@@ -2719,57 +2455,6 @@ def install_agent_routes(
             status_code=code,
             headers=headers,
             media_type="application/octet-stream",
-        )
-
-    @agent.get(
-        "/workload-tuf/metadata/{name}",
-        response_class=Response,
-        responses=download_responses("application/json"),
-        openapi_extra={"x-vonk-streaming-transport": True},
-    )
-    def workload_tuf_metadata(name: str, request: Request) -> Response:
-        """Deliver only workload trust metadata over the node mTLS boundary."""
-        _scope_identity(request)
-        required = _require_services(services)
-        _authenticated_identity(request, required)
-        if _WORKLOAD_TUF_METADATA_NAME.fullmatch(name) is None:
-            raise HTTPException(status_code=404, detail="workload TUF file not found")
-        raw = _read_tuf_file(
-            required.workload_tuf_metadata_root,
-            name,
-            required.max_workload_tuf_metadata_bytes,
-        )
-        return Response(
-            content=raw,
-            media_type="application/json",
-            headers={"Cache-Control": "no-store", "Content-Length": str(len(raw))},
-        )
-
-    @agent.get(
-        "/workload-tuf/targets/{name:path}",
-        response_class=Response,
-        responses=download_responses("application/octet-stream"),
-        openapi_extra={"x-vonk-streaming-transport": True},
-    )
-    def workload_tuf_target(name: str, request: Request) -> Response:
-        """Deliver one digest-addressed workload lock, never model payloads."""
-        _scope_identity(request)
-        required = _require_services(services)
-        _authenticated_identity(request, required)
-        if _WORKLOAD_TUF_TARGET_NAME.fullmatch(name) is None:
-            raise HTTPException(status_code=404, detail="workload TUF target not found")
-        digest = name.removeprefix("releases/").removesuffix(".json")
-        raw = _read_tuf_file(
-            required.workload_tuf_target_root,
-            digest,
-            required.max_workload_tuf_target_bytes,
-        )
-        if hashlib.sha256(raw).hexdigest() != digest:
-            raise HTTPException(status_code=404, detail="workload TUF target not found")
-        return Response(
-            content=raw,
-            media_type="application/octet-stream",
-            headers={"Cache-Control": "no-store", "Content-Length": str(len(raw))},
         )
 
     app.include_router(agent)
