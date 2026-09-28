@@ -65,7 +65,10 @@ services:
     logging: *tailscale-logging
     read_only: true
     network_mode: service:tailscale-gateway
-    entrypoint: [/bin/sh, /run/vonk-runtime-assets/tailscale/configure.sh]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'until [ -f /run/vonk-runtime-assets/tailscale/configure.sh ]; do sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/tailscale/configure.sh'
     environment:
       # Compose profiles are a client-side selection and are not inherited by
       # containers. Pass the selection explicitly so the healthcheck cannot
@@ -84,7 +87,8 @@ services:
         condition: service_healthy
         restart: true
       control-api:
-        condition: service_healthy
+        condition: service_started
+        required: false
         restart: true
       caddy:
         condition: service_healthy

@@ -415,8 +415,8 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
         "control-api": {
-            "condition": "service_healthy",
-            "required": True,
+            "condition": "service_started",
+            "required": False,
             "restart": True,
         },
         "tailscale-gateway": {

@@ -704,8 +704,8 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
         "required": True,
     }
     assert services["litellm"]["depends_on"]["control-api"] == {
-        "condition": "service_healthy",
-        "required": True,
+        "condition": "service_started",
+        "required": False,
         "restart": True,
     }
     litellm = services["litellm"]
@@ -749,10 +749,10 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
     worker = services["control-worker"]
     volumes = {volume["target"]: volume for volume in litellm["volumes"]}
 
-    assert litellm["entrypoint"] == [
-        "/bin/sh",
-        "/run/vonk-runtime-assets/litellm/entrypoint.sh",
-    ]
+    assert litellm["entrypoint"][:2] == ["/bin/sh", "-c"]
+    assert litellm["entrypoint"][2].endswith(
+        "exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh"
+    )
     assert volumes["/routes"]["read_only"] is True
     assert volumes["/supervisor"].get("read_only", False) is False
     assert volumes["/run/vonk-normalized-secrets"]["read_only"] is True

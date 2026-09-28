@@ -58,9 +58,9 @@ services:
     # owner-only local Compose secret mounts without gaining host authority.
     user: "0:0"
     entrypoint:
-      - python
-      - /run/vonk-runtime-assets/hermes-agent/provision-litellm-key.py
-      - --reconcile-forever
+      - /bin/sh
+      - -c
+      - 'until [ -f /run/vonk-runtime-assets/hermes-agent/provision-litellm-key.py ]; do sleep 1; done; exec python /run/vonk-runtime-assets/hermes-agent/provision-litellm-key.py --reconcile-forever'
     cap_drop: [ALL]
     cap_add: [DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
@@ -78,7 +78,8 @@ services:
       - litellm-edge
     depends_on:
       control-api:
-        condition: service_healthy
+        condition: service_started
+        required: false
         restart: true
       litellm:
         condition: service_healthy

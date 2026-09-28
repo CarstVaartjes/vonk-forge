@@ -132,10 +132,13 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
 def test_litellm_runs_the_docker_staged_entrypoint_through_shell() -> None:
     litellm = _rendered()["services"]["litellm"]
 
-    assert litellm["entrypoint"] == [
-        "/bin/sh",
-        "/run/vonk-runtime-assets/litellm/entrypoint.sh",
-    ]
+    # Wait for the staged entrypoint, then run it through the shell.
+    assert litellm["entrypoint"][:2] == ["/bin/sh", "-c"]
+    assert litellm["entrypoint"][2] == (
+        "until [ -f /run/vonk-runtime-assets/litellm/entrypoint.sh ]; "
+        "do sleep 1; done; "
+        "exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh"
+    )
 
 
 def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
@@ -255,7 +258,7 @@ def test_retired_runtime_signer_and_agent_update_surfaces_are_absent() -> None:
 def test_former_bootstrap_dependants_wait_for_real_service_health() -> None:
     services = _rendered()["services"]
 
-    for name in ("control-worker", "litellm", "step-ca"):
+    for name in ("control-worker", "step-ca"):
         dependency = services[name]["depends_on"]["control-api"]
         assert dependency["condition"] == "service_healthy"
         assert dependency["required"] is True
