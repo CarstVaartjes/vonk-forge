@@ -31,8 +31,7 @@ def _valid(**overrides: str):
     }
     results = {
         "lint": "success",
-        "rust-umbrella": "success",
-        "rust-quality-gate": "success",
+        "rust-quality": "success",
         "rust-tests": "success",
         "rust-platform": "success",
         "controller-spark-wire": "success",
@@ -42,7 +41,6 @@ def _valid(**overrides: str):
         "web": "success",
         "generated": "skipped",
         "compose": "success",
-        "catalog-runtime": "success",
         "supply-chain": "success",
     }
     selected.update({key: value for key, value in overrides.items() if key in selected})
@@ -60,6 +58,7 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
     for area in selected:
         selected[area] = "false"
     for job in (
+        "rust-quality",
         "rust-tests",
         "rust-platform",
         "controller-spark-wire",
@@ -76,10 +75,10 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
 
 def test_rejects_selector_failure_and_unexpected_skip() -> None:
     selected, results = _valid()
-    results["rust-quality-gate"] = "skipped"
+    results["rust-quality"] = "skipped"
     errors = _module().verify("failure", selected, results)
     assert any("selector result" in error for error in errors)
-    assert any("rust-quality-gate result" in error for error in errors)
+    assert any("rust-quality result" in error for error in errors)
 
 
 def test_supply_chain_verification_is_required() -> None:

@@ -47,7 +47,7 @@ Useful flags:
 ## What it guarantees
 
 - **The CI command, not a paraphrase.** It runs
-  `uv run --project control --frozen --with-editable . python
+  `uv run --project control --frozen python
   scripts/tests/run_agent_wire_contracts.py -- -q -n 4 --dist loadfile`, the exact
   `controller-spark-wire` step. Run `scripts/build-control-wheel` before using
   the control environment locally; CI builds and digest-checks this wheel before
@@ -119,10 +119,10 @@ the BuildKit layer cache is intact takes seconds, so `--rebuild` alone is cheap.
 
 ## Limits
 
-- It runs only the job's final wire step, not the host-independent checks that
-  precede it in `controller-spark-wire` (recipe launch projections, API contract
-  completeness, `generate-agent-wire --check`). Those need no cargo, so the
-  macOS fast tier already covers them.
+- It runs only the job's final wire step, not the API response witness run that
+  precedes it in `controller-spark-wire`. Recipe launch projections, API
+  contract completeness and generated-wire drift are ordinary control and
+  repository tests, so the macOS fast tier already covers them.
 - No systemd, no GPU, no NVIDIA hardware, no physical Spark. It cannot produce
   hardware, NCCL/fabric or model-quality evidence.
 - The base image is pinned by tag plus index digest, like the deployment images,

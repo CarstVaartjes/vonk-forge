@@ -208,16 +208,14 @@ uv sync --dev
 scripts/build-control-wheel
 
 # Fast tier: hermetic and parallel, no Docker/PostgreSQL/cargo/host tooling.
-uv run --project control --frozen --with-editable . \
+uv run --project control --frozen \
   pytest -q control/tests -m "not lane" -n auto --dist loadfile
-uv run --python 3.14 --frozen --with pytest==9.1.1 --with pytest-xdist==3.8.0 \
-  --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
-  pytest -q tests -m "not lane" -n auto
+uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 
 # Lane tier in the container or CI lane.
-uv run --project control --frozen --with-editable . pytest -q control/tests
-uv run --python 3.14 --frozen --with pytest==9.1.1 \
-  --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" pytest -q tests
+scripts/pull-test-images postgres caddy step-ca tailscale python
+uv run --project control --frozen pytest -q control/tests
+uv run --project control --frozen pytest -q tests
 
 # Web and compose boundaries, then release evidence.
 npm ci --prefix control/web

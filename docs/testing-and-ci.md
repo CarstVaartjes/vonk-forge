@@ -123,43 +123,41 @@ readiness regressions. Real NVIDIA hardware, NCCL/fabric behavior, model
 quality, and physical Spark acceptance still require the designated Linux/ARM64
 or Spark lane.
 
+Every Python suite, lint and type check runs in one locked environment: the
+`control` project with its `dev` dependency group (`control/uv.lock`). It
+contains the root `vonk-cluster-profiles` package (editable), the Controller,
+the locked recipe contracts, pytest and its plugins, the build backend and
+pyright. Nothing is added with `uv run --with` or `uvx`: a new test or tool
+dependency goes into a dependency group and the lock. Ruff is the one
+exception to the shared environment: `openapi-python-client` pins an older ruff,
+so the root project's `dev` group carries the repository's ruff pin.
+
+Tests never download, build an environment or pull an image. A test that needs
+a wheel builds it with the locked `hatchling` in the running interpreter; one
+that installs a wheel into a scratch venv installs `--offline` from the uv cache
+the environment was synced from; Docker-backed tests use the pinned images
+`scripts/pull-test-images` pulls beforehand (CI does the same, with retries).
+
 Use a writable, task-specific uv cache. Replace `vonk-example-change` in these
 cache paths with the task name. Run from the active task worktree:
 
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
+export UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache
+scripts/build-control-wheel
 
 # Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
-UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
-  uv run --project control --frozen --with-editable . pytest -q \
-    control/tests -m "not lane" -n auto --dist loadfile
-UV_CACHE_DIR=/private/tmp/vonk-example-change-acceptance-cache \
-  uv run --python 3.14 --frozen --with pytest==9.1.1 \
-    --with pytest-xdist==3.8.0 \
-    --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
-    pytest -q tests -m "not lane" -n auto
+uv run --project control --frozen pytest -q control/tests -m "not lane" -n auto --dist loadfile
+uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 
 # Lane tier: the same trees without the marker filter. Run it in OrbStack or
 # the designated CI lane; it needs Docker, PostgreSQL, cargo, dpkg and a
 # Linux/ARM64 host.
-UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
-  uv run --project control --frozen --with-editable . pytest -q control/tests
-UV_CACHE_DIR=/private/tmp/vonk-example-change-acceptance-cache \
-  uv run --python 3.14 --frozen --with pytest==9.1.1 \
-    --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" pytest -q tests
-
-# Compose lane. These tests import the Controller, so they run in the control
-# environment, not the root one.
-TMPDIR=/tmp/vk UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
-  uv run --project control --frozen --with-editable . pytest -q deploy/compose/tests
+scripts/pull-test-images postgres caddy step-ca tailscale python
+uv run --project control --frozen pytest -q control/tests
+uv run --project control --frozen pytest -q tests
+uv run --project control --frozen pytest -q -n auto deploy/compose/tests
 ```
-
-The compose lane needs the control environment because the container config it
-loads imports `pydantic`; the root project deliberately has neither. On macOS,
-also point `TMPDIR` at a short directory: several of these tests bind a Unix
-socket under `tmp_path`, and the default `/private/var/folders/...` prefix plus a
-long test name exceeds the 104-byte `sun_path` limit, which fails the whole
-Tailscale group with `OSError: AF_UNIX path too long`.
 
 The `lane` marker is applied automatically at collection time for a PostgreSQL
 fixture or a `*_wire_bridge.py` Rust probe module. A test that starts Docker
@@ -178,13 +176,11 @@ Run the two trees in separate pytest invocations. Both contain modules with the
 same basename, so a single invocation over `tests control/tests` mis-collects
 them.
 
-Run the root `tests/` suite in the standalone environment CI uses: `pytest`
-plus an editable install of the recipe contracts package. The root project is
-the `vonk-cluster-profiles` package and its lint tooling; it deliberately has
-no dependency on `pydantic`, `vonk_control`, or the contracts package, so a
-bare `uv run pytest` from the root environment cannot import what the
-acceptance and contract tests need. The control environment is a superset and
-can also run that tree for a quick check, but CI parity is the standalone form.
+The root project is the `vonk-cluster-profiles` package; it deliberately has
+no dependency on `pydantic`, `vonk_control` or the contracts package. The
+installed-CLI tests prove that boundary by installing the built wheel into a
+separate venv; the `tests/` suite itself runs in the control environment like
+every other suite.
 
 `VONK_RECIPE_LIBRARY_ROOT` is a path to the sibling recipe-library checkout, not
 a secret. Catalog, canonical-consumer, and acceptance-recipe tests read the real
@@ -217,8 +213,8 @@ are worth running before claiming a Controller change works.
 
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
-UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache uv run --project control \
-  --frozen --with-editable . pytest -q -m lane -n auto --dist loadfile \
+UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --project control \
+  --frozen pytest -q -m lane -n auto --dist loadfile \
   control/tests/test_catalog_documents_postgres.py \
   control/tests/test_agent_jobs_postgres.py \
   control/tests/test_agent_job_lock_order_postgres.py \
@@ -230,39 +226,34 @@ UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache uv run --project con
 
 ### Lint, format, type and generation checks
 
-For implementation changes, run Python lint and types, the TypeScript build,
-and the generated-wire check below. Each uses the pinned toolchain.
+For implementation changes, run Python lint and types and the TypeScript build.
+Each uses the pinned toolchain.
 
 ```bash
-export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
+export UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache
 
 # Python lint; ruff is the repository's formatting authority too.
-UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --frozen ruff check .
+uv run --frozen --only-group dev ruff check .
 
-# Python types. Pyright reads [tool.pyright] and resolves imports from the
-# control virtualenv, so sync that project once first.
+# Python types. Pyright is locked in the control dev group and resolves imports
+# from that same environment.
 scripts/build-control-wheel
-UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
-  uv sync --project control --frozen
-UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache scripts/check-python-types
+scripts/check-python-types
 
 # Web behavior and types; the build runs tsc --noEmit before bundling.
 npm ci --prefix control/web
 npm test --prefix control/web -- --run
 npm run build --prefix control/web
-
-# Rust wire structures: fail if they no longer match the Pydantic schemas.
-# This runs the typify code generator with cargo, then compares its output.
-# The generator runs on macOS too; it does not build the Linux-only agent.
-scripts/build-control-wheel
-UV_CACHE_DIR=/private/tmp/vonk-example-change-control-cache \
-  uv run --project control --frozen --with-editable . \
-  python scripts/generate-agent-wire --check
 ```
 
-`control/.venv` cannot satisfy the ruff pin because `openapi-python-client`
-requires `ruff<0.14`; always lint through the root project. CI runs the same
-version via `uvx --from ruff==0.16.1 ruff check .`.
+Generated contracts are checked by ordinary tests, not `--check` scripts:
+`tests/test_generated_contracts.py` renders the agent wire schema, the
+installer release schema, the qualification campaign schemas and the Controller
+OpenAPI documents in memory and fails when a committed copy is stale, naming the
+generator to run; the `vonk-wire-codegen` crate's test does the same for
+`generated.rs` against the committed `wire.json`. The "Generated control
+clients" CI job regenerates the Python and TypeScript clients with Node when a
+client input changed and rejects any drift.
 
 The repository does not type-check cleanly yet, but every surviving error is a
 reviewed one. `scripts/check-python-types` treats
@@ -278,8 +269,8 @@ to write the current errors, then write the reason for anything it adds.
 mode; generated clients and virtualenvs are excluded.
 
 The coordination boundaries are checked by
-`control/tests/coordination_boundaries.py`, which is pure stdlib and runs as
-`python3 control/tests/coordination_boundaries.py` (CI runs the same step). It
+`control/tests/coordination_boundaries.py`, which the control suite runs over
+`control/src` in `test_coordination_boundaries.py`. It
 detects defined syntax patterns for transactions spanning external work and
 artifact locks acquired inside transactions, blockingly, or more than one at a
 time. Passing this scan establishes only its checked patterns; real PostgreSQL

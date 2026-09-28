@@ -78,19 +78,16 @@ def export_schema() -> dict[str, object]:
     return schema
 
 
+def rendered() -> str:
+    return json.dumps(export_schema(), indent=2, sort_keys=True) + "\n"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    content = json.dumps(export_schema(), indent=2, sort_keys=True) + "\n"
-    if args.check:
-        if not args.output.exists() or args.output.read_text() != content:
-            raise SystemExit(f"Stale Pydantic wire schema: {args.output}")
-    else:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(content)
-
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(rendered())
 
 if __name__ == "__main__":
     main()

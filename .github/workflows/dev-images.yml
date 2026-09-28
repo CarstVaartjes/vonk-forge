@@ -67,7 +67,7 @@ jobs:
             >> "$GITHUB_OUTPUT"
 
       - name: Install uv and build protocol wheel
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.1"
           python-version: "3.14"
@@ -80,14 +80,14 @@ jobs:
         run: scripts/verify-public-image-inputs
 
       - name: Set up ARM64 emulation
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
           platforms: arm64
 
       - parallel:
           - name: Set up Docker Buildx
-            uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+            uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
           - name: Install Skopeo from Ubuntu
             shell: bash
@@ -123,13 +123,13 @@ jobs:
 
       - parallel:
           - name: Restore accepted hermes digest and signed evidence
-            uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+            uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
             with:
               path: ${{ runner.temp }}/accepted-image-cache/hermes
               key: accepted-hermes-${{ steps.image_inputs.outputs.hermes_key }}
 
           - name: Restore accepted litellm digest and signed evidence
-            uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+            uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
             with:
               path: ${{ runner.temp }}/accepted-image-cache/litellm
               key: accepted-litellm-${{ steps.image_inputs.outputs.litellm_key }}
@@ -167,7 +167,7 @@ jobs:
       - parallel:
           - name: Build API once to local OCI and exact registry digest
             id: build_api
-            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
             with:
               context: .
               file: control/Dockerfile
@@ -187,7 +187,7 @@ jobs:
 
           - name: Build worker once to local OCI and exact registry digest
             id: build_worker
-            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
             with:
               context: .
               file: control/Dockerfile
@@ -208,7 +208,7 @@ jobs:
           - name: Build Hermes once to local OCI and exact registry digest
             id: build_hermes
             if: steps.reuse_hermes.outputs.digest == ''
-            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
             with:
               context: ${{ runner.temp }}/image-contexts/hermes
               file: ${{ runner.temp }}/image-contexts/hermes/Dockerfile
@@ -228,7 +228,7 @@ jobs:
           - name: Build LiteLLM once to local OCI and exact registry digest
             id: build_litellm
             if: steps.reuse_litellm.outputs.digest == ''
-            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
             with:
               context: ${{ runner.temp }}/image-contexts/litellm
               file: ${{ runner.temp }}/image-contexts/litellm/deploy/compose/litellm/Dockerfile

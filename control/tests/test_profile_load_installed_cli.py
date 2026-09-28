@@ -13,6 +13,7 @@ import signal
 import socket
 import ssl
 import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -263,10 +264,25 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
         extra={
             "VONK_BUILD_SOURCE_SHA": "d" * 40,
             "VONK_BUILD_RELEASE_VERSION": "0.1.1",
+            # The offline install reads the dependency wheels from the cache
+            # the test environment itself was synced from.
+            "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR")
+            or subprocess.run(
+                [uv, "cache", "dir"], capture_output=True, text=True, check=True
+            ).stdout.strip(),
         },
     )
     built = subprocess.run(
-        [uv, "build", "--wheel", "--offline", "--out-dir", str(wheel_directory)],
+        [
+            sys.executable,
+            "-m",
+            "hatchling",
+            "build",
+            "--target",
+            "wheel",
+            "--directory",
+            str(wheel_directory),
+        ],
         cwd=root,
         env=environment,
         capture_output=True,
@@ -279,7 +295,7 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
     assert len(wheels) == 1
     venv = workspace / "venv"
     created = subprocess.run(
-        [uv, "venv", "--python", "3.14", str(venv)],
+        [uv, "venv", "--python", sys.executable, str(venv)],
         env=environment,
         capture_output=True,
         text=True,

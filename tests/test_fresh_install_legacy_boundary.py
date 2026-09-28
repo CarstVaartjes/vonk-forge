@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
@@ -32,13 +33,28 @@ def test_operator_cli_rejects_removed_platform_update_commands() -> None:
     assert stderr.getvalue() == ""
 
 
+HATCHLING_WHEEL_BUILD = (
+    sys.executable,
+    "-m",
+    "hatchling",
+    "build",
+    "--target",
+    "wheel",
+    "--directory",
+)
+
+
 def _build_wheel(tmp_path: Path, project: Path | None = None) -> set[str]:
     output = tmp_path / ("control-dist" if project else "operator-dist")
-    command = ["uv", "build", "--offline", "--wheel"]
-    if project is not None:
-        command.extend(("--project", str(project)))
-    command.extend(("--out-dir", str(output)))
-    subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+    # The build backend is locked in the test environment; building with it
+    # directly needs no isolated build environment and no network.
+    subprocess.run(
+        [*HATCHLING_WHEEL_BUILD, str(output)],
+        cwd=project or ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     with zipfile.ZipFile(next(output.glob("*.whl"))) as archive:
         return set(archive.namelist())
 

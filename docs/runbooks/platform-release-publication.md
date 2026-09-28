@@ -81,8 +81,7 @@ assignment, never whether a test is selected.
 
 ```sh
 scripts/verify-supply-chain --json
-uv run --python 3.14 --frozen --with pytest==9.1.1 \
-  --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
+uv run --project control --frozen \
   pytest -q tests/scripts/test_install_release_publication.py
 ```
 

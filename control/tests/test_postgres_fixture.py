@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -13,8 +15,14 @@ from .conftest import (
 )
 
 
-def test_postgres_runtime_is_version_pinned_18_3() -> None:
-    assert POSTGRES_IMAGE == "postgres:18.3"
+def test_postgres_runtime_is_the_deployed_pin() -> None:
+    lock = json.loads(
+        (
+            Path(__file__).resolve().parents[2] / "deploy/compose/images.lock.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert POSTGRES_IMAGE == lock["images"]["postgres"]
+    assert re.fullmatch(r"postgres:\d+\.\d+", POSTGRES_IMAGE)
 
 
 def test_postgres_database_names_are_unique_safe_identifiers() -> None:

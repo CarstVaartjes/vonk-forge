@@ -14,21 +14,19 @@ sys.path.insert(0, str(ROOT / "agent_protocol/src"))
 from vonk_agent_protocol.installer_release import InstallerReleaseManifest
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
+OUTPUT = ROOT / "schemas/install-release-manifest.schema.json"
+
+
+def rendered() -> str:
     schema = InstallerReleaseManifest.model_json_schema()
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["$id"] = "https://vonkforge.ai/schemas/install-release-manifest.schema.json"
-    content = json.dumps(schema, sort_keys=True, indent=2) + "\n"
-    output = ROOT / "schemas/install-release-manifest.schema.json"
-    if args.check:
-        if output.read_text() != content:
-            raise SystemExit(f"Stale installer manifest schema: {output}")
-    else:
-        output.write_text(content)
+    return json.dumps(schema, sort_keys=True, indent=2) + "\n"
 
+
+def main() -> None:
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    OUTPUT.write_text(rendered())
 
 if __name__ == "__main__":
     main()

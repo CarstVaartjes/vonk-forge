@@ -18,10 +18,9 @@ from vonk_forge_contracts.qualification_authority import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
+def rendered() -> dict[Path, str]:
+    """Every tracked campaign schema file and the content it must have."""
+
     schemas = {
         "qualification-authority-v4.schema.json": campaign_authority_json_schema(),
         "qualification-campaign-manifest-v2.schema.json": campaign_manifest_json_schema(),
@@ -29,19 +28,17 @@ def main() -> None:
         "recovery-coverage-receipt-v1.schema.json": recovery_coverage_receipt_json_schema(),
         "recovery-coverage-use-v1.schema.json": recovery_coverage_use_json_schema(),
     }
-    for name, schema in schemas.items():
-        content = json.dumps(schema, sort_keys=True, indent=2) + "\n"
-        for directory in ("src/cluster_profiles/schemas", "schemas"):
-            output = ROOT / directory / name
-            if args.check:
-                if (
-                    not output.is_file()
-                    or output.read_text(encoding="utf-8") != content
-                ):
-                    raise SystemExit(f"Stale qualification campaign schema: {output}")
-            else:
-                output.write_text(content, encoding="utf-8")
+    return {
+        ROOT / directory / name: json.dumps(schema, sort_keys=True, indent=2) + "\n"
+        for name, schema in schemas.items()
+        for directory in ("src/cluster_profiles/schemas", "schemas")
+    }
 
+
+def main() -> None:
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    for output, content in rendered().items():
+        output.write_text(content, encoding="utf-8")
 
 if __name__ == "__main__":
     main()

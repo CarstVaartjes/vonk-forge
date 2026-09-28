@@ -29,7 +29,11 @@ def _module():
 
 
 def _lane_root(tmp_path: Path, module) -> Path:
-    for relative in (module.CI_WORKFLOW, module.DOCKERFILE):
+    actions = sorted(
+        path.relative_to(ROOT)
+        for path in (ROOT / ".github/actions").glob("*/action.yml")
+    )
+    for relative in (module.CI_WORKFLOW, module.DOCKERFILE, *actions):
         destination = tmp_path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
