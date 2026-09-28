@@ -232,7 +232,14 @@ def _active_recipe_state(session) -> dict[str, tuple[str, str, int]]:
 def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fixture, _index_path, original_index = _publisher_fixture()
+    fixture, _index_path, published_index = _publisher_fixture()
+    # Generation semantics need a few real packages, not the whole corpus;
+    # importing every published recipe is the test above. Three real rows keep
+    # the changed, failing and untouched cases distinct.
+    original_index = copy.deepcopy(published_index)
+    original_index["recipes"] = require_sequence(
+        published_index["recipes"], "catalog index recipes"
+    )[:3]
     index_recipes = require_sequence(original_index["recipes"], "catalog index recipes")
     index_entities = require_sequence(
         original_index["catalog_entities"], "catalog index entities"
