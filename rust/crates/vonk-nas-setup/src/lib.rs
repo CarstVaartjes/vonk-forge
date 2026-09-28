@@ -79,6 +79,10 @@ pub struct CanonicalTemplatePayload {
     internal_values: Vec<InternalValue>,
     #[serde(default)]
     required_values: Vec<RequiredValuePrompt>,
+    /// Keys the installer never writes but an upgrade keeps when the operator
+    /// set them; any other key not named by this payload is dropped.
+    #[serde(default)]
+    optional_values: Vec<String>,
     #[serde(default)]
     secrets: Vec<SecretPrompt>,
     #[serde(default)]
@@ -294,6 +298,9 @@ impl CanonicalTemplatePayload {
             &mut environment,
             &mut secrets,
         )?;
+        for name in &self.optional_values {
+            validate_env_name(name)?;
+        }
         if let Some(hermes) = &self.hermes {
             validate_env_name(&hermes.env)?;
             if !environment.insert(hermes.env.as_str()) {
@@ -895,6 +902,8 @@ impl SetupRequest {
 pub struct SetupOutcome {
     pub root: PathBuf,
     pub hermes_enabled: Option<bool>,
+    /// `.env` keys an upgrade dropped because the payload no longer names them.
+    pub dropped_environment: Vec<String>,
 }
 
 pub fn prepare<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
@@ -1027,6 +1036,7 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         Ok(SetupOutcome {
             root: bundle.to_path_buf(),
             hermes_enabled,
+            dropped_environment: Vec::new(),
         })
     })();
     if result.is_err() {
@@ -1870,6 +1880,7 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         None
     };
 
+    let dropped = retain_known_environment(payload, &mut environment);
     let environment_document = render_owned_environment(&environment)?;
     for (name, value) in new_secrets {
         let content = if value.is_empty() {
@@ -1899,7 +1910,42 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     Ok(SetupOutcome {
         root: bundle.to_path_buf(),
         hermes_enabled,
+        dropped_environment: dropped,
     })
+}
+
+/// Keep only the `.env` keys this payload names and return the dropped ones,
+/// so settings retired by a release do not linger across upgrades.
+fn retain_known_environment(
+    payload: &CanonicalTemplatePayload,
+    environment: &mut Vec<(String, String)>,
+) -> Vec<String> {
+    let mut known = payload
+        .internal_values
+        .iter()
+        .map(|value| value.env.as_str())
+        .chain(
+            payload
+                .required_values
+                .iter()
+                .map(|value| value.env.as_str()),
+        )
+        .chain(payload.optional_values.iter().map(String::as_str))
+        .chain(payload.hermes.iter().map(|hermes| hermes.env.as_str()))
+        .collect::<HashSet<_>>();
+    if let Some(modes) = &payload.install_modes {
+        known.insert("COMPOSE_PROFILES");
+        known.extend(modes.lab_values.iter().map(|value| value.env.as_str()));
+    }
+    let mut dropped = Vec::new();
+    environment.retain(|(key, _)| {
+        let keep = known.contains(key.as_str());
+        if !keep {
+            dropped.push(key.clone());
+        }
+        keep
+    });
+    dropped
 }
 
 fn secret_file_exists(root: &Path, relative: &str) -> Result<bool, SetupError> {

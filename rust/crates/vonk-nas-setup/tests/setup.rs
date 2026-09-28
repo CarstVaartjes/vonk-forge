@@ -639,7 +639,7 @@ fn write_existing_bundle(root: &Path) {
     std::fs::write(bundle.join("docker-compose.yaml"), "old compose\n").expect("compose");
     std::fs::write(
         bundle.join(".env"),
-        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\nSITE_LOCAL=kept\n",
+        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\n",
     )
     .expect("environment");
     std::fs::write(
@@ -684,7 +684,7 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
     );
     assert_eq!(
         std::fs::read_to_string(bundle.join(".env")).expect("environment"),
-        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\nSITE_LOCAL=kept\n"
+        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\n"
     );
     assert_eq!(
         std::fs::read_to_string(bundle.join("secrets/site-secret")).expect("secret"),
@@ -776,6 +776,69 @@ fn upgrade_prompts_only_for_new_undefaulted_inputs_and_preserves_existing_values
         "generated-secret\n"
     );
     assert!(secret(&bundle, "new-signing-key").starts_with("-----BEGIN PRIVATE KEY-----"));
+}
+
+#[test]
+fn upgrade_rewrites_an_old_environment_with_only_known_keys() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "internal_values": [
+            {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"}
+          ],
+          "required_values": [
+            {"env": "NAS_LAN_IP", "prompt": "Reserved NAS LAN IP", "validation": "ipv4"},
+            {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"}
+          ],
+          "optional_values": ["VONK_BACKUP_OFFHOST_PATH", "VONK_RECIPE_LIBRARY_RELEASE"],
+          "install_modes": {
+            "prompt": "Install mode",
+            "lab_value": "lab",
+            "secure_remote_value": "secure-remote",
+            "lab_values": []
+          }
+        }"#,
+    )
+    .expect("valid payload");
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = temporary.path().join("vonk-forge");
+    std::fs::create_dir_all(bundle.join("secrets")).expect("bundle");
+    std::fs::write(bundle.join("docker-compose.yaml"), "old compose\n").expect("compose");
+    std::fs::write(
+        bundle.join(".env"),
+        "COMPOSE_PROJECT_NAME=vonk-forge-control\n\
+         COMPOSE_PROFILES=secure-remote\n\
+         NAS_LAN_IP=192.168.1.20\n\
+         VONK_AGENT_ENROLL_HOSTNAME=enroll.example.test\n\
+         VONK_CONTROL_HOSTNAME=vonk.example.test\n\
+         AGENT_CA_PROVISIONER_KID=old-kid\n\
+         VONK_BACKUP_OFFHOST_PATH=/mnt/offhost\n",
+    )
+    .expect("old environment");
+
+    let (result, transcript) = run_with_answers(
+        &payload,
+        SetupRequest::upgrade(temporary.path()),
+        "",
+        &FixedSecretGenerator,
+    );
+
+    assert_eq!(
+        environment(&bundle),
+        [
+            "COMPOSE_PROJECT_NAME=vonk-forge-control",
+            "COMPOSE_PROFILES=secure-remote",
+            "NAS_LAN_IP=192.168.1.20",
+            "VONK_CONTROL_HOSTNAME=vonk.example.test",
+            "VONK_BACKUP_OFFHOST_PATH=/mnt/offhost",
+        ]
+    );
+    assert_eq!(
+        result.dropped_environment,
+        ["VONK_AGENT_ENROLL_HOSTNAME", "AGENT_CA_PROVISIONER_KID"]
+    );
+    assert!(transcript.is_empty(), "dropped keys are never prompted for");
 }
 
 #[test]
