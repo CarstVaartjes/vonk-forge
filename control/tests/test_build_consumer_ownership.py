@@ -38,7 +38,7 @@ def _availability(sessions, storage, now, revision, plan):
     recipe = RecipeDefinition.model_validate_json(json.dumps(revision.document))
 
     def failed_builder(*_args, **_kwargs):
-        raise RecipeImageAvailabilityError("build.invalid_source", "source rejected")
+        raise RecipeImageAvailabilityError("build.source_invalid", "source rejected")
 
     return RecipeImageAvailabilityService(
         sessions,

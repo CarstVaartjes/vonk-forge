@@ -237,10 +237,12 @@ def test_model_removal_reference_scan_failure_rolls_back_and_same_key_recovers(
         service.close()
 
 
-def test_accepted_model_request_prevents_removal_before_any_bytes_change(
+def test_newer_model_removal_supersedes_an_accepted_download_request(
     postgres_engine: Engine,
     tmp_path: Path,
 ) -> None:
+    """The latest request leads: removal cancels the older queued download."""
+
     service, sessions = _removal_service(postgres_engine, tmp_path)
     model = _one_model(tmp_path, "accepted-reference")
     selector = _register_model(sessions, model)
@@ -262,27 +264,20 @@ def test_accepted_model_request_prevents_removal_before_any_bytes_change(
     assert accepted.state == "queued"
 
     try:
-        with pytest.raises(ModelCacheConflict) as refused:
-            _remove_model(
-                service,
-                selector,
-                actor="operator",
-                request_key="00000000-0000-4000-8000-000000000113",
-                model_content_sha256=digest,
-            )
-        assert refused.value.code == "model_cache.removal_referenced"
-        assert service.get_operation(accepted.id).state == "queued"
+        removal = _remove_model(
+            service,
+            selector,
+            actor="operator",
+            request_key="00000000-0000-4000-8000-000000000113",
+            model_content_sha256=digest,
+        )
+        assert service.get_operation(accepted.id).state in {"cancelling", "cancelled"}
+        settled = _settle_removal(service, removal)
+        assert settled.state == "succeeded", settled
+        assert service.get_operation(accepted.id).state == "cancelled"
         with sessions() as session:
-            assert session.get(ModelCacheSet, set_digest) is not None
-            assert (
-                session.scalar(
-                    select(ModelCacheOperation).where(
-                        ModelCacheOperation.kind == "remove"
-                    )
-                )
-                is None
-            )
-        assert object_path.read_bytes() == b"abc"
+            assert session.get(ModelCacheSet, set_digest) is None
+        assert not object_path.exists()
     finally:
         service.close()
 
@@ -383,7 +378,7 @@ def test_removing_one_set_leaves_shared_object_open_for_second_model(
         service.close()
 
 
-def test_sibling_membership_change_after_review_refuses_model_removal(
+def test_sibling_membership_change_after_review_keeps_the_shared_object(
     postgres_engine: Engine,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -420,27 +415,29 @@ def test_sibling_membership_change_after_review_refuses_model_removal(
 
     monkeypatch.setattr(service, "review_model_removal", review_then_change_sibling)
     try:
-        with pytest.raises(ModelCacheConflict) as stale:
-            service.remove_model_selector(
-                selector_a,
-                actor="operator",
-                request_key="00000000-0000-4000-8000-000000000127",
-                model_content_sha256=digest_a,
-                review_digest=review.review_digest,
-            )
-        assert stale.value.code == "model_cache.removal_review_stale"
+        # The reviewed digest is advisory: the removal applies to the current
+        # state, which still shares the object with the changed sibling.
+        removing_a = service.remove_model_selector(
+            selector_a,
+            actor="operator",
+            request_key="00000000-0000-4000-8000-000000000127",
+            model_content_sha256=digest_a,
+            review_digest=review.review_digest,
+        )
+        settled = _settle_removal(service, removing_a)
+        assert settled.state == "succeeded", settled
         with sessions() as session:
-            assert session.get(ModelCacheSet, set_a) is not None
+            assert session.get(ModelCacheSet, set_a) is None
             sibling = session.get(ModelCacheSet, set_b)
             assert sibling is not None and sibling.state == "failed"
             assert (
                 session.scalar(
-                    select(ModelCacheOperation).where(
-                        ModelCacheOperation.request_key
-                        == "00000000-0000-4000-8000-000000000127"
+                    select(ModelCacheSetArtifact).where(
+                        ModelCacheSetArtifact.artifact_set_sha256 == set_b,
+                        ModelCacheSetArtifact.artifact_sha256 == object_digest,
                     )
                 )
-                is None
+                is not None
             )
             gates = tuple(session.scalars(select(ArtifactLifecycleGate)))
         assert all(gate.removal_owner_id is None for gate in gates)

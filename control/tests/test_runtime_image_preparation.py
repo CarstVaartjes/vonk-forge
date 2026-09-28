@@ -380,7 +380,7 @@ def test_unparseable_prebuilt_receipt_is_replaced_from_verified_bytes(
     assert repaired.image_digest == PLATFORM_IMAGE_DIGEST
 
 
-def test_non_schema_two_receipt_is_skipped_by_scans_but_refused_by_exact_read(
+def test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
@@ -412,8 +412,61 @@ def test_non_schema_two_receipt_is_skipped_by_scans_but_refused_by_exact_read(
         )
         is None
     )
-    with pytest.raises(RuntimeImagePreparationError, match="schema version"):
-        storage.read_receipt(receipt.oci_archive_sha256)
+    # The scan discarded our own unusable receipt; preparation re-derives it.
+    assert not receipt_path.exists()
+    restored = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    assert storage.read_receipt(receipt.oci_archive_sha256) == restored
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"schema_version": 3},
+        {"field_from_a_newer_contract": "value"},
+    ],
+    ids=["newer-schema-version", "unknown-field"],
+)
+def test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten(
+    tmp_path: Path, change: dict[str, object]
+) -> None:
+    """A mixed deploy must not delete a newer Controller's valid receipt."""
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    receipt_path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
+    value = json.loads(receipt_path.read_text(encoding="utf-8")) | change
+    newer = json.dumps(value)
+    receipt_path.write_text(newer, encoding="utf-8")
+
+    assert (
+        storage.find_published(
+            IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+    assert receipt_path.read_text(encoding="utf-8") == newer
+    with pytest.raises(RuntimeImagePreparationError) as raised:
+        prepare_runtime_image(
+            _recipe("recipe-image.json"),
+            runtime=_runtime(),
+            storage=storage,
+            transport=TinyTransport(),
+        )
+    assert raised.value.code == "runtime_image.receipt_contract_newer"
+    assert raised.value.retryable is True
+    assert receipt_path.read_text(encoding="utf-8") == newer
 
 
 @pytest.mark.parametrize(
@@ -1054,7 +1107,7 @@ def test_cancelled_owner_and_source_lock_loser_preserve_verified_stage(
     assert stage.read_bytes() == ARCHIVE
 
 
-def test_oversized_published_stage_checkpoint_fails_closed_before_transport(
+def test_oversized_published_stage_checkpoint_is_discarded_and_pulled_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
@@ -1075,21 +1128,20 @@ def test_oversized_published_stage_checkpoint_fails_closed_before_transport(
         lambda command, **kwargs: _fake_skopeo_run(command, state=state, **kwargs),
     )
 
-    with pytest.raises(RuntimeImagePreparationError) as rejected:
-        prepare_runtime_image(
-            recipe,
-            runtime=_runtime(),
-            storage=storage,
-            transport=SkopeoOCIImageTransport(),
-        )
+    prepared = prepare_runtime_image(
+        recipe,
+        runtime=_runtime(),
+        storage=storage,
+        transport=SkopeoOCIImageTransport(),
+    )
 
-    assert rejected.value.code == "runtime_image.stage_checkpoint_invalid"
-    assert "16384 bytes" in rejected.value.detail
-    assert "4096 bytes" in rejected.value.detail
-    assert state == {}
+    # The malformed checkpoint was discarded and the image pulled again.
+    assert state.get("exports") == 1
+    assert storage.read_receipt(prepared.oci_archive_sha256) == prepared
+    assert checkpoint.stat().st_size < 16 * 1024
 
 
-def test_nonregular_published_stage_checkpoint_reports_type_refusal(
+def test_nonregular_published_stage_checkpoint_is_discarded(
     tmp_path: Path,
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
@@ -1105,21 +1157,19 @@ def test_nonregular_published_stage_checkpoint_reports_type_refusal(
     )
     checkpoint_path.mkdir()
 
-    with pytest.raises(RuntimeImagePreparationError) as rejected:
+    assert (
         storage.find_published_stage(
             reference,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
         )
-
-    assert rejected.value.code == "runtime_image.stage_checkpoint_invalid"
-    assert rejected.value.detail == (
-        "published runtime image checkpoint is not a regular file"
+        is None
     )
+    assert not checkpoint_path.exists()
 
 
 @pytest.mark.needs_recipe_library
-def test_fifo_published_stage_checkpoint_is_rejected_without_blocking(
+def test_fifo_published_stage_checkpoint_is_discarded_without_blocking(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "objects"
@@ -1157,15 +1207,11 @@ def test_fifo_published_stage_checkpoint_is_rejected_without_blocking(
         "from pathlib import Path\n"
         "from vonk_control.runtime_image_preparation import "
         "FilesystemRuntimeImageStorage, RuntimeImagePreparationError\n"
-        "try:\n"
-        "    FilesystemRuntimeImageStorage(Path(sys.argv[1])).find_published_stage(\n"
-        "        sys.argv[2], expected_architecture='linux/arm64',\n"
-        "        expected_runtime_interface='vonk.runtime.v1'\n"
-        "    )\n"
-        "except RuntimeImagePreparationError as error:\n"
-        "    assert error.code == 'runtime_image.stage_checkpoint_invalid'\n"
-        "else:\n"
-        "    raise AssertionError('FIFO checkpoint was accepted')\n"
+        "found = FilesystemRuntimeImageStorage(Path(sys.argv[1])).find_published_stage(\n"
+        "    sys.argv[2], expected_architecture='linux/arm64',\n"
+        "    expected_runtime_interface='vonk.runtime.v1'\n"
+        ")\n"
+        "assert found is None, 'FIFO checkpoint was accepted'\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", script, str(root), reference],
@@ -1177,6 +1223,8 @@ def test_fifo_published_stage_checkpoint_is_rejected_without_blocking(
     )
 
     assert result.returncode == 0, result.stderr
+    # The unusable checkpoint was discarded so the next preparation pulls again.
+    assert not checkpoint_path.exists()
 
 
 def test_published_checkpoint_accepts_maximum_canonical_recipe_image_reference() -> (
@@ -1210,7 +1258,7 @@ def test_published_checkpoint_accepts_maximum_canonical_recipe_image_reference()
     assert len(encoded) <= 4 * 1024
 
 
-def test_receiptless_final_with_wrong_bytes_is_not_repaired_from_size_alone(
+def test_receiptless_final_with_wrong_bytes_is_discarded_and_re_exported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from vonk_control import runtime_image_preparation
@@ -1251,17 +1299,16 @@ def test_receiptless_final_with_wrong_bytes_is_not_repaired_from_size_alone(
     monkeypatch.setattr(
         "vonk_control.runtime_image_preparation._atomic_json_replace", atomic_replace
     )
-    with pytest.raises(RuntimeImagePreparationError) as mismatch:
-        prepare_runtime_image(
-            _recipe("recipe-image.json"),
-            runtime=_runtime(),
-            storage=storage,
-            transport=SkopeoOCIImageTransport(),
-        )
-    assert mismatch.value.code == "runtime_image.archive_conflict"
-    assert final.read_bytes() == b"X" * len(ARCHIVE)
-    assert not (storage.root / f"{ARCHIVE_DIGEST}.receipt.json").exists()
-    assert state == {"blob_fetches": 1, "exports": 2}
+    repaired = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=SkopeoOCIImageTransport(),
+    )
+    # Bytes that disagree with their content address are never accepted:
+    # they are discarded and replaced by freshly verified bytes.
+    assert final.read_bytes() == ARCHIVE
+    assert storage.read_receipt(ARCHIVE_DIGEST) == repaired
 
 
 def test_build_receipt_requires_the_exact_stored_archive(tmp_path: Path) -> None:
@@ -1442,7 +1489,9 @@ def test_preparation_backfills_a_missing_build_input_identity(
         == repaired
     )
 
-    with pytest.raises(RuntimeImagePreparationError, match="different build input"):
+    # A different build input claiming the same verified bytes is a build
+    # identity conflict: it is refused, never swapped under existing owners.
+    with pytest.raises(RuntimeImagePreparationError) as conflict:
         prepare_runtime_image(
             _recipe("recipe-source-build.json"),
             runtime=_runtime(),
@@ -1457,6 +1506,8 @@ def test_preparation_backfills_a_missing_build_input_identity(
                 "image_bytes": len(ARCHIVE),
             },
         )
+    assert conflict.value.code == "runtime_image.receipt_identity_conflict"
+    assert storage.read_receipt(ARCHIVE_DIGEST).build_input_sha256 == build_input
 
 
 def test_verified_lookup_treats_a_vanished_archive_as_a_miss(tmp_path: Path) -> None:
@@ -1565,8 +1616,10 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
     )
     with (
         Session(engine) as session,
-        pytest.raises(RuntimeImagePreparationError, match="identity changed"),
+        pytest.raises(RuntimeImagePreparationError, match="identity changed") as raised,
     ):
+        # Admitted workloads are bound to the authorized identity, so the same
+        # bytes under another identity are refused rather than swapped.
         persist_runtime_image_receipt(
             session,
             recipe_revision_id=revision_id,
@@ -1575,6 +1628,7 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
             receipt=conflicting,
             verified_at=second_at,
         )
+    assert raised.value.code == "runtime_image.receipt_identity_conflict"
 
 
 def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
@@ -2406,15 +2460,10 @@ def test_an_unreadable_stored_receipt_names_the_rule_that_rejected_it() -> None:
     assert "lacks its adapter" in message, message
 
 
-def test_unreadable_receipt_is_skipped_by_scan_but_refused_by_exact_read(
+def test_stale_receipt_is_discarded_once_by_scan(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """One archive's unusable receipt must not poison a scan over all receipts.
-
-    The scan spans unrelated archives and recipes, so a file the current
-    contract rejects is skipped with a bounded warning naming its digest.  The
-    exact-identity read for that same digest still refuses.
-    """
+    """One archive's stale receipt must not poison, or spam, every scan."""
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     published = prepare_runtime_image(
@@ -2472,24 +2521,25 @@ def test_unreadable_receipt_is_skipped_by_scan_but_refused_by_exact_read(
     assert found == published
     warnings = [record.getMessage() for record in caplog.records]
     assert any(legacy_digest in message for message in warnings), warnings
-    assert any("lacks its adapter" in message for message in warnings), warnings
+    # The stale receipt is removed once, so later scans stay quiet.
+    assert not (storage.root / f"{legacy_digest}.receipt.json").exists()
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="vonk_control.runtime_image_preparation"):
+        storage.find_build(
+            "b" * 64,
+            expected_architecture="linux-arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+    assert not caplog.records
 
     with pytest.raises(RuntimeImagePreparationError) as raised:
         storage.read_receipt(legacy_digest)
     assert raised.value.code == "runtime_image.receipt_unavailable"
-    assert "lacks its adapter" in str(raised.value)
 
 
 def test_parseable_receipt_with_a_different_identity_stays_a_conflict(
     tmp_path: Path,
 ) -> None:
-    """Stale metadata is replaceable; a parsed, disagreeing identity is not.
-
-    The replacement rule applies only to a document the current contract
-    cannot parse.  A receipt that parses and names a different immutable
-    identity for the same content-addressed archive remains an explicit
-    conflict.
-    """
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     adapter = resolve_runtime_adapter("vllm", {"mode": "single"})
@@ -2528,5 +2578,7 @@ def test_parseable_receipt_with_a_different_identity_stays_a_conflict(
     with pytest.raises(RuntimeImagePreparationError) as raised:
         storage.commit(second, receipt=disagreeing)
 
-    assert raised.value.code == "runtime_image.archive_conflict"
+    # A parseable receipt binds these bytes to an identity that workloads may
+    # already use; it is never swapped underneath them.
+    assert raised.value.code == "runtime_image.receipt_identity_conflict"
     assert storage.read_receipt(digest) == existing

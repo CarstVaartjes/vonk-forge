@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import threading
 import uuid
@@ -64,15 +65,18 @@ from .cache_removal_review import (
     CacheRemovalFinding,
     CacheRemovalReview,
     CacheRemovalReviewContent,
+    refusing_removal_blockers,
     seal_cache_removal_review,
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import read_catalog_document
+from .failure_classification import is_redownload, is_security_failure
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
     ModelCacheNotFound,
     ModelCacheRemovalScope,
+    model_cache_failure_is_terminal,
 )
 from .model_cache_contract import ModelCacheCancellation, ModelCacheRemovalResult
 from .model_cache_progress import project_cache_progress
@@ -131,6 +135,7 @@ from .strict_json import serialize_json_value
 if TYPE_CHECKING:
     from .recipe_update_batches import RecipeUpdateClaim
 
+_LOGGER = logging.getLogger(__name__)
 SCHEMA_VERSION = 2
 OPERATION_KIND = "recipe.image.availability.v2"
 REMOVE_OPERATION_KIND = RECIPE_CACHE_REMOVE_KIND
@@ -138,22 +143,29 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _CANCELLATION_UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
-_MAX_AUTOMATIC_ATTEMPTS = 3
-_MAX_OPERATOR_RETRIES = 3
+# Only an invalid recipe/runtime contract, a withdrawn revision, a revoked
+# authority, an untrusted source or redirect, an invalid build source or
+# security envelope, or a conflicting registry/build identity for the same
+# bytes is terminal (as is any availability error explicitly marked
+# non-retryable, such as a build whose identity changed). Every other failure, including
+# integrity mismatches (whose bytes are then downloaded or built again) and
+# malformed records of our own, retries with capped backoff while the
+# operation remains the current intent.
 _TERMINAL_FAILURE_CODES = frozenset(
     {
-        "recipe_image.identity_conflict",
-        "recipe_image.metadata_stale",
+        "build.security_invalid",
+        "build.source_invalid",
         "recipe_image.recipe_invalid",
         "recipe_image.recipe_unavailable",
         "recipe_image.runtime_invalid",
-        "runtime_image.digest_mismatch",
-        "runtime_image.archive_mismatch",
-        "runtime_image.archive_conflict",
+        "registry.destination_forbidden",
+        "registry.redirect_forbidden",
+        "runtime_image.image_unpinned",
         "runtime_image.receipt_identity_conflict",
-        "runtime_image.authorization_invalid",
+        "runtime_image.source_mismatch",
     }
 )
+_MAX_RETRY_SECONDS = 900
 
 
 def _removal_retry_is_due(
@@ -544,31 +556,17 @@ def _progress(
 
 
 def _retryable(error: BaseException) -> bool:
+    """Classify by typed code; unknown failures retry with capped backoff."""
+
     code = getattr(error, "code", None)
-    if isinstance(code, str) and code in _TERMINAL_FAILURE_CODES:
+    if isinstance(code, str) and (
+        code in _TERMINAL_FAILURE_CODES or is_security_failure(code)
+    ):
         return False
-    explicit_retryable = getattr(error, "retryable", None)
-    if type(explicit_retryable) is bool:
-        return explicit_retryable
-    if isinstance(error, DBAPIError) and retryable_artifact_database_error(error):
-        return True
-    if isinstance(code, str) and code in _RECOVERABLE_MISS_CODES:
-        return True
-    status = getattr(error, "status_code", None)
-    if type(status) is int:
-        return status == 429 or status >= 500
-    text = f"{getattr(error, 'code', '')} {getattr(error, 'detail', str(error))}".casefold()
-    return isinstance(error, (OSError, TimeoutError, ConnectionError)) or any(
-        marker in text
-        for marker in (
-            "timeout",
-            "timed out",
-            "connection",
-            "network",
-            "transport",
-            "temporarily",
-            "copy",
-        )
+    if isinstance(error, ModelCacheError):
+        return not model_cache_failure_is_terminal(code)
+    return not (
+        isinstance(error, RecipeImageAvailabilityError) and error.retryable is False
     )
 
 
@@ -675,18 +673,12 @@ class RecipeImageAvailabilityService:
         receipt_writer: Callable[[Session, str, str, str, RuntimeImageReceipt], object]
         | None = None,
         model_cache: Any | None = None,
-        automatic_attempt_limit: int = _MAX_AUTOMATIC_ATTEMPTS,
-        operator_retry_limit: int = _MAX_OPERATOR_RETRIES,
         max_parallel: int = 4,
         max_parallel_builds: int = 1,
         builder_admission: Callable[[RecipeDefinition, Mapping[str, object]], None]
         | None = None,
         claim_lease_seconds: int = 120,
     ) -> None:
-        if not 1 <= automatic_attempt_limit <= 8:
-            raise ValueError("automatic attempt limit is invalid")
-        if not 0 <= operator_retry_limit <= 8:
-            raise ValueError("operator retry limit is invalid")
         if not 1 <= max_parallel <= 16:
             raise ValueError("availability parallelism is invalid")
         if not 1 <= max_parallel_builds <= max_parallel:
@@ -701,8 +693,6 @@ class RecipeImageAvailabilityService:
         self._clock = clock
         self._receipt_writer = receipt_writer
         self._model_cache = model_cache
-        self._automatic_attempt_limit = automatic_attempt_limit
-        self._operator_retry_limit = operator_retry_limit
         self._max_parallel = max_parallel
         self._max_parallel_builds = max_parallel_builds
         self._builder_admission = builder_admission
@@ -1071,7 +1061,6 @@ class RecipeImageAvailabilityService:
         actor: str,
         request_id: str,
         with_model: bool,
-        review_digest: str,
     ) -> dict[str, object]:
         if operation.kind != REMOVE_OPERATION_KIND:
             raise RecipeImageAvailabilityError(
@@ -1085,7 +1074,6 @@ class RecipeImageAvailabilityService:
             or intent.actor != actor
             or intent.request_key != request_id
             or intent.with_model is not with_model
-            or intent.review_digest != review_digest
         ):
             raise RecipeImageAvailabilityError(
                 "recipe_image.request_key_reused",
@@ -1652,24 +1640,21 @@ class RecipeImageAvailabilityService:
         *,
         actor: str,
         request_id: str,
-        review_digest: str,
+        review_digest: str | None = None,
         with_model: bool = False,
     ) -> dict[str, object]:
-        """Accept one exact, restart-safe cache removal before any byte effect."""
+        """Accept a restart-safe removal of the named recipe against current state.
 
+        A previously reviewed digest is advisory. Assets still in use are
+        fenced against new consumers and the removal waits for their owners.
+        """
+
+        del review_digest
         if not isinstance(selector, str) or not 1 <= len(selector.strip()) <= 256:
             raise RecipeImageAvailabilityError(
                 "recipe_image.selector_invalid", "recipe selector is required"
             )
         selector = selector.strip().casefold()
-        if (
-            not isinstance(review_digest, str)
-            or _SHA256.fullmatch(review_digest) is None
-        ):
-            raise RecipeImageAvailabilityError(
-                "recipe_image.review_invalid",
-                "removal requires a valid cache-review digest",
-            )
         with self._sessions() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is not None:
@@ -1679,17 +1664,12 @@ class RecipeImageAvailabilityService:
                     actor=actor,
                     request_id=request_id,
                     with_model=with_model,
-                    review_digest=review_digest,
                 )
 
         observed_review = self.review_removal(selector, with_model=with_model)
-        if observed_review.review_digest != review_digest:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.review_stale",
-                "recipe removal impact changed after review; inspect a fresh review",
-            )
-        if observed_review.blockers:
-            first_blocker = observed_review.blockers[0]
+        observed_blockers = refusing_removal_blockers(observed_review)
+        if observed_blockers:
+            first_blocker = observed_blockers[0]
             raise RecipeImageAvailabilityError(
                 first_blocker.code,
                 first_blocker.detail,
@@ -1710,7 +1690,6 @@ class RecipeImageAvailabilityService:
                         actor=actor,
                         request_id=request_id,
                         with_model=with_model,
-                        review_digest=review_digest,
                     )
 
                 selection = self._recipe_removal_selection_in_session(
@@ -1788,13 +1767,9 @@ class RecipeImageAvailabilityService:
                     assets=current_assets,
                     now=now,
                 )
-                if current_review.review_digest != review_digest:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.review_stale",
-                        "recipe removal impact changed while acceptance was being checked",
-                    )
-                if current_review.blockers:
-                    first_blocker = current_review.blockers[0]
+                current_blockers = refusing_removal_blockers(current_review)
+                if current_blockers:
+                    first_blocker = current_blockers[0]
                     raise RecipeImageAvailabilityError(
                         first_blocker.code,
                         first_blocker.detail,
@@ -1854,7 +1829,7 @@ class RecipeImageAvailabilityService:
                     selector=selector,
                     actor=actor,
                     request_key=request_id,
-                    review_digest=review_digest,
+                    review_digest=current_review.review_digest,
                     recipe_revision_id=revision_id,
                     with_model=with_model,
                     removal_fence=removal_fence,
@@ -1921,7 +1896,6 @@ class RecipeImageAvailabilityService:
                     actor=actor,
                     request_id=request_id,
                     with_model=with_model,
-                    review_digest=review_digest,
                 )
         except ArtifactLifecycleError as error:
             raise RecipeImageAvailabilityError(
@@ -2145,10 +2119,8 @@ class RecipeImageAvailabilityService:
             if pending_bytes is None:
                 pending_bytes = observed_bytes
             elif observed_bytes not in {0, pending_bytes}:
-                raise RuntimeImagePreparationError(
-                    "runtime_image.archive_mismatch",
-                    "published image length disagrees with its durable removal checkpoint",
-                )
+                # Our own checkpoint is stale; remove what is stored now.
+                pending_bytes = observed_bytes
             updated_checkpoint = checkpoint.model_copy(
                 update={"image_pending_bytes": pending_bytes, "failure": None}
             )
@@ -3268,6 +3240,23 @@ class RecipeImageAvailabilityService:
         )
         return self._start_request(intent, actor=actor, request_id=request_id)
 
+    def _refresh_authority(
+        self, recipe_revision_id: str, *, force: bool
+    ) -> tuple[RecipeDefinition | Mapping[str, object], Mapping[str, object]]:
+        assert self._authority is not None
+        try:
+            return self._authority(recipe_revision_id, force=force)
+        except RecipeImageAvailabilityError:
+            raise
+        except Exception as error:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.metadata_refresh_failed",
+                "latest recipe metadata could not be refreshed",
+                retryable=_retryable(error),
+                retry_after_seconds=_retry_after(error),
+                recovery_actions=("retry",) if _retryable(error) else ("inspect",),
+            ) from error
+
     def _start_request(
         self,
         intent: RecipeSelectorIntent | RecipeRevisionIntent,
@@ -3296,18 +3285,16 @@ class RecipeImageAvailabilityService:
                 "recipe_image.metadata_refresh_unavailable",
                 "latest recipe metadata could not be refreshed",
             )
-        try:
-            raw_recipe, runtime = self._authority(recipe_revision_id, force=force)
-        except RecipeImageAvailabilityError:
-            raise
-        except Exception as error:
-            raise RecipeImageAvailabilityError(
-                "recipe_image.metadata_refresh_failed",
-                "latest recipe metadata could not be refreshed",
-                retryable=_retryable(error),
-                retry_after_seconds=_retry_after(error),
-                recovery_actions=("retry",) if _retryable(error) else ("inspect",),
-            ) from error
+        raw_recipe, runtime = self._refresh_authority(recipe_revision_id, force=force)
+        if isinstance(intent, RecipeSelectorIntent):
+            # The refresh may have published a newer head; the selector means
+            # the current revision, so follow it instead of reporting staleness.
+            current_revision_id = self._resolve_recipe_selector(intent.selector)
+            if current_revision_id != recipe_revision_id:
+                recipe_revision_id = current_revision_id
+                raw_recipe, runtime = self._refresh_authority(
+                    recipe_revision_id, force=force
+                )
         recipe = _canonical_recipe(raw_recipe)
         computed_digest = content_sha256(recipe)
         if not isinstance(runtime, Mapping):
@@ -3340,6 +3327,9 @@ class RecipeImageAvailabilityService:
                     raise RecipeImageAvailabilityError(
                         "recipe_image.metadata_stale",
                         "refreshed recipe does not match the selected revision",
+                        retryable=True,
+                        retry_after_seconds=5,
+                        recovery_actions=("retry",),
                     )
                 if effective_execution_key is None:
                     effective_execution_key = revision.execution_key
@@ -3907,27 +3897,12 @@ class RecipeImageAvailabilityService:
             previous_payload = (
                 previous.payload if isinstance(previous.payload, Mapping) else {}
             )
-            failure = previous_payload.get("failure", {})
-            failure = failure if isinstance(failure, Mapping) else {}
-            recovery_actions = failure.get("recovery_actions", [])
-            explicit_repair = (
-                isinstance(recovery_actions, list)
-                and "download_again" in recovery_actions
-            )
-            if failure.get("retryable") is not True and not explicit_repair:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.not_retryable", "operation failure is terminal"
-                )
             retry = previous_payload.get("retry", {})
             retry_count = (
                 int(retry.get("operator_retries", 0))
                 if isinstance(retry, Mapping)
                 else 0
             )
-            if retry_count >= self._operator_retry_limit:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.retry_exhausted", "operator retry limit reached"
-                )
             previous_authority = previous.authority_revision
             previous_targets = list(previous.targets)
             payload = dict(previous_payload)
@@ -4489,11 +4464,10 @@ class RecipeImageAvailabilityService:
                 if isinstance(stored_image, Mapping):
                     try:
                         receipt = RuntimeImageReceipt(**dict(stored_image))
-                    except (TypeError, ValueError) as error:
-                        raise RecipeImageAvailabilityError(
-                            "runtime_image.receipt_invalid",
-                            "durable runtime image result is malformed",
-                        ) from error
+                    except (TypeError, ValueError):
+                        # Our own malformed result record is rebuilt from the
+                        # image below instead of failing the operation.
+                        receipt = None
                 if receipt is None or not self._storage.build_archive_available(
                     receipt.oci_archive_sha256, receipt.image_bytes
                 ):
@@ -5022,16 +4996,20 @@ class RecipeImageAvailabilityService:
                         and existing_reference.image_digest == reference.image_digest
                         and existing_reference.image_bytes == reference.image_bytes
                     )
-                    prior_attempt = existing_reference.attempt < reference.attempt
-                    if not same_output or not prior_attempt:
-                        raise RuntimeImagePreparationError(
-                            "runtime_image.identity_conflict",
-                            "availability retry produced a different archive identity",
+                    if not same_output:
+                        _LOGGER.warning(
+                            "availability operation %s now publishes archive %s "
+                            "instead of %s",
+                            reference.operation_id,
+                            reference.oci_archive_sha256,
+                            existing_reference.oci_archive_sha256,
                         )
-                    # This callback runs under the exact archive publication
-                    # lock. The prior attempt can no longer commit after this
-                    # owner transfer; the exact bytes remain protected without
-                    # opening a gap between provisional references.
+                    # The current attempt's output leads (only the current
+                    # claim reaches here). This callback runs under the exact
+                    # archive publication lock. The prior attempt can no
+                    # longer commit after this owner transfer; the exact bytes
+                    # remain protected without opening a gap between
+                    # provisional references.
                     payload["image_reference_intent"] = serialize_json_value(reference)
                     operation.payload = payload
                     operation.updated_at = now
@@ -5161,11 +5139,12 @@ class RecipeImageAvailabilityService:
             automatic_attempts = int(retry.get("automatic_attempts", 0))
             dependency_wait = str(code) in _DEPENDENCY_WAIT_CODES
             if retryable and retry_after is None:
-                retry_after = 5 if dependency_wait else min(60, 2**automatic_attempts)
-            bounded = retryable and (
-                dependency_wait
-                or automatic_attempts + 1 < self._automatic_attempt_limit
-            )
+                retry_after = (
+                    5
+                    if dependency_wait
+                    else min(_MAX_RETRY_SECONDS, 2 ** min(automatic_attempts, 10))
+                )
+            bounded = retryable
             retry["automatic_attempts"] = automatic_attempts + int(not dependency_wait)
             now = self._clock()
             now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
@@ -5215,6 +5194,15 @@ class RecipeImageAvailabilityService:
                 return
             payload.pop("image_reference_intent", None)
             payload |= {"retry": retry, "failure": failure}
+            if bounded and (
+                str(code) in _INTEGRITY_FAILURE_CODES or is_redownload(str(code))
+            ):
+                # Never reuse bytes that failed verification: the automatic
+                # retry downloads or builds them again.
+                if payload.get("execution_mode") == "build":
+                    payload["force_rebuild"] = True
+                else:
+                    payload["force_download"] = True
             dependency = payload.get("build_dependency")
             settled_build_id = getattr(error, "settled_build_operation_id", None)
             exact_build_settled = (
