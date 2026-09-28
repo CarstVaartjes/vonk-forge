@@ -84,6 +84,11 @@ def test_profile_operator_routes_are_singular_and_unversioned() -> None:
     assert unused.status_code == 200
     assert unused.json()["number"] == 2
     assert unused.json()["status"] == "not-created"
+    # An unsaved profile has one revision everywhere: GET, /definition and the
+    # expected_revision the first save must send.
+    definition = client.get("/api/profile/2/definition", headers=_headers(codec))
+    assert definition.status_code == 200
+    assert unused.json()["revision"] == definition.json()["revision"] == 0
 
     assert (
         client.get("/api/profile/2/status", headers=_headers(codec)).status_code == 404

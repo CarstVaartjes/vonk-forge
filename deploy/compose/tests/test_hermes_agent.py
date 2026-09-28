@@ -96,7 +96,7 @@ def test_compose_hermes_is_unpublished_bounded_and_segmented() -> None:
     assert volumes["/opt/data/home/.cache"]["source"] == "hermes-cache"
 
 
-def test_hermes_uses_only_caddy_lease_edge_and_authenticated_gateway() -> None:
+def test_hermes_uses_only_caddy_inference_edge_and_authenticated_gateway() -> None:
     service = _rendered()["services"]["hermes-agent"]
     environment = service["environment"]
 

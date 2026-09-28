@@ -389,7 +389,9 @@ class FleetProfileView(_StrictModel):
     schema_version: Literal[2] = 2
     id: UuidId
     number: int = Field(ge=1)
-    revision: int = Field(ge=1)
+    # Zero until the first save, matching the definition view and PUT's
+    # expected_revision for an uncreated profile.
+    revision: int = Field(ge=0)
     name: Name
     description: Description
     installation_policy: FleetProfileInstallationPolicy

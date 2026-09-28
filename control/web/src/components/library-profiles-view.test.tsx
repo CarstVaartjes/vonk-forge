@@ -101,3 +101,9 @@ test("a loaded profile names the inference gateway and alias as its client endpo
   expect(within(endpoint).getByText("Spark backend (diagnostic)")).toBeVisible();
   expect(profileEndpoints).toHaveBeenCalledWith(2, expect.any(AbortSignal));
 });
+
+test("a saved profile shows the cache counts the server reports", async () => {
+  const cached = {...profile, cache_summary: {cached: 2, missing: 1, unknown: 0}} as unknown as FleetProfile;
+  render(<LibraryProfilesView api={apiFor({profiles: vi.fn(async () => ({schema_version: 2 as const, generated_at: "2026-09-10T00:00:00Z", profiles: [cached]}))})} entries={[]} onNavigate={vi.fn()}/>);
+  expect(await screen.findByText("2 cached · 1 missing")).toBeVisible();
+});

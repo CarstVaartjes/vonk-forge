@@ -69,7 +69,7 @@ def test_actual_publisher_bytes_are_accepted_by_reader_and_supervisor(
     bundle = verify_active_route_bundle(root, clock=lambda: NOW)
     assert bundle.marker == marker
     supervisor = _supervisor(monkeypatch, root)
-    request = supervisor._active_request(now=NOW)
+    request = supervisor._active_request()
     assert request is not None
     assert request.activation_sha256 == marker.digest
     assert request.marker == marker.model_dump()
@@ -102,7 +102,7 @@ def test_reader_and_supervisor_reject_invalid_or_retired_markers(
     (root / "activation.json").write_bytes(_encoded(document))
     with pytest.raises(RouteRuntimeError):
         verify_active_route_bundle(root, clock=lambda: NOW)
-    assert _supervisor(monkeypatch, root)._active_request(now=NOW) is None
+    assert _supervisor(monkeypatch, root)._active_request() is None
 
 
 @pytest.mark.parametrize("filename", ["manifest.json", "routes.json", "litellm.json"])
@@ -112,24 +112,25 @@ def test_corrupt_generation_fails_closed(tmp_path, monkeypatch, filename):
     (root / "generations" / marker.directory / filename).write_bytes(b"{}\n")
     with pytest.raises(RouteRuntimeError, match="checksum"):
         verify_active_route_bundle(root, clock=lambda: NOW)
-    assert _supervisor(monkeypatch, root)._active_request(now=NOW) is None
+    assert _supervisor(monkeypatch, root)._active_request() is None
 
 
-def test_noncanonical_and_expired_marker_fail_closed(tmp_path, monkeypatch):
+def test_noncanonical_marker_fails_closed_and_expiry_is_controller_only(
+    tmp_path, monkeypatch
+):
     marker = _publish(_publisher(tmp_path))
     root = tmp_path / "runtime"
     activation = root / "activation.json"
     activation.write_text(json.dumps(marker.model_dump(), indent=2))
     with pytest.raises(RouteRuntimeError, match="canonical"):
         verify_active_route_bundle(root, clock=lambda: NOW)
-    assert _supervisor(monkeypatch, root)._active_request(now=NOW) is None
+    assert _supervisor(monkeypatch, root)._active_request() is None
     activation.write_bytes(marker.canonical_bytes())
     with pytest.raises(RouteRuntimeError, match="lease"):
         verify_active_route_bundle(root, clock=lambda: NOW + timedelta(seconds=151))
-    assert (
-        _supervisor(monkeypatch, root)._active_request(now=NOW + timedelta(seconds=151))
-        is None
-    )
+    # The supervisor keeps serving an expired marker; only the Controller's
+    # own reader treats expiry as stale.
+    assert _supervisor(monkeypatch, root)._active_request() is not None
 
 
 def test_renewal_and_empty_publication_keep_monotonic_generations_and_ack(tmp_path):
@@ -265,7 +266,7 @@ def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
     supervisor = _supervisor(monkeypatch, tmp_path / "runtime")
     ack_path = tmp_path / "supervisor/ack.json"
     monkeypatch.setattr(supervisor, "ACK", ack_path)
-    request = supervisor._active_request(now=NOW)
+    request = supervisor._active_request()
     child = SimpleNamespace(pid=123, poll=lambda: None)
     elapsed = [0.0]
 
