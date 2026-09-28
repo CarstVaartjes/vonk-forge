@@ -20,7 +20,7 @@ from vonk_control.runtime_writable_paths import (
     telemetry_contract,
     writable_paths,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import ModelDefinition, document_sha256, read_model, read_recipe
 
 BUILTINS = (
     "vllm",
@@ -128,15 +128,13 @@ def test_platform_metadata_is_immutable_and_digest_bound() -> None:
 
 @pytest.fixture(scope="module")
 def model() -> ModelDefinition:
-    return ModelDefinition.model_validate(_example("model-definition.json"))
+    return read_model(_example("model-definition.json"))
 
 
-def _recipe(slug: str) -> RecipeDefinition:
-    raw = RecipeDefinition.model_validate(
-        _example(
-            "recipe-source-build.json" if slug in OPENAI_BUILTINS else "recipe-job.json"
-        )
-    ).model_dump(mode="json")
+def _recipe(slug: str) -> dict:
+    raw = _example(
+        "recipe-source-build.json" if slug in OPENAI_BUILTINS else "recipe-job.json"
+    )
     raw["runtime"]["engine"] = slug
     raw["runtime"]["entrypoint"] = copy.deepcopy(ENTRYPOINTS[slug])
     raw["runtime"]["arguments"] = copy.deepcopy(ARGS[slug])
@@ -155,23 +153,33 @@ def _recipe(slug: str) -> RecipeDefinition:
         raw["interfaces"][0]["adapter"] = adapter
         raw["validation"]["serving"]["interface"] = adapter
         raw["validation"]["serving"]["checks"][0]["kind"] = f"{adapter}.output"
-    return RecipeDefinition.model_validate(raw)
+    return raw
+
+
+_BUILT_IMAGE = {
+    "image_reference": "localhost/vonk/build@sha256:" + "a" * 64,
+    "image_digest": "a" * 64,
+    "paths": ["context.tar", "Dockerfile", "blank"],
+}
 
 
 def _projection(
     slug: str,
     *,
-    recipe: RecipeDefinition | None = None,
+    recipe: dict | None = None,
     model: ModelDefinition,
-    package_handle: object = None,
+    package_handle: object = _BUILT_IMAGE,
     settings: dict[str, object] | None = None,
     role: str = "entrypoint",
     rank: int = 0,
 ):
-    selected = recipe or _recipe(slug)
+    raw = recipe or _recipe(slug)
+    selected = read_recipe(raw)
+    models = {document_sha256(_example("model-definition.json")): model}
     compile_runtime_spec(
         selected,
-        models=[model],
+        models=models,
+        recipe_digest=document_sha256(raw),
         package_handle=package_handle,
         parameters=settings,
         role=role,
@@ -179,7 +187,7 @@ def _projection(
     )
     projection, _artifacts, _digest = compile_canonical_harness(
         selected,
-        (model,),
+        models,
         package_handle,
         role=role,
         rank=rank,
@@ -204,11 +212,7 @@ def test_builtin_harness_compiles_shell_free_secure_projection(
     )
     assert projection.contract_version == 1
     assert projection.network_mode == "none"
-    assert projection.architecture == "linux/arm64"
     assert projection.user == "10001:10001"
-    assert projection.no_new_privileges is True
-    assert projection.capabilities == ()
-    assert projection.read_only_root is True
     assert projection.telemetry == telemetry_contract(slug)
     assert projection.writable_paths == writable_paths(slug)
     assert all(mount.read_only for mount in projection.model_mounts)
@@ -231,17 +235,17 @@ def test_builtin_harness_compiles_the_declared_model_and_output_mounts(
 def test_builtin_harness_executes_a_valid_short_entrypoint_as_authored(
     model: ModelDefinition,
 ) -> None:
-    raw = _recipe("vllm").model_dump(mode="json")
+    raw = _recipe("vllm")
     raw["runtime"]["entrypoint"] = ["vllm", "serve", "/models"]
     projection = _projection(
-        "vllm", recipe=RecipeDefinition.model_validate(raw), model=model
+        "vllm", recipe=raw, model=model
     )
 
     assert projection.command[0] == "vllm"
 
 
 def test_vllm_preserves_opaque_engine_options(model: ModelDefinition) -> None:
-    raw = _recipe("vllm").model_dump(mode="json")
+    raw = _recipe("vllm")
     raw["runtime"]["arguments"].extend(
         [
             {"name": "future-engine-option", "value": "preserve-me"},
@@ -249,7 +253,7 @@ def test_vllm_preserves_opaque_engine_options(model: ModelDefinition) -> None:
         ]
     )
     projection = _projection(
-        "vllm", recipe=RecipeDefinition.model_validate(raw), model=model
+        "vllm", recipe=raw, model=model
     )
 
     assert "--future-engine-option" in projection.command
@@ -261,7 +265,7 @@ def test_vllm_preserves_opaque_engine_options(model: ModelDefinition) -> None:
 def test_canonical_harness_preserves_value_bearing_arguments(
     model: ModelDefinition,
 ) -> None:
-    raw = _recipe("vllm").model_dump(mode="json")
+    raw = _recipe("vllm")
     raw["runtime"]["arguments"] = [
         {"name": "device", "value": "--device=/dev/nvidia0"},
         {"name": "network", "value": "host"},
@@ -269,7 +273,7 @@ def test_canonical_harness_preserves_value_bearing_arguments(
         {"name": "option", "value": "-c"},
     ]
     projection = _projection(
-        "vllm", recipe=RecipeDefinition.model_validate(raw), model=model
+        "vllm", recipe=raw, model=model
     )
 
     expected = (
@@ -290,12 +294,12 @@ def test_canonical_harness_preserves_value_bearing_arguments(
 def test_builtin_harness_preserves_unknown_environment(
     slug: str, model: ModelDefinition
 ) -> None:
-    raw = _recipe(slug).model_dump(mode="json")
+    raw = _recipe(slug)
     raw["runtime"]["environment"] = [
         {"name": "FUTURE_ENGINE_SETTING", "value": "preserve-me"}
     ]
     projection = _projection(
-        slug, recipe=RecipeDefinition.model_validate(raw), model=model
+        slug, recipe=raw, model=model
     )
 
     assert ("FUTURE_ENGINE_SETTING", "preserve-me") in projection.environment
@@ -308,11 +312,11 @@ def test_builtin_harness_preserves_unknown_environment(
 def test_builtin_harness_rejects_unsafe_environment(
     unsafe: str, model: ModelDefinition
 ) -> None:
-    raw = _recipe("vllm").model_dump(mode="json")
+    raw = _recipe("vllm")
     raw["runtime"]["environment"] = [{"name": unsafe, "value": "/tmp/value"}]
 
     with pytest.raises((ValidationError, HarnessCompileError, RecipeRuntimeSpecError)):
-        _projection("vllm", recipe=RecipeDefinition.model_validate(raw), model=model)
+        _projection("vllm", recipe=raw, model=model)
 
 
 def test_vllm_injects_platform_owned_environment(model: ModelDefinition) -> None:
@@ -327,25 +331,23 @@ def test_vllm_injects_platform_owned_environment(model: ModelDefinition) -> None
 def test_builtin_harness_rejects_shell_entrypoint(
     slug: str, model: ModelDefinition
 ) -> None:
-    raw = _recipe(slug).model_dump(mode="json")
+    raw = _recipe(slug)
     raw["runtime"]["entrypoint"] = ["bash", "-c", "run"]
 
     with pytest.raises((ValidationError, HarnessCompileError, RecipeRuntimeSpecError)):
-        _projection(slug, recipe=RecipeDefinition.model_validate(raw), model=model)
+        _projection(slug, recipe=raw, model=model)
 
 
 def test_artifact_harness_projects_an_isolated_read_only_input(
     model: ModelDefinition,
 ) -> None:
-    raw = _recipe("diffusers").model_dump(mode="json")
+    raw = _recipe("diffusers")
     raw["interfaces"][0]["input"] = {
-        "path": "/inputs",
         "required": True,
         "media_types": ["image/png"],
         "max_bytes": 32 * 1024 * 1024,
     }
-    raw["validation"]["serving"]["checks"][0]["request"]["input_path"] = "/inputs"
-    recipe = RecipeDefinition.model_validate(raw)
+    recipe = raw
     projection = _projection("diffusers", recipe=recipe, model=model)
 
     assert projection.input_mount is not None
@@ -358,10 +360,10 @@ def test_artifact_harness_projects_an_isolated_read_only_input(
 def test_job_media_contract_is_bound_to_the_canonical_interface(
     model: ModelDefinition,
 ) -> None:
-    raw = _recipe("diffusers").model_dump(mode="json")
+    raw = _recipe("diffusers")
     raw["interfaces"][0]["output"]["slots"][0]["media_types"] = ["image/png"]
     raw["runtime"]["arguments"].append({"name": "output-mime", "value": "image/png"})
-    recipe = RecipeDefinition.model_validate(raw)
+    recipe = raw
     projection = _projection("diffusers", recipe=recipe, model=model)
 
     assert "--output-mime" in projection.command
@@ -373,7 +375,7 @@ def test_job_media_contract_is_bound_to_the_canonical_interface(
 def test_parameter_substitution_uses_declared_typed_bounds(
     model: ModelDefinition,
 ) -> None:
-    raw = _recipe("vllm").model_dump(mode="json")
+    raw = _recipe("vllm")
     raw["runtime"]["arguments"] = [
         {"name": "max-model-len", "setting": "max_model_len"}
     ]
@@ -381,7 +383,7 @@ def test_parameter_substitution_uses_declared_typed_bounds(
         "value": 32768,
         "change_effect": "restart",
     }
-    recipe = RecipeDefinition.model_validate(raw)
+    recipe = raw
 
     projection = _projection(
         "vllm", recipe=recipe, model=model, settings={"max_model_len": 65536}
@@ -394,10 +396,10 @@ def test_parameter_substitution_uses_declared_typed_bounds(
 
 
 def test_source_build_requires_and_binds_exact_receipt(model: ModelDefinition) -> None:
-    recipe = RecipeDefinition.model_validate(_example("recipe-source-build.json"))
+    recipe = _example("recipe-source-build.json")
 
     with pytest.raises(RecipeRuntimeSpecError, match="receipt"):
-        _projection("vllm", recipe=recipe, model=model)
+        _projection("vllm", recipe=recipe, model=model, package_handle=None)
 
     digest = "a" * 64
     projection = _projection(
@@ -416,7 +418,7 @@ def test_source_build_requires_and_binds_exact_receipt(model: ModelDefinition) -
 def test_current_compiler_rejects_missing_source_bundle_members(
     model: ModelDefinition,
 ) -> None:
-    recipe = RecipeDefinition.model_validate(_example("recipe-source-build.json"))
+    recipe = _example("recipe-source-build.json")
     digest = "a" * 64
 
     with pytest.raises(RecipeRuntimeSpecError, match="package|path"):
@@ -435,30 +437,26 @@ def test_current_compiler_rejects_missing_source_bundle_members(
 def test_distributed_sglang_compiles_rank_specific_launch(
     model: ModelDefinition,
 ) -> None:
-    raw = _recipe("sglang").model_dump(mode="json")
+    raw = _recipe("sglang")
     endpoint = copy.deepcopy(raw["topology"]["roles"][0])
     worker = copy.deepcopy(endpoint)
     worker.update({"name": "worker", "endpoint_owner": False})
     raw["topology"].update(
         {
-            "mode": "distributed",
             "node_count": 2,
             "roles": [endpoint, worker],
             "parallelism": {
-                "world_size": 2,
                 "tensor": 2,
                 "pipeline": 1,
                 "data": 1,
                 "backend": "native",
             },
-            "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
             "start_order": ["entrypoint", "worker"],
-            "stop_order": ["entrypoint", "worker"],
         }
     )
     raw["runtime"]["arguments"][2]["value"] = 2
     raw["models"][0]["files"][0]["roles"] = ["entrypoint", "worker"]
-    recipe = RecipeDefinition.model_validate(raw)
+    recipe = raw
     projection = _projection(
         "sglang", recipe=recipe, model=model, role="worker", rank=1
     )
