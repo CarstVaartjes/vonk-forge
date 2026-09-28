@@ -384,7 +384,7 @@ def test_packaged_module_entrypoint_consumes_the_host_projection(
     path = tmp_path / "observations.json"
     build_path = tmp_path / "controller-build.json"
     build_path.write_text(json.dumps({"source_commit": SOURCE}))
-    monkeypatch.setenv("VONK_DEPLOYMENT_OBSERVATIONS_FILE", str(path))
+    monkeypatch.setattr(collector, "DEPLOYMENT_OBSERVATIONS_PATH", path)
     monkeypatch.setattr(collector, "PUBLIC_KEY_PATH", public_key_path)
     monkeypatch.setattr(collector, "CONTROLLER_BUILD_METADATA", build_path)
     monkeypatch.setattr(collector.socket, "gethostname", lambda: CONTAINER_ID[:12])
@@ -400,6 +400,7 @@ def test_packaged_module_entrypoint_consumes_the_host_projection(
     assert stored.controller is not None
     assert stored.controller.image_digest == "sha256:" + IMAGE_DIGEST
     monkeypatch.setattr(provenance, "CONTROLLER_BUILD_METADATA", build_path)
+    monkeypatch.setattr(provenance, "DEPLOYMENT_OBSERVATIONS_PATH", path)
     assert provenance.local_deployment_observations().controller == stored.controller
     assert (
         capsys.readouterr().out == f"recorded Controller image sha256:{IMAGE_DIGEST}\n"

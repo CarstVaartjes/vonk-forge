@@ -37,7 +37,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: data.path(),
-        huggingface_curl_config: None,
     };
     for file in &request.inputs {
         let bytes: Vec<u8> = serde_json::from_value(doc["input_contents"][&file.name].clone())?;

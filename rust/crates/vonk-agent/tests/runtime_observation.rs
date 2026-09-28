@@ -100,7 +100,6 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: root.path(),
-        huggingface_curl_config: None,
     };
     let launched = runtime
         .prepare_start_with_inspection_identity(
@@ -164,7 +163,6 @@ fn retained_inspection_and_agent_preparation_leave_private_tmp_cleanup_to_helper
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: root.path(),
-        huggingface_curl_config: None,
     };
     let placement = placement(&plan);
     let identity = identity(&plan);
@@ -241,7 +239,6 @@ fn real_751_artifact_spec_json_round_trips_through_persisted_loader() {
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: root.path(),
-        huggingface_curl_config: None,
     };
     let loaded = runtime.load_spec(INSTALLATION).unwrap();
     assert_eq!(loaded.artifacts.len(), 751);
@@ -282,7 +279,6 @@ fn uninstall_removes_only_its_materialization_despite_unrelated_metadata() {
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: root.path(),
-        huggingface_curl_config: None,
     };
     assert_eq!(
         runtime
@@ -312,7 +308,6 @@ fn uninstall_validates_storage_without_requiring_launchable_placement() {
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: root.path(),
-        huggingface_curl_config: None,
     };
     runtime
         .uninstall(INSTALLATION, &plan.identity.recipe_revision_sha256)
@@ -346,7 +341,6 @@ fn uninstall_rejects_its_own_invalid_metadata_identity_and_artifact_paths() {
         let runtime = OciRuntime {
             runner: &NoProcess,
             data_root: root.path(),
-            huggingface_curl_config: None,
         };
         assert!(
             runtime.uninstall(INSTALLATION, &recipe).is_err(),
@@ -391,7 +385,6 @@ fn retained_job_stop_accepts_only_a_timeout_within_installed_limit() {
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: root.path(),
-        huggingface_curl_config: None,
     };
     let mut retained = installed;
     retained.job.as_mut().unwrap().timeout_seconds = 30;
@@ -418,7 +411,6 @@ fn retained_lifecycle_requires_all_canonical_placement_fields() {
     let runtime = OciRuntime {
         runner: &NoProcess,
         data_root: root.path(),
-        huggingface_curl_config: None,
     };
     runtime
         .prepare_start_with_inspection_identity(

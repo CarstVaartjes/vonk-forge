@@ -19,9 +19,9 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 ROOT = Path(__file__).resolve().parents[3]
 CADDY_IMAGE = "caddy:2.11.4"
 HOSTNAMES = (
-    "enroll.test.example",
-    "agents.test.example",
-    "registry.test.example",
+    "enroll.control.test.example",
+    "agents.control.test.example",
+    "registry.control.test.example",
 )
 CONTROL_HOSTNAME = "control.test.example"
 
@@ -238,14 +238,6 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
         "/tmp",
         "--env",
         f"VONK_CONTROL_HOSTNAME={CONTROL_HOSTNAME}",
-        "--env",
-        f"VONK_AGENT_ENROLL_HOSTNAME={HOSTNAMES[0]}",
-        "--env",
-        f"VONK_AGENT_HOSTNAME={HOSTNAMES[1]}",
-        "--env",
-        f"VONK_REGISTRY_HOSTNAME={HOSTNAMES[2]}",
-        "--env",
-        "VONK_BACKEND_PORT=8443",
         "--volume",
         f"{ROOT / 'deploy/compose/Caddyfile'}:/etc/caddy/Caddyfile:ro",
         "--volume",

@@ -2,21 +2,6 @@
 set -eu
 
 : "${VONK_CONTROL_HOSTNAME:?set VONK_CONTROL_HOSTNAME}"
-: "${VONK_AGENT_ENROLL_HOSTNAME:?set VONK_AGENT_ENROLL_HOSTNAME}"
-: "${VONK_AGENT_HOSTNAME:?set VONK_AGENT_HOSTNAME}"
-: "${VONK_REGISTRY_HOSTNAME:?set VONK_REGISTRY_HOSTNAME}"
-: "${VONK_BACKEND_PORT:?set VONK_BACKEND_PORT}"
-
-case "$VONK_BACKEND_PORT" in
-  "" | *[!0-9]*)
-    echo "VONK_BACKEND_PORT must be an integer from 1 through 65535" >&2
-    exit 64
-    ;;
-esac
-if [ "$VONK_BACKEND_PORT" -lt 1 ] || [ "$VONK_BACKEND_PORT" -gt 65535 ]; then
-  echo "VONK_BACKEND_PORT must be an integer from 1 through 65535" >&2
-  exit 64
-fi
 
 normalize_hostname() {
   hostname=$1
@@ -49,20 +34,14 @@ normalize_hostname() {
   printf '%s' "$normalized"
 }
 
+# One control hostname names the whole controller: the enrollment, agent, and
+# registry SNI names are fixed prefixes of it (the installer's certificate
+# carries exactly these names).
 control_hostname=$(normalize_hostname "$VONK_CONTROL_HOSTNAME")
-enrollment_hostname=$(normalize_hostname "$VONK_AGENT_ENROLL_HOSTNAME")
-agent_hostname=$(normalize_hostname "$VONK_AGENT_HOSTNAME")
-registry_hostname=$(normalize_hostname "$VONK_REGISTRY_HOSTNAME")
-
-if [ "$control_hostname" = "$enrollment_hostname" ] \
-  || [ "$control_hostname" = "$agent_hostname" ] \
-  || [ "$control_hostname" = "$registry_hostname" ] \
-  || [ "$enrollment_hostname" = "$agent_hostname" ] \
-  || [ "$enrollment_hostname" = "$registry_hostname" ] \
-  || [ "$agent_hostname" = "$registry_hostname" ]; then
-  echo "Vonk Forge Caddy SNI hostnames must be distinct" >&2
-  exit 64
-fi
+export VONK_CONTROL_HOSTNAME="$control_hostname"
+export VONK_AGENT_ENROLL_HOSTNAME="enroll.$control_hostname"
+export VONK_AGENT_HOSTNAME="agents.$control_hostname"
+export VONK_REGISTRY_HOSTNAME="registry.$control_hostname"
 
 for required_file in \
   /run/secrets/controller-server-certificate \

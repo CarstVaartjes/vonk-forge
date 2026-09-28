@@ -5,14 +5,15 @@
    private NAS it includes the reserved LAN address, for example:
 
    ```sh
-   curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
+   curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 VONK_ENROLLMENT_URL=https://enroll.example.test VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
    ```
 
-3. Enter the enrollment values plus the Spark management address, this Spark's
-   fabric address, and its peer's fabric address. The generated command supplies
-   the NAS address; safe service ports and 200 Gbit/s fabric bandwidth have
-   defaults. The one-use token authorizes that enrollment and is exchanged
-   directly for the Spark identity.
+3. Enter the one-use pairing token. The generated command supplies the NAS
+   address, enrollment endpoint and CA fingerprint, and the installer detects
+   the Spark's management and fabric addresses and its peer's fabric address
+   (it asks only when detection is ambiguous). Service ports and 200 Gbit/s
+   fabric bandwidth are fixed. The token authorizes that enrollment and is
+   exchanged directly for the Spark identity.
 
 The command finishes only after the direct Rust agent is paired, running, and
 verified. It preserves the TLS hostnames and creates the required NAS LAN

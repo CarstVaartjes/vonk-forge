@@ -52,9 +52,9 @@ from .deployment_provenance_contract import (
     DeploymentObservations,
     PlatformObservation,
 )
+from .settings import DEPLOYMENT_OBSERVATIONS_PATH
 from .strict_json import StrictJSONModel
 
-OBSERVATIONS_ENV = "VONK_DEPLOYMENT_OBSERVATIONS_FILE"
 PUBLIC_KEY_PATH = Path("/usr/local/share/vonk-forge/installer-release-public.pem")
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_OBSERVATIONS_BYTES = 1024 * 1024
@@ -345,13 +345,7 @@ def main() -> int:
         raise SystemExit("deployment capture input exceeds the size limit")
     try:
         request = CaptureInput.model_validate_json(raw)
-        observation_path_value = os.environ.get(OBSERVATIONS_ENV)
-        if not observation_path_value:
-            raise CaptureError(f"{OBSERVATIONS_ENV} is not configured")
-        observation = capture(
-            request,
-            observation_path=Path(observation_path_value),
-        )
+        observation = capture(request, observation_path=DEPLOYMENT_OBSERVATIONS_PATH)
     except (ValueError, OSError) as error:
         raise SystemExit(str(error)) from error
     print(f"recorded Controller image {observation.image_digest}")

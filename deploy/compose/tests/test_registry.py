@@ -35,7 +35,7 @@ def _rendered() -> dict:
 def test_distribution_is_pinned_private_persistent_and_credential_free() -> None:
     rendered = _rendered()
     registry = rendered["services"]["registry"]
-    assert registry["image"] == "registry:3"
+    assert registry["image"] == "registry:3.1.2"
     assert not registry.get("ports")
     assert set(registry["networks"]) == {"registry-edge", "registry-publisher"}
     assert rendered["networks"]["registry-edge"]["internal"] is True
@@ -65,9 +65,9 @@ def test_registry_caddy_adapter_has_only_ping_and_digest_pull_proxies() -> None:
     _require_docker_runtime()
     environment = {
         "VONK_CONTROL_HOSTNAME": "control.test.example",
-        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
-        "VONK_AGENT_HOSTNAME": "agents.test.example",
-        "VONK_REGISTRY_HOSTNAME": "registry.test.example",
+        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.control.test.example",
+        "VONK_AGENT_HOSTNAME": "agents.control.test.example",
+        "VONK_REGISTRY_HOSTNAME": "registry.control.test.example",
         "VONK_AGENT_PROXY_AUTH": "test-proxy-secret",
     }
     command = ["docker", "run", "--rm", "-i"]
@@ -100,7 +100,7 @@ def test_registry_caddy_adapter_has_only_ping_and_digest_pull_proxies() -> None:
     registry_site = next(
         route
         for route in backend["routes"]
-        if route.get("match") == [{"host": ["registry.test.example"]}]
+        if route.get("match") == [{"host": ["registry.control.test.example"]}]
     )
     encoded = json.dumps(registry_site, sort_keys=True)
     assert encoded.count("registry:5000") == 2
@@ -117,7 +117,6 @@ def test_operator_publisher_validates_project_and_digest_before_docker(
         "COMPOSE_PROJECT_NAME": "../unsafe",
         "ORAS_PUBLISHER_IMAGE": "oras:latest",
         "RELEASE_TAG": "release-1",
-        "REGISTRY_REPOSITORY": "vonk/releases",
     }
     result = subprocess.run(
         [str(script), str(tmp_path)],
@@ -143,7 +142,6 @@ def test_operator_publisher_validates_project_and_digest_before_docker(
         "COMPOSE_PROJECT_NAME": "site_a",
         "ORAS_PUBLISHER_IMAGE": "example/oras:1.3.3@sha256:" + "a" * 64,
         "RELEASE_TAG": "release-1",
-        "REGISTRY_REPOSITORY": "site_a/node.releases",
     }
     valid = subprocess.run(
         [str(script), str(release)],
@@ -166,12 +164,11 @@ def test_operator_publisher_validates_project_and_digest_before_docker(
         "example/oras:1.3.3@sha256:" + "a" * 64,
         "push",
         "--plain-http",
-        "registry:5000/site_a/node.releases:release-1",
+        "registry:5000/vonk/releases:release-1",
         ".",
     ]
 
     for changed in (
-        {"REGISTRY_REPOSITORY": "../releases"},
         {"RELEASE_TAG": "x" * 129},
         {"RELEASE_TAG": ".starts-with-dot"},
     ):

@@ -1,557 +1,181 @@
+import json
+import logging
 from pathlib import Path
 
 import pytest
-from vonk_control.settings import Settings, SettingsError, WorkerSettings
+from vonk_control import settings as settings_module
+from vonk_control.settings import Settings, SettingsError
+
+_ENVIRONMENT = (
+    "VONK_DEPLOYMENT_MODE",
+    "VONK_CONTROL_HOSTNAME",
+    "VONK_NAS_LAN_IP",
+    "VONK_MANAGEMENT_CIDRS",
+    "VONK_DIRECT_FABRIC_CIDRS",
+    "VONK_INSTALL_CHANNEL",
+    "VONK_RECIPE_LIBRARY_RELEASE",
+)
 
 
-def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
-    secret = tmp_path / "database-url"
-    secret.write_text("postgresql+psycopg://control:pw@postgres/control\n")
-    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(secret))
+@pytest.fixture
+def secrets_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "secrets"
+    root.mkdir()
+    (root / "database-url").write_text("postgresql+psycopg://control:pw@postgres/db\n")
+    monkeypatch.setattr(settings_module, "SECRETS_ROOT", root)
+    for name in _ENVIRONMENT:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("VONK_CONTROL_HOSTNAME", "vonk-forge.tail1234.ts.net")
+    monkeypatch.setenv("VONK_NAS_LAN_IP", "192.168.1.231")
+    return root
+
+
+def test_production_defaults_and_derived_service_names(secrets_root: Path) -> None:
     settings = Settings.from_env_and_secrets()
+
+    assert settings.deployment_mode == "production"
+    assert settings.agent_runtime_enabled
     assert settings.database_host == "postgres"
-    assert settings.recipe_library_api_url == "https://api.github.com"
-    assert settings.recipe_library_asset_url == "http://caddy:8085"
+    assert settings.secrets_root == secrets_root
+    assert settings.management_cidrs == "192.168.1.0/24"
+    assert settings.install_channel == "stable"
     assert settings.recipe_library_release == "latest"
-    assert settings.recipe_library_sync_interval_seconds == 900
-    assert settings.agent_release_api_url == "https://install.vonkforge.ai"
+    assert settings.agent_service_hostnames == (
+        "vonk-forge.tail1234.ts.net",
+        "enroll.vonk-forge.tail1234.ts.net",
+        "agents.vonk-forge.tail1234.ts.net",
+        "registry.vonk-forge.tail1234.ts.net",
+    )
+    assert (
+        settings.agent_controller_origin
+        == "https://agents.vonk-forge.tail1234.ts.net:8443"
+    )
+    assert (
+        settings.agent_enrollment_origin
+        == "https://enroll.vonk-forge.tail1234.ts.net:8443"
+    )
+    assert settings.controller_ca_path == secrets_root / "controller-ca"
 
 
-def test_optional_huggingface_token_uses_file_path_without_exposing_value(
-    tmp_path: Path, monkeypatch
+def test_production_requires_the_control_hostname(
+    secrets_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    token = tmp_path / "hf-token"
-    token.write_text("hf_test_secret\n")
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(token))
+    monkeypatch.delenv("VONK_CONTROL_HOSTNAME")
+    with pytest.raises(SettingsError, match="VONK_CONTROL_HOSTNAME"):
+        Settings.from_env_and_secrets()
 
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "test")
+    assert not Settings.from_env_and_secrets().agent_runtime_enabled
+
+
+@pytest.mark.parametrize("database_url", [None, "", "mysql://db/control"])
+def test_database_url_fails_closed(
+    secrets_root: Path, database_url: str | None
+) -> None:
+    secret = secrets_root / "database-url"
+    if database_url is None:
+        secret.unlink()
+    else:
+        secret.write_text(database_url)
+    with pytest.raises(SettingsError):
+        Settings.from_env_and_secrets()
+
+
+def test_database_url_must_not_be_a_symlink(secrets_root: Path) -> None:
+    secret = secrets_root / "database-url"
+    target = secrets_root / "actual"
+    secret.rename(target)
+    secret.symlink_to(target)
+    with pytest.raises(SettingsError, match="regular non-symlink"):
+        Settings.from_env_and_secrets()
+
+
+def test_network_lists_self_heal(
+    secrets_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv(
+        "VONK_MANAGEMENT_CIDRS", "192.168.1.5/24, not-a-cidr 192.168.1.0/24,fd00::1/64"
+    )
+    monkeypatch.setenv("VONK_DIRECT_FABRIC_CIDRS", "10.10.0.7/24,192.168.1.240/28")
+
+    with caplog.at_level(logging.WARNING):
+        settings = Settings.from_env_and_secrets()
+
+    assert settings.management_cidrs == "192.168.1.0/24,fd00::/64"
+    # The fabric entry inside a management network is dropped, not fatal.
+    assert settings.direct_fabric_cidrs == "10.10.0.0/24"
+    assert "not-a-cidr" in caplog.text
+
+
+def test_management_networks_default_to_the_nas_lan(
+    secrets_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "garbage")
+    assert Settings.from_env_and_secrets().management_cidrs == "192.168.1.0/24"
+
+    monkeypatch.delenv("VONK_NAS_LAN_IP")
+    with pytest.raises(SettingsError, match="VONK_MANAGEMENT_CIDRS"):
+        Settings.from_env_and_secrets()
+
+
+def test_invalid_operator_choices_fall_back_to_safe_defaults(
+    secrets_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VONK_INSTALL_CHANNEL", "dev")
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_RELEASE", "v1.1.0")
+    settings = Settings.from_env_and_secrets()
+    assert (settings.install_channel, settings.recipe_library_release) == (
+        "dev",
+        "v1.1.0",
+    )
+
+    monkeypatch.setenv("VONK_INSTALL_CHANNEL", "preview")
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_RELEASE", "v1.1")
+    settings = Settings.from_env_and_secrets()
+    assert (settings.install_channel, settings.recipe_library_release) == (
+        "stable",
+        "latest",
+    )
+
+
+def test_worker_never_reads_api_only_secrets(secrets_root: Path) -> None:
+    # No token, metrics or proxy secrets exist: loading must still succeed.
+    settings = Settings.from_env_and_secrets()
+    assert settings.huggingface_token_path is None
+
+    with pytest.raises(SettingsError, match="token-signing-key"):
+        _ = settings.token_signing_key
+
+
+def test_api_secrets_are_validated_on_first_use(secrets_root: Path) -> None:
+    (secrets_root / "token-signing-key").write_text("k" * 32)
+    (secrets_root / "metrics-token").write_text("m" * 16 + "\n")
+    (secrets_root / "agent-proxy-auth").write_text("p" * 32 + "\r\n")
+    (secrets_root / "hf-token").write_text("hf_test_secret\n")
     settings = Settings.from_env_and_secrets()
 
-    assert settings.huggingface_token_path == token
+    assert settings.token_signing_key == b"k" * 32
+    assert settings.metrics_token == "m" * 16
+    assert settings.agent_proxy_auth == b"p" * 32
+    assert settings.huggingface_token_path == secrets_root / "hf-token"
     assert "hf_test_secret" not in repr(settings)
 
+    (secrets_root / "token-signing-key").write_text("short")
+    with pytest.raises(SettingsError, match="32 bytes"):
+        _ = Settings.from_env_and_secrets().token_signing_key
 
-def test_optional_huggingface_token_allows_missing_or_empty_normalized_secret(
-    tmp_path: Path, monkeypatch
+
+def test_development_uses_ephemeral_api_secrets(
+    secrets_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    missing = tmp_path / "missing-hf-token"
-    empty = tmp_path / "empty-hf-token"
-    empty.touch()
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(missing))
-    assert Settings.from_env_and_secrets().huggingface_token_path is None
-
-    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(empty))
-    assert Settings.from_env_and_secrets().huggingface_token_path is None
-
-
-def test_optional_huggingface_token_rejects_symlink(
-    tmp_path: Path, monkeypatch
-) -> None:
-    token = tmp_path / "hf-token"
-    token.write_text("hf_test_secret")
-    link = tmp_path / "hf-token-link"
-    link.symlink_to(token)
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(link))
-
-    with pytest.raises(SettingsError, match="regular non-symlink"):
-        Settings.from_env_and_secrets()
-
-
-def test_recipe_library_api_uses_only_github_or_the_internal_relay(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_RECIPE_LIBRARY_API_URL", "http://caddy:8083/")
-    assert Settings.from_env_and_secrets().recipe_library_api_url == "http://caddy:8083"
-
-    for invalid in ("http://api.github.com", "https://github.example"):
-        monkeypatch.setenv("VONK_RECIPE_LIBRARY_API_URL", invalid)
-        with pytest.raises(SettingsError, match="recipe library API URL"):
-            Settings.from_env_and_secrets()
-
-
-def test_recipe_library_asset_relay_is_built_in_and_retired_variables_are_ignored(
-    monkeypatch,
-) -> None:
-    # Existing .env files may still name retired variables; startup ignores
-    # them and the asset relay stays the in-project Caddy relay.
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_RECIPE_LIBRARY_ASSET_URL", "https://github.example")
-    monkeypatch.setenv("VONK_RECIPE_LIBRARY_RAW_URL", "https://raw.example")
-    assert (
-        Settings.from_env_and_secrets().recipe_library_asset_url == "http://caddy:8085"
-    )
-
-
-def test_recipe_library_release_is_latest_or_an_exact_tag(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_RECIPE_LIBRARY_RELEASE", "v1.1.0")
-    assert Settings.from_env_and_secrets().recipe_library_release == "v1.1.0"
-
-    for invalid in ("main", "v1.1", "v1.1.0-rc1", "0929ef6b467c4ffd"):
-        monkeypatch.setenv("VONK_RECIPE_LIBRARY_RELEASE", invalid)
-        with pytest.raises(SettingsError, match="recipe library release"):
-            Settings.from_env_and_secrets()
-
-
-def test_recipe_library_sync_interval_is_bounded(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "60")
-    assert Settings.from_env_and_secrets().recipe_library_sync_interval_seconds == 60
-
-    monkeypatch.setenv("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "59")
-    with pytest.raises(SettingsError, match="recipe library sync interval"):
-        Settings.from_env_and_secrets()
-
-
-def test_recipe_build_parallel_preparations_defaults_and_bounds(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.delenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", raising=False)
-    assert Settings.from_env_and_secrets().recipe_build_parallel_preparations == 2
-
-    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "3")
-    assert Settings.from_env_and_secrets().recipe_build_parallel_preparations == 3
-
-    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "5")
-    with pytest.raises(SettingsError, match="recipe build parallel preparations"):
-        Settings.from_env_and_secrets()
-
-
-def test_agent_release_api_uses_only_public_origin_or_internal_relay(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_AGENT_RELEASE_API_URL", "http://caddy:8084/")
-    assert Settings.from_env_and_secrets().agent_release_api_url == "http://caddy:8084"
-
-    for invalid in ("http://install.vonkforge.ai", "https://install.example"):
-        monkeypatch.setenv("VONK_AGENT_RELEASE_API_URL", invalid)
-        with pytest.raises(SettingsError, match="agent release API URL"):
-            Settings.from_env_and_secrets()
-
-
-def test_management_networks_are_explicit_and_policy_validated(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24,2001:db8:42::/64")
-    monkeypatch.setenv("VONK_DIRECT_FABRIC_CIDRS", "10.0.0.240/28")
-
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "development")
     settings = Settings.from_env_and_secrets()
 
-    assert settings.management_cidrs == "10.0.0.0/24,2001:db8:42::/64"
-    assert settings.direct_fabric_cidrs == "10.0.0.240/28"
-
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.1/24")
-    with pytest.raises(SettingsError, match="canonical CIDR"):
-        Settings.from_env_and_secrets()
-
-
-def test_management_networks_load_from_a_protected_file(
-    tmp_path: Path, monkeypatch
-) -> None:
-    management = tmp_path / "management-cidrs"
-    management.write_text("10.0.0.0/24,2001:db8:42::/64\n")
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(management))
-
-    settings = Settings.from_env_and_secrets()
-
-    assert settings.management_cidrs == "10.0.0.0/24,2001:db8:42::/64"
-
-
-def test_management_networks_reject_env_and_file_sources_together(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    management = tmp_path / "management-cidrs"
-    management.write_text("10.0.0.0/24\n")
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(management))
-
-    with pytest.raises(SettingsError, match="cannot be combined"):
-        Settings.from_env_and_secrets()
-
-
-def test_management_networks_reject_symlink_file(tmp_path: Path, monkeypatch) -> None:
-    management = tmp_path / "management-cidrs"
-    management.write_text("10.0.0.0/24\n")
-    link = tmp_path / "management-cidrs-link"
-    link.symlink_to(management)
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(link))
-
-    with pytest.raises(SettingsError, match="regular non-symlink"):
-        Settings.from_env_and_secrets()
-
-
-def test_management_networks_reject_empty_file(tmp_path: Path, monkeypatch) -> None:
-    management = tmp_path / "management-cidrs"
-    management.write_text("\n")
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(management))
-
-    with pytest.raises(SettingsError, match="must not be empty"):
-        Settings.from_env_and_secrets()
-
-
-def test_management_network_file_rejects_overlap_with_direct_fabric(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    management = tmp_path / "management-cidrs"
-    management.write_text("10.0.0.240/28\n")
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(management))
-    monkeypatch.setenv("VONK_DIRECT_FABRIC_CIDRS", "10.0.0.240/28")
-
-    with pytest.raises(SettingsError, match="fully forbidden"):
-        Settings.from_env_and_secrets()
-
-
-def test_workload_tuf_roots_are_explicit_absolute_nonoverlapping_paths(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    metadata = tmp_path / "workload-tuf/metadata"
-    targets = tmp_path / "workload-tuf/targets"
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_WORKLOAD_TUF_METADATA_ROOT", str(metadata))
-    monkeypatch.setenv("VONK_WORKLOAD_TUF_TARGET_ROOT", str(targets))
-
-    settings = Settings.from_env_and_secrets()
-
-    assert settings.workload_tuf_metadata_root == metadata
-    assert settings.workload_tuf_target_root == targets
-
-    monkeypatch.setenv("VONK_WORKLOAD_TUF_TARGET_ROOT", "relative/targets")
-    with pytest.raises(SettingsError, match="absolute"):
-        Settings.from_env_and_secrets()
-
-    monkeypatch.setenv("VONK_WORKLOAD_TUF_TARGET_ROOT", str(metadata / "nested"))
-    with pytest.raises(SettingsError, match="distinct"):
-        Settings.from_env_and_secrets()
-
-
-def test_development_defaults_agent_runtime_to_disabled(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.delenv("VONK_AGENT_RUNTIME", raising=False)
-
-    settings = Settings.from_env_and_secrets()
-
-    assert settings.agent_runtime == "disabled"
+    assert len(settings.token_signing_key) == 32
+    assert settings.metrics_token
     assert settings.agent_proxy_auth == b""
-
-
-def test_enabled_agent_runtime_loads_distinct_origins_and_public_controller_ca_path(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _configure_agent_authority(
-        tmp_path,
-        monkeypatch,
-        mode="development",
-    )
-    controller_ca = tmp_path / "controller-ca.pem"
-    controller_ca.write_text("public controller CA\n", encoding="utf-8")
-    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
-    monkeypatch.setenv(
-        "VONK_AGENT_CONTROLLER_ORIGIN", "https://agents.example.test:8443"
-    )
-    monkeypatch.setenv(
-        "VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test:8443"
-    )
-    monkeypatch.setenv("VONK_AGENT_CONTROLLER_ADDRESS", "192.168.1.231")
-    monkeypatch.setenv(
-        "VONK_AGENT_SERVICE_HOSTNAMES",
-        "control.example.test,enroll.example.test,agents.example.test,registry.example.test",
-    )
-    monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(controller_ca))
-    monkeypatch.setenv("VONK_INSTALL_CHANNEL", "dev")
-
-    settings = Settings.from_env_and_secrets()
-
-    assert settings.agent_controller_origin == "https://agents.example.test:8443"
-    assert settings.agent_enrollment_origin == "https://enroll.example.test:8443"
-    assert settings.controller_ca_path == controller_ca
-    assert settings.agent_ca_url == "https://step-ca:9000"
-    assert settings.agent_controller_address == "192.168.1.231"
-    assert settings.agent_service_hostnames == (
-        "control.example.test",
-        "enroll.example.test",
-        "agents.example.test",
-        "registry.example.test",
-    )
-    assert settings.install_channel == "dev"
-    assert settings.artifact_job_storage_max_bytes == 16 * 1024**3
-    assert settings.artifact_job_retention_seconds == 7 * 24 * 60 * 60
-
-
-def test_install_channel_rejects_unpublished_values(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_INSTALL_CHANNEL", "preview")
-
-    with pytest.raises(SettingsError, match="VONK_INSTALL_CHANNEL"):
-        Settings.from_env_and_secrets()
-
-
-def test_artifact_job_storage_settings_are_bounded(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES", "1024")
-
-    with pytest.raises(SettingsError, match="artifact job storage maximum"):
-        Settings.from_env_and_secrets()
-
-
-def test_enabled_agent_runtime_rejects_non_https_controller_origin(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _configure_agent_authority(
-        tmp_path,
-        monkeypatch,
-        mode="development",
-    )
-    controller_ca = tmp_path / "controller-ca.pem"
-    controller_ca.write_text("public controller CA\n", encoding="utf-8")
-    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
-    monkeypatch.setenv("VONK_AGENT_CONTROLLER_ORIGIN", "http://agents.example.test")
-    monkeypatch.setenv("VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test")
-    monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(controller_ca))
-
-    with pytest.raises(SettingsError, match="fixed HTTPS origin"):
-        Settings.from_env_and_secrets()
-
-
-def _configure_agent_authority(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    mode: str,
-) -> dict[str, Path]:
-    secret_values = {
-        "VONK_DATABASE_URL_FILE": "postgresql://db/control\n",
-        "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
-        "VONK_METRICS_TOKEN_FILE": "m" * 16,
-        "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
-        "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
-        "VONK_AGENT_CA_CREDENTIAL_FILE": "provider-credential",
-        "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "provider-public-jwk",
-        "VONK_AGENT_CA_ROOT_FILE": "root-certificate",
-        "VONK_CONTROLLER_CA_FILE": "public-controller-ca",
-        "VONK_AGENT_PROXY_AUTH_FILE": "p" * 32,
-    }
-    paths: dict[str, Path] = {}
-    for name, value in secret_values.items():
-        path = tmp_path / name
-        path.write_text(value)
-        paths[name] = path
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", mode)
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    monkeypatch.setenv(
-        "VONK_AGENT_CONTROLLER_ORIGIN", "https://agents.example.test:8443"
-    )
-    monkeypatch.setenv(
-        "VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test:8443"
-    )
-    monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(paths["VONK_CONTROLLER_CA_FILE"]))
-    if mode == "production":
-        for name in (
-            "VONK_DATABASE_URL_FILE",
-            "VONK_TOKEN_SIGNING_KEY_FILE",
-            "VONK_METRICS_TOKEN_FILE",
-        ):
-            monkeypatch.setenv(name, str(paths[name]))
-    else:
-        monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-        monkeypatch.setenv(
-            "VONK_TOKEN_SIGNING_KEY_FILE",
-            str(paths["VONK_TOKEN_SIGNING_KEY_FILE"]),
-        )
-    for name in (
-        "VONK_AGENT_CLIENT_CA_FILE",
-        "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE",
-        "VONK_AGENT_CA_CREDENTIAL_FILE",
-        "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE",
-        "VONK_AGENT_CA_ROOT_FILE",
-        "VONK_AGENT_PROXY_AUTH_FILE",
-    ):
-        monkeypatch.setenv(name, str(paths[name]))
-    monkeypatch.setenv("VONK_AGENT_CA_URL", "https://step-ca:9000")
-    monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_NAME", "vonk-forge-agent")
-    monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_KID", "test-kid")
-    return paths
-
-
-@pytest.mark.parametrize(
-    ("mode", "runtime"),
-    [
-        ("development", "disabled"),
-        ("development", "enabled"),
-        ("production", "enabled"),
-    ],
-)
-def test_agent_authority_mode_runtime_matrix(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    mode: str,
-    runtime: str,
-) -> None:
-    _configure_agent_authority(
-        tmp_path,
-        monkeypatch,
-        mode=mode,
-    )
-    monkeypatch.setenv("VONK_AGENT_RUNTIME", runtime)
-
-    settings = Settings.from_env_and_secrets()
-
-    assert settings.agent_runtime == runtime
-    if runtime == "disabled":
-        assert settings.agent_proxy_auth == b""
-        return
-    assert settings.agent_client_ca == b"client-ca"
-    assert settings.agent_intermediate_certificate == b"intermediate-certificate"
-    assert settings.agent_proxy_auth == b"p" * 32
-
-
-def test_agent_certificate_lifetime_defaults_and_is_bounded(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _configure_agent_authority(tmp_path, monkeypatch, mode="development")
-    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
-
-    assert (
-        Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 2592000
-    )
-
-    monkeypatch.setenv("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "90")
-    assert Settings.from_env_and_secrets().agent_ca_certificate_lifetime_seconds == 90
-
-    for value in ("not-a-number", "89", "2592001"):
-        monkeypatch.setenv("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", value)
-        with pytest.raises(SettingsError, match="certificate lifetime") as caught:
-            Settings.from_env_and_secrets()
-        assert value not in str(caught.value)
-
-
-def test_enabled_development_agent_authority_requires_management_cidrs(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _configure_agent_authority(
-        tmp_path,
-        monkeypatch,
-        mode="development",
-    )
-    monkeypatch.delenv("VONK_MANAGEMENT_CIDRS")
-    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
-
-    with pytest.raises(SettingsError, match="VONK_MANAGEMENT_CIDRS"):
-        Settings.from_env_and_secrets()
-
-
-def test_enabled_development_agent_authority_requires_token_signing_file(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _configure_agent_authority(
-        tmp_path,
-        monkeypatch,
-        mode="development",
-    )
-    monkeypatch.delenv("VONK_TOKEN_SIGNING_KEY_FILE")
-    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
-
-    with pytest.raises(SettingsError, match="VONK_TOKEN_SIGNING_KEY_FILE"):
-        Settings.from_env_and_secrets()
-
-
-def test_production_agent_runtime_requires_management_networks(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    database = tmp_path / "database-url"
-    database.write_text("postgresql://db/control")
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
-
-    with pytest.raises(SettingsError, match="VONK_MANAGEMENT_CIDRS"):
-        Settings.from_env_and_secrets()
-
-
-def test_production_rejects_raw_database_secret(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://unsafe")
-    with pytest.raises(SettingsError, match="secret file"):
-        Settings.from_env_and_secrets()
-
-
-def test_secret_file_must_not_be_symlink(tmp_path: Path, monkeypatch) -> None:
-    target = tmp_path / "actual"
-    target.write_text("postgresql://db/control")
-    link = tmp_path / "database-url"
-    link.symlink_to(target)
-    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(link))
-    with pytest.raises(SettingsError, match="regular non-symlink"):
-        Settings.from_env_and_secrets()
-
-
-def test_compose_is_platform_neutral_and_only_caddy_publishes_ports() -> None:
-    root = Path(__file__).resolve().parents[2]
-    text = (root / "deploy/compose/compose.yaml").read_text()
-    assert "ugreen" not in text.lower()
-    assert "192.168." not in text
-    assert "node1" not in text.lower() and "node2" not in text.lower()
-    assert text.count("ports:") == 1
-    assert "control-api:" in text and "control-worker:" in text
-    assert "postgres:" in text and "caddy:" in text
-
-
-def _configure_enrollment_bootstrap_environment(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    controller_ca = tmp_path / "controller-ca.pem"
-    controller_ca.write_text("public controller CA\n", encoding="utf-8")
-    monkeypatch.setenv(
-        "VONK_AGENT_CONTROLLER_ORIGIN", "https://agents.example.test:8443"
-    )
-    monkeypatch.setenv(
-        "VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test:8443"
-    )
-    monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(controller_ca))
-
-
-def test_production_agent_boundary_requires_secret_files_and_step_ca(
-    tmp_path: Path, monkeypatch
-) -> None:
-    values = {
-        "VONK_DATABASE_URL_FILE": "postgresql://db/control",
-        "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
-        "VONK_METRICS_TOKEN_FILE": "m" * 16,
-        "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
-        "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
-        "VONK_AGENT_CA_CREDENTIAL_FILE": "provider-credential",
-        "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "provider-public-jwk",
-        "VONK_AGENT_CA_ROOT_FILE": "root-certificate",
-        "VONK_AGENT_PROXY_AUTH_FILE": "p" * 32 + "\r\n",
-    }
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    for name, value in values.items():
-        path = tmp_path / name
-        path.write_text(value)
-        monkeypatch.setenv(name, str(path))
-    monkeypatch.setenv("VONK_AGENT_CA_URL", "https://step-ca:9000")
-    monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_NAME", "vonk-forge-agent")
-    monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_KID", "test-kid")
-    _configure_enrollment_bootstrap_environment(tmp_path, monkeypatch)
-
-    settings = Settings.from_env_and_secrets()
-
-    assert settings.agent_proxy_auth == ("p" * 32).encode()
 
 
 @pytest.mark.parametrize(
@@ -566,99 +190,64 @@ def test_production_agent_boundary_requires_secret_files_and_step_ca(
         "p" * 16 + "\x00" + "p" * 16,
     ),
 )
-def test_production_rejects_noncanonical_agent_proxy_auth(
-    tmp_path: Path,
-    monkeypatch,
-    proxy_auth: str,
+def test_noncanonical_agent_proxy_auth_is_refused(
+    secrets_root: Path, proxy_auth: str
 ) -> None:
-    values = {
-        "VONK_DATABASE_URL_FILE": "postgresql://db/control",
-        "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
-        "VONK_METRICS_TOKEN_FILE": "m" * 16,
-        "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
-        "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
-        "VONK_AGENT_CA_CREDENTIAL_FILE": "provider-credential",
-        "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "provider-public-jwk",
-        "VONK_AGENT_CA_ROOT_FILE": "root-certificate",
-        "VONK_AGENT_PROXY_AUTH_FILE": proxy_auth,
-    }
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    monkeypatch.setenv("VONK_AGENT_CA_URL", "https://step-ca:9000")
-    monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_NAME", "vonk-forge-agent")
-    monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_KID", "test-kid")
-    _configure_enrollment_bootstrap_environment(tmp_path, monkeypatch)
-    for name, value in values.items():
-        path = tmp_path / name
-        path.write_text(value)
-        monkeypatch.setenv(name, str(path))
-
+    (secrets_root / "agent-proxy-auth").write_text(proxy_auth)
     with pytest.raises(SettingsError, match="base64url-like"):
-        Settings.from_env_and_secrets()
+        _ = Settings.from_env_and_secrets().agent_proxy_auth
 
 
-def test_agent_proxy_auth_defaults_empty(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    settings = Settings.from_env_and_secrets()
-    assert settings.agent_proxy_auth == b""
+def test_provisioner_key_id_comes_from_the_public_jwk(secrets_root: Path) -> None:
+    jwk = secrets_root / "agent-ca-provisioner-public-jwk"
+    jwk.write_text(json.dumps({"kty": "EC", "kid": "thumbprint-kid"}))
+    assert Settings.from_env_and_secrets().agent_ca_provisioner_kid == "thumbprint-kid"
+
+    jwk.write_text(json.dumps({"kty": "EC"}))
+    with pytest.raises(SettingsError, match="kid"):
+        _ = Settings.from_env_and_secrets().agent_ca_provisioner_kid
 
 
-def test_production_worker_settings_requires_management_cidrs(
-    tmp_path: Path, monkeypatch
+@pytest.mark.parametrize(
+    ("duration", "seconds"),
+    [("90s", 90), ("720h", 2_592_000), ("1h30m", 5400), ("1ms", 2_592_000)],
+)
+def test_certificate_lifetime_follows_the_step_ca_provisioner(
+    secrets_root: Path, duration: str, seconds: int
 ) -> None:
-    values = {
-        "VONK_DATABASE_URL_FILE": "postgresql://db/control",
-    }
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    for name, value in values.items():
-        path = tmp_path / name
-        path.write_text(value)
-        monkeypatch.setenv(name, str(path))
-
-    with pytest.raises(SettingsError, match="VONK_MANAGEMENT_CIDRS"):
-        WorkerSettings.from_env_and_secrets()
-
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    settings = WorkerSettings.from_env_and_secrets()
-
-    assert settings.management_cidrs == "10.0.0.0/24"
-
-
-def test_worker_recipe_build_parallel_preparations_defaults_and_bounds(
-    tmp_path: Path, monkeypatch
-) -> None:
-    database = tmp_path / "database-url"
-    database.write_text("postgresql://control:test@postgres/control")
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    monkeypatch.delenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", raising=False)
-    assert WorkerSettings.from_env_and_secrets().recipe_build_parallel_preparations == 2
-
-    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "3")
-    assert WorkerSettings.from_env_and_secrets().recipe_build_parallel_preparations == 3
-
-    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "5")
-    with pytest.raises(SettingsError, match="recipe build parallel preparations"):
-        WorkerSettings.from_env_and_secrets()
-
-
-@pytest.mark.parametrize("settings_class", [Settings, WorkerSettings])
-def test_distributed_start_timeout_default_override_and_bounds(
-    monkeypatch, settings_class
-) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.delenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", raising=False)
-    assert (
-        settings_class.from_env_and_secrets().distributed_start_timeout_seconds == 3600
-    )
-    for valid in (60, 1800, 3600):
-        monkeypatch.setenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", str(valid))
-        assert (
-            settings_class.from_env_and_secrets().distributed_start_timeout_seconds
-            == valid
+    (secrets_root / "step-ca").mkdir()
+    (secrets_root / "step-ca" / "ca.json").write_text(
+        json.dumps(
+            {
+                "authority": {
+                    "provisioners": [
+                        {"name": "other", "claims": {"defaultTLSCertDuration": "1h"}},
+                        {
+                            "name": "vonk-forge-agent",
+                            "claims": {"defaultTLSCertDuration": duration},
+                        },
+                    ]
+                }
+            }
         )
-    for invalid in ("0", "59", "3601", "1.5", "invalid"):
-        monkeypatch.setenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", invalid)
-        with pytest.raises(SettingsError, match="distributed start timeout"):
-            settings_class.from_env_and_secrets()
+    )
+    settings = Settings.from_env_and_secrets()
+    assert settings.agent_ca_certificate_lifetime_seconds == seconds
+
+
+def test_certificate_lifetime_defaults_to_thirty_days_without_config(
+    secrets_root: Path,
+) -> None:
+    settings = Settings.from_env_and_secrets()
+    assert settings.agent_ca_certificate_lifetime_seconds == 30 * 24 * 60 * 60
+
+
+def test_compose_is_platform_neutral_and_only_caddy_publishes_ports() -> None:
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "deploy/compose/compose.yaml").read_text()
+    assert "ugreen" not in text.lower()
+    assert "192.168." not in text
+    assert "node1" not in text.lower() and "node2" not in text.lower()
+    assert text.count("ports:") == 1
+    assert "control-api:" in text and "control-worker:" in text
+    assert "postgres:" in text and "caddy:" in text

@@ -21,7 +21,7 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 
-from .settings import database_wait_budgets
+from .settings import DATABASE_WAIT_BUDGETS
 
 _STARTUP_ADVISORY_LOCK = 8_241_779_103
 _MODULE_ALEMBIC_CONFIG = Path(__file__).resolve().parent / "alembic.ini"
@@ -39,14 +39,14 @@ _LOGGER = logging.getLogger(__name__)
 def build_engine(database_url: str) -> Engine:
     """Build the one engine every component shares.
 
-    Configuration owns every finite wait budget; PostgreSQL receives all four
+    The fixed wait budgets bound every wait; PostgreSQL receives all four
     server-side timeouts per connection, and its pool is explicitly bounded so
     a saturated pool fails within the pool timeout instead of queueing a
     connection forever. SQLite accepts neither the server options nor an
     explicit pool size, so it keeps the default pool.
     """
 
-    budgets = database_wait_budgets()
+    budgets = DATABASE_WAIT_BUDGETS
     if "postgres" in database_url:
         connect_args = {
             "options": " ".join(

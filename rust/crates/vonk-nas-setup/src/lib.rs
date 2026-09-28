@@ -98,7 +98,7 @@ struct InstallModes {
     default: String,
     lab_value: String,
     secure_remote_value: String,
-    lab_required_values: Vec<RequiredValuePrompt>,
+    /// Values that replace the secure-remote-only prompts in lab mode.
     lab_values: Vec<InternalValue>,
 }
 
@@ -129,15 +129,14 @@ struct GeneratedSecrets {
 #[serde(deny_unknown_fields)]
 struct RandomTextRequest {
     file: String,
-    prompt: String,
     bytes: usize,
+    prefix: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Ed25519KeyRequest {
     file: String,
-    prompt: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,10 +162,10 @@ struct RuntimeFile {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StepCaControllerRequest {
-    prompt: String,
-    hostname_envs: Vec<String>,
+    /// The control hostname; the enrollment, agent, and registry names are
+    /// fixed prefixes of it, so one value names the whole controller.
+    hostname_env: String,
     provisioner_name: String,
-    kid_env: String,
     password_bytes: usize,
     files: StepCaControllerFiles,
 }
@@ -219,9 +218,7 @@ enum RequiredValueValidation {
     Ipv4,
     CidrList,
     OptionalCidrList,
-    Jurisdiction,
     Hostname,
-    HttpsOrigin,
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,14 +226,11 @@ enum RequiredValueValidation {
 struct SecretPrompt {
     file: String,
     prompt: String,
-    generate_bytes: Option<usize>,
-    prefix: Option<String>,
     #[serde(default)]
     optional: bool,
+    /// Lab mode leaves this secret empty instead of asking for it.
     #[serde(default)]
     secure_remote_only: bool,
-    #[serde(default)]
-    generate_in_lab: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -246,10 +240,6 @@ struct HermesPrompt {
     prompt: String,
     enabled_value: String,
     disabled_value: String,
-    #[serde(default)]
-    required_values: Vec<RequiredValuePrompt>,
-    #[serde(default)]
-    secrets: Vec<SecretPrompt>,
 }
 
 impl CanonicalTemplatePayload {
@@ -326,12 +316,6 @@ impl CanonicalTemplatePayload {
                         .to_owned(),
                 ));
             }
-            validate_prompts(
-                &hermes.required_values,
-                &hermes.secrets,
-                &mut environment,
-                &mut secrets,
-            )?;
         }
         if let Some(modes) = &self.install_modes {
             if modes.prompt.trim().is_empty()
@@ -345,12 +329,6 @@ impl CanonicalTemplatePayload {
                     "install mode choices are invalid".to_owned(),
                 ));
             }
-            validate_prompts(
-                &modes.lab_required_values,
-                &[],
-                &mut HashSet::new(),
-                &mut HashSet::new(),
-            )?;
             let mut lab_environment = HashSet::new();
             for value in &modes.lab_values {
                 validate_env_name(&value.env)?;
@@ -364,17 +342,27 @@ impl CanonicalTemplatePayload {
         }
         for request in &self.generated_secrets.random_text {
             validate_generated_file(&request.file, &mut secrets)?;
-            validate_generation_prompt(&request.prompt, &request.file)?;
             if !(16..=128).contains(&request.bytes) {
                 return Err(SetupError::InvalidPayload(format!(
                     "generation size for {} is outside 16..=128 bytes",
                     request.file
                 )));
             }
+            if request.prefix.as_deref().is_some_and(|prefix| {
+                prefix.is_empty()
+                    || prefix.len() > 32
+                    || !prefix.chars().all(|character| {
+                        character.is_ascii_alphanumeric() || "_.~-".contains(character)
+                    })
+            }) {
+                return Err(SetupError::InvalidPayload(format!(
+                    "generation prefix for {} is invalid",
+                    request.file
+                )));
+            }
         }
         for request in &self.generated_secrets.ed25519_pkcs8_pem {
             validate_generated_file(&request.file, &mut secrets)?;
-            validate_generation_prompt(&request.prompt, &request.file)?;
         }
         for request in &self.generated_secrets.postgres_urls {
             validate_generated_file(&request.file, &mut secrets)?;
@@ -401,30 +389,19 @@ impl CanonicalTemplatePayload {
             validate_generated_file(&runtime_file.file, &mut secrets)?;
         }
         if let Some(request) = &self.step_ca_controller {
-            if request.prompt.trim().is_empty()
-                || request.provisioner_name.trim().is_empty()
+            if request.provisioner_name.trim().is_empty()
                 || request.provisioner_name.contains(['\0', '\r', '\n'])
                 || !(16..=128).contains(&request.password_bytes)
-                || request.hostname_envs.is_empty()
             {
                 return Err(SetupError::InvalidPayload(
                     "Step CA/controller request is incomplete".to_owned(),
                 ));
             }
-            let mut hostnames = HashSet::new();
-            for name in &request.hostname_envs {
-                validate_env_name(name)?;
-                if !environment.contains(name.as_str()) || !hostnames.insert(name.as_str()) {
-                    return Err(SetupError::InvalidPayload(format!(
-                        "Step CA hostname environment key {name} is undeclared or repeated"
-                    )));
-                }
-            }
-            validate_env_name(&request.kid_env)?;
-            if !environment.insert(request.kid_env.as_str()) {
+            validate_env_name(&request.hostname_env)?;
+            if !environment.contains(request.hostname_env.as_str()) {
                 return Err(SetupError::InvalidPayload(format!(
-                    "duplicate environment key {}",
-                    request.kid_env
+                    "Step CA hostname environment key {} is undeclared",
+                    request.hostname_env
                 )));
             }
             for file in request.files.all() {
@@ -443,15 +420,6 @@ fn validate_generated_file<'a>(
     if !secrets.insert(file) {
         return Err(SetupError::InvalidPayload(format!(
             "duplicate secret file {file}"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_generation_prompt(prompt: &str, file: &str) -> Result<(), SetupError> {
-    if prompt.trim().is_empty() {
-        return Err(SetupError::InvalidPayload(format!(
-            "prompt for {file} is empty"
         )));
     }
     Ok(())
@@ -527,33 +495,6 @@ fn validate_prompts<'a>(
                 secret.file
             )));
         }
-        if secret
-            .generate_bytes
-            .is_some_and(|bytes| !(16..=128).contains(&bytes))
-        {
-            return Err(SetupError::InvalidPayload(format!(
-                "generation size for {} is outside 16..=128 bytes",
-                secret.file
-            )));
-        }
-        if secret.optional && secret.generate_bytes.is_some() {
-            return Err(SetupError::InvalidPayload(format!(
-                "optional secret {} cannot request generated bytes",
-                secret.file
-            )));
-        }
-        if secret.prefix.as_deref().is_some_and(|prefix| {
-            prefix.is_empty()
-                || prefix.len() > 32
-                || !prefix.chars().all(|character| {
-                    character.is_ascii_alphanumeric() || "_.~-".contains(character)
-                })
-        }) {
-            return Err(SetupError::InvalidPayload(format!(
-                "generation prefix for {} is invalid",
-                secret.file
-            )));
-        }
         if !secrets.insert(&secret.file) {
             return Err(SetupError::InvalidPayload(format!(
                 "duplicate secret file {}",
@@ -604,12 +545,7 @@ fn valid_required_value(value: &str, validation: &RequiredValueValidation) -> bo
         RequiredValueValidation::Ipv4 => value.parse::<Ipv4Addr>().is_ok(),
         RequiredValueValidation::CidrList => valid_cidr_list(value, false),
         RequiredValueValidation::OptionalCidrList => valid_cidr_list(value, true),
-        RequiredValueValidation::Jurisdiction => {
-            const ISO_ALPHA2: &str = " AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW EU ";
-            value.len() == 2 && ISO_ALPHA2.contains(&format!(" {value} "))
-        }
         RequiredValueValidation::Hostname => valid_hostname(value),
-        RequiredValueValidation::HttpsOrigin => valid_https_origin(value),
     }
 }
 
@@ -648,19 +584,6 @@ fn valid_hostname(value: &str) -> bool {
                 .chars()
                 .all(|character| character.is_ascii_alphanumeric() || character == '-')
     })
-}
-
-fn valid_https_origin(value: &str) -> bool {
-    let Ok(origin) = url::Url::parse(value) else {
-        return false;
-    };
-    origin.scheme() == "https"
-        && origin.host_str().is_some()
-        && origin.username().is_empty()
-        && origin.password().is_none()
-        && origin.path() == "/"
-        && origin.query().is_none()
-        && origin.fragment().is_none()
 }
 
 fn validate_secret_name(name: &str) -> Result<(), SetupError> {
@@ -800,46 +723,11 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
         }
     }
 
-    fn secret<G: SecretGenerator>(
-        &mut self,
-        prompt: &SecretPrompt,
-        generator: &G,
-    ) -> Result<String, SetupError> {
-        let label = if prompt.generate_bytes.is_some() {
-            format!("{} (leave blank to generate)", prompt.prompt)
-        } else {
-            prompt.prompt.clone()
-        };
+    fn secret(&mut self, prompt: &SecretPrompt) -> Result<String, SetupError> {
         loop {
-            let value = self
-                .secret_input
-                .read_secret(&label, &mut self.reader, &mut self.writer)
-                .map_err(|error| {
-                    if error.kind() == io::ErrorKind::UnexpectedEof {
-                        SetupError::InputEnded
-                    } else {
-                        SetupError::Io(error)
-                    }
-                })?;
-            if !value.is_empty() {
-                if prompt.prefix.as_deref().is_some_and(|prefix| {
-                    !value.starts_with(prefix)
-                        || !value.chars().all(|character| {
-                            character.is_ascii_alphanumeric() || "_.~-".contains(character)
-                        })
-                }) {
-                    writeln!(self.writer, "The value is invalid.")?;
-                    continue;
-                }
+            let value = self.read_hidden_value(&prompt.prompt)?;
+            if validate_single_line_secret(&value, &prompt.file).is_ok() {
                 return Ok(value);
-            }
-            if let Some(bytes) = prompt.generate_bytes {
-                let generated = generator.generate(bytes).map_err(SetupError::from)?;
-                return Ok(format!(
-                    "{}{}",
-                    prompt.prefix.as_deref().unwrap_or_default(),
-                    generated
-                ));
             }
             writeln!(self.writer, "A value is required.")?;
         }
@@ -888,49 +776,6 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
         }
     }
 
-    fn generated_text<G: SecretGenerator>(
-        &mut self,
-        request: &RandomTextRequest,
-        generator: &G,
-    ) -> Result<String, SetupError> {
-        let value =
-            self.read_hidden_value(&format!("{} (leave blank to generate)", request.prompt))?;
-        if value.is_empty() {
-            generator.generate(request.bytes).map_err(SetupError::from)
-        } else {
-            validate_single_line_secret(&value, &request.file)?;
-            Ok(value)
-        }
-    }
-
-    fn ed25519_private_key(&mut self, request: &Ed25519KeyRequest) -> Result<String, SetupError> {
-        let import_path = self.read_hidden_value(&format!(
-            "{} (existing PEM path; leave blank to generate)",
-            request.prompt
-        ))?;
-        if import_path.is_empty() {
-            return Ok(canonical_ed25519_pkcs8_pem(&generate_ed25519_key()?));
-        }
-        let pem = read_import_file(Path::new(&import_path), 64 * 1024)?;
-        validate_ed25519_private_key(&pem, &request.file)?;
-        Ok(pem)
-    }
-
-    fn pki_import_directory(
-        &mut self,
-        request: &StepCaControllerRequest,
-    ) -> Result<Option<PathBuf>, SetupError> {
-        let path = self.read_hidden_value(&format!(
-            "{} (existing bundle secrets directory; leave blank to generate)",
-            request.prompt
-        ))?;
-        if path.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(PathBuf::from(path)))
-        }
-    }
-
     fn read_hidden_value(&mut self, label: &str) -> Result<String, SetupError> {
         self.secret_input
             .read_secret(label, &mut self.reader, &mut self.writer)
@@ -941,6 +786,11 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
                     SetupError::Io(error)
                 }
             })
+    }
+
+    fn note(&mut self, line: &str) -> Result<(), SetupError> {
+        writeln!(self.writer, "{line}")?;
+        Ok(())
     }
 
     fn confirm(&mut self, label: &str) -> Result<bool, SetupError> {
@@ -962,22 +812,6 @@ fn validate_single_line_secret(value: &str, file: &str) -> Result<(), SetupError
         )));
     }
     Ok(())
-}
-
-fn read_import_file(path: &Path, maximum_bytes: u64) -> Result<String, SetupError> {
-    let path = canonicalize_selected_path(path)?;
-    let metadata = fs::symlink_metadata(&path).map_err(|error| {
-        SetupError::InvalidSecretMaterial(format!("cannot read {}: {error}", path.display()))
-    })?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > maximum_bytes {
-        return Err(SetupError::InvalidSecretMaterial(format!(
-            "{} is not a safe regular import file",
-            path.display()
-        )));
-    }
-    fs::read_to_string(&path).map_err(|error| {
-        SetupError::InvalidSecretMaterial(format!("cannot read {}: {error}", path.display()))
-    })
 }
 
 fn validate_ed25519_private_key(pem: &str, file: &str) -> Result<(), SetupError> {
@@ -1114,85 +948,28 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
                     modes.secure_remote_value.clone()
                 },
             );
+            if lab_mode {
+                for value in &modes.lab_values {
+                    set_environment_value(&mut environment, &value.env, value.value.clone());
+                }
+            }
         }
+        collect_required_values(&payload.required_values, &mut environment, prompt)?;
+
         let mut secret_values = Vec::new();
-        let required_values = if lab_mode {
-            &payload
-                .install_modes
-                .as_ref()
-                .expect("lab mode requires install mode metadata")
-                .lab_required_values
-        } else {
-            &payload.required_values
-        };
-        if lab_mode {
-            for value in &payload
-                .install_modes
-                .as_ref()
-                .expect("lab mode requires install mode metadata")
-                .lab_values
-            {
-                set_environment_value(&mut environment, &value.env, value.value.clone());
-            }
-        }
-        for value in required_values {
-            let default = required_value_default(value, &environment);
-            environment.push((
-                value.env.clone(),
-                prompt.required_with_default(value, default.as_deref())?,
-            ));
-        }
         for secret in &payload.secrets {
-            if lab_mode && secret.secure_remote_only {
-                secret_values.push((secret.file.clone(), String::new()));
-                continue;
-            }
-            secret_values.push((
-                secret.file.clone(),
-                if secret.optional {
-                    prompt.optional_secret(secret)?
-                } else if lab_mode && secret.generate_in_lab {
-                    generator.generate(secret.generate_bytes.unwrap_or(24))?
-                } else {
-                    prompt.secret(secret, generator)?
-                },
-            ));
-        }
-        for request in &payload.generated_secrets.random_text {
-            secret_values.push((
-                request.file.clone(),
-                if lab_mode {
-                    generator.generate(request.bytes)?
-                } else {
-                    prompt.generated_text(request, generator)?
-                },
-            ));
-        }
-        for request in &payload.generated_secrets.ed25519_pkcs8_pem {
-            secret_values.push((
-                request.file.clone(),
-                if lab_mode {
-                    canonical_ed25519_pkcs8_pem(&generate_ed25519_key()?)
-                } else {
-                    prompt.ed25519_private_key(request)?
-                },
-            ));
-        }
-        for request in &payload.generated_secrets.postgres_urls {
-            let password = secret_value(&secret_values, &request.password_file)?.to_owned();
-            secret_values.push((
-                request.file.clone(),
-                render_postgres_url(request, &password)?,
-            ));
-        }
-        if let Some(request) = &payload.step_ca_controller {
-            let material = if lab_mode {
-                generate_pki(request, &environment, generator)?
+            let value = if lab_mode && secret.secure_remote_only {
+                String::new()
+            } else if secret.optional {
+                prompt.optional_secret(secret)?
             } else {
-                prepare_pki(request, &environment, prompt, generator)?
+                prompt.secret(secret)?
             };
-            environment.push((request.kid_env.clone(), material.kid));
-            secret_values.extend(material.files);
+            secret_values.push((secret.file.clone(), value));
+        }
+        generate_missing_secrets(payload, None, &mut secret_values, generator)?;
+        if let Some(request) = &payload.step_ca_controller {
+            secret_values.extend(generate_pki(request, &environment, generator)?);
         }
 
         let hermes_enabled = if let Some(hermes) = &payload.hermes {
@@ -1207,14 +984,6 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
                 enabled,
             );
             set_environment_value(&mut environment, &hermes.env, profile_value);
-            if enabled {
-                for value in &hermes.required_values {
-                    environment.push((value.env.clone(), prompt.required(value)?));
-                }
-                for secret in &hermes.secrets {
-                    secret_values.push((secret.file.clone(), prompt.secret(secret, generator)?));
-                }
-            }
             Some(enabled)
         } else {
             None
@@ -1229,10 +998,12 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         write_new_file(&staging.join(".env"), environment.as_bytes(), 0o600)?;
         let secret_directory = staging.join("secrets");
         create_secure_directory(&secret_directory)?;
-        // Compose bind mounts the backup directory from the bundle. Create it
-        // while the installer is still running as the invoking user so Docker
-        // cannot materialize a root-owned host directory on first start.
-        create_secure_directory(&staging.join("backups"))?;
+        // Compose bind mounts the backup directories from the bundle. Create
+        // them while the installer is still running as the invoking user so
+        // Docker cannot materialize (or refuse) a missing host directory.
+        for directory in BUNDLE_DIRECTORIES {
+            create_secure_directory(&staging.join(directory))?;
+        }
         for (name, value) in secret_values {
             let content = if value.is_empty() {
                 Vec::new()
@@ -1262,6 +1033,83 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         let _ = fs::remove_dir_all(&staging);
     }
     result
+}
+
+/// Host directories the Compose bundle bind mounts.
+const BUNDLE_DIRECTORIES: [&str; 2] = ["backups", "backups-offhost"];
+
+/// Fill every required value that is not set yet. A value with a default
+/// (fixed or derived from values already known) is taken without a prompt and
+/// reported, so the operator can still change it in `.env` later.
+fn collect_required_values<R: BufRead, W: Write, S: SecretInput<R, W>>(
+    required_values: &[RequiredValuePrompt],
+    environment: &mut Vec<(String, String)>,
+    prompt: &mut PromptIo<R, W, S>,
+) -> Result<(), SetupError> {
+    for required in required_values {
+        if environment_value(environment, &required.env).is_some() {
+            continue;
+        }
+        let value = match required_value_default(required, environment) {
+            Some(default) => {
+                prompt.note(&format!(
+                    "{}: {default} (change it in .env)",
+                    required.prompt
+                ))?;
+                default
+            }
+            None => prompt.required(required)?,
+        };
+        environment.push((required.env.clone(), value));
+    }
+    Ok(())
+}
+
+/// Generate every internal secret that does not exist yet. Nothing here is
+/// asked: internal credentials, keys, and database URLs are always generated.
+fn generate_missing_secrets<G: SecretGenerator>(
+    payload: &CanonicalTemplatePayload,
+    existing_root: Option<&Path>,
+    secret_values: &mut Vec<(String, String)>,
+    generator: &G,
+) -> Result<(), SetupError> {
+    let exists = |file: &str| match existing_root {
+        Some(root) => secret_file_exists(root, file),
+        None => Ok(false),
+    };
+    let generated = &payload.generated_secrets;
+    for request in &generated.random_text {
+        if !exists(&request.file)? {
+            let value = generator.generate(request.bytes)?;
+            let value = format!("{}{value}", request.prefix.as_deref().unwrap_or_default());
+            secret_values.push((request.file.clone(), value));
+        }
+    }
+    for request in &generated.ed25519_pkcs8_pem {
+        if !exists(&request.file)? {
+            secret_values.push((
+                request.file.clone(),
+                canonical_ed25519_pkcs8_pem(&generate_ed25519_key()?),
+            ));
+        }
+    }
+    for request in &generated.postgres_urls {
+        if exists(&request.file)? {
+            continue;
+        }
+        let password = match secret_value(secret_values, &request.password_file) {
+            Ok(value) => value.to_owned(),
+            Err(error) => match existing_root {
+                Some(root) => read_existing_secret(root, &request.password_file)?,
+                None => return Err(error),
+            },
+        };
+        secret_values.push((
+            request.file.clone(),
+            render_postgres_url(request, &password)?,
+        ));
+    }
+    Ok(())
 }
 
 fn secret_value<'a>(values: &'a [(String, String)], file: &str) -> Result<&'a str, SetupError> {
@@ -1307,11 +1155,6 @@ fn secret_file_content(value: String) -> Vec<u8> {
     content
 }
 
-struct PkiMaterial {
-    kid: String,
-    files: Vec<(String, String)>,
-}
-
 #[derive(Clone, Deserialize, Serialize)]
 struct PublicJwk {
     alg: String,
@@ -1337,23 +1180,11 @@ struct PrivateJwk {
     y: String,
 }
 
-fn prepare_pki<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
-    request: &StepCaControllerRequest,
-    environment: &[(String, String)],
-    prompt: &mut PromptIo<R, W, S>,
-    generator: &G,
-) -> Result<PkiMaterial, SetupError> {
-    if let Some(directory) = prompt.pki_import_directory(request)? {
-        return import_pki(request, environment, &directory);
-    }
-    generate_pki(request, environment, generator)
-}
-
 fn generate_pki<G: SecretGenerator>(
     request: &StepCaControllerRequest,
     environment: &[(String, String)],
     generator: &G,
-) -> Result<PkiMaterial, SetupError> {
+) -> Result<Vec<(String, String)>, SetupError> {
     let hostnames = pki_hostnames(request, environment)?;
     let password = generator.generate(request.password_bytes)?;
     validate_single_line_secret(&password, &request.files.password)?;
@@ -1407,37 +1238,34 @@ fn generate_pki<G: SecretGenerator>(
     let controller_chain = format!("{}{}", controller_certificate.pem(), intermediate_pem);
     let files = &request.files;
 
-    Ok(PkiMaterial {
-        kid: public_jwk.kid.clone(),
-        files: vec![
-            (files.root_certificate.clone(), root_pem.clone()),
-            (files.intermediate_certificate.clone(), intermediate_pem),
-            (
-                files.intermediate_private_key.clone(),
-                encrypted_intermediate,
-            ),
-            (
-                files.controller_server_certificate.clone(),
-                controller_chain,
-            ),
-            (
-                files.controller_server_private_key.clone(),
-                controller_key.serialize_pem(),
-            ),
-            (
-                files.provisioner_private_jwk.clone(),
-                serde_json::to_string(&private_jwk)
-                    .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?,
-            ),
-            (
-                files.provisioner_public_jwk.clone(),
-                serde_json::to_string(&public_jwk)
-                    .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?,
-            ),
-            (files.ca_config.clone(), ca_config),
-            (files.password.clone(), password),
-        ],
-    })
+    Ok(vec![
+        (files.root_certificate.clone(), root_pem.clone()),
+        (files.intermediate_certificate.clone(), intermediate_pem),
+        (
+            files.intermediate_private_key.clone(),
+            encrypted_intermediate,
+        ),
+        (
+            files.controller_server_certificate.clone(),
+            controller_chain,
+        ),
+        (
+            files.controller_server_private_key.clone(),
+            controller_key.serialize_pem(),
+        ),
+        (
+            files.provisioner_private_jwk.clone(),
+            serde_json::to_string(&private_jwk)
+                .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?,
+        ),
+        (
+            files.provisioner_public_jwk.clone(),
+            serde_json::to_string(&public_jwk)
+                .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?,
+        ),
+        (files.ca_config.clone(), ca_config),
+        (files.password.clone(), password),
+    ])
 }
 
 fn controller_certificate_params(
@@ -1489,27 +1317,30 @@ fn ca_certificate_params(
     Ok(params)
 }
 
+/// The controller certificate names: the control hostname and the fixed
+/// enrollment, agent, and registry names derived from it.
+const DERIVED_HOSTNAME_PREFIXES: [&str; 3] = ["enroll", "agents", "registry"];
+
 fn pki_hostnames(
     request: &StepCaControllerRequest,
     environment: &[(String, String)],
 ) -> Result<Vec<String>, SetupError> {
-    request
-        .hostname_envs
-        .iter()
-        .map(|name| {
-            let value = environment_value(environment, name).ok_or_else(|| {
-                SetupError::InvalidPayload(format!(
-                    "Step CA hostname environment key {name} is unavailable"
-                ))
-            })?;
-            if value.is_empty() || value.contains(['\0', '\r', '\n', '/', ':']) {
-                return Err(SetupError::InvalidPayload(format!(
-                    "Step CA hostname value for {name} is invalid"
-                )));
-            }
-            Ok(value.to_owned())
-        })
-        .collect()
+    let control = environment_value(environment, &request.hostname_env)
+        .filter(|value| valid_hostname(value))
+        .ok_or_else(|| {
+            SetupError::InvalidPayload(format!(
+                "Step CA hostname value for {} is invalid",
+                request.hostname_env
+            ))
+        })?
+        .to_ascii_lowercase();
+    let mut hostnames = vec![control.clone()];
+    hostnames.extend(
+        DERIVED_HOSTNAME_PREFIXES
+            .iter()
+            .map(|prefix| format!("{prefix}.{control}")),
+    );
+    Ok(hostnames)
 }
 
 fn generate_es256_jwks() -> Result<(PublicJwk, PrivateJwk), SetupError> {
@@ -1598,48 +1429,22 @@ fn render_ca_config(
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))
 }
 
-fn import_pki(
-    request: &StepCaControllerRequest,
-    environment: &[(String, String)],
-    directory: &Path,
-) -> Result<PkiMaterial, SetupError> {
-    let directory = canonicalize_selected_path(directory)?;
-    require_real_directory(&directory).map_err(|_| {
-        SetupError::InvalidSecretMaterial(format!(
-            "{} is not a safe PKI import directory",
-            directory.display()
-        ))
-    })?;
-    let files = request
-        .files
-        .all()
-        .into_iter()
-        .map(|relative| {
-            read_import_file(&directory.join(relative), 1024 * 1024)
-                .map(|content| (relative.to_owned(), content))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let kid = validate_pki_material(request, environment, &files)?;
-    Ok(PkiMaterial { kid, files })
-}
-
 fn validate_pki_material(
     request: &StepCaControllerRequest,
     environment: &[(String, String)],
     files: &[(String, String)],
-) -> Result<String, SetupError> {
-    let validated = validate_pki_material_at(
+) -> Result<(), SetupError> {
+    validate_pki_material_at(
         request,
         environment,
         files,
         time::OffsetDateTime::now_utc(),
         false,
     )?;
-    Ok(validated.kid)
+    Ok(())
 }
 
 struct ValidatedPkiMaterial {
-    kid: String,
     controller_needs_renewal: bool,
 }
 
@@ -1813,7 +1618,6 @@ fn validate_pki_material_at(
     let renewal_deadline =
         now + time::Duration::days(CONTROLLER_CERTIFICATE_RENEWAL_THRESHOLD_DAYS);
     Ok(ValidatedPkiMaterial {
-        kid: public.kid,
         controller_needs_renewal: controller_hostnames_changed
             || server.validity().not_after.timestamp() <= renewal_deadline.unix_timestamp(),
     })
@@ -1971,53 +1775,59 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
     validate_existing_bundle(bundle)?;
-    // Older bundles may predate the visible backup bind mount. Add the private
-    // directory before Compose is started, preserving its invoking-user owner.
-    ensure_secure_directory(&bundle.join("backups"))?;
+    for directory in BUNDLE_DIRECTORIES {
+        ensure_secure_directory(&bundle.join(directory))?;
+    }
+    let secret_root = bundle.join("secrets");
     let mut environment = parse_environment(&bundle.join(".env"))?;
     for internal in &payload.internal_values {
         set_environment_value(&mut environment, &internal.env, internal.value.clone());
     }
-    let mut new_secrets = Vec::new();
-    let mut controller_leaf_replacement = None;
-    for required in &payload.required_values {
-        if environment_value(&environment, &required.env).is_none() {
-            let default = required_value_default(required, &environment);
-            environment.push((
-                required.env.clone(),
-                prompt.required_with_default(required, default.as_deref())?,
-            ));
+    let lab_mode = payload.install_modes.as_ref().is_some_and(|modes| {
+        !environment_value(&environment, "COMPOSE_PROFILES")
+            .is_some_and(|profiles| compose_profile_enabled(profiles, &modes.secure_remote_value))
+    });
+    if let Some(modes) = payload.install_modes.as_ref().filter(|_| lab_mode) {
+        for value in &modes.lab_values {
+            if environment_value(&environment, &value.env).is_none() {
+                environment.push((value.env.clone(), value.value.clone()));
+            }
         }
     }
-    collect_missing_secrets(
-        &bundle.join("secrets"),
-        &payload.secrets,
-        prompt,
-        generator,
-        &mut new_secrets,
-    )?;
-    collect_missing_generated_secrets(
-        &bundle.join("secrets"),
-        &payload.generated_secrets,
-        prompt,
-        generator,
-        &mut new_secrets,
-    )?;
+    collect_required_values(&payload.required_values, &mut environment, prompt)?;
+
+    let mut new_secrets = Vec::new();
+    for secret in &payload.secrets {
+        if secret_file_exists(&secret_root, &secret.file)? {
+            continue;
+        }
+        let value = if secret.optional || (lab_mode && secret.secure_remote_only) {
+            String::new()
+        } else {
+            prompt.secret(secret)?
+        };
+        new_secrets.push((secret.file.clone(), value));
+    }
+    generate_missing_secrets(payload, Some(&secret_root), &mut new_secrets, generator)?;
+    for request in &payload.generated_secrets.ed25519_pkcs8_pem {
+        if secret_file_exists(&secret_root, &request.file)? {
+            validate_ed25519_private_key(
+                &read_existing_secret(&secret_root, &request.file)?,
+                &request.file,
+            )?;
+        }
+    }
+
+    let mut controller_leaf_replacement = None;
     if let Some(request) = &payload.step_ca_controller {
-        let secret_root = bundle.join("secrets");
         let existing = request
             .files
             .all()
             .into_iter()
             .map(|file| secret_file_exists(&secret_root, file))
             .collect::<Result<Vec<_>, _>>()?;
-        let existing_count = existing.into_iter().filter(|present| *present).count();
-        match existing_count {
-            0 => {
-                let material = prepare_pki(request, &environment, prompt, generator)?;
-                set_environment_value(&mut environment, &request.kid_env, material.kid);
-                new_secrets.extend(material.files);
-            }
+        match existing.into_iter().filter(|present| *present).count() {
+            0 => new_secrets.extend(generate_pki(request, &environment, generator)?),
             count if count == request.files.all().len() => {
                 let files = request
                     .files
@@ -2029,7 +1839,6 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let validated = validate_upgrade_pki_material(request, &environment, &files)?;
-                set_environment_value(&mut environment, &request.kid_env, validated.kid);
                 if validated.controller_needs_renewal {
                     controller_leaf_replacement =
                         Some(renew_controller_leaf(request, &environment, &files)?);
@@ -2047,13 +1856,8 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         // The Hermes switch shares its variable with other Compose profiles
         // (for example the secure-remote install mode), so it is one member
         // of a comma-separated list rather than the whole value.
-        let current = match environment_value(&environment, &hermes.env) {
-            Some(value) => compose_profile_enabled(value, &hermes.enabled_value),
-            None => match requested_hermes_enabled {
-                Some(enabled) => enabled,
-                None => prompt.confirm(&hermes.prompt)?,
-            },
-        };
+        let current = environment_value(&environment, &hermes.env)
+            .is_some_and(|value| compose_profile_enabled(value, &hermes.enabled_value));
         let enabled = requested_hermes_enabled.unwrap_or(current);
         let profile_value = with_compose_profile(
             environment_value(&environment, &hermes.env).unwrap_or_default(),
@@ -2061,20 +1865,6 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
             enabled,
         );
         set_environment_value(&mut environment, &hermes.env, profile_value);
-        if enabled {
-            for required in &hermes.required_values {
-                if environment_value(&environment, &required.env).is_none() {
-                    environment.push((required.env.clone(), prompt.required(required)?));
-                }
-            }
-            collect_missing_secrets(
-                &bundle.join("secrets"),
-                &hermes.secrets,
-                prompt,
-                generator,
-                &mut new_secrets,
-            )?;
-        }
         Some(enabled)
     } else {
         None
@@ -2082,19 +1872,23 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
 
     let environment_document = render_owned_environment(&environment)?;
     for (name, value) in new_secrets {
-        let content = secret_file_content(value);
-        write_secret_file(&bundle.join("secrets"), &name, &content)?;
+        let content = if value.is_empty() {
+            Vec::new()
+        } else {
+            secret_file_content(value)
+        };
+        write_secret_file(&secret_root, &name, &content)?;
     }
     for runtime_file in &payload.runtime_files {
         replace_runtime_file(
-            &bundle.join("secrets"),
+            &secret_root,
             &runtime_file.file,
             runtime_file.content.as_bytes(),
             runtime_file.mode,
         )?;
     }
     if let Some(replacement) = controller_leaf_replacement {
-        atomic_replace_controller_leaf(&bundle.join("secrets"), replacement)?;
+        atomic_replace_controller_leaf(&secret_root, replacement)?;
     }
     atomic_replace(&bundle.join(".env"), environment_document.as_bytes(), 0o600)?;
     atomic_replace(
@@ -2106,54 +1900,6 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
         root: bundle.to_path_buf(),
         hermes_enabled,
     })
-}
-
-fn collect_missing_generated_secrets<
-    R: BufRead,
-    W: Write,
-    S: SecretInput<R, W>,
-    G: SecretGenerator,
->(
-    secret_root: &Path,
-    generated: &GeneratedSecrets,
-    prompt: &mut PromptIo<R, W, S>,
-    generator: &G,
-    new_secrets: &mut Vec<(String, String)>,
-) -> Result<(), SetupError> {
-    for request in &generated.random_text {
-        if !secret_file_exists(secret_root, &request.file)? {
-            new_secrets.push((
-                request.file.clone(),
-                prompt.generated_text(request, generator)?,
-            ));
-        }
-    }
-    for request in &generated.ed25519_pkcs8_pem {
-        if secret_file_exists(secret_root, &request.file)? {
-            let existing = read_existing_secret(secret_root, &request.file)?;
-            validate_ed25519_private_key(&existing, &request.file)?;
-        } else {
-            new_secrets.push((request.file.clone(), prompt.ed25519_private_key(request)?));
-        }
-    }
-    for request in &generated.postgres_urls {
-        if secret_file_exists(secret_root, &request.file)? {
-            continue;
-        }
-        let password = if let Some(value) = new_secrets
-            .iter()
-            .find_map(|(name, value)| (name == &request.password_file).then_some(value.as_str()))
-        {
-            value.to_owned()
-        } else {
-            read_existing_secret(secret_root, &request.password_file)?
-        };
-        new_secrets.push((
-            request.file.clone(),
-            render_postgres_url(request, &password)?,
-        ));
-    }
-    Ok(())
 }
 
 fn secret_file_exists(root: &Path, relative: &str) -> Result<bool, SetupError> {
@@ -2181,39 +1927,6 @@ fn read_existing_secret(root: &Path, relative: &str) -> Result<String, SetupErro
     Ok(fs::read_to_string(path)?
         .trim_end_matches(['\r', '\n'])
         .to_owned())
-}
-
-fn collect_missing_secrets<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
-    secret_root: &Path,
-    required: &[SecretPrompt],
-    prompt: &mut PromptIo<R, W, S>,
-    generator: &G,
-    new_secrets: &mut Vec<(String, String)>,
-) -> Result<(), SetupError> {
-    for secret in required {
-        let path = secret_root.join(&secret.file);
-        match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
-            Ok(_) => {
-                return Err(SetupError::UnsafeDestination(format!(
-                    "{} is not a regular secret file",
-                    path.display()
-                )));
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                new_secrets.push((
-                    secret.file.clone(),
-                    if secret.optional {
-                        String::new()
-                    } else {
-                        prompt.secret(secret, generator)?
-                    },
-                ));
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Ok(())
 }
 
 fn parse_environment(path: &Path) -> Result<Vec<(String, String)>, SetupError> {
@@ -2259,17 +1972,20 @@ fn required_value_default(
     prompt: &RequiredValuePrompt,
     environment: &[(String, String)],
 ) -> Option<String> {
-    prompt.default.clone().or_else(|| {
-        let prefix = match prompt.env.as_str() {
-            "VONK_AGENT_ENROLL_HOSTNAME" => "enroll",
-            "VONK_AGENT_HOSTNAME" => "agents",
-            "VONK_REGISTRY_HOSTNAME" => "registry",
-            _ => return None,
-        };
-        let control = environment_value(environment, "VONK_CONTROL_HOSTNAME")?;
-        let tailnet = control.strip_prefix("vonk-forge.")?;
-        Some(format!("{prefix}.{tailnet}"))
-    })
+    prompt
+        .default
+        .clone()
+        .or_else(|| match prompt.env.as_str() {
+            // Trust the NAS's own /24 unless the operator narrows it in .env.
+            "VONK_MANAGEMENT_CIDRS" => {
+                let address = environment_value(environment, "NAS_LAN_IP")?
+                    .parse::<Ipv4Addr>()
+                    .ok()?;
+                let [a, b, c, _] = address.octets();
+                Some(format!("{a}.{b}.{c}.0/24"))
+            }
+            _ => None,
+        })
 }
 
 fn compose_profile_enabled(value: &str, profile: &str) -> bool {
@@ -2446,7 +2162,12 @@ fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
                 }
             }
         }
-        if name != ".env" && name != "docker-compose.yaml" && name != "secrets" && name != "backups"
+        if name != ".env"
+            && name != "docker-compose.yaml"
+            && name != "secrets"
+            && !BUNDLE_DIRECTORIES
+                .iter()
+                .any(|directory| name == *directory)
         {
             // A synced/NAS-hosted bundle keeps its rclone bisync database in a
             // real `.sync` directory at the bundle root.  Tolerate exactly that
@@ -2469,8 +2190,10 @@ fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
     let secrets = bundle.join("secrets");
     require_real_directory(&secrets)?;
     validate_secret_tree(&secrets)?;
-    if fs::symlink_metadata(bundle.join("backups")).is_ok() {
-        require_real_directory(&bundle.join("backups"))?;
+    for directory in BUNDLE_DIRECTORIES {
+        if fs::symlink_metadata(bundle.join(directory)).is_ok() {
+            require_real_directory(&bundle.join(directory))?;
+        }
     }
     Ok(())
 }

@@ -140,6 +140,22 @@ from .recipe_library_types import RecipeLibraryError
 from .recipe_operations import RecipeOperationService
 from .recipe_packages import RecipePackageClient
 from .run_switch_operations import RunSwitchOperationService
+from .settings import (
+    AGENT_CA_PROVISIONER_NAME,
+    AGENT_CA_URL,
+    AGENT_RELEASE_API_URL,
+    ARTIFACT_JOB_RETENTION_SECONDS,
+    ARTIFACT_JOB_STORAGE_MAX_BYTES,
+    DISTRIBUTED_START_TIMEOUT_SECONDS,
+    MODEL_CACHE_PARALLEL_DOWNLOADS,
+    MODEL_CACHE_RESERVE_BYTES,
+    RECIPE_BUILD_PARALLEL_PREPARATIONS,
+    RECIPE_IMAGE_PARALLEL_PREPARATIONS,
+    RECIPE_LIBRARY_API_URL,
+    RECIPE_LIBRARY_ASSET_URL,
+    RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
+    Settings,
+)
 from .source_bundles import DatabaseSourceBundleStore
 from .strict_json import ControllerAPIRoute
 
@@ -317,7 +333,7 @@ def build_agent_services(
         if callable(attach_sessions):
             attach_sessions(sessions)
 
-    if settings.agent_runtime != "enabled":
+    if not settings.agent_runtime_enabled:
         # Local development still needs the durable operation queue and fleet
         # presence service, but deliberately has no enrollment or certificate
         # authority.  Agent HTTP routes stay disabled by production_app.
@@ -343,50 +359,32 @@ def build_agent_services(
             distribution=distribution,
         )
 
-    if settings.agent_intermediate_certificate_path is None:
-        raise RuntimeError("agent intermediate certificate path is unavailable")
-    if settings.controller_ca_path is None:
-        raise RuntimeError("controller CA path is unavailable")
     bootstrap = EnrollmentBootstrapConfig.from_paths(
         controller_endpoint=settings.agent_controller_origin,
         enrollment_endpoint=settings.agent_enrollment_origin,
         controller_ca_path=settings.controller_ca_path,
-        controller_address=settings.agent_controller_address,
-        service_hostnames=settings.agent_service_hostnames,
+        controller_address=settings.nas_lan_ip,
+        service_hostnames=(
+            settings.agent_service_hostnames if settings.nas_lan_ip else ()
+        ),
         installer_url=(
             "https://install.vonkforge.ai/dev/spark"
-            if getattr(settings, "install_channel", "stable") == "dev"
+            if settings.install_channel == "dev"
             else "https://install.vonkforge.ai/spark"
         ),
     )
-    if (
-        settings.agent_ca_root_path is None
-        or settings.agent_ca_credential_path is None
-        or settings.agent_ca_provisioner_public_jwk_path is None
-    ):
-        raise RuntimeError("step-ca provider files are unavailable")
     authority = StepCertificateAuthority(
-        ca_url=settings.agent_ca_url,
+        ca_url=AGENT_CA_URL,
         root_certificate_path=settings.agent_ca_root_path,
         intermediate_certificate_path=settings.agent_intermediate_certificate_path,
-        provisioner_name=settings.agent_ca_provisioner_name,
+        provisioner_name=AGENT_CA_PROVISIONER_NAME,
         provisioner_kid=settings.agent_ca_provisioner_kid,
         credential_path=settings.agent_ca_credential_path,
         provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
-        timeout_seconds=settings.agent_ca_timeout_seconds,
-        max_response_bytes=settings.agent_ca_max_response_bytes,
         certificate_lifetime_seconds=settings.agent_ca_certificate_lifetime_seconds,
     )
-    workload_tuf_metadata_root = getattr(
-        settings,
-        "workload_tuf_metadata_root",
-        settings.agent_artifact_root.parent / "workload-tuf/metadata",
-    )
-    workload_tuf_target_root = getattr(
-        settings,
-        "workload_tuf_target_root",
-        settings.agent_artifact_root.parent / "workload-tuf/targets",
-    )
+    workload_tuf_metadata_root = settings.workload_tuf_metadata_root
+    workload_tuf_target_root = settings.workload_tuf_target_root
     for root in (
         settings.agent_artifact_root,
         workload_tuf_metadata_root,
@@ -410,41 +408,25 @@ def build_agent_services(
         presence.observe_in_session(session, source)
 
     operations.set_contact_consumer(observe_contact)
-    helper_authority = None
-    host_runtime_authority = None
-    grant_key_path = getattr(settings, "package_helper_grant_private_key_path", None)
-    receipt_key_path = getattr(
-        settings, "package_helper_receipt_private_key_path", None
-    )
-    if getattr(settings, "deployment_mode", "") == "production" and (
-        grant_key_path is None or receipt_key_path is None
-    ):
+    grant_key_path = settings.package_helper_grant_private_key_path
+    receipt_key_path = settings.package_helper_receipt_private_key_path
+    if grant_key_path is None or receipt_key_path is None:
         raise RuntimeError("workload helper authority keys are unavailable")
-    if grant_key_path is not None and receipt_key_path is not None:
-        helper_authority = WorkloadHelperAuthorityService(
-            sessions,
-            WorkloadHelperGrantIssuer.from_private_key_file(
-                grant_key_path, clock=clock
-            ),
-            WorkloadObjectReceiptIssuer.from_private_key_file(receipt_key_path),
-            workload_target_root=workload_tuf_target_root,
-            clock=clock,
-        )
-    host_runtime_key_path = getattr(
-        settings, "host_runtime_grant_private_key_path", None
+    helper_authority = WorkloadHelperAuthorityService(
+        sessions,
+        WorkloadHelperGrantIssuer.from_private_key_file(grant_key_path, clock=clock),
+        WorkloadObjectReceiptIssuer.from_private_key_file(receipt_key_path),
+        workload_target_root=workload_tuf_target_root,
+        clock=clock,
     )
-    if getattr(settings, "deployment_mode", "") == "production" and (
-        host_runtime_key_path is None
-    ):
+    host_runtime_key_path = settings.host_runtime_grant_private_key_path
+    if host_runtime_key_path is None:
         raise RuntimeError("host runtime authority key is unavailable")
-    if host_runtime_key_path is not None:
-        host_runtime_authority = HostRuntimeAuthorityService(
-            sessions,
-            HostHelperGrantIssuer.from_private_key_file(
-                host_runtime_key_path, clock=clock
-            ),
-            clock=clock,
-        )
+    host_runtime_authority = HostRuntimeAuthorityService(
+        sessions,
+        HostHelperGrantIssuer.from_private_key_file(host_runtime_key_path, clock=clock),
+        clock=clock,
+    )
     return AgentApiServices(
         enrollment=EnrollmentService(sessions, authority, clock=clock),
         operations=operations,
@@ -1424,7 +1406,7 @@ def create_app(
     return app
 
 
-def production_app() -> FastAPI:
+def production_app(settings: Settings | None = None) -> FastAPI:
     configure_controller_logging()
     from sqlalchemy import func, select
     from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -1463,10 +1445,10 @@ def production_app() -> FastAPI:
         resolve_persisted_runtime_image_receipt,
         runtime_image_expectations,
     )
-    from .settings import Settings
     from .telemetry import TelemetryRepository
 
-    settings = Settings.from_env_and_secrets()
+    if settings is None:
+        settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url))
     # Planning, profile choices, and preparation share the same managed OCI root.
     runtime_image_storage = FilesystemRuntimeImageStorage(settings.agent_artifact_root)
@@ -1504,8 +1486,8 @@ def production_app() -> FastAPI:
     model_cache = ModelCacheService(
         sessions,
         settings.model_cache_root,
-        reserve_bytes=settings.model_cache_reserve_bytes,
-        max_parallel_downloads=settings.model_cache_parallel_downloads,
+        reserve_bytes=MODEL_CACHE_RESERVE_BYTES,
+        max_parallel_downloads=MODEL_CACHE_PARALLEL_DOWNLOADS,
         clock=clock,
         huggingface_token_path=settings.huggingface_token_path,
         runtime_archive_available=runtime_image_storage.build_archive_available,
@@ -1635,7 +1617,7 @@ def production_app() -> FastAPI:
         route_publications=recipe_routes,
         builds=recipe_builds,
         mappings=ClusterMappingService(sessions),
-        distributed_start_timeout_seconds=settings.distributed_start_timeout_seconds,
+        distributed_start_timeout_seconds=DISTRIBUTED_START_TIMEOUT_SECONDS,
     )
     run_switch_operations = RunSwitchOperationService(
         sessions,
@@ -1671,10 +1653,10 @@ def production_app() -> FastAPI:
         recipe_operations=recipe_operations,
         blob_store=ArtifactBlobStore(
             settings.state_path / "artifact-jobs" / "blobs",
-            max_stored_bytes=settings.artifact_job_storage_max_bytes,
+            max_stored_bytes=ARTIFACT_JOB_STORAGE_MAX_BYTES,
         ),
         clock=clock,
-        retention_seconds=settings.artifact_job_retention_seconds,
+        retention_seconds=ARTIFACT_JOB_RETENTION_SECONDS,
     )
     artifact_jobs.reconcile_storage()
     from .fleet_profiles import build_production_fleet_profile_service
@@ -1690,13 +1672,8 @@ def production_app() -> FastAPI:
         agent_services.operations,
         clock=clock,
         current_revision=current_revision,
-        channel=(
-            "dev"
-            if agent_services.bootstrap is not None
-            and "/dev/" in agent_services.bootstrap.installer_url
-            else "stable"
-        ),
-        release_api_url=settings.agent_release_api_url,
+        channel=settings.install_channel,
+        release_api_url=AGENT_RELEASE_API_URL,
     )
 
     def consume_agent_result(session, operation, attempt, message) -> None:
@@ -1768,10 +1745,9 @@ def production_app() -> FastAPI:
         )
 
     recipe_library = RecipePackageClient(
-        settings.recipe_library_package_url,
         cache_root=settings.state_path / "recipe-library-packages",
-        api_url=settings.recipe_library_api_url,
-        asset_url=settings.recipe_library_asset_url,
+        api_url=RECIPE_LIBRARY_API_URL,
+        asset_url=RECIPE_LIBRARY_ASSET_URL,
         release=settings.recipe_library_release,
     )
     catalog_service = CatalogService(
@@ -1794,8 +1770,8 @@ def production_app() -> FastAPI:
         recipe_operations=recipe_operations,
         model_cache=model_cache,
         clock=clock,
-        max_parallel=settings.recipe_image_parallel_preparations,
-        max_parallel_builds=settings.recipe_build_parallel_preparations,
+        max_parallel=RECIPE_IMAGE_PARALLEL_PREPARATIONS,
+        max_parallel_builds=RECIPE_BUILD_PARALLEL_PREPARATIONS,
     )
     audits_store = SqlAuditStore(sessions, clock)
 
@@ -1830,14 +1806,14 @@ def production_app() -> FastAPI:
                     type(error).__name__,
                     getattr(error, "code", "unclassified"),
                     catalog_sync_retry_delay(
-                        failures, settings.recipe_library_sync_interval_seconds
+                        failures, RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
                     ),
                 )
             try:
                 await asyncio.wait_for(
                     automatic_sync_stop.wait(),
                     timeout=catalog_sync_retry_delay(
-                        failures, settings.recipe_library_sync_interval_seconds
+                        failures, RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
                     ),
                 )
             except TimeoutError:
@@ -1893,7 +1869,7 @@ def production_app() -> FastAPI:
         metrics_token=settings.metrics_token,
         metrics_refresh=refresh_metrics,
         job_logs=DatabaseJobLogStore(sessions, clock=clock),
-        agent=(agent_services if settings.agent_runtime == "enabled" else None),
+        agent=(agent_services if settings.agent_runtime_enabled else None),
         trusted_agent_proxy_auth=settings.agent_proxy_auth,
         operations=register_model_cache_operation_provider(
             durable_operation_services(
@@ -1924,9 +1900,7 @@ def production_app() -> FastAPI:
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
         fleet_services=build_fleet_operator_services(
-            agent_services=(
-                agent_services if settings.agent_runtime == "enabled" else None
-            ),
+            agent_services=(agent_services if settings.agent_runtime_enabled else None),
             upgrades=agent_upgrades,
             sessions=sessions,
             job_logs=DatabaseJobLogStore(sessions, clock=clock),

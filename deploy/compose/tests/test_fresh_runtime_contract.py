@@ -24,7 +24,7 @@ ALL_SERVICES = DEFAULT_SERVICES | HERMES_SERVICES | SECURE_REMOTE_SERVICES
 # A service image is pinned by a digest or by an explicit version tag; a bare
 # or floating reference pins nothing.
 PINNED_VERSION = re.compile(
-    r"(?:@sha256:[0-9a-f]{64}|:(?!latest|main|edge|stable|master|dev)[A-Za-z0-9][A-Za-z0-9._-]*)}(?:}|$)"
+    r"(?:@sha256:[0-9a-f]{64}|:(?!latest|main|edge|stable|master|dev)[A-Za-z0-9][A-Za-z0-9._-]*)$"
 )
 
 
@@ -126,18 +126,15 @@ def test_canonical_model_has_healthchecks_and_version_pinned_images() -> None:
             assert PINNED_VERSION.search(image), name
 
 
-def test_site_path_inputs_are_relative_to_the_uploaded_directory() -> None:
+def test_secret_files_are_relative_to_the_uploaded_directory() -> None:
     """Catches an installation bundle that only works at one NAS filesystem path."""
-    environment = (COMPOSE_ROOT / ".env.example").read_text(encoding="utf-8")
-
-    for line in environment.splitlines():
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        name, value = line.split("=", 1)
-        if name == "VONK_BACKUP_OFFHOST_PATH" and not value:
-            continue
-        if name.endswith(("_FILE", "_PATH")):
-            assert value.startswith("./secrets/"), name
+    model = _canonical_model()
+    secrets = model["secrets"]
+    assert isinstance(secrets, dict)
+    for name, secret in secrets.items():
+        assert isinstance(secret, dict), name
+        assert secret["file"].startswith("./secrets/"), name
+        assert ".." not in Path(secret["file"]).parts, name
 
 
 def test_canonical_model_has_no_bootstrap_runtime_dependency() -> None:
@@ -152,35 +149,3 @@ def test_canonical_model_has_no_bootstrap_runtime_dependency() -> None:
         for service in services.values()
         if isinstance(service, dict)
     )
-
-
-def test_the_shipped_start_budget_default_is_the_controller_default(
-    monkeypatch,
-) -> None:
-    """The deployment default and the Controller's own default must be one number.
-
-    Wrong implementation: Compose shipped ``:-60`` -- the *minimum* the validator
-    accepts -- while the settings default, the operator documentation and the Mia
-    cold-start qualification budget all said 1800.  A default deployment therefore
-    refused a distributed cold start after one minute, and nothing failed, because
-    the two defaults had no relationship in code.  Asserting that they agree,
-    rather than restating either number, is what keeps them from drifting again.
-
-    All eleven ``${VAR:-default}`` interpolations in compose.yaml were audited
-    against the code that reads them once this shape was known, so nobody has to
-    re-run the sweep by hand: every other one agrees with its code fallback, and
-    ``VONK_BACKUP_INTERVAL_SECONDS`` / ``VONK_BACKUP_KEEP`` have no code fallback
-    at all -- ``deploy/compose/postgres/entrypoint.sh`` is their only owner.
-    """
-    from vonk_control.settings import _distributed_start_timeout
-
-    text = (COMPOSE_ROOT / "compose.yaml").read_text(encoding="utf-8")
-    shipped = re.findall(
-        r"VONK_DISTRIBUTED_START_TIMEOUT_SECONDS: "
-        r"\$\{VONK_DISTRIBUTED_START_TIMEOUT_SECONDS:-(\d+)\}",
-        text,
-    )
-    # The API and the worker must agree: one admitted deadline covers both.
-    assert len(shipped) == 2, shipped
-    monkeypatch.delenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", raising=False)
-    assert set(shipped) == {str(_distributed_start_timeout())}

@@ -38,18 +38,10 @@ uses separate credentials and a
 dedicated disposable test tailnet; after the run, remove its nodes, Service
 definitions, policy, and OAuth client.
 
-The repository's disposable acceptance harness sets
-`VONK_TAILSCALE_EPHEMERAL=true`, while generated operator bundles retain the
-default permanent identity. This keeps restart recovery representative without
-leaking offline CI machines into the tailnet after the acceptance volumes are
-removed.
-
-`TS_REQUIRE_PRIMARY_ROUTES` defaults to `1` for operator deployments and
-requires the additional TailVIP route-ownership check. A local acceptance run
-without a separate tailnet client may set it to `0`: the configurator still
-requires the approved `service-host` mapping and exact Serve configuration, but
-the external route and HTTPS checks must be performed by a separate-client or
-physical acceptance lane. Do not use `0` to weaken an operator deployment.
+Operator bundles have no Tailscale switches: the gateway is a durable node and
+the configurator requires full route ownership. The disposable acceptance
+harness edits its own copy of the rendered Compose file instead (an ephemeral
+gateway, and relaxed readiness when no independent tailnet client exists).
 
 See [the gateway runbook](../../../docs/runbooks/tailscale.md) for setup,
 verification, backup, and recovery.

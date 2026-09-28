@@ -4,12 +4,12 @@ use std::path::Path;
 use tempfile::tempdir;
 use vonk_nas_setup::{
     CanonicalTemplatePayload, PromptIo, SecretGenerationError, SecretGenerator, SecretInput,
-    SetupRequest, prepare,
+    SetupOutcome, SetupRequest, prepare,
 };
 
 struct FixedSecretGenerator;
 
-struct LabSecretGenerator;
+struct SizedSecretGenerator;
 
 struct FixedHiddenInput;
 
@@ -31,7 +31,7 @@ impl SecretGenerator for FixedSecretGenerator {
     }
 }
 
-impl SecretGenerator for LabSecretGenerator {
+impl SecretGenerator for SizedSecretGenerator {
     fn generate(&self, bytes: usize) -> Result<String, SecretGenerationError> {
         Ok(format!("generated-{bytes}-byte-secret"))
     }
@@ -47,35 +47,117 @@ fn payload() -> CanonicalTemplatePayload {
             {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"}
           ],
           "secrets": [
-            {"file": "database-password", "prompt": "Database password", "generate_bytes": 16}
+            {"file": "database-password", "prompt": "Database password"}
           ],
+          "generated_secrets": {
+            "random_text": [{"file": "generated-token", "bytes": 16}]
+          },
           "hermes": {
             "env": "VONK_HERMES_ENABLED",
             "prompt": "Enable Hermes?",
             "enabled_value": "true",
-            "disabled_value": "false",
-            "required_values": [],
-            "secrets": []
+            "disabled_value": "false"
           }
         }"#,
     )
     .expect("valid fixture")
 }
 
+/// The site-facing part of the real release payload (scripts/build-nas-compose-bundle).
+fn site_payload() -> CanonicalTemplatePayload {
+    CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "preflight": ["Complete the Tailscale prerequisites."],
+          "internal_values": [
+            {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"}
+          ],
+          "required_values": [
+            {"env": "NAS_LAN_IP", "prompt": "Reserved NAS LAN IP", "validation": "ipv4"},
+            {"env": "VONK_MANAGEMENT_CIDRS", "prompt": "Trusted Spark management CIDRs", "validation": "cidr_list"},
+            {"env": "VONK_DIRECT_FABRIC_CIDRS", "prompt": "Direct GPU fabric CIDRs", "default": "192.168.100.0/24", "validation": "optional_cidr_list"},
+            {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"}
+          ],
+          "secrets": [
+            {"file": "tailscale-oauth-client-id", "prompt": "Tailscale OAuth client ID", "secure_remote_only": true},
+            {"file": "tailscale-oauth-client-secret", "prompt": "Tailscale OAuth client secret", "secure_remote_only": true},
+            {"file": "litellm-upstream-key", "prompt": "LiteLLM upstream key", "optional": true},
+            {"file": "hf-token", "prompt": "Hugging Face token", "optional": true}
+          ],
+          "install_modes": {
+            "prompt": "Install mode",
+            "default": "secure-remote",
+            "lab_value": "lab",
+            "secure_remote_value": "secure-remote",
+            "lab_values": [
+              {"env": "VONK_CONTROL_HOSTNAME", "value": "vonk-forge.local"}
+            ]
+          },
+          "generated_secrets": {
+            "random_text": [
+              {"file": "admin-password", "bytes": 24},
+              {"file": "hermes-litellm-key", "bytes": 32, "prefix": "sk-"}
+            ]
+          },
+          "hermes": {
+            "env": "COMPOSE_PROFILES",
+            "prompt": "Enable Hermes?",
+            "enabled_value": "hermes",
+            "disabled_value": ""
+          }
+        }"#,
+    )
+    .expect("valid site fixture")
+}
+
+/// Run one operation with exactly `answers` as input: a missing answer fails
+/// with `InputEnded`, and a leftover answer means a prompt was skipped.
+fn run_with_answers(
+    payload: &CanonicalTemplatePayload,
+    request: SetupRequest,
+    answers: &str,
+    generator: &impl SecretGenerator,
+) -> (SetupOutcome, String) {
+    let mut input = Cursor::new(answers.as_bytes().to_vec());
+    let mut output = Vec::new();
+    let result = prepare(
+        payload,
+        request,
+        &mut PromptIo::new(&mut input, &mut output),
+        generator,
+    )
+    .expect("setup succeeds");
+    assert_eq!(
+        input.position(),
+        answers.len() as u64,
+        "every answer must be consumed"
+    );
+    (result, String::from_utf8(output).expect("UTF-8 transcript"))
+}
+
+fn environment(root: &Path) -> Vec<String> {
+    std::fs::read_to_string(root.join(".env"))
+        .expect("environment")
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+fn secret(root: &Path, file: &str) -> String {
+    std::fs::read_to_string(root.join("secrets").join(file))
+        .unwrap_or_else(|error| panic!("secret {file}: {error}"))
+}
+
 #[test]
 fn install_creates_only_the_secure_drag_and_drop_bundle() {
     let temporary = tempdir().expect("temporary directory");
-    let input = Cursor::new(b"forge.example.test\n\nn\n".to_vec());
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(input, &mut output);
-
-    let result = prepare(
+    let (result, _) = run_with_answers(
         &payload(),
         SetupRequest::install(temporary.path()),
-        &mut prompt,
+        "forge.example.test\ntyped-database-password\nn\n",
         &FixedSecretGenerator,
-    )
-    .expect("bundle prepared");
+    );
 
     assert_eq!(
         result.root,
@@ -90,7 +172,13 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
     entries.sort();
     assert_eq!(
         entries,
-        [".env", "backups", "docker-compose.yaml", "secrets"]
+        [
+            ".env",
+            "backups",
+            "backups-offhost",
+            "docker-compose.yaml",
+            "secrets"
+        ]
     );
     assert_eq!(
         std::fs::read_to_string(result.root.join("docker-compose.yaml")).expect("compose"),
@@ -101,8 +189,11 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
         "VONK_PUBLIC_HOST=forge.example.test\nVONK_HERMES_ENABLED=false\n"
     );
     assert_eq!(
-        std::fs::read_to_string(result.root.join("secrets/database-password"))
-            .expect("database password"),
+        secret(&result.root, "database-password"),
+        "typed-database-password\n"
+    );
+    assert_eq!(
+        secret(&result.root, "generated-token"),
         "generated-secret\n"
     );
 
@@ -126,14 +217,16 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
                 & 0o777,
             0o700
         );
-        assert_eq!(
-            std::fs::metadata(result.root.join("backups"))
-                .expect("backup metadata")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o700
-        );
+        for directory in ["backups", "backups-offhost"] {
+            assert_eq!(
+                std::fs::metadata(result.root.join(directory))
+                    .expect("backup metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
         assert_eq!(
             std::fs::metadata(result.root.join("secrets/database-password"))
                 .expect("secret metadata")
@@ -164,7 +257,6 @@ fn optional_huggingface_secret_is_prompted_and_can_be_skipped() {
             {
               "file": "hf-token",
               "prompt": "Hugging Face access token (optional; leave blank for public models)",
-              "generate_bytes": null,
               "optional": true
             }
           ]
@@ -183,11 +275,6 @@ fn optional_huggingface_secret_is_prompted_and_can_be_skipped() {
     )
     .expect("bundle prepared without an HF token");
 
-    assert!(
-        String::from_utf8(output)
-            .expect("prompt output")
-            .contains("Hugging Face access token (optional; leave blank for public models): ")
-    );
     assert_eq!(
         std::fs::read(result.root.join("secrets/hf-token")).expect("HF token file"),
         b""
@@ -208,154 +295,109 @@ fn optional_huggingface_secret_is_prompted_and_can_be_skipped() {
 }
 
 #[test]
-fn lab_install_asks_only_for_lan_address_and_optional_hf_token() {
-    let payload = CanonicalTemplatePayload::from_json(
-        br#"{
-          "schema_version": 2,
-          "docker_compose_yaml": "services: {}\n",
-          "required_values": [
-            {"env": "TAILNET_HOST", "prompt": "Tailnet hostname"}
-          ],
-          "secrets": [
-            {"file": "admin-password", "prompt": "Admin password", "generate_bytes": 24, "generate_in_lab": true},
-            {"file": "tailscale-secret", "prompt": "Tailscale secret", "secure_remote_only": true},
-            {"file": "hf-token", "prompt": "Hugging Face token", "optional": true}
-          ],
-          "install_modes": {
-            "prompt": "Install mode",
-            "default": "secure-remote",
-            "lab_value": "lab",
-            "secure_remote_value": "secure-remote",
-            "lab_required_values": [
-              {"env": "NAS_LAN_IP", "prompt": "NAS LAN IP", "validation": "ipv4"}
-            ],
-            "lab_values": [
-              {"env": "VONK_CONTROL_HOSTNAME", "value": "vonk-forge.local"}
-            ]
-          }
-        }"#,
-    )
-    .expect("valid lab fixture");
+fn secure_remote_install_asks_only_for_site_inputs_and_generates_the_rest() {
     let temporary = tempdir().expect("temporary directory");
-    let input = Cursor::new(b"lab\n192.168.1.22\nhf_test_token\n".to_vec());
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(input, &mut output);
-
-    let result = prepare(
-        &payload,
+    // Default mode, NAS IP, control hostname, both OAuth values, the optional
+    // upstream key, a skipped HF token, and the Hermes question.
+    let (result, transcript) = run_with_answers(
+        &site_payload(),
         SetupRequest::install(temporary.path()),
-        &mut prompt,
-        &LabSecretGenerator,
-    )
-    .expect("lab bundle prepared");
+        "\n192.168.1.22\nvonk-forge.example.ts.net\noauth-id\noauth-secret\nupstream-key\n\nn\n",
+        &SizedSecretGenerator,
+    );
 
-    let transcript = String::from_utf8(output).expect("prompt transcript");
-    assert_eq!(transcript.matches(": ").count(), 3, "{transcript}");
-    assert!(!transcript.contains("Tailnet hostname"));
+    assert_eq!(result.hermes_enabled, Some(false));
+    let preflight = transcript
+        .find("Complete the Tailscale prerequisites.")
+        .expect("preflight shown");
+    let first_secret = transcript
+        .find("Tailscale OAuth client ID")
+        .expect("OAuth prompt shown");
+    assert!(preflight < first_secret);
+    // Defaulted values are reported, never secrets.
+    assert!(transcript.contains("192.168.1.0/24"), "{transcript}");
+    for value in ["oauth-secret", "upstream-key", "generated-"] {
+        assert!(!transcript.contains(value), "{value} leaked: {transcript}");
+    }
     assert_eq!(
-        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
-        "COMPOSE_PROFILES=\nVONK_CONTROL_HOSTNAME=vonk-forge.local\nNAS_LAN_IP=192.168.1.22\n"
+        environment(&result.root),
+        [
+            "COMPOSE_PROJECT_NAME=vonk-forge-control",
+            "COMPOSE_PROFILES=secure-remote",
+            "NAS_LAN_IP=192.168.1.22",
+            "VONK_MANAGEMENT_CIDRS=192.168.1.0/24",
+            "VONK_DIRECT_FABRIC_CIDRS=192.168.100.0/24",
+            "VONK_CONTROL_HOSTNAME=vonk-forge.example.ts.net",
+        ]
     );
     assert_eq!(
-        std::fs::read_to_string(result.root.join("secrets/admin-password"))
-            .expect("generated administrator password"),
+        secret(&result.root, "tailscale-oauth-client-id"),
+        "oauth-id\n"
+    );
+    assert_eq!(
+        secret(&result.root, "tailscale-oauth-client-secret"),
+        "oauth-secret\n"
+    );
+    assert_eq!(
+        secret(&result.root, "litellm-upstream-key"),
+        "upstream-key\n"
+    );
+    assert_eq!(secret(&result.root, "hf-token"), "");
+    assert_eq!(
+        secret(&result.root, "admin-password"),
         "generated-24-byte-secret\n"
     );
     assert_eq!(
-        std::fs::read_to_string(result.root.join("secrets/tailscale-secret"))
-            .expect("inactive remote secret placeholder"),
-        ""
-    );
-    assert_eq!(
-        std::fs::read_to_string(result.root.join("secrets/hf-token")).expect("HF token"),
-        "hf_test_token\n"
+        secret(&result.root, "hermes-litellm-key"),
+        "sk-generated-32-byte-secret\n"
     );
 }
 
 #[test]
-fn secure_remote_selection_keeps_tailscale_profile_when_hermes_is_disabled() {
-    let payload = CanonicalTemplatePayload::from_json(
-        br#"{
-          "schema_version": 2,
-          "docker_compose_yaml": "services: {}\n",
-          "install_modes": {
-            "prompt": "Install mode",
-            "default": "secure-remote",
-            "lab_value": "lab",
-            "secure_remote_value": "secure-remote",
-            "lab_required_values": [],
-            "lab_values": []
-          },
-          "hermes": {
-            "env": "COMPOSE_PROFILES",
-            "prompt": "Enable Hermes?",
-            "enabled_value": "hermes",
-            "disabled_value": ""
-          }
-        }"#,
-    )
-    .expect("valid secure-remote fixture");
+fn lab_install_asks_only_for_the_nas_address_and_optional_secrets() {
     let temporary = tempdir().expect("temporary directory");
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(b"secure-remote\nn\n".to_vec()), &mut output);
-
-    let result = prepare(
-        &payload,
+    let (result, _) = run_with_answers(
+        &site_payload(),
         SetupRequest::install(temporary.path()),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("secure remote bundle prepared");
+        "lab\n10.0.4.9\n\nhf_test_token\n",
+        &SizedSecretGenerator,
+    );
 
+    assert_eq!(result.hermes_enabled, Some(false));
     assert_eq!(
-        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
-        "COMPOSE_PROFILES=secure-remote\n"
+        environment(&result.root),
+        [
+            "COMPOSE_PROJECT_NAME=vonk-forge-control",
+            "COMPOSE_PROFILES=",
+            "VONK_CONTROL_HOSTNAME=vonk-forge.local",
+            "NAS_LAN_IP=10.0.4.9",
+            "VONK_MANAGEMENT_CIDRS=10.0.4.0/24",
+            "VONK_DIRECT_FABRIC_CIDRS=192.168.100.0/24",
+        ]
     );
-}
-
-#[test]
-fn empty_install_mode_answer_selects_secure_remote_by_default() {
-    let payload = CanonicalTemplatePayload::from_json(
-        br#"{
-          "schema_version": 2,
-          "docker_compose_yaml": "services: {}\n",
-          "install_modes": {
-            "prompt": "Install mode",
-            "lab_value": "lab",
-            "secure_remote_value": "secure-remote",
-            "lab_required_values": [],
-            "lab_values": []
-          },
-          "hermes": {
-            "env": "COMPOSE_PROFILES",
-            "prompt": "Enable Hermes?",
-            "enabled_value": "hermes",
-            "disabled_value": ""
-          }
-        }"#,
-    )
-    .expect("valid install mode fixture without an explicit default");
-    let temporary = tempdir().expect("temporary directory");
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(b"\nn\n".to_vec()), &mut output);
-
-    let result = prepare(
-        &payload,
-        SetupRequest::install(temporary.path()),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("default install mode prepared");
-
-    let transcript = String::from_utf8(output).expect("prompt transcript");
-    assert!(
-        transcript.contains("Install mode [secure-remote / lab]: "),
-        "{transcript}"
-    );
+    assert_eq!(secret(&result.root, "tailscale-oauth-client-id"), "");
+    assert_eq!(secret(&result.root, "tailscale-oauth-client-secret"), "");
+    assert_eq!(secret(&result.root, "litellm-upstream-key"), "");
+    assert_eq!(secret(&result.root, "hf-token"), "hf_test_token\n");
     assert_eq!(
-        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
-        "COMPOSE_PROFILES=secure-remote\n"
+        secret(&result.root, "admin-password"),
+        "generated-24-byte-secret\n"
     );
+
+    // A lab upgrade restores missing lab-only and optional secrets empty,
+    // without asking.
+    std::fs::remove_file(result.root.join("secrets/tailscale-oauth-client-secret"))
+        .expect("remove lab-only secret");
+    std::fs::remove_file(result.root.join("secrets/hf-token")).expect("remove optional secret");
+    let (_, transcript) = run_with_answers(
+        &site_payload(),
+        SetupRequest::upgrade(temporary.path()),
+        "",
+        &SizedSecretGenerator,
+    );
+    assert!(transcript.is_empty(), "{transcript}");
+    assert_eq!(secret(&result.root, "tailscale-oauth-client-secret"), "");
+    assert_eq!(secret(&result.root, "hf-token"), "");
 }
 
 #[test]
@@ -369,7 +411,6 @@ fn secure_remote_bundle_upgrades_and_toggles_hermes_beside_its_profile() {
             "default": "secure-remote",
             "lab_value": "lab",
             "secure_remote_value": "secure-remote",
-            "lab_required_values": [],
             "lab_values": []
           },
           "hermes": {
@@ -437,94 +478,6 @@ fn secure_remote_bundle_upgrades_and_toggles_hermes_beside_its_profile() {
         std::fs::read_to_string(&environment).expect("environment"),
         "COMPOSE_PROFILES=\"secure-remote,hermes\"\n"
     );
-}
-
-#[test]
-fn fresh_install_prints_preflight_before_the_first_prompt() {
-    let payload = CanonicalTemplatePayload::from_json(
-        br#"{
-          "schema_version": 2,
-          "docker_compose_yaml": "services: {}\n",
-          "preflight": [
-            "Enable MagicDNS and HTTPS certificates.",
-            "Define only the unsuffixed production Services."
-          ],
-          "required_values": [
-            {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"}
-          ],
-          "secrets": [
-            {"file": "tailscale-oauth-client-id", "prompt": "Tailscale OAuth client ID", "generate_bytes": null}
-          ]
-        }"#,
-    )
-    .expect("valid preflight payload");
-    let temporary = tempdir().expect("temporary directory");
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(
-        Cursor::new(b"forge.example.test\noauth-client-id\n".to_vec()),
-        &mut output,
-    );
-
-    prepare(
-        &payload,
-        SetupRequest::install(temporary.path()),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("bundle prepared");
-
-    let output = String::from_utf8(output).expect("UTF-8 prompts");
-    let preflight = output
-        .find("Before continuing, complete this preflight:")
-        .expect("preflight is shown");
-    let oauth = output
-        .find("Tailscale OAuth client ID: ")
-        .expect("OAuth prompt is shown");
-    assert!(preflight < oauth);
-    assert!(output.contains("  [ ] Enable MagicDNS and HTTPS certificates."));
-    assert!(output.contains("  [ ] Define only the unsuffixed production Services."));
-}
-
-#[test]
-fn service_hostnames_default_to_the_control_tailnet() {
-    let payload = CanonicalTemplatePayload::from_json(
-        br#"{
-          "schema_version": 2,
-          "docker_compose_yaml": "services: {}\n",
-          "required_values": [
-            {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"},
-            {"env": "VONK_AGENT_ENROLL_HOSTNAME", "prompt": "Enrollment hostname", "validation": "hostname"},
-            {"env": "VONK_AGENT_HOSTNAME", "prompt": "Agent hostname", "validation": "hostname"},
-            {"env": "VONK_REGISTRY_HOSTNAME", "prompt": "Registry hostname", "validation": "hostname"}
-          ],
-          "secrets": []
-        }"#,
-    )
-    .expect("valid hostname payload");
-    let temporary = tempdir().expect("temporary directory");
-    let input = Cursor::new(b"vonk-forge.example-tailnet.ts.net\n\n\n\n".to_vec());
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(input, &mut output);
-
-    let result = prepare(
-        &payload,
-        SetupRequest::install(temporary.path()),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("derived hostnames accepted");
-
-    assert_eq!(
-        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
-        "VONK_CONTROL_HOSTNAME=vonk-forge.example-tailnet.ts.net\n\
-VONK_AGENT_ENROLL_HOSTNAME=enroll.example-tailnet.ts.net\n\
-VONK_AGENT_HOSTNAME=agents.example-tailnet.ts.net\n\
-VONK_REGISTRY_HOSTNAME=registry.example-tailnet.ts.net\n"
-    );
-    let output = String::from_utf8(output).expect("UTF-8 prompts");
-    assert!(output.contains("Enrollment hostname [enroll.example-tailnet.ts.net]: "));
-    assert!(output.contains("Agent hostname [agents.example-tailnet.ts.net]: "));
-    assert!(output.contains("Registry hostname [registry.example-tailnet.ts.net]: "));
 }
 
 #[test]
@@ -612,7 +565,7 @@ fn runtime_files_are_materialized_and_replaced_beneath_the_bundle() {
 }
 
 #[test]
-fn upgrade_adds_a_private_backup_directory_to_an_existing_bundle() {
+fn upgrade_adds_private_backup_directories_to_an_existing_bundle() {
     let temporary = tempdir().expect("temporary directory");
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::new()), &mut output);
@@ -623,7 +576,9 @@ fn upgrade_adds_a_private_backup_directory_to_an_existing_bundle() {
         &FixedSecretGenerator,
     )
     .expect("bundle installed");
-    std::fs::remove_dir(installed.root.join("backups")).expect("simulate pre-backup bundle");
+    for directory in ["backups", "backups-offhost"] {
+        std::fs::remove_dir(installed.root.join(directory)).expect("simulate pre-backup bundle");
+    }
 
     prepare(
         &runtime_file_payload("services: {}\n", "second\n", 0o644),
@@ -631,13 +586,13 @@ fn upgrade_adds_a_private_backup_directory_to_an_existing_bundle() {
         &mut prompt,
         &FixedSecretGenerator,
     )
-    .expect("backup directory added during upgrade");
+    .expect("backup directories added during upgrade");
 
     #[cfg(unix)]
-    {
+    for directory in ["backups", "backups-offhost"] {
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(
-            std::fs::metadata(installed.root.join("backups"))
+            std::fs::metadata(installed.root.join(directory))
                 .expect("backup metadata")
                 .permissions()
                 .mode()
@@ -645,6 +600,15 @@ fn upgrade_adds_a_private_backup_directory_to_an_existing_bundle() {
             0o700
         );
     }
+
+    // A bundle that already has both directories upgrades again.
+    prepare(
+        &runtime_file_payload("services: {}\n", "third\n", 0o644),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("repeat upgrade accepts the backup directories");
 }
 
 #[test]
@@ -744,26 +708,36 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
 }
 
 #[test]
-fn upgrade_prompts_only_for_new_release_inputs_and_preserves_existing_values() {
+fn upgrade_prompts_only_for_new_undefaulted_inputs_and_preserves_existing_values() {
     let payload = CanonicalTemplatePayload::from_json(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api@sha256:new\n",
+          "internal_values": [
+            {"env": "SITE_LOCAL", "value": "release-owned"}
+          ],
           "required_values": [
             {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"},
-            {"env": "NEW_RELEASE_VALUE", "prompt": "New release value"}
+            {"env": "NEW_RELEASE_VALUE", "prompt": "New release value"},
+            {"env": "NEW_DEFAULTED_VALUE", "prompt": "New defaulted value", "default": "the-default"}
           ],
           "secrets": [
-            {"file": "database-password", "prompt": "Database password", "generate_bytes": 16},
-            {"file": "new-release-secret", "prompt": "New release secret", "generate_bytes": 16}
+            {"file": "database-password", "prompt": "Database password"},
+            {"file": "new-release-secret", "prompt": "New release secret"},
+            {"file": "new-optional-secret", "prompt": "New optional secret", "optional": true}
           ],
+          "generated_secrets": {
+            "random_text": [
+              {"file": "site-secret", "bytes": 16},
+              {"file": "new-generated-secret", "bytes": 16}
+            ],
+            "ed25519_pkcs8_pem": [{"file": "new-signing-key"}]
+          },
           "hermes": {
             "env": "VONK_HERMES_ENABLED",
             "prompt": "Enable Hermes?",
             "enabled_value": "true",
-            "disabled_value": "false",
-            "required_values": [],
-            "secrets": []
+            "disabled_value": "false"
           }
         }"#,
     )
@@ -771,230 +745,68 @@ fn upgrade_prompts_only_for_new_release_inputs_and_preserves_existing_values() {
     let temporary = tempdir().expect("temporary directory");
     write_existing_bundle(temporary.path());
     let bundle = temporary.path().join("vonk-forge");
-    let input = Cursor::new(b"new-value\n\n".to_vec());
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(input, &mut output);
 
-    let result = prepare(
+    let (result, _) = run_with_answers(
         &payload,
         SetupRequest::upgrade(temporary.path()),
-        &mut prompt,
+        "new-value\nnew-secret-value\n",
         &FixedSecretGenerator,
-    )
-    .expect("bundle upgraded with new inputs");
+    );
 
     assert_eq!(result.hermes_enabled, Some(false));
     assert_eq!(
-        std::fs::read_to_string(bundle.join(".env")).expect("environment"),
-        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\nSITE_LOCAL=kept\nNEW_RELEASE_VALUE=new-value\n"
+        environment(&bundle),
+        [
+            "VONK_PUBLIC_HOST=kept.example.test",
+            "VONK_HERMES_ENABLED=false",
+            "SITE_LOCAL=release-owned",
+            "NEW_RELEASE_VALUE=new-value",
+            "NEW_DEFAULTED_VALUE=the-default",
+        ]
     );
     assert_eq!(
-        std::fs::read_to_string(bundle.join("secrets/database-password"))
-            .expect("database password"),
+        secret(&bundle, "database-password"),
         "kept-database-password\n"
     );
+    assert_eq!(secret(&bundle, "site-secret"), "kept-secret\n");
+    assert_eq!(secret(&bundle, "new-release-secret"), "new-secret-value\n");
+    assert_eq!(secret(&bundle, "new-optional-secret"), "");
     assert_eq!(
-        std::fs::read_to_string(bundle.join("secrets/new-release-secret"))
-            .expect("new release secret"),
+        secret(&bundle, "new-generated-secret"),
         "generated-secret\n"
     );
-}
-
-fn hermes_toggle_payload() -> CanonicalTemplatePayload {
-    CanonicalTemplatePayload::from_json(
-        br#"{
-          "schema_version": 2,
-          "docker_compose_yaml": "services: {}\n",
-          "required_values": [
-            {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"}
-          ],
-          "secrets": [
-            {"file": "database-password", "prompt": "Database password", "generate_bytes": 16}
-          ],
-          "hermes": {
-            "env": "VONK_HERMES_ENABLED",
-            "prompt": "Enable Hermes?",
-            "enabled_value": "true",
-            "disabled_value": "false",
-            "required_values": [
-              {"env": "HERMES_ENDPOINT", "prompt": "Hermes endpoint"}
-            ],
-            "secrets": [
-              {"file": "hermes-token", "prompt": "Hermes token"}
-            ]
-          }
-        }"#,
-    )
-    .expect("valid Hermes toggle payload")
+    assert!(secret(&bundle, "new-signing-key").starts_with("-----BEGIN PRIVATE KEY-----"));
 }
 
 #[test]
-fn upgrade_can_enable_hermes_in_an_existing_bundle() {
-    let temporary = tempdir().expect("temporary directory");
-    write_existing_bundle(temporary.path());
-    let bundle = temporary.path().join("vonk-forge");
-    let input = Cursor::new(b"https://hermes.example.test\nprivate-hermes-token\n".to_vec());
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(input, &mut output);
-
-    let result = prepare(
-        &hermes_toggle_payload(),
-        SetupRequest::upgrade(temporary.path()).with_hermes_enabled(true),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("Hermes enabled during upgrade");
-
-    assert_eq!(result.hermes_enabled, Some(true));
-    assert_eq!(
-        std::fs::read_to_string(bundle.join(".env")).expect("environment"),
-        "VONK_PUBLIC_HOST=kept.example.test\n\
-VONK_HERMES_ENABLED=true\n\
-SITE_LOCAL=kept\n\
-HERMES_ENDPOINT=https://hermes.example.test\n"
-    );
-    assert_eq!(
-        std::fs::read_to_string(bundle.join("secrets/hermes-token")).expect("Hermes token"),
-        "private-hermes-token\n"
-    );
-}
-
-#[test]
-fn upgrade_can_disable_hermes_without_deleting_its_configuration() {
+fn upgrade_can_disable_hermes_without_deleting_its_secrets() {
     let temporary = tempdir().expect("temporary directory");
     write_existing_bundle(temporary.path());
     let bundle = temporary.path().join("vonk-forge");
     std::fs::write(
         bundle.join(".env"),
-        "VONK_PUBLIC_HOST=kept.example.test\n\
-VONK_HERMES_ENABLED=true\n\
-HERMES_ENDPOINT=https://hermes.example.test\n\
-SITE_LOCAL=kept\n",
+        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=true\n",
     )
     .expect("enabled environment");
-    std::fs::write(bundle.join("secrets/hermes-token"), "kept-hermes-token\n")
-        .expect("Hermes token");
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    std::fs::write(bundle.join("secrets/generated-token"), "kept-token\n").expect("token");
 
-    let result = prepare(
-        &hermes_toggle_payload(),
+    let (result, transcript) = run_with_answers(
+        &payload(),
         SetupRequest::upgrade(temporary.path()).with_hermes_enabled(false),
-        &mut prompt,
+        "",
         &FixedSecretGenerator,
-    )
-    .expect("Hermes disabled during upgrade");
+    );
 
     assert_eq!(result.hermes_enabled, Some(false));
+    assert!(transcript.is_empty());
     assert_eq!(
-        std::fs::read_to_string(bundle.join(".env")).expect("environment"),
-        "VONK_PUBLIC_HOST=kept.example.test\n\
-VONK_HERMES_ENABLED=false\n\
-HERMES_ENDPOINT=https://hermes.example.test\n\
-SITE_LOCAL=kept\n"
+        environment(&bundle),
+        [
+            "VONK_PUBLIC_HOST=kept.example.test",
+            "VONK_HERMES_ENABLED=false"
+        ]
     );
-    assert_eq!(
-        std::fs::read_to_string(bundle.join("secrets/hermes-token")).expect("Hermes token"),
-        "kept-hermes-token\n"
-    );
-    assert!(output.is_empty());
-}
-
-#[test]
-fn ordinary_upgrade_preserves_enabled_hermes_without_prompting() {
-    let temporary = tempdir().expect("temporary directory");
-    write_existing_bundle(temporary.path());
-    let bundle = temporary.path().join("vonk-forge");
-    std::fs::write(
-        bundle.join(".env"),
-        "VONK_PUBLIC_HOST=kept.example.test\n\
-VONK_HERMES_ENABLED=true\n\
-HERMES_ENDPOINT=https://hermes.example.test\n\
-SITE_LOCAL=kept\n",
-    )
-    .expect("enabled environment");
-    std::fs::write(bundle.join("secrets/hermes-token"), "kept-hermes-token\n")
-        .expect("Hermes token");
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
-
-    let result = prepare(
-        &hermes_toggle_payload(),
-        SetupRequest::upgrade(temporary.path()),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("enabled Hermes state preserved");
-
-    assert_eq!(result.hermes_enabled, Some(true));
-    assert!(
-        std::fs::read_to_string(bundle.join(".env"))
-            .expect("environment")
-            .contains("VONK_HERMES_ENABLED=true\n")
-    );
-    assert!(output.is_empty());
-}
-
-#[test]
-fn ordinary_upgrade_adds_only_missing_inputs_for_enabled_hermes() {
-    let temporary = tempdir().expect("temporary directory");
-    write_existing_bundle(temporary.path());
-    let bundle = temporary.path().join("vonk-forge");
-    std::fs::write(
-        bundle.join(".env"),
-        "VONK_PUBLIC_HOST=kept.example.test\n\
-VONK_HERMES_ENABLED=true\n\
-SITE_LOCAL=kept\n",
-    )
-    .expect("enabled environment with missing Hermes input");
-    let input = Cursor::new(b"https://hermes.example.test\nprivate-hermes-token\n".to_vec());
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(input, &mut output);
-
-    let result = prepare(
-        &hermes_toggle_payload(),
-        SetupRequest::upgrade(temporary.path()),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("missing enabled Hermes state repaired");
-
-    assert_eq!(result.hermes_enabled, Some(true));
-    assert!(
-        std::fs::read_to_string(bundle.join(".env"))
-            .expect("environment")
-            .contains("HERMES_ENDPOINT=https://hermes.example.test\n")
-    );
-    assert_eq!(
-        std::fs::read_to_string(bundle.join("secrets/hermes-token")).expect("Hermes token"),
-        "private-hermes-token\n"
-    );
-}
-
-#[test]
-fn ordinary_upgrade_does_not_add_missing_hermes_inputs_while_disabled() {
-    let temporary = tempdir().expect("temporary directory");
-    write_existing_bundle(temporary.path());
-    let bundle = temporary.path().join("vonk-forge");
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
-
-    let result = prepare(
-        &hermes_toggle_payload(),
-        SetupRequest::upgrade(temporary.path()),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("disabled Hermes state preserved");
-
-    assert_eq!(result.hermes_enabled, Some(false));
-    assert!(!bundle.join("secrets/hermes-token").exists());
-    assert!(
-        !std::fs::read_to_string(bundle.join(".env"))
-            .expect("environment")
-            .contains("HERMES_ENDPOINT=")
-    );
-    assert!(output.is_empty());
+    assert_eq!(secret(&bundle, "generated-token"), "kept-token\n");
 }
 
 #[cfg(unix)]
@@ -1231,17 +1043,12 @@ fn upgrade_rejects_a_staging_name_symlink_without_touching_its_target() {
 #[test]
 fn prompts_retry_invalid_required_values_and_confirmation() {
     let temporary = tempdir().expect("temporary directory");
-    let input = Cursor::new(b"\nforge.example.test\n\nperhaps\nyes\n".to_vec());
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(input, &mut output);
-
-    let result = prepare(
+    let (result, _) = run_with_answers(
         &payload(),
         SetupRequest::install(temporary.path()),
-        &mut prompt,
+        "\nforge.example.test\n\ndatabase-secret\nperhaps\nyes\n",
         &FixedSecretGenerator,
-    )
-    .expect("invalid interactive input is retried");
+    );
 
     assert_eq!(result.hermes_enabled, Some(true));
     assert_eq!(
@@ -1251,63 +1058,35 @@ fn prompts_retry_invalid_required_values_and_confirmation() {
 }
 
 #[test]
-fn typed_site_values_reject_invalid_addresses_cidrs_hostnames_and_origins() {
+fn typed_site_values_reject_invalid_addresses_cidrs_and_hostnames() {
     let payload = CanonicalTemplatePayload::from_json(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
           "required_values": [
             {"env": "NAS_LAN_IP", "prompt": "NAS IP", "validation": "ipv4"},
-            {"env": "VONK_MANAGEMENT_CIDRS", "prompt": "Management CIDRs", "validation": "cidr_list"},
-            {"env": "VONK_DIRECT_FABRIC_CIDRS", "prompt": "Fabric CIDRs", "default": "", "validation": "optional_cidr_list"},
-            {"env": "VONK_OPERATOR_JURISDICTION", "prompt": "Jurisdiction", "validation": "jurisdiction"},
+            {"env": "SITE_CIDRS", "prompt": "Site CIDRs", "validation": "cidr_list"},
             {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"}
-          ],
-          "secrets": [],
-          "hermes": {
-            "env": "COMPOSE_PROFILES",
-            "prompt": "Enable Hermes?",
-            "enabled_value": "hermes",
-            "disabled_value": "",
-            "required_values": [
-              {"env": "HERMES_DASHBOARD_ORIGIN", "prompt": "Dashboard", "validation": "https_origin"}
-            ],
-            "secrets": []
-          }
+          ]
         }"#,
     )
     .expect("valid typed payload");
     let temporary = tempdir().expect("temporary directory");
-    let input = Cursor::new(
-        b"not-an-ip\n192.168.1.231\n192.168.1.0/99\n192.168.1.0/24,100.64.0.0/10\n\nnl\nZZ\nNL\nhttps://bad/path\ncontrol.example.test\nyes\nhttp://dashboard.example.test\nhttps://dashboard.example.test\n".to_vec(),
-    );
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(input, &mut output);
 
-    let result = prepare(
+    let (result, _) = run_with_answers(
         &payload,
         SetupRequest::install(temporary.path()),
-        &mut prompt,
+        "not-an-ip\n192.168.1.231\n192.168.1.0/99\n192.168.1.0/24,100.64.0.0/10\nhttps://bad/path\ncontrol.example.test\n",
         &FixedSecretGenerator,
-    )
-    .expect("invalid typed values are retried");
+    );
 
     assert_eq!(
-        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
-        "NAS_LAN_IP=192.168.1.231\n\
-VONK_MANAGEMENT_CIDRS=\"192.168.1.0/24,100.64.0.0/10\"\n\
-VONK_DIRECT_FABRIC_CIDRS=\n\
-VONK_OPERATOR_JURISDICTION=NL\n\
-VONK_CONTROL_HOSTNAME=control.example.test\n\
-COMPOSE_PROFILES=hermes\n\
-HERMES_DASHBOARD_ORIGIN=https://dashboard.example.test\n"
-    );
-    assert!(
-        String::from_utf8(output)
-            .expect("UTF-8 prompts")
-            .matches("The value is invalid.")
-            .count()
-            >= 5
+        environment(&result.root),
+        [
+            "NAS_LAN_IP=192.168.1.231",
+            "SITE_CIDRS=\"192.168.1.0/24,100.64.0.0/10\"",
+            "VONK_CONTROL_HOSTNAME=control.example.test",
+        ]
     );
 }
 
@@ -1382,7 +1161,7 @@ fn payload_rejects_secret_path_traversal() {
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
           "required_values": [],
-          "secrets": [{"file": "../outside", "prompt": "Unsafe", "generate_bytes": 32}],
+          "secrets": [{"file": "../outside", "prompt": "Unsafe"}],
           "hermes": null
         }"#,
     )
@@ -1408,7 +1187,7 @@ fn install_accepts_a_real_output_below_a_symlinked_ancestor() {
         .join("vonk-forge");
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(
-        Cursor::new(b"forge.example.test\n\nn\n".to_vec()),
+        Cursor::new(b"forge.example.test\ndatabase-secret\nn\n".to_vec()),
         &mut output,
     );
 
@@ -1451,115 +1230,22 @@ fn install_rejects_a_symlinked_output_root() {
 }
 
 #[test]
-fn hermes_prompts_are_conditional_on_opt_in() {
-    let payload = CanonicalTemplatePayload::from_json(
-        br#"{
-          "schema_version": 2,
-          "docker_compose_yaml": "services: {}\n",
-          "required_values": [],
-          "secrets": [],
-          "hermes": {
-            "env": "VONK_HERMES_ENABLED",
-            "prompt": "Enable Hermes?",
-            "enabled_value": "true",
-            "disabled_value": "false",
-            "required_values": [{"env": "HERMES_ENDPOINT", "prompt": "Hermes endpoint"}],
-            "secrets": [{"file": "hermes-token", "prompt": "Hermes token"}]
-          }
-        }"#,
-    )
-    .expect("valid fixture");
-    let temporary = tempdir().expect("temporary directory");
-    let input = Cursor::new(b"yes\nhttps://hermes.example.test\nprivate-hermes-token\n".to_vec());
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(input, &mut output);
-
-    let result = prepare(
-        &payload,
-        SetupRequest::install(temporary.path()),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("Hermes bundle prepared");
-
-    assert_eq!(result.hermes_enabled, Some(true));
-    assert_eq!(
-        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
-        "VONK_HERMES_ENABLED=true\nHERMES_ENDPOINT=https://hermes.example.test\n"
-    );
-    assert_eq!(
-        std::fs::read_to_string(result.root.join("secrets/hermes-token")).expect("token"),
-        "private-hermes-token\n"
-    );
-    assert!(
-        !String::from_utf8(output)
-            .expect("UTF-8 prompts")
-            .contains("private-hermes-token")
-    );
-}
-
-#[test]
-fn hermes_generated_client_key_uses_the_required_prefix() {
-    let payload = CanonicalTemplatePayload::from_json(
-        br#"{
-          "schema_version": 2,
-          "docker_compose_yaml": "services: {}\n",
-          "required_values": [],
-          "secrets": [],
-          "hermes": {
-            "env": "COMPOSE_PROFILES",
-            "prompt": "Enable Hermes?",
-            "enabled_value": "hermes",
-            "disabled_value": "",
-            "required_values": [],
-            "secrets": [
-              {
-                "file": "hermes-litellm-key",
-                "prompt": "Hermes LiteLLM key",
-                "generate_bytes": 16,
-                "prefix": "sk-"
-              }
-            ]
-          }
-        }"#,
-    )
-    .expect("valid prefixed secret payload");
-    let temporary = tempdir().expect("temporary directory");
-    let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(b"yes\n\n".to_vec()), &mut output);
-
-    let result = prepare(
-        &payload,
-        SetupRequest::install(temporary.path()),
-        &mut prompt,
-        &FixedSecretGenerator,
-    )
-    .expect("prefixed Hermes key generated");
-
-    assert_eq!(
-        std::fs::read_to_string(result.root.join("secrets/hermes-litellm-key"))
-            .expect("Hermes LiteLLM key"),
-        "sk-generated-secret\n"
-    );
-}
-
-#[test]
 fn install_creates_safe_nested_secret_paths() {
     let payload = CanonicalTemplatePayload::from_json(
         br#"{
           "schema_version": 2,
           "docker_compose_yaml": "services: {}\n",
           "required_values": [],
-          "secrets": [
-            {"file": "step-ca/ca.json", "prompt": "Step CA configuration", "generate_bytes": 16}
-          ],
+          "generated_secrets": {
+            "random_text": [{"file": "step-ca/ca.json", "bytes": 16}]
+          },
           "hermes": null
         }"#,
     )
     .expect("nested secret path is valid");
     let temporary = tempdir().expect("temporary directory");
     let mut output = Vec::new();
-    let mut prompt = PromptIo::new(Cursor::new(b"\n".to_vec()), &mut output);
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
 
     let result = prepare(
         &payload,
@@ -1618,9 +1304,7 @@ fn schema_v2_emits_internal_values_and_maps_hermes_to_compose_profiles() {
             "env": "COMPOSE_PROFILES",
             "prompt": "Enable Hermes?",
             "enabled_value": "hermes",
-            "disabled_value": "",
-            "required_values": [],
-            "secrets": []
+            "disabled_value": ""
           }
         }"#,
     )

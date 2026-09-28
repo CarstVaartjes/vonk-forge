@@ -1,763 +1,64 @@
-"""Strict application configuration loaded from paths and secret files."""
+"""Controller configuration: a few operator choices, everything else constant.
+
+The API and the worker share one environment block and one ``Settings``
+loader. Only values an operator genuinely chooses come from the environment;
+file locations, relay origins and tuning budgets are fixed constants. Values
+that can be repaired are repaired with a logged warning instead of refusing to
+start. Security material still fails closed, but API-only secrets are read
+lazily so the worker never touches them.
+"""
 
 from __future__ import annotations
 
+import ipaddress
+import json
+import logging
 import os
 import re
 import secrets
+import stat
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .presence import ManagementAddressPolicy, PresenceError
+_LOGGER = logging.getLogger(__name__)
 
 
 class SettingsError(ValueError):
     pass
 
 
-_AGENT_PROXY_AUTH_PATTERN = re.compile(rb"[A-Za-z0-9_-]{32,}\Z")
-_EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY = secrets.token_bytes(32)
+# Fixed file locations inside the Controller containers.
+SECRETS_ROOT = Path("/run/vonk-normalized-secrets")
+DEPLOYMENT_OBSERVATIONS_PATH = Path(
+    "/run/vonk-deployment-observations/observations.json"
+)
+STATE_ROOT = Path("/state")
+AGENT_ARTIFACT_ROOT = Path("/state/agent-artifacts")
+WORKLOAD_TUF_METADATA_ROOT = Path("/workload-tuf/metadata")
+WORKLOAD_TUF_TARGET_ROOT = Path("/workload-tuf/targets")
+MODEL_CACHE_ROOT = Path("/state/model-cache")
 
+# Fixed in-project relays and the private certificate authority.
+RECIPE_LIBRARY_API_URL = "http://caddy:8083"
+RECIPE_LIBRARY_ASSET_URL = "http://caddy:8085"
+AGENT_RELEASE_API_URL = "http://caddy:8084"
+AGENT_CA_URL = "https://step-ca:9000"
+AGENT_CA_PROVISIONER_NAME = "vonk-forge-agent"
+DEFAULT_AGENT_CERTIFICATE_LIFETIME_SECONDS = 30 * 24 * 60 * 60
 
-def _secret(name: str, *, production: bool) -> str:
-    raw_name = name.removesuffix("_FILE")
-    raw = os.environ.get(raw_name)
-    source = os.environ.get(name)
-    if production and raw:
-        raise SettingsError(f"{raw_name} must be supplied through a secret file")
-    if source:
-        path = Path(source)
-        if path.is_symlink() or not path.is_file():
-            raise SettingsError(f"{name} must name a regular non-symlink file")
-        value = path.read_text().strip()
-    else:
-        value = raw or ""
-    if not value:
-        raise SettingsError(f"{name} is required")
-    return value
-
-
-def _secret_path(name: str) -> Path:
-    source = os.environ.get(name)
-    if not source:
-        raise SettingsError(f"{name} is required")
-    path = Path(source)
-    if path.is_symlink() or not path.is_file():
-        raise SettingsError(f"{name} must name a regular non-symlink file")
-    return path
-
-
-def _optional_secret_path(name: str) -> Path | None:
-    """Return an optional file secret path without reading its credential."""
-    source = os.environ.get(name)
-    if not source:
-        return None
-    path = Path(source)
-    if path.is_symlink() or (path.exists() and not path.is_file()):
-        raise SettingsError(f"{name} must name a regular non-symlink file")
-    # The normalized Compose secret is intentionally absent when the optional
-    # source was not configured. This keeps public downloads anonymous.
-    return path if path.exists() and path.stat().st_size else None
-
-
-def _secret_or_file(name: str, file_name: str) -> str:
-    raw = os.environ.get(name)
-    source = os.environ.get(file_name)
-    if raw is not None and source is not None:
-        raise SettingsError(f"{name} and {file_name} cannot be combined")
-    if source:
-        path = Path(source)
-        if path.is_symlink() or not path.is_file():
-            raise SettingsError(f"{file_name} must name a regular non-symlink file")
-        value = path.read_text().strip()
-        if not value:
-            raise SettingsError(f"{file_name} must not be empty")
-        return value
-    return (raw or "").strip()
-
-
-def _agent_proxy_auth_secret(name: str, *, production: bool) -> bytes:
-    raw_name = name.removesuffix("_FILE")
-    raw = os.environ.get(raw_name)
-    source = os.environ.get(name)
-    if production and raw:
-        raise SettingsError(f"{raw_name} must be supplied through a secret file")
-    if source:
-        path = Path(source)
-        if path.is_symlink() or not path.is_file():
-            raise SettingsError(f"{name} must name a regular non-symlink file")
-        value = path.read_bytes()
-    else:
-        value = (raw or "").encode("ascii", errors="strict")
-    normalized = value.rstrip(b"\r\n")
-    if _AGENT_PROXY_AUTH_PATTERN.fullmatch(normalized) is None:
-        raise SettingsError(
-            f"{name} must contain one base64url-like token of at least 32 characters"
-        )
-    return normalized
-
-
-def _absolute_root(name: str, default: str) -> Path:
-    value = os.environ.get(name, default)
-    path = Path(value)
-    if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
-        raise SettingsError(f"{name} must be an absolute normalized path")
-    return path
-
-
-def _fixed_https_origin(name: str, value: str) -> str:
-    if value != value.strip():
-        raise SettingsError(f"{name} must be a fixed HTTPS origin")
-    try:
-        parsed = urlsplit(value)
-        port = parsed.port
-    except ValueError as error:
-        raise SettingsError(f"{name} must be a fixed HTTPS origin") from error
-    if (
-        parsed.scheme != "https"
-        or not parsed.hostname
-        or parsed.path not in {"", "/"}
-        or parsed.query
-        or parsed.fragment
-        or parsed.username is not None
-        or parsed.password is not None
-        or port is not None
-        and not 1 <= port <= 65535
-    ):
-        raise SettingsError(f"{name} must be a fixed HTTPS origin")
-    return value.rstrip("/")
-
-
-@dataclass(frozen=True)
-class Settings:
-    database_url: str
-    state_path: Path
-    deployment_mode: str
-    token_signing_key: bytes
-    metrics_token: str
-    agent_runtime: str
-    agent_controller_origin: str
-    agent_enrollment_origin: str
-    controller_ca_path: Path | None
-    agent_client_ca: bytes
-    agent_intermediate_certificate: bytes
-    agent_intermediate_certificate_path: Path | None
-    agent_ca_credential_path: Path | None
-    agent_ca_provisioner_public_jwk_path: Path | None
-    agent_ca_url: str
-    agent_ca_root_path: Path | None
-    agent_ca_provisioner_name: str
-    agent_ca_provisioner_kid: str
-    agent_ca_timeout_seconds: float
-    agent_ca_max_response_bytes: int
-    agent_ca_certificate_lifetime_seconds: int
-    agent_artifact_root: Path
-    workload_tuf_metadata_root: Path
-    workload_tuf_target_root: Path
-    agent_proxy_auth: bytes
-    management_cidrs: str
-    direct_fabric_cidrs: str
-    package_helper_grant_private_key_path: Path | None = None
-    package_helper_receipt_private_key_path: Path | None = None
-    host_runtime_grant_private_key_path: Path | None = None
-    recipe_library_api_url: str = "https://api.github.com"
-    # Release asset downloads always use the in-project Caddy relay, which is
-    # scoped to the recipe repository; the API has no direct path to GitHub's
-    # asset origin.  This is fixed, not configuration.
-    recipe_library_asset_url: str = "http://caddy:8085"
-    # "latest" follows the newest signed release; an exact vMAJOR.MINOR.PATCH
-    # tag holds the Controller on that release.
-    recipe_library_release: str = "latest"
-    # Acceptance-only unsigned fixture channel (the Spark lifecycle canary).
-    # Unset in every deployment, which reads signed GitHub releases.
-    recipe_library_package_url: str | None = None
-    recipe_library_sync_interval_seconds: int = 900
-    distributed_start_timeout_seconds: int = 3600
-    agent_release_api_url: str = "https://install.vonkforge.ai"
-    agent_controller_address: str | None = None
-    agent_service_hostnames: tuple[str, ...] = ()
-    install_channel: str = "stable"
-    artifact_job_storage_max_bytes: int = 16 * 1024**3
-    artifact_job_retention_seconds: int = 7 * 24 * 60 * 60
-    model_cache_root: Path = Path("/state/model-cache")
-    model_cache_reserve_bytes: int = 10 * 1024**3
-    model_cache_parallel_downloads: int = 8
-    recipe_image_parallel_preparations: int = 4
-    recipe_build_parallel_preparations: int = 2
-    huggingface_token_path: Path | None = None
-
-    @property
-    def database_host(self) -> str | None:
-        return urlsplit(self.database_url).hostname
-
-    @classmethod
-    def from_env_and_secrets(cls) -> Settings:
-        mode = os.environ.get("VONK_DEPLOYMENT_MODE", "development")
-        if mode not in {"development", "test", "production"}:
-            raise SettingsError("VONK_DEPLOYMENT_MODE is invalid")
-        agent_runtime = os.environ.get(
-            "VONK_AGENT_RUNTIME",
-            "disabled" if mode == "development" else "enabled",
-        )
-        if agent_runtime not in {"enabled", "disabled"}:
-            raise SettingsError("VONK_AGENT_RUNTIME is invalid")
-        agent_enabled = agent_runtime == "enabled" and mode in {
-            "development",
-            "production",
-        }
-        database_url = _secret(
-            "VONK_DATABASE_URL_FILE", production=mode == "production"
-        )
-        if urlsplit(database_url).scheme not in {"postgresql", "postgresql+psycopg"}:
-            raise SettingsError("database URL must use PostgreSQL")
-        management_cidrs = _secret_or_file(
-            "VONK_MANAGEMENT_CIDRS",
-            "VONK_MANAGEMENT_CIDRS_FILE",
-        )
-        direct_fabric_cidrs = os.environ.get("VONK_DIRECT_FABRIC_CIDRS", "").strip()
-        if (mode == "production" or agent_enabled) and not management_cidrs:
-            raise SettingsError("VONK_MANAGEMENT_CIDRS is required in production")
-        if not management_cidrs and direct_fabric_cidrs:
-            raise SettingsError(
-                "VONK_MANAGEMENT_CIDRS is required when direct fabric CIDRs are set"
-            )
-        if management_cidrs:
-            try:
-                ManagementAddressPolicy.parse(
-                    management_cidrs,
-                    forbidden_cidrs=direct_fabric_cidrs,
-                )
-            except PresenceError as error:
-                raise SettingsError(str(error)) from error
-        signing_file = os.environ.get("VONK_TOKEN_SIGNING_KEY_FILE")
-        if signing_file:
-            signing_path = Path(signing_file)
-            if signing_path.is_symlink() or not signing_path.is_file():
-                raise SettingsError(
-                    "token signing key must be a regular non-symlink file"
-                )
-            signing_key = signing_path.read_bytes().strip()
-        elif mode == "production" or (mode == "development" and agent_enabled):
-            raise SettingsError(
-                "VONK_TOKEN_SIGNING_KEY_FILE is required when the agent runtime is enabled"
-            )
-        else:
-            signing_key = _EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY
-        if len(signing_key) < 32:
-            raise SettingsError("token signing key must contain at least 32 bytes")
-        metrics_file = os.environ.get("VONK_METRICS_TOKEN_FILE")
-        if metrics_file:
-            metrics_path = Path(metrics_file)
-            if metrics_path.is_symlink() or not metrics_path.is_file():
-                raise SettingsError("metrics token must be a regular non-symlink file")
-            metrics_token = metrics_path.read_text().strip()
-        elif mode == "production":
-            raise SettingsError("VONK_METRICS_TOKEN_FILE is required in production")
-        else:
-            metrics_token = "development-metrics-token"
-        if len(metrics_token) < 16 or any(
-            character.isspace() for character in metrics_token
-        ):
-            raise SettingsError("metrics token is invalid")
-        agent_controller_origin = (
-            _fixed_https_origin(
-                "VONK_AGENT_CONTROLLER_ORIGIN",
-                os.environ.get("VONK_AGENT_CONTROLLER_ORIGIN", ""),
-            )
-            if agent_enabled
-            else ""
-        )
-        agent_enrollment_origin = (
-            _fixed_https_origin(
-                "VONK_AGENT_ENROLLMENT_ORIGIN",
-                os.environ.get("VONK_AGENT_ENROLLMENT_ORIGIN", ""),
-            )
-            if agent_enabled
-            else ""
-        )
-        agent_controller_address = (
-            os.environ.get("VONK_AGENT_CONTROLLER_ADDRESS", "").strip() or None
-            if agent_enabled
-            else None
-        )
-        agent_service_hostnames = (
-            tuple(
-                value.strip()
-                for value in os.environ.get("VONK_AGENT_SERVICE_HOSTNAMES", "").split(
-                    ","
-                )
-                if value.strip()
-            )
-            if agent_enabled
-            else ()
-        )
-        distributed_start_timeout_seconds = _distributed_start_timeout()
-        install_channel = os.environ.get("VONK_INSTALL_CHANNEL", "stable")
-        if install_channel not in {"dev", "stable"}:
-            raise SettingsError("VONK_INSTALL_CHANNEL is invalid")
-        try:
-            artifact_job_storage_max_bytes = int(
-                os.environ.get("VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES", str(16 * 1024**3))
-            )
-            artifact_job_retention_seconds = int(
-                os.environ.get(
-                    "VONK_ARTIFACT_JOB_RETENTION_SECONDS", str(7 * 24 * 60 * 60)
-                )
-            )
-            recipe_library_sync_interval_seconds = int(
-                os.environ.get("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "900")
-            )
-            model_cache_reserve_bytes = int(
-                os.environ.get("VONK_MODEL_CACHE_RESERVE_BYTES", str(10 * 1024**3))
-            )
-            model_cache_parallel_downloads = int(
-                os.environ.get("VONK_MODEL_CACHE_PARALLEL_DOWNLOADS", "8")
-            )
-            recipe_image_parallel_preparations = int(
-                os.environ.get("VONK_RECIPE_IMAGE_PARALLEL_PREPARATIONS", "4")
-            )
-            recipe_build_parallel_preparations = int(
-                os.environ.get("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "2")
-            )
-        except ValueError as error:
-            raise SettingsError(
-                "artifact and model cache storage settings must be integers"
-            ) from error
-        if not 1024**3 <= artifact_job_storage_max_bytes <= 1024**4:
-            raise SettingsError(
-                "artifact job storage maximum must be between 1 GiB and 1 TiB"
-            )
-        if not 3600 <= artifact_job_retention_seconds <= 365 * 24 * 60 * 60:
-            raise SettingsError(
-                "artifact job retention must be between one hour and one year"
-            )
-        if not 60 <= recipe_library_sync_interval_seconds <= 24 * 60 * 60:
-            raise SettingsError(
-                "recipe library sync interval must be between one minute and one day"
-            )
-        if not 0 <= model_cache_reserve_bytes <= 1024**4:
-            raise SettingsError("model cache reserve must be between zero and one TiB")
-        if not 1 <= model_cache_parallel_downloads <= 16:
-            raise SettingsError(
-                "model cache parallel downloads must be between 1 and 16"
-            )
-        if not 1 <= recipe_image_parallel_preparations <= 16:
-            raise SettingsError(
-                "recipe image parallel preparations must be between 1 and 16"
-            )
-        if (
-            not 1
-            <= recipe_build_parallel_preparations
-            <= recipe_image_parallel_preparations
-        ):
-            raise SettingsError(
-                "recipe build parallel preparations must not exceed image preparations"
-            )
-        controller_ca_path = (
-            _secret_path("VONK_CONTROLLER_CA_FILE") if agent_enabled else None
-        )
-        agent_client_ca = (
-            _secret("VONK_AGENT_CLIENT_CA_FILE", production=True).encode()
-            if agent_enabled
-            else b""
-        )
-        agent_intermediate_certificate_path = (
-            _secret_path("VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE")
-            if agent_enabled
-            else None
-        )
-        agent_intermediate_certificate = (
-            agent_intermediate_certificate_path.read_bytes()
-            if agent_intermediate_certificate_path
-            else b""
-        )
-        step_ca_enabled = agent_enabled
-        agent_ca_credential_path = (
-            _secret_path("VONK_AGENT_CA_CREDENTIAL_FILE") if step_ca_enabled else None
-        )
-        agent_ca_provisioner_public_jwk_path = (
-            _secret_path("VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE")
-            if step_ca_enabled
-            else None
-        )
-        agent_ca_root_path = (
-            _secret_path("VONK_AGENT_CA_ROOT_FILE") if step_ca_enabled else None
-        )
-        agent_ca_url = (
-            os.environ.get("VONK_AGENT_CA_URL", "") if step_ca_enabled else ""
-        )
-        parsed_ca_url = urlsplit(agent_ca_url)
-        if step_ca_enabled and (
-            parsed_ca_url.scheme != "https"
-            or not parsed_ca_url.hostname
-            or parsed_ca_url.path not in {"", "/"}
-            or parsed_ca_url.query
-            or parsed_ca_url.fragment
-            or parsed_ca_url.username is not None
-            or parsed_ca_url.password is not None
-        ):
-            raise SettingsError("VONK_AGENT_CA_URL must be a fixed HTTPS origin")
-        agent_ca_provisioner_name = (
-            os.environ.get("VONK_AGENT_CA_PROVISIONER_NAME", "")
-            if step_ca_enabled
-            else ""
-        )
-        agent_ca_provisioner_kid = (
-            os.environ.get("VONK_AGENT_CA_PROVISIONER_KID", "")
-            if step_ca_enabled
-            else ""
-        )
-        if step_ca_enabled and (
-            not agent_ca_provisioner_name or not agent_ca_provisioner_kid
-        ):
-            raise SettingsError("Smallstep provisioner name and key ID are required")
-        try:
-            agent_ca_timeout_seconds = float(
-                os.environ.get("VONK_AGENT_CA_TIMEOUT_SECONDS", "3")
-            )
-            agent_ca_max_response_bytes = int(
-                os.environ.get("VONK_AGENT_CA_MAX_RESPONSE_BYTES", str(64 * 1024))
-            )
-        except ValueError as error:
-            raise SettingsError(
-                "Smallstep timeout and response limit must be numeric"
-            ) from error
-        if not 0 < agent_ca_timeout_seconds <= 30:
-            raise SettingsError("Smallstep timeout must be between zero and 30 seconds")
-        if not 1024 <= agent_ca_max_response_bytes <= 1024 * 1024:
-            raise SettingsError(
-                "Smallstep response limit must be between 1024 bytes and one MiB"
-            )
-        if step_ca_enabled:
-            try:
-                agent_ca_certificate_lifetime_seconds = int(
-                    os.environ.get(
-                        "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "2592000"
-                    )
-                )
-            except ValueError as error:
-                raise SettingsError(
-                    "Smallstep certificate lifetime must be an integer between 90 and 2592000 seconds"
-                ) from error
-            if not 90 <= agent_ca_certificate_lifetime_seconds <= 2592000:
-                raise SettingsError(
-                    "Smallstep certificate lifetime must be between 90 and 2592000 seconds"
-                )
-        else:
-            agent_ca_certificate_lifetime_seconds = 2592000
-        agent_proxy_auth = (
-            _agent_proxy_auth_secret("VONK_AGENT_PROXY_AUTH_FILE", production=True)
-            if agent_enabled
-            else b""
-        )
-        agent_artifact_root = _absolute_root(
-            "VONK_AGENT_ARTIFACT_ROOT", "/state/agent-artifacts"
-        )
-        workload_tuf_metadata_root = _absolute_root(
-            "VONK_WORKLOAD_TUF_METADATA_ROOT", "/state/workload-tuf/metadata"
-        )
-        workload_tuf_target_root = _absolute_root(
-            "VONK_WORKLOAD_TUF_TARGET_ROOT", "/state/workload-tuf/targets"
-        )
-        agent_roots = (
-            agent_artifact_root,
-            workload_tuf_metadata_root,
-            workload_tuf_target_root,
-        )
-        if any(
-            left == right or left.is_relative_to(right) or right.is_relative_to(left)
-            for index, left in enumerate(agent_roots)
-            for right in agent_roots[index + 1 :]
-        ):
-            raise SettingsError(
-                "agent artifact and workload TUF roots must be distinct and nonoverlapping"
-            )
-        package_helper_grant_private_key_path = (
-            _secret_path("VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE")
-            if os.environ.get("VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE")
-            else None
-        )
-        package_helper_receipt_private_key_path = (
-            _secret_path("VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE")
-            if os.environ.get("VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE")
-            else None
-        )
-        host_runtime_grant_private_key_path = (
-            _secret_path("VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE")
-            if os.environ.get("VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE")
-            else None
-        )
-        recipe_library_api_url = os.environ.get(
-            "VONK_RECIPE_LIBRARY_API_URL", "https://api.github.com"
-        ).rstrip("/")
-        if recipe_library_api_url not in {
-            "https://api.github.com",
-            "http://caddy:8083",
-        }:
-            raise SettingsError(
-                "recipe library API URL must be GitHub or the fixed internal relay"
-            )
-        recipe_library_release = (
-            os.environ.get("VONK_RECIPE_LIBRARY_RELEASE", "latest").strip() or "latest"
-        )
-        if recipe_library_release != "latest" and not re.fullmatch(
-            r"v[0-9]+\.[0-9]+\.[0-9]+", recipe_library_release
-        ):
-            raise SettingsError(
-                "recipe library release must be latest or an exact vMAJOR.MINOR.PATCH tag"
-            )
-        recipe_library_package_url = (
-            os.environ.get("VONK_RECIPE_LIBRARY_PACKAGE_URL", "").rstrip("/") or None
-        )
-        if recipe_library_package_url is not None:
-            parsed_package = urlsplit(recipe_library_package_url)
-            package_loopback = parsed_package.hostname in {
-                "localhost",
-                "127.0.0.1",
-                "::1",
-                "caddy",
-            }
-            if (
-                not parsed_package.hostname
-                or (
-                    parsed_package.scheme != "https"
-                    and not (parsed_package.scheme == "http" and package_loopback)
-                )
-                or parsed_package.username
-                or parsed_package.password
-                or parsed_package.query
-                or parsed_package.fragment
-                or parsed_package.path not in {"", "/"}
-            ):
-                raise SettingsError(
-                    "recipe library package URL must be a fixed HTTPS origin"
-                )
-        agent_release_api_url = os.environ.get(
-            "VONK_AGENT_RELEASE_API_URL", "https://install.vonkforge.ai"
-        ).rstrip("/")
-        if agent_release_api_url not in {
-            "https://install.vonkforge.ai",
-            "http://caddy:8084",
-        }:
-            raise SettingsError(
-                "agent release API URL must be the public origin or fixed internal relay"
-            )
-        return cls(
-            database_url=database_url,
-            state_path=Path(os.environ.get("VONK_STATE_PATH", "/srv/vonk-forge/state")),
-            deployment_mode=mode,
-            token_signing_key=signing_key,
-            metrics_token=metrics_token,
-            agent_runtime=agent_runtime,
-            agent_controller_origin=agent_controller_origin,
-            agent_enrollment_origin=agent_enrollment_origin,
-            controller_ca_path=controller_ca_path,
-            agent_client_ca=agent_client_ca,
-            agent_intermediate_certificate=agent_intermediate_certificate,
-            agent_intermediate_certificate_path=agent_intermediate_certificate_path,
-            agent_ca_credential_path=agent_ca_credential_path,
-            agent_ca_provisioner_public_jwk_path=agent_ca_provisioner_public_jwk_path,
-            agent_ca_url=agent_ca_url,
-            agent_ca_root_path=agent_ca_root_path,
-            agent_ca_provisioner_name=agent_ca_provisioner_name,
-            agent_ca_provisioner_kid=agent_ca_provisioner_kid,
-            agent_ca_timeout_seconds=agent_ca_timeout_seconds,
-            agent_ca_max_response_bytes=agent_ca_max_response_bytes,
-            agent_ca_certificate_lifetime_seconds=agent_ca_certificate_lifetime_seconds,
-            agent_artifact_root=agent_artifact_root,
-            workload_tuf_metadata_root=workload_tuf_metadata_root,
-            workload_tuf_target_root=workload_tuf_target_root,
-            agent_proxy_auth=agent_proxy_auth,
-            management_cidrs=management_cidrs,
-            direct_fabric_cidrs=direct_fabric_cidrs,
-            package_helper_grant_private_key_path=package_helper_grant_private_key_path,
-            package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
-            host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
-            recipe_library_api_url=recipe_library_api_url,
-            recipe_library_release=recipe_library_release,
-            recipe_library_package_url=recipe_library_package_url,
-            recipe_library_sync_interval_seconds=recipe_library_sync_interval_seconds,
-            distributed_start_timeout_seconds=distributed_start_timeout_seconds,
-            agent_release_api_url=agent_release_api_url,
-            agent_controller_address=agent_controller_address,
-            agent_service_hostnames=agent_service_hostnames,
-            install_channel=install_channel,
-            artifact_job_storage_max_bytes=artifact_job_storage_max_bytes,
-            artifact_job_retention_seconds=artifact_job_retention_seconds,
-            model_cache_root=_absolute_root(
-                "VONK_MODEL_CACHE_ROOT", "/state/model-cache"
-            ),
-            model_cache_reserve_bytes=model_cache_reserve_bytes,
-            model_cache_parallel_downloads=model_cache_parallel_downloads,
-            recipe_image_parallel_preparations=recipe_image_parallel_preparations,
-            recipe_build_parallel_preparations=recipe_build_parallel_preparations,
-            huggingface_token_path=_optional_secret_path("VONK_HF_TOKEN_FILE"),
-        )
-
-
-@dataclass(frozen=True)
-class WorkerSettings:
-    """Minimal production-worker settings without repository or API authority."""
-
-    database_url: str
-    deployment_mode: str
-    management_cidrs: str
-    direct_fabric_cidrs: str
-    state_path: Path
-    agent_artifact_root: Path
-    artifact_job_storage_max_bytes: int
-    artifact_job_retention_seconds: int
-    artifact_job_reconcile_interval_seconds: int
-    artifact_job_reconcile_batch_limit: int
-    distributed_start_timeout_seconds: int = 3600
-    model_cache_root: Path = Path("/state/model-cache")
-    model_cache_reserve_bytes: int = 10 * 1024**3
-    model_cache_parallel_downloads: int = 8
-    recipe_image_parallel_preparations: int = 4
-    recipe_build_parallel_preparations: int = 2
-    huggingface_token_path: Path | None = None
-
-    @classmethod
-    def from_env_and_secrets(cls) -> WorkerSettings:
-        mode = os.environ.get("VONK_DEPLOYMENT_MODE", "development")
-        if mode not in {"development", "test", "production"}:
-            raise SettingsError("VONK_DEPLOYMENT_MODE is invalid")
-        database_url = _secret(
-            "VONK_DATABASE_URL_FILE",
-            production=mode == "production",
-        )
-        if urlsplit(database_url).scheme not in {
-            "postgresql",
-            "postgresql+psycopg",
-        }:
-            raise SettingsError("database URL must use PostgreSQL")
-        management_cidrs = _secret_or_file(
-            "VONK_MANAGEMENT_CIDRS",
-            "VONK_MANAGEMENT_CIDRS_FILE",
-        )
-        direct_fabric_cidrs = os.environ.get(
-            "VONK_DIRECT_FABRIC_CIDRS",
-            "",
-        ).strip()
-        if mode == "production" and not management_cidrs:
-            raise SettingsError("VONK_MANAGEMENT_CIDRS is required in production")
-        if not management_cidrs and direct_fabric_cidrs:
-            raise SettingsError(
-                "VONK_MANAGEMENT_CIDRS is required when direct fabric CIDRs are set"
-            )
-        if management_cidrs:
-            try:
-                ManagementAddressPolicy.parse(
-                    management_cidrs,
-                    forbidden_cidrs=direct_fabric_cidrs,
-                )
-            except PresenceError as error:
-                raise SettingsError(str(error)) from error
-        try:
-            artifact_job_storage_max_bytes = int(
-                os.environ.get("VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES", str(16 * 1024**3))
-            )
-            artifact_job_retention_seconds = int(
-                os.environ.get(
-                    "VONK_ARTIFACT_JOB_RETENTION_SECONDS", str(7 * 24 * 60 * 60)
-                )
-            )
-            artifact_job_reconcile_interval_seconds = int(
-                os.environ.get("VONK_ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS", "3600")
-            )
-            artifact_job_reconcile_batch_limit = int(
-                os.environ.get("VONK_ARTIFACT_JOB_RECONCILE_BATCH_LIMIT", "1000")
-            )
-            model_cache_reserve_bytes = int(
-                os.environ.get("VONK_MODEL_CACHE_RESERVE_BYTES", str(10 * 1024**3))
-            )
-            model_cache_parallel_downloads = int(
-                os.environ.get("VONK_MODEL_CACHE_PARALLEL_DOWNLOADS", "8")
-            )
-            recipe_image_parallel_preparations = int(
-                os.environ.get("VONK_RECIPE_IMAGE_PARALLEL_PREPARATIONS", "4")
-            )
-            recipe_build_parallel_preparations = int(
-                os.environ.get("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "2")
-            )
-        except ValueError as error:
-            raise SettingsError(
-                "artifact job worker settings must be integers"
-            ) from error
-        if not 1024**3 <= artifact_job_storage_max_bytes <= 1024**4:
-            raise SettingsError(
-                "artifact job storage maximum must be between 1 GiB and 1 TiB"
-            )
-        if not 3600 <= artifact_job_retention_seconds <= 365 * 24 * 60 * 60:
-            raise SettingsError(
-                "artifact job retention must be between one hour and one year"
-            )
-        if not 60 <= artifact_job_reconcile_interval_seconds <= 7 * 24 * 60 * 60:
-            raise SettingsError(
-                "artifact job reconciliation interval must be between one minute and one week"
-            )
-        if not 1 <= artifact_job_reconcile_batch_limit <= 10000:
-            raise SettingsError(
-                "artifact job reconciliation batch limit must be between 1 and 10000"
-            )
-        if not 0 <= model_cache_reserve_bytes <= 1024**4:
-            raise SettingsError("model cache reserve must be between zero and one TiB")
-        if not 1 <= model_cache_parallel_downloads <= 16:
-            raise SettingsError(
-                "model cache parallel downloads must be between 1 and 16"
-            )
-        if not 1 <= recipe_image_parallel_preparations <= 16:
-            raise SettingsError(
-                "recipe image parallel preparations must be between 1 and 16"
-            )
-        if (
-            not 1
-            <= recipe_build_parallel_preparations
-            <= recipe_image_parallel_preparations
-        ):
-            raise SettingsError(
-                "recipe build parallel preparations must not exceed image preparations"
-            )
-        return cls(
-            database_url=database_url,
-            distributed_start_timeout_seconds=_distributed_start_timeout(),
-            deployment_mode=mode,
-            management_cidrs=management_cidrs,
-            direct_fabric_cidrs=direct_fabric_cidrs,
-            state_path=_absolute_root("VONK_STATE_PATH", "/srv/vonk-forge/state"),
-            agent_artifact_root=_absolute_root(
-                "VONK_AGENT_ARTIFACT_ROOT", "/state/agent-artifacts"
-            ),
-            artifact_job_storage_max_bytes=artifact_job_storage_max_bytes,
-            artifact_job_retention_seconds=artifact_job_retention_seconds,
-            artifact_job_reconcile_interval_seconds=(
-                artifact_job_reconcile_interval_seconds
-            ),
-            artifact_job_reconcile_batch_limit=artifact_job_reconcile_batch_limit,
-            model_cache_root=_absolute_root(
-                "VONK_MODEL_CACHE_ROOT", "/state/model-cache"
-            ),
-            model_cache_reserve_bytes=model_cache_reserve_bytes,
-            model_cache_parallel_downloads=model_cache_parallel_downloads,
-            recipe_image_parallel_preparations=recipe_image_parallel_preparations,
-            recipe_build_parallel_preparations=recipe_build_parallel_preparations,
-            huggingface_token_path=_optional_secret_path("VONK_HF_TOKEN_FILE"),
-        )
-
-
-def _distributed_start_timeout() -> int:
-    try:
-        distributed_start_timeout_seconds = int(
-            os.environ.get("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", "3600")
-        )
-    except ValueError as error:
-        raise SettingsError("distributed start timeout must be an integer") from error
-    if not 60 <= distributed_start_timeout_seconds <= 3600:
-        raise SettingsError(
-            "distributed start timeout must be between 60 and 3600 seconds"
-        )
-    return distributed_start_timeout_seconds
+# Tuning budgets.
+ARTIFACT_JOB_STORAGE_MAX_BYTES = 16 * 1024**3
+ARTIFACT_JOB_RETENTION_SECONDS = 7 * 24 * 60 * 60
+ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS = 3600
+ARTIFACT_JOB_RECONCILE_BATCH_LIMIT = 1000
+MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3
+MODEL_CACHE_PARALLEL_DOWNLOADS = 8
+RECIPE_IMAGE_PARALLEL_PREPARATIONS = 4
+RECIPE_BUILD_PARALLEL_PREPARATIONS = 2
+RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS = 900
+DISTRIBUTED_START_TIMEOUT_SECONDS = 3600
 
 
 @dataclass(frozen=True, slots=True)
@@ -767,75 +68,371 @@ class DatabaseWaitBudgets:
     The engine applies the connection and pool budgets per connection. The
     admission budget narrows ``lock_timeout`` inside admission transactions so
     implicit foreign-key and unique-index waits are rescheduled promptly.
+    Invariants: admission lock <= lock <= statement <= transaction, and
+    idle-in-transaction <= transaction.
     """
 
-    lock_timeout_ms: int
-    admission_lock_timeout_ms: int
-    statement_timeout_ms: int
-    transaction_timeout_ms: int
-    idle_in_transaction_timeout_ms: int
-    pool_size: int
-    max_overflow: int
-    pool_timeout_seconds: float
+    lock_timeout_ms: int = 30_000
+    admission_lock_timeout_ms: int = 750
+    statement_timeout_ms: int = 120_000
+    transaction_timeout_ms: int = 300_000
+    idle_in_transaction_timeout_ms: int = 60_000
+    pool_size: int = 5
+    max_overflow: int = 10
+    pool_timeout_seconds: float = 30.0
 
 
-def _bounded_int_env(name: str, default: int, low: int, high: int) -> int:
+DATABASE_WAIT_BUDGETS = DatabaseWaitBudgets()
+
+_AGENT_PROXY_AUTH_PATTERN = re.compile(rb"[A-Za-z0-9_-]{32,}\Z")
+_RELEASE_TAG = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+\Z")
+_HOSTNAME = re.compile(
+    r"(?=.{1,253}\Z)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\Z"
+)
+_GO_DURATION_PART = re.compile(r"([0-9]+)(h|m|s)")
+_DURATION_UNITS = {"h": 3600, "m": 60, "s": 1}
+_EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY = secrets.token_bytes(32)
+
+type _Network = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
+def _read_secret(path: Path) -> bytes:
+    """Read one regular, non-symlink secret file or fail closed."""
     try:
-        value = int(os.environ.get(name, str(default)))
-    except ValueError as error:
-        raise SettingsError(f"{name} must be an integer") from error
-    if not low <= value <= high:
-        raise SettingsError(f"{name} must be between {low} and {high}")
-    return value
-
-
-def _bounded_float_env(name: str, default: float, low: float, high: float) -> float:
+        metadata = path.lstat()
+    except FileNotFoundError as error:
+        raise SettingsError(f"secret {path.name} is missing") from error
+    except OSError as error:
+        raise SettingsError(f"secret {path.name} is unreadable") from error
+    if not stat.S_ISREG(metadata.st_mode):
+        raise SettingsError(f"secret {path.name} must be a regular non-symlink file")
     try:
-        value = float(os.environ.get(name, str(default)))
-    except ValueError as error:
-        raise SettingsError(f"{name} must be numeric") from error
-    if not low <= value <= high:
-        raise SettingsError(f"{name} must be between {low} and {high}")
-    return value
+        return path.read_bytes()
+    except OSError as error:
+        raise SettingsError(f"secret {path.name} is unreadable") from error
 
 
-def database_wait_budgets() -> DatabaseWaitBudgets:
-    """Read and validate the finite wait budgets owned by configuration."""
+def _regular_file(path: Path) -> Path | None:
+    """Return a present, non-empty, regular file path without reading it."""
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size == 0:
+        return None
+    return path
 
-    lock = _bounded_int_env("VONK_DATABASE_LOCK_TIMEOUT_MS", 30_000, 1_000, 600_000)
-    admission_lock = _bounded_int_env(
-        "VONK_DATABASE_ADMISSION_LOCK_TIMEOUT_MS", 750, 1, 600_000
+
+def _parse_networks(raw: str, label: str) -> list[_Network]:
+    """Parse CIDRs leniently: strip host bits, drop junk and duplicates."""
+    networks: list[_Network] = []
+    for item in raw.replace(",", " ").split():
+        try:
+            network = ipaddress.ip_network(item, strict=False)
+        except ValueError:
+            _LOGGER.warning("ignoring unparseable %s entry %r", label, item)
+            continue
+        if str(network) != item:
+            _LOGGER.warning("normalized %s entry %s to %s", label, item, network)
+        if network not in networks:
+            networks.append(network)
+    return networks
+
+
+def _overlaps(left: _Network, right: _Network) -> bool:
+    if isinstance(left, ipaddress.IPv4Network) and isinstance(
+        right, ipaddress.IPv4Network
+    ):
+        return left.overlaps(right)
+    if isinstance(left, ipaddress.IPv6Network) and isinstance(
+        right, ipaddress.IPv6Network
+    ):
+        return left.overlaps(right)
+    return False
+
+
+def _network_for_address(address: str | None) -> _Network | None:
+    if address is None:
+        return None
+    parsed = ipaddress.ip_address(address)
+    prefix = 24 if parsed.version == 4 else 64
+    return ipaddress.ip_network(f"{parsed}/{prefix}", strict=False)
+
+
+def _normalize_networks(
+    management_raw: str, fabric_raw: str, nas_lan_ip: str | None
+) -> tuple[str, str]:
+    management = _parse_networks(management_raw, "management CIDR")
+    if not management:
+        default = _network_for_address(nas_lan_ip)
+        if default is not None:
+            _LOGGER.warning(
+                "no management CIDRs configured; using %s around the NAS LAN IP",
+                default,
+            )
+            management = [default]
+    fabric: list[_Network] = []
+    for network in _parse_networks(fabric_raw, "direct fabric CIDR"):
+        # Management and fabric networks must be disjoint. An overlapping
+        # fabric entry is the ambiguous one: the operator explicitly trusts the
+        # management range, so the fabric entry is ignored rather than refusing
+        # to start.
+        if any(_overlaps(network, allowed) for allowed in management):
+            _LOGGER.warning(
+                "ignoring direct fabric CIDR %s: it overlaps a management CIDR",
+                network,
+            )
+            continue
+        fabric.append(network)
+    return (
+        ",".join(str(network) for network in management),
+        ",".join(str(network) for network in fabric),
     )
-    statement = _bounded_int_env(
-        "VONK_DATABASE_STATEMENT_TIMEOUT_MS", 120_000, 1_000, 3_600_000
-    )
-    transaction = _bounded_int_env(
-        "VONK_DATABASE_TRANSACTION_TIMEOUT_MS", 300_000, 1_000, 3_600_000
-    )
-    idle = _bounded_int_env(
-        "VONK_DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS", 60_000, 1_000, 600_000
-    )
-    if admission_lock > lock:
-        raise SettingsError(
-            "database admission lock budget must not exceed the lock budget"
+
+
+def _nas_lan_ip(raw: str) -> str | None:
+    value = raw.strip()
+    if not value:
+        return None
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        _LOGGER.warning("ignoring invalid VONK_NAS_LAN_IP %r", value)
+        return None
+    if address.is_unspecified or address.is_multicast:
+        _LOGGER.warning("ignoring unusable VONK_NAS_LAN_IP %s", address)
+        return None
+    return str(address)
+
+
+def _control_hostname(raw: str) -> str:
+    hostname = raw.strip().lower().rstrip(".")
+    if hostname and _HOSTNAME.fullmatch(hostname) is None:
+        raise SettingsError("VONK_CONTROL_HOSTNAME must be a DNS hostname")
+    return hostname
+
+
+def parse_go_duration_seconds(value: object) -> int | None:
+    """Parse the step-ca duration subset used for certificate claims."""
+    if not isinstance(value, str) or not value:
+        return None
+    total = 0
+    position = 0
+    for match in _GO_DURATION_PART.finditer(value):
+        if match.start() != position:
+            return None
+        total += int(match.group(1)) * _DURATION_UNITS[match.group(2)]
+        position = match.end()
+    return total if position == len(value) else None
+
+
+def certificate_lifetime_from_step_ca_config(path: Path) -> int:
+    """Read the agent provisioner's default TLS duration; fall back to 30 days."""
+    try:
+        config = json.loads(path.read_bytes())
+        provisioners = config["authority"]["provisioners"]
+        provisioner = next(
+            item
+            for item in provisioners
+            if isinstance(item, dict) and item.get("name") == AGENT_CA_PROVISIONER_NAME
         )
-    if not lock <= statement <= transaction:
-        raise SettingsError(
-            "database wait budgets must satisfy lock <= statement <= transaction"
+        seconds = parse_go_duration_seconds(
+            provisioner["claims"]["defaultTLSCertDuration"]
         )
-    if idle > transaction:
-        raise SettingsError(
-            "idle-in-transaction budget must not exceed the transaction budget"
+    except (OSError, ValueError, KeyError, TypeError, StopIteration):
+        seconds = None
+    if (
+        seconds is None
+        or not 90 <= seconds <= DEFAULT_AGENT_CERTIFICATE_LIFETIME_SECONDS
+    ):
+        _LOGGER.warning(
+            "agent certificate lifetime unavailable from step-ca config; using %s s",
+            DEFAULT_AGENT_CERTIFICATE_LIFETIME_SECONDS,
         )
-    return DatabaseWaitBudgets(
-        lock_timeout_ms=lock,
-        admission_lock_timeout_ms=admission_lock,
-        statement_timeout_ms=statement,
-        transaction_timeout_ms=transaction,
-        idle_in_transaction_timeout_ms=idle,
-        pool_size=_bounded_int_env("VONK_DATABASE_POOL_SIZE", 5, 1, 64),
-        max_overflow=_bounded_int_env("VONK_DATABASE_MAX_OVERFLOW", 10, 0, 64),
-        pool_timeout_seconds=_bounded_float_env(
-            "VONK_DATABASE_POOL_TIMEOUT_SECONDS", 30.0, 1.0, 300.0
-        ),
-    )
+        return DEFAULT_AGENT_CERTIFICATE_LIFETIME_SECONDS
+    return seconds
+
+
+@dataclass(frozen=True)
+class Settings:
+    """The Controller configuration shared by the API and the worker."""
+
+    database_url: str
+    deployment_mode: str = "production"
+    control_hostname: str = ""
+    nas_lan_ip: str | None = None
+    management_cidrs: str = ""
+    direct_fabric_cidrs: str = ""
+    install_channel: str = "stable"
+    recipe_library_release: str = "latest"
+    secrets_root: Path = SECRETS_ROOT
+    state_path: Path = STATE_ROOT
+    agent_artifact_root: Path = AGENT_ARTIFACT_ROOT
+    workload_tuf_metadata_root: Path = WORKLOAD_TUF_METADATA_ROOT
+    workload_tuf_target_root: Path = WORKLOAD_TUF_TARGET_ROOT
+    model_cache_root: Path = MODEL_CACHE_ROOT
+
+    @classmethod
+    def from_env_and_secrets(cls) -> Settings:
+        mode = os.environ.get("VONK_DEPLOYMENT_MODE", "production").strip()
+        if mode not in {"development", "test", "production"}:
+            _LOGGER.warning("unknown VONK_DEPLOYMENT_MODE %r; using production", mode)
+            mode = "production"
+        database_url = _read_secret(SECRETS_ROOT / "database-url").decode().strip()
+        if urlsplit(database_url).scheme not in {"postgresql", "postgresql+psycopg"}:
+            raise SettingsError("database URL must use PostgreSQL")
+        nas_lan_ip = _nas_lan_ip(os.environ.get("VONK_NAS_LAN_IP", ""))
+        management_cidrs, direct_fabric_cidrs = _normalize_networks(
+            os.environ.get("VONK_MANAGEMENT_CIDRS", ""),
+            os.environ.get("VONK_DIRECT_FABRIC_CIDRS", ""),
+            nas_lan_ip,
+        )
+        control_hostname = _control_hostname(
+            os.environ.get("VONK_CONTROL_HOSTNAME", "")
+        )
+        if mode == "production":
+            if not control_hostname:
+                raise SettingsError("VONK_CONTROL_HOSTNAME is required in production")
+            if not management_cidrs:
+                raise SettingsError(
+                    "VONK_MANAGEMENT_CIDRS or VONK_NAS_LAN_IP is required in production"
+                )
+        install_channel = os.environ.get("VONK_INSTALL_CHANNEL", "").strip()
+        if install_channel not in {"dev", "stable"}:
+            if install_channel:
+                _LOGGER.warning(
+                    "unknown VONK_INSTALL_CHANNEL %r; using stable", install_channel
+                )
+            install_channel = "stable"
+        release = os.environ.get("VONK_RECIPE_LIBRARY_RELEASE", "").strip()
+        if release != "latest" and _RELEASE_TAG.fullmatch(release) is None:
+            if release:
+                _LOGGER.warning(
+                    "invalid VONK_RECIPE_LIBRARY_RELEASE %r; using latest", release
+                )
+            release = "latest"
+        return cls(
+            database_url=database_url,
+            deployment_mode=mode,
+            control_hostname=control_hostname,
+            nas_lan_ip=nas_lan_ip,
+            management_cidrs=management_cidrs,
+            direct_fabric_cidrs=direct_fabric_cidrs,
+            install_channel=install_channel,
+            recipe_library_release=release,
+            secrets_root=SECRETS_ROOT,
+        )
+
+    @property
+    def database_host(self) -> str | None:
+        return urlsplit(self.database_url).hostname
+
+    @property
+    def agent_runtime_enabled(self) -> bool:
+        return self.deployment_mode == "production"
+
+    # Hostnames and origins derived from the one control hostname.
+
+    @property
+    def agent_service_hostnames(self) -> tuple[str, ...]:
+        host = self.control_hostname
+        return (host, f"enroll.{host}", f"agents.{host}", f"registry.{host}")
+
+    @property
+    def agent_controller_origin(self) -> str:
+        return f"https://agents.{self.control_hostname}:8443"
+
+    @property
+    def agent_enrollment_origin(self) -> str:
+        return f"https://enroll.{self.control_hostname}:8443"
+
+    # Secret file locations (read by their consumers).
+
+    @property
+    def controller_ca_path(self) -> Path:
+        return self.secrets_root / "controller-ca"
+
+    @property
+    def agent_intermediate_certificate_path(self) -> Path:
+        return self.secrets_root / "agent-intermediate-certificate"
+
+    @property
+    def agent_ca_credential_path(self) -> Path:
+        return self.secrets_root / "agent-ca-credential"
+
+    @property
+    def agent_ca_provisioner_public_jwk_path(self) -> Path:
+        return self.secrets_root / "agent-ca-provisioner-public-jwk"
+
+    @property
+    def agent_ca_root_path(self) -> Path:
+        return self.secrets_root / "step-ca-root-certificate"
+
+    @property
+    def package_helper_grant_private_key_path(self) -> Path | None:
+        return _regular_file(self.secrets_root / "package-helper-grant-private-key")
+
+    @property
+    def package_helper_receipt_private_key_path(self) -> Path | None:
+        return _regular_file(self.secrets_root / "package-helper-receipt-private-key")
+
+    @property
+    def host_runtime_grant_private_key_path(self) -> Path | None:
+        return _regular_file(self.secrets_root / "host-runtime-grant-private-key")
+
+    @property
+    def huggingface_token_path(self) -> Path | None:
+        # Optional: absent or empty keeps public model downloads anonymous.
+        return _regular_file(self.secrets_root / "hf-token")
+
+    # API-only secret material, read and validated on first use.
+
+    @cached_property
+    def token_signing_key(self) -> bytes:
+        path = self.secrets_root / "token-signing-key"
+        if self.deployment_mode != "production" and not path.exists():
+            return _EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY
+        key = _read_secret(path).strip()
+        if len(key) < 32:
+            raise SettingsError("token signing key must contain at least 32 bytes")
+        return key
+
+    @cached_property
+    def metrics_token(self) -> str:
+        path = self.secrets_root / "metrics-token"
+        if self.deployment_mode != "production" and not path.exists():
+            return "development-metrics-token"
+        token = _read_secret(path).decode(errors="replace").strip()
+        if len(token) < 16 or any(character.isspace() for character in token):
+            raise SettingsError("metrics token is invalid")
+        return token
+
+    @cached_property
+    def agent_proxy_auth(self) -> bytes:
+        if not self.agent_runtime_enabled:
+            return b""
+        value = _read_secret(self.secrets_root / "agent-proxy-auth").rstrip(b"\r\n")
+        if _AGENT_PROXY_AUTH_PATTERN.fullmatch(value) is None:
+            raise SettingsError(
+                "agent proxy auth must contain one base64url-like token of at "
+                "least 32 characters"
+            )
+        return value
+
+    @cached_property
+    def agent_ca_provisioner_kid(self) -> str:
+        raw = _read_secret(self.agent_ca_provisioner_public_jwk_path)
+        try:
+            kid = json.loads(raw)["kid"]
+        except (ValueError, KeyError, TypeError) as error:
+            raise SettingsError("agent CA provisioner public JWK has no kid") from error
+        if not isinstance(kid, str) or not kid:
+            raise SettingsError("agent CA provisioner public JWK has no kid")
+        return kid
+
+    @cached_property
+    def agent_ca_certificate_lifetime_seconds(self) -> int:
+        return certificate_lifetime_from_step_ca_config(
+            self.secrets_root / "step-ca" / "ca.json"
+        )

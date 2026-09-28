@@ -32,6 +32,8 @@ def _version_pinned(image: str) -> bool:
     return (
         "@sha256:" in image or VERSIONED_IMAGE.fullmatch(image) is not None
     ) and bare.rsplit(":", 1)[-1].lower() not in FLOATING_TAGS
+
+
 SERVICES = {
     "tailscale-gateway",
     "tailscale-configurator",
@@ -184,15 +186,14 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
     return services
 
 
-def _materialize_relative_secret_paths(document: dict[str, Any]) -> None:
+def _validate_secret_paths(document: dict[str, Any]) -> None:
     secrets = _mapping(document.get("secrets"), "secrets")
     if set(secrets) != set(SECRET_FILES):
         raise BundleError("Compose secret topology is not canonical")
     for name, relative in SECRET_FILES.items():
         secret = _mapping(secrets[name], f"secret {name}")
-        if set(secret) != {"file"} or not isinstance(secret["file"], str):
-            raise BundleError(f"Compose secret {name} must be one file-backed secret")
-        secret["file"] = f"./secrets/{relative}"
+        if secret != {"file": f"./secrets/{relative}"}:
+            raise BundleError(f"Compose secret {name} must be ./secrets/{relative}")
 
 
 def _materialize_embedded_configs(
@@ -274,7 +275,7 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
     renderer._resolve_runtime_images(document, channel)
     renderer._resolve_extension_images(document, channel)
     runtime_files = _materialize_embedded_configs(document)
-    _materialize_relative_secret_paths(document)
+    _validate_secret_paths(document)
     compose = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     return {
         "schema_version": 2,
@@ -291,6 +292,9 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
             {"env": "VONK_INSTALL_CHANNEL", "value": channel},
         ],
+        # Only NAS_LAN_IP and the control hostname are asked; the others take
+        # their default (the management CIDRs derive from the NAS address)
+        # and are reported so the operator can change them in .env later.
         "required_values": [
             _required_value("NAS_LAN_IP", "Reserved NAS LAN IP", validation="ipv4"),
             _required_value(
@@ -309,51 +313,26 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 "Control hostname (vonk-forge.<tailnet>.ts.net)",
                 validation="hostname",
             ),
-            _required_value(
-                "VONK_AGENT_ENROLL_HOSTNAME",
-                "Agent enrollment hostname (enroll.<tailnet>.ts.net)",
-                validation="hostname",
-            ),
-            _required_value(
-                "VONK_AGENT_HOSTNAME",
-                "Agent controller hostname (agents.<tailnet>.ts.net)",
-                validation="hostname",
-            ),
-            _required_value(
-                "VONK_REGISTRY_HOSTNAME",
-                "Registry hostname (registry.<tailnet>.ts.net)",
-                validation="hostname",
-            ),
         ],
         "secrets": [
             {
-                "file": "admin-password",
-                "prompt": "Vonk Forge administrator password",
-                "generate_bytes": 24,
-                "generate_in_lab": True,
-            },
-            {
                 "file": "tailscale-oauth-client-id",
                 "prompt": "Tailscale OAuth client ID",
-                "generate_bytes": None,
                 "secure_remote_only": True,
             },
             {
                 "file": "tailscale-oauth-client-secret",
                 "prompt": "Tailscale OAuth client secret",
-                "generate_bytes": None,
                 "secure_remote_only": True,
             },
             {
                 "file": "litellm-upstream-key",
-                "prompt": "LiteLLM upstream provider API key",
-                "generate_bytes": None,
-                "secure_remote_only": True,
+                "prompt": "LiteLLM upstream provider API key (optional; leave blank to skip)",
+                "optional": True,
             },
             {
                 "file": "hf-token",
                 "prompt": "Hugging Face access token (optional; leave blank for public models)",
-                "generate_bytes": None,
                 "optional": True,
             },
         ],
@@ -362,47 +341,36 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             "default": "secure-remote",
             "lab_value": "lab",
             "secure_remote_value": "secure-remote",
-            "lab_required_values": [
-                _required_value("NAS_LAN_IP", "NAS reserved LAN IP", validation="ipv4")
-            ],
             "lab_values": [
-                {"env": "VONK_MANAGEMENT_CIDRS", "value": "192.168.1.0/24"},
-                {"env": "VONK_DIRECT_FABRIC_CIDRS", "value": "192.168.100.0/24,192.168.101.0/24"},
                 {"env": "VONK_CONTROL_HOSTNAME", "value": "vonk-forge.local"},
-                {"env": "VONK_AGENT_ENROLL_HOSTNAME", "value": "enroll.vonk-forge.local"},
-                {"env": "VONK_AGENT_HOSTNAME", "value": "agents.vonk-forge.local"},
-                {"env": "VONK_REGISTRY_HOSTNAME", "value": "registry.vonk-forge.local"},
             ],
         },
+        # Internal credentials, keys, database URLs, and the PKI are always
+        # generated; the administrator password is read from secrets/.
         "generated_secrets": {
             "random_text": [
-                {"file": name, "prompt": prompt, "bytes": 32}
-                for name, prompt in (
-                    ("postgres-password", "PostgreSQL control password"),
-                    ("litellm-database-password", "LiteLLM database password"),
-                    ("token-signing-key", "Controller token-signing key"),
-                    ("metrics-token", "Prometheus metrics token"),
-                    ("litellm-master-key", "LiteLLM administrator key"),
-                    ("grafana-admin-password", "Grafana administrator password"),
-                    ("agent-proxy-auth", "Internal agent proxy token"),
-                    ("hermes-api-key", "Hermes API key"),
-                )
+                {"file": "admin-password", "bytes": 24},
+                *(
+                    {"file": name, "bytes": 32}
+                    for name in (
+                        "postgres-password",
+                        "litellm-database-password",
+                        "token-signing-key",
+                        "metrics-token",
+                        "litellm-master-key",
+                        "grafana-admin-password",
+                        "agent-proxy-auth",
+                        "hermes-api-key",
+                    )
+                ),
+                {"file": "hermes-litellm-key", "bytes": 32, "prefix": "sk-"},
             ],
             "ed25519_pkcs8_pem": [
-                {"file": name, "prompt": prompt}
-                for name, prompt in (
-                    (
-                        "package-helper-grant-private-key.pem",
-                        "Workload package grant Ed25519 key",
-                    ),
-                    (
-                        "package-helper-receipt-private-key.pem",
-                        "Workload receipt Ed25519 key",
-                    ),
-                    (
-                        "host-runtime-grant-private-key.pem",
-                        "Host runtime grant Ed25519 key",
-                    ),
+                {"file": name}
+                for name in (
+                    "package-helper-grant-private-key.pem",
+                    "package-helper-receipt-private-key.pem",
+                    "host-runtime-grant-private-key.pem",
                 )
             ],
             "postgres_urls": [
@@ -428,15 +396,8 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
         },
         "runtime_files": runtime_files,
         "step_ca_controller": {
-            "prompt": "Step CA/controller PKI",
-            "hostname_envs": [
-                "VONK_CONTROL_HOSTNAME",
-                "VONK_AGENT_ENROLL_HOSTNAME",
-                "VONK_AGENT_HOSTNAME",
-                "VONK_REGISTRY_HOSTNAME",
-            ],
+            "hostname_env": "VONK_CONTROL_HOSTNAME",
             "provisioner_name": "vonk-forge-agent",
-            "kid_env": "AGENT_CA_PROVISIONER_KID",
             "password_bytes": 32,
             "files": {
                 "root_certificate": "step-ca/root-certificate",
@@ -455,21 +416,6 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
             "prompt": "Enable the optional Hermes agent?",
             "enabled_value": "hermes",
             "disabled_value": "",
-            "required_values": [
-                _required_value(
-                    "HERMES_DASHBOARD_ORIGIN",
-                    "Hermes dashboard HTTPS origin",
-                    validation="https_origin",
-                )
-            ],
-            "secrets": [
-                {
-                    "file": "hermes-litellm-key",
-                    "prompt": "Dedicated Hermes LiteLLM client key",
-                    "generate_bytes": 32,
-                    "prefix": "sk-",
-                }
-            ],
         },
     }
 

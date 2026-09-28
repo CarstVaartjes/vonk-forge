@@ -79,6 +79,7 @@ COPY pyproject.toml /vonk-cluster-profiles/
 COPY src/cluster_profiles /vonk-cluster-profiles/src/cluster_profiles
 COPY tools/hatch_build.py /vonk-cluster-profiles/tools/hatch_build.py
 COPY schemas/install-release-manifest.schema.json /vonk-cluster-profiles/schemas/install-release-manifest.schema.json
+COPY install/installer-release-public.pem /vonk-cluster-profiles/install/installer-release-public.pem
 COPY control/pyproject.toml ./
 COPY control/uv.lock ./uv.lock
 COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock

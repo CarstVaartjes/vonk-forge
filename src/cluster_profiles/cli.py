@@ -97,7 +97,6 @@ def _parser() -> argparse.ArgumentParser:
         help="Install the signed wheel in this Python environment",
     )
     update.add_argument("--channel", choices=("dev", "stable"), default=None)
-    update.add_argument("--public-key", type=Path, default=None)
     update.add_argument("--origin", default="https://install.vonkforge.ai")
     update.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     return parser
@@ -606,26 +605,17 @@ def _main(
             parser.print_help()
         return 0
     if args.command == "update":
-        key = args.public_key or os.environ.get("VONK_INSTALLER_PUBLIC_KEY_FILE")
-        if key is None:
-            result: dict[str, object] = {
-                "error": "set --public-key to the trusted installer signing public key",
-                "error_type": "update",
-            }
+        try:
+            result: dict[str, object] = run_update(
+                channel=args.channel or configured_update_channel(),
+                origin=args.origin,
+                apply=args.apply,
+            )
+            cache_update_notice(result, origin=args.origin)
+            status = 0
+        except (CliUpdateError, OSError) as error:
+            result = {"error": _sanitize_text(error), "error_type": "update"}
             status = 2
-        else:
-            try:
-                result = run_update(
-                    channel=args.channel or configured_update_channel(),
-                    public_key=Path(key),
-                    origin=args.origin,
-                    apply=args.apply,
-                )
-                cache_update_notice(result, public_key=Path(key), origin=args.origin)
-                status = 0
-            except (CliUpdateError, OSError) as error:
-                result = {"error": _sanitize_text(error), "error_type": "update"}
-                status = 2
         if args.global_json or getattr(args, "json", False):
             print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         else:

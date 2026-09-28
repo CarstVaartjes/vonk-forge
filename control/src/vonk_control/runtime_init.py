@@ -334,12 +334,14 @@ def stage_compose_secrets(
                 owner_gid=1000,
                 mode=0o400,
             )
+    # Public configuration: step-ca owns it, and the Controller group may read
+    # the agent provisioner's certificate lifetime from it.
     stage_private_key(
         source_root / "step-ca-config",
         destination_root / "step-ca" / "ca.json",
         owner_uid=1000,
-        owner_gid=1000,
-        mode=0o400,
+        owner_gid=10001,
+        mode=0o440,
     )
 
 

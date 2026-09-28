@@ -9,6 +9,9 @@ use thiserror::Error;
 use url::Url;
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/vonk-forge-agent/agent.toml";
+/// Controller poll and retry backoff bounds; fixed for every Spark.
+pub const POLL_MIN_SECONDS: u64 = 2;
+pub const POLL_MAX_SECONDS: u64 = 60;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -20,8 +23,10 @@ pub enum ConfigError {
     Unsafe(&'static str),
 }
 
+/// The Spark's site configuration. Keys this agent no longer reads (for
+/// example the retired poll bounds) are ignored, so a Spark set up by an older
+/// release keeps starting after a package upgrade.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct AgentConfig {
     pub enrollment_url: Url,
     pub controller_url: Url,
@@ -29,11 +34,8 @@ pub struct AgentConfig {
     pub ca_sha256: String,
     pub data_dir: PathBuf,
     pub node_id: String,
-    pub poll_min_seconds: u64,
-    pub poll_max_seconds: u64,
     pub fabric_address: Option<std::net::IpAddr>,
     pub fabric_bandwidth_mbps: Option<u64>,
-    pub huggingface_curl_config: Option<PathBuf>,
 }
 
 impl AgentConfig {
@@ -65,13 +67,6 @@ impl AgentConfig {
                 return Err(ConfigError::Unsafe(name));
             }
         }
-        if self
-            .huggingface_curl_config
-            .as_deref()
-            .is_some_and(|path| !canonical_absolute(path))
-        {
-            return Err(ConfigError::Unsafe("huggingface_curl_config"));
-        }
         if self.ca_sha256.len() != 64
             || !self
                 .ca_sha256
@@ -87,12 +82,6 @@ impl AgentConfig {
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         {
             return Err(ConfigError::Unsafe("node_id"));
-        }
-        if self.poll_min_seconds == 0
-            || self.poll_min_seconds > self.poll_max_seconds
-            || self.poll_max_seconds > 300
-        {
-            return Err(ConfigError::Unsafe("poll timing"));
         }
         if self.fabric_address.is_some() != self.fabric_bandwidth_mbps.is_some()
             || self
