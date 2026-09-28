@@ -47,6 +47,7 @@ jobs:
       contents: read
       id-token: write
       packages: write
+      security-events: write
     steps:
       - name: Check out publication tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -243,6 +244,49 @@ jobs:
                 org.opencontainers.image.revision=${{ github.sha }}
               cache-from: type=gha,scope=vonk-forge-litellm
               cache-to: type=gha,mode=max,scope=vonk-forge-litellm
+
+      # Each image built here is scanned by its pushed digest (amd64; the
+      # arm64 variant is built from the same packages) before acceptance.
+      - name: Scan the api image for fixable vulnerabilities
+        uses: ./.github/actions/image-scan
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image: ${{ steps.metadata.outputs.api_image }}@${{ steps.build_api.outputs.digest }}
+          category: development-api
+          # skopeo and its runtime libraries are copied unchanged from the
+          # upstream quay.io/skopeo release image.
+          skip-dirs: /usr/local/lib/skopeo
+      - name: Scan the worker image for fixable vulnerabilities
+        uses: ./.github/actions/image-scan
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image: ${{ steps.metadata.outputs.worker_image }}@${{ steps.build_worker.outputs.digest }}
+          category: development-worker
+          # skopeo and its runtime libraries are copied unchanged from the
+          # upstream quay.io/skopeo release image.
+          skip-dirs: /usr/local/lib/skopeo
+      - name: Scan the hermes image for fixable vulnerabilities
+        if: steps.reuse_hermes.outputs.digest == ''
+        uses: ./.github/actions/image-scan
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image: ghcr.io/carstvaartjes/vonk-forge-hermes@${{ steps.build_hermes.outputs.digest }}
+          category: development-hermes
+          # An upstream application release with a thin layer of ours.
+          gate: "false"
+      - name: Scan the litellm image for fixable vulnerabilities
+        if: steps.reuse_litellm.outputs.digest == ''
+        uses: ./.github/actions/image-scan
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image: ghcr.io/carstvaartjes/vonk-forge-litellm@${{ steps.build_litellm.outputs.digest }}
+          category: development-litellm
+          # An upstream application release with a thin layer of ours.
+          gate: "false"
 
       - name: Remove registry write credentials before acceptance
         shell: bash

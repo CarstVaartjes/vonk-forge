@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# The one entry point for the Python test suites. CI calls it verbatim; run it
+# locally the same way. Every suite runs in the locked control environment.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$root"
+
+usage() {
+    cat <<'USAGE'
+Usage: scripts/test SUITE [--markers EXPR] [--shard I/N] [--durations FILE] [-- PYTEST_ARGS...]
+
+SUITE is one of:
+  repository  tests/
+  control     control/tests, except the built-image checks and the Rust wire
+              bridges (those run in their own lanes)
+  compose     deploy/compose/tests
+  images      control/tests -m built_image, against the images named by
+              VONK_TEST_CONTROLLER_IMAGE / VONK_TEST_WORKER_IMAGE
+
+--markers EXPR    also require this marker expression (for example "not lane")
+--shard I/N       run only shard I of N (1-based), whole files per shard,
+                  balanced by the measured per-file durations in --durations
+                  when given and by test count otherwise
+--durations FILE  schema-1 per-file durations (scripts/collect-pytest-file-durations)
+
+Arguments after -- go to pytest unchanged (for example -x or --junitxml=...).
+USAGE
+}
+
+(($#)) || { usage >&2; exit 2; }
+suite=$1
+shift
+shard=
+durations=
+markers=
+while (($#)); do
+    case "$1" in
+        --markers) markers=${2:?--markers needs an expression}; shift 2 ;;
+        --shard) shard=${2:?--shard needs I/N}; shift 2 ;;
+        --durations) durations=${2:?--durations needs a file}; shift 2 ;;
+        --) shift; break ;;
+        -h|--help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+
+case "$suite" in
+    # selection: which tests; parallel: how they run. prefix: pytest reports
+    # control/tests node IDs relative to control/, its rootdir.
+    repository)
+        paths=(tests) selection=() parallel=(-n auto --dist loadfile) prefix= suite_markers=
+        ;;
+    control)
+        paths=(control/tests) prefix=control/ suite_markers="not built_image"
+        selection=(--ignore-glob='*_wire_bridge.py')
+        parallel=(-n auto --dist loadfile)
+        ;;
+    compose)
+        paths=(deploy/compose/tests) selection=() parallel=(-n auto) prefix= suite_markers=
+        ;;
+    images)
+        paths=(control/tests) selection=() parallel=() prefix=control/ suite_markers=built_image
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
+if [[ -n "$suite_markers" && -n "$markers" ]]; then
+    selection+=(-m "($suite_markers) and ($markers)")
+elif [[ -n "$suite_markers$markers" ]]; then
+    selection+=(-m "$suite_markers$markers")
+fi
+
+run() {
+    uv run --project control --frozen pytest -q -p no:cacheprovider "$@"
+}
+
+if [[ -n "$shard" ]]; then
+    [[ "$shard" =~ ^([0-9]+)/([0-9]+)$ ]] || { echo "--shard must be I/N" >&2; exit 2; }
+    index=$((BASH_REMATCH[1] - 1))
+    total=${BASH_REMATCH[2]}
+    collection=$(mktemp)
+    trap 'rm -f "$collection"' EXIT
+    # Collect exactly what the suite runs (same marker and ignore options).
+    run --collect-only "${selection[@]}" "$@" "${paths[@]}" > "$collection" || {
+        cat "$collection"
+        exit 1
+    }
+    selector=(scripts/select-pytest-shard-files --index "$index" --total "$total" --prefix "$prefix")
+    if [[ -n "$durations" ]]; then
+        selector+=(--durations "$durations" --max-duration-age-hours 720)
+    fi
+    mapfile -t paths < <(grep -E '^[^ ]+\.py::' "$collection" | "${selector[@]}")
+    ((${#paths[@]} > 0)) || { echo "shard $shard selected no files" >&2; exit 1; }
+fi
+
+run "${selection[@]}" "${parallel[@]}" "$@" "${paths[@]}"
