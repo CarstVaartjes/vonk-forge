@@ -5,7 +5,7 @@ command shown by the controller as the normal administrator account. A private
 NAS command looks like:
 
 ```sh
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 VONK_ENROLLMENT_URL=https://enroll.example.test VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
 ```
 
 Do not prefix `curl` or the shell with `sudo`. The installer downloads the
@@ -14,14 +14,16 @@ digest, and then authenticates `sudo` in the foreground terminal. The framed
 privileged handoff runs noninteractively; an expired sudo ticket fails clearly
 without treating the enrollment frame as a password prompt.
 
-For a new Spark, the wizard asks for the enrollment endpoint, controller CA
-fingerprint, one-use pairing token, Spark management IPv4 address, this Spark's
-fabric IPv4 address, and its peer's fabric IPv4 address. The generated private
-NAS command supplies `VONK_CONTROLLER_ADDRESS`, so that address also becomes the
-NAS management address without another prompt. If it is absent, the wizard asks
-for the NAS management address too. The endpoint ports (`8000,8101` and `8888`),
-rendezvous port (`29500`), and fabric bandwidth (`200000` Mbit/s) use validated
-defaults.
+For a new Spark, the generated command supplies the NAS address, enrollment
+endpoint and controller CA fingerprint, so the installer asks only for the
+one-use pairing token. It detects the Spark's own addresses: the management
+address is the one the kernel uses to reach the NAS, the fabric address is the
+only IPv4 address on an active RoCE interface, and the peer is the other end of
+a point-to-point fabric subnet or the fabric link's only known neighbour. It
+asks for any of them only when detection finds none or more than one, and for
+the enrollment values only when they are missing from the command. The endpoint
+ports (`8000,8101` and `8888`), rendezvous port (`29500`), and fabric bandwidth
+(`200000` Mbit/s) are fixed.
 
 Secret input is hidden and never appears in process arguments or environment
 variables. The installer retrieves the bounded bootstrap document through the

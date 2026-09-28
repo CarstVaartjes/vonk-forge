@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -22,7 +21,6 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.settings import SettingsError, WorkerSettings
 from vonk_control.worker import Worker, assemble_production_worker
 
 
@@ -280,66 +278,3 @@ def test_production_worker_binds_build_reuse_to_the_image_cache_root(tmp_path) -
     finally:
         worker.close()
         model_cache.close()
-
-
-def test_production_worker_settings_loads_current_secrets(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    database = tmp_path / "database-url"
-    database.write_text("postgresql://control:test@postgres/control")
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    monkeypatch.setenv("VONK_STATE_PATH", str(tmp_path / "state"))
-
-    settings = WorkerSettings.from_env_and_secrets()
-
-    assert settings.database_url == database.read_text()
-    assert settings.state_path == tmp_path / "state"
-    assert settings.agent_artifact_root == Path("/state/agent-artifacts")
-    assert settings.artifact_job_storage_max_bytes == 16 * 1024**3
-    assert settings.artifact_job_retention_seconds == 7 * 24 * 60 * 60
-    assert settings.artifact_job_reconcile_interval_seconds == 3600
-    assert settings.artifact_job_reconcile_batch_limit == 1000
-    for forbidden in (
-        "repository_path",
-        "git_signing_key_path",
-        "token_signing_key",
-        "metrics_token",
-        "agent_ca_credential_path",
-    ):
-        assert not hasattr(settings, forbidden)
-
-
-@pytest.mark.parametrize(
-    ("name", "value", "message"),
-    [
-        (
-            "VONK_ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS",
-            "59",
-            "reconciliation interval",
-        ),
-        (
-            "VONK_ARTIFACT_JOB_RECONCILE_BATCH_LIMIT",
-            "10001",
-            "batch limit",
-        ),
-    ],
-)
-def test_production_worker_settings_bound_artifact_maintenance(
-    tmp_path,
-    monkeypatch,
-    name,
-    value,
-    message,
-) -> None:
-    database = tmp_path / "database-url"
-    database.write_text("postgresql://control:test@postgres/control")
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
-    monkeypatch.setenv(name, value)
-
-    with pytest.raises(SettingsError, match=message):
-        WorkerSettings.from_env_and_secrets()

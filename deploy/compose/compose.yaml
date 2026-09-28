@@ -8,65 +8,26 @@ x-bounded-logging: &bounded-logging
     max-size: 10m
     max-file: "5"
 
-x-api-environment: &api-environment
-  VONK_DEPLOYMENT_MODE: production
-  VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
-  VONK_HF_TOKEN_FILE: /run/vonk-normalized-secrets/hf-token
-  VONK_TOKEN_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/token-signing-key
-  VONK_METRICS_TOKEN_FILE: /run/vonk-normalized-secrets/metrics-token
-  VONK_STATE_PATH: /state
-  # The API remains on internal networks. Caddy relays only read-only requests
-  # to the explicitly scoped public recipe and agent-release authorities.
-  VONK_RECIPE_LIBRARY_API_URL: http://caddy:8083
-  # Recipes come from signed GitHub releases of the recipe repository: a
-  # release is accepted only after its SHA256SUMS Sigstore attestation verifies
-  # against the pinned publisher, and every asset matches its listed digest.
-  # Asset downloads always use Caddy's repository-scoped relay (built in).
-  # "latest" follows the newest signed release; an exact tag holds a release.
-  VONK_RECIPE_LIBRARY_RELEASE: ${VONK_RECIPE_LIBRARY_RELEASE:-latest}
-  VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS: ${VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS:-900}
-  VONK_DISTRIBUTED_START_TIMEOUT_SECONDS: ${VONK_DISTRIBUTED_START_TIMEOUT_SECONDS:-3600}
-  VONK_AGENT_RELEASE_API_URL: http://caddy:8084
-  VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
+# The Controller's whole site configuration. Everything else (secret paths,
+# internal relays, tuning) is fixed in code. Only the NAS address and the
+# control hostname are required; the rest heals to a sensible default.
+x-control-environment: &control-environment
+  VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set the control hostname}
+  VONK_NAS_LAN_IP: ${NAS_LAN_IP:?set the reserved NAS LAN IP}
+  VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:-}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
-  VONK_AGENT_ARTIFACT_ROOT: /state/agent-artifacts
-  VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:8443
-  VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:8443
-  VONK_AGENT_CONTROLLER_ADDRESS: ${NAS_LAN_IP:?set reserved NAS LAN IP}
   VONK_INSTALL_CHANNEL: ${VONK_INSTALL_CHANNEL:-stable}
-  VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES: ${VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES:-17179869184}
-  VONK_ARTIFACT_JOB_RETENTION_SECONDS: ${VONK_ARTIFACT_JOB_RETENTION_SECONDS:-604800}
-  VONK_AGENT_SERVICE_HOSTNAMES: ${VONK_CONTROL_HOSTNAME:?set Caddy control hostname},${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname},${VONK_AGENT_HOSTNAME:?set Caddy agent hostname},${VONK_REGISTRY_HOSTNAME:?set Caddy registry hostname}
-  VONK_CONTROLLER_CA_FILE: /run/vonk-normalized-secrets/controller-ca
-  VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
-  VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
-  VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-grant-private-key
-  VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-receipt-private-key
-  VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/host-runtime-grant-private-key
-
-x-worker-environment: &worker-environment
-  VONK_DISTRIBUTED_START_TIMEOUT_SECONDS: ${VONK_DISTRIBUTED_START_TIMEOUT_SECONDS:-3600}
-  VONK_DEPLOYMENT_MODE: production
-  VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
-  VONK_HF_TOKEN_FILE: /run/vonk-normalized-secrets/hf-token
-  VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
-  VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
-  VONK_STATE_PATH: /state
-  VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES: ${VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES:-17179869184}
-  VONK_ARTIFACT_JOB_RETENTION_SECONDS: ${VONK_ARTIFACT_JOB_RETENTION_SECONDS:-604800}
-  VONK_ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS: ${VONK_ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS:-3600}
-  VONK_ARTIFACT_JOB_RECONCILE_BATCH_LIMIT: ${VONK_ARTIFACT_JOB_RECONCILE_BATCH_LIMIT:-1000}
+  # "latest" follows the newest signed recipe release; vX.Y.Z holds one.
+  VONK_RECIPE_LIBRARY_RELEASE: ${VONK_RECIPE_LIBRARY_RELEASE:-latest}
 
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:18.6}
+    image: postgres:18.6
     entrypoint: [/usr/local/bin/vonk-postgres-entrypoint]
     command: [postgres]
     restart: unless-stopped
     logging: *bounded-logging
     environment:
-      VONK_BACKUP_INTERVAL_SECONDS: ${VONK_BACKUP_INTERVAL_SECONDS:-86400}
-      VONK_BACKUP_KEEP: ${VONK_BACKUP_KEEP:-7}
       VONK_BACKUP_OFFHOST_PATH: ${VONK_BACKUP_OFFHOST_PATH:-}
       POSTGRES_DB: control
       POSTGRES_USER: control
@@ -103,21 +64,7 @@ services:
     cap_drop: [ALL]
     cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
     security_opt: [no-new-privileges:true]
-    environment:
-      <<: *api-environment
-      VONK_AGENT_RUNTIME: enabled
-      VONK_AGENT_CLIENT_CA_FILE: /run/vonk-normalized-secrets/agent-client-ca
-      VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE: /run/vonk-normalized-secrets/agent-intermediate-certificate
-      VONK_AGENT_CA_CREDENTIAL_FILE: /run/vonk-normalized-secrets/agent-ca-credential
-      VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE: /run/vonk-normalized-secrets/agent-ca-provisioner-public-jwk
-      VONK_AGENT_CA_ROOT_FILE: /run/vonk-normalized-secrets/step-ca-root-certificate
-      VONK_AGENT_CA_URL: https://step-ca:9000
-      VONK_AGENT_CA_PROVISIONER_NAME: ${AGENT_CA_PROVISIONER_NAME:-vonk-forge-agent}
-      VONK_AGENT_CA_PROVISIONER_KID: ${AGENT_CA_PROVISIONER_KID:?set agent CA provisioner key ID}
-      VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
-      VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
-      VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
-      VONK_DEPLOYMENT_OBSERVATIONS_FILE: /run/vonk-deployment-observations/observations.json
+    environment: *control-environment
     secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
@@ -158,8 +105,7 @@ services:
     user: "10001:10001"
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    environment:
-      <<: *worker-environment
+    environment: *control-environment
     secrets: []
     volumes:
       - route-publications:/routes
@@ -182,7 +128,7 @@ services:
       retries: 12
 
   step-ca:
-    image: ${STEP_CA_IMAGE:-smallstep/step-ca:0.30.2}
+    image: smallstep/step-ca:0.30.2
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
@@ -242,7 +188,7 @@ services:
       retries: 10
 
   prometheus:
-    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.15.0}
+    image: prom/prometheus:v3.15.0
     restart: unless-stopped
     logging: *bounded-logging
     command:
@@ -267,7 +213,7 @@ services:
       retries: 12
 
   grafana:
-    image: ${GRAFANA_IMAGE:-grafana/grafana:13.2.2}
+    image: grafana/grafana:13.2.2
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
@@ -295,7 +241,7 @@ services:
       retries: 12
 
   caddy:
-    image: ${CADDY_IMAGE:-caddy:2.11.4}
+    image: caddy:2.11.4
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
@@ -312,11 +258,7 @@ services:
     tmpfs: [/tmp]
     entrypoint: [/bin/sh, /usr/local/bin/vonk-caddy-entrypoint]
     environment:
-      VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set Caddy control hostname}
-      VONK_AGENT_ENROLL_HOSTNAME: ${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}
-      VONK_AGENT_HOSTNAME: ${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}
-      VONK_REGISTRY_HOSTNAME: ${VONK_REGISTRY_HOSTNAME:?set Caddy registry hostname}
-      VONK_BACKEND_PORT: "8443"
+      VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set the control hostname}
     secrets: [agent-client-ca, agent-proxy-auth, controller-server-certificate, controller-server-key]
     networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge, hermes-inference, litellm-edge]
     depends_on:
@@ -329,7 +271,7 @@ services:
       retries: 12
 
   registry:
-    image: ${REGISTRY_IMAGE:-registry:3.1.2}
+    image: registry:3.1.2
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
@@ -346,61 +288,60 @@ services:
       timeout: 5s
       retries: 10
 
+# Every secret is a file the installer generates under ./secrets.
 secrets:
-  # An optional credential used only by the Controller for gated/private
-  # Hugging Face model-cache downloads. Public downloads remain anonymous.
   hf-token:
-    file: "${HF_TOKEN_FILE:-/dev/null}"
+    file: ./secrets/hf-token
   admin-password:
-    file: "${ADMIN_PASSWORD_FILE:?set Vonk administrator password secret file}"
+    file: ./secrets/admin-password
   database-url:
-    file: "${DATABASE_URL_FILE:?set database URL secret file}"
+    file: ./secrets/database-url
   postgres-password:
-    file: "${POSTGRES_PASSWORD_FILE:?set PostgreSQL password secret file}"
+    file: ./secrets/postgres-password
   litellm-database-password:
-    file: "${LITELLM_DATABASE_PASSWORD_FILE:?set LiteLLM database password secret file}"
+    file: ./secrets/litellm-database-password
   token-signing-key:
-    file: "${TOKEN_SIGNING_KEY_FILE:?set token signing key secret file}"
+    file: ./secrets/token-signing-key
   metrics-token:
-    file: "${METRICS_TOKEN_FILE:?set metrics scrape token secret file}"
+    file: ./secrets/metrics-token
   litellm-master-key:
-    file: "${LITELLM_MASTER_KEY_FILE:?set LiteLLM master key secret file}"
+    file: ./secrets/litellm-master-key
   litellm-upstream-key:
-    file: "${LITELLM_UPSTREAM_KEY_FILE:?set LiteLLM upstream key secret file}"
+    file: ./secrets/litellm-upstream-key
   litellm-database-url:
-    file: "${LITELLM_DATABASE_URL_FILE:?set LiteLLM database URL secret file}"
+    file: ./secrets/litellm-database-url
   grafana-admin-password:
-    file: "${GRAFANA_ADMIN_PASSWORD_FILE:?set Grafana admin password secret file}"
+    file: ./secrets/grafana-admin-password
   agent-client-ca:
-    file: "${AGENT_CLIENT_CA_FILE:?set agent client CA certificate secret file}"
+    file: ./secrets/step-ca/root-certificate
   agent-intermediate-certificate:
-    file: "${AGENT_INTERMEDIATE_CERTIFICATE_FILE:?set agent intermediate certificate secret file}"
+    file: ./secrets/step-ca/intermediate-certificate
   controller-ca:
-    file: "${CONTROLLER_CA_FILE:?set public controller CA certificate secret file}"
+    file: ./secrets/step-ca/root-certificate
   controller-server-certificate:
-    file: "${CONTROLLER_SERVER_CERTIFICATE_FILE:?set controller server certificate secret file}"
+    file: ./secrets/controller-server-certificate
   controller-server-key:
-    file: "${CONTROLLER_SERVER_KEY_FILE:?set controller server private key secret file}"
+    file: ./secrets/controller-server-key
   agent-proxy-auth:
-    file: "${AGENT_PROXY_AUTH_FILE:?set agent proxy authentication secret file}"
+    file: ./secrets/agent-proxy-auth
   package-helper-grant-private-key:
-    file: "${PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE:?set workload package helper grant private key file}"
+    file: ./secrets/package-helper-grant-private-key.pem
   package-helper-receipt-private-key:
-    file: "${PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE:?set workload package helper receipt private key file}"
+    file: ./secrets/package-helper-receipt-private-key.pem
   host-runtime-grant-private-key:
-    file: "${HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE:?set host runtime grant private key file}"
+    file: ./secrets/host-runtime-grant-private-key.pem
   agent-ca-credential:
-    file: "${AGENT_CA_CREDENTIAL_FILE:?set agent CA provider credential secret file}"
+    file: ./secrets/agent-ca-credential
   agent-ca-provisioner-public-jwk:
-    file: "${AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE:?set agent CA provisioner public JWK file}"
+    file: ./secrets/agent-ca-provisioner-public-jwk
   step-ca-root-certificate:
-    file: "${STEP_CA_ROOT_CERTIFICATE_FILE:?set step-ca root certificate secret file}"
+    file: ./secrets/step-ca/root-certificate
   step-ca-intermediate-key:
-    file: "${STEP_CA_INTERMEDIATE_KEY_FILE:?set encrypted step-ca intermediate signing key secret file}"
+    file: ./secrets/step-ca/intermediate-key
   step-ca-password:
-    file: "${STEP_CA_PASSWORD_FILE:?set step-ca password secret file}"
+    file: ./secrets/step-ca-password
   step-ca-config:
-    file: "${STEP_CA_CONFIG_FILE:?set generated step-ca configuration file}"
+    file: ./secrets/step-ca/ca.json
 
 networks:
   ingress: {}

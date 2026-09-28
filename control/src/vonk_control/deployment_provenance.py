@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import socket
 import stat
 from collections.abc import Callable, Mapping, Sequence
@@ -55,6 +54,7 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .settings import DEPLOYMENT_OBSERVATIONS_PATH
 from .strict_json import stored_document_detail
 
 CONTROLLER_BUILD_METADATA = Path("/usr/local/share/vonk-forge/controller-build.json")
@@ -75,22 +75,20 @@ def _model_source_provenance(model: ModelDefinition) -> tuple[str, str]:
 
 def local_deployment_observations() -> DeploymentObservations:
     """No GitHub/network reads; malformed configured evidence fails visibly."""
-    path = os.environ.get("VONK_DEPLOYMENT_OBSERVATIONS_FILE")
     observations = DeploymentObservations()
-    if path:
-        observation_path = Path(path)
-        try:
-            metadata = observation_path.lstat()
-        except FileNotFoundError:
-            # A fresh named volume has no host capture until the deployment
-            # helper records the container after its first successful start.
-            pass
-        else:
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 1024 * 1024:
-                raise ValueError("configured deployment observations file is unsafe")
-            observations = DeploymentObservations.model_validate_json(
-                observation_path.read_bytes()
-            )
+    observation_path = DEPLOYMENT_OBSERVATIONS_PATH
+    try:
+        metadata = observation_path.lstat()
+    except FileNotFoundError:
+        # A fresh named volume has no host capture until the deployment
+        # helper records the container after its first successful start.
+        pass
+    else:
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 1024 * 1024:
+            raise ValueError("configured deployment observations file is unsafe")
+        observations = DeploymentObservations.model_validate_json(
+            observation_path.read_bytes()
+        )
     build = None
     if CONTROLLER_BUILD_METADATA.is_file():
         build = ControllerBuildMetadata.model_validate_json(

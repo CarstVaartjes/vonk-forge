@@ -200,33 +200,6 @@ def test_build_engine_bounds_every_wait_only_on_postgres(monkeypatch) -> None:
     ]
 
 
-def test_database_wait_budgets_refuse_out_of_range_values(monkeypatch) -> None:
-    """Configuration is the owner, and an invalid budget is refused, not clamped."""
-
-    from vonk_control.settings import SettingsError, database_wait_budgets
-
-    monkeypatch.delenv("VONK_DATABASE_LOCK_TIMEOUT_MS", raising=False)
-    monkeypatch.setenv("VONK_DATABASE_LOCK_TIMEOUT_MS", "0")
-    with pytest.raises(SettingsError, match="VONK_DATABASE_LOCK_TIMEOUT_MS"):
-        database_wait_budgets()
-
-    monkeypatch.setenv("VONK_DATABASE_LOCK_TIMEOUT_MS", "30000")
-    monkeypatch.setenv("VONK_DATABASE_ADMISSION_LOCK_TIMEOUT_MS", "30001")
-    with pytest.raises(SettingsError, match="admission lock budget"):
-        database_wait_budgets()
-    monkeypatch.setenv("VONK_DATABASE_ADMISSION_LOCK_TIMEOUT_MS", "750")
-    monkeypatch.setenv("VONK_DATABASE_POOL_SIZE", "1000")
-    with pytest.raises(SettingsError, match="VONK_DATABASE_POOL_SIZE"):
-        database_wait_budgets()
-
-    # A lock budget above the statement budget would make the statement bound
-    # unreachable, so the combination is refused rather than reordered.
-    monkeypatch.setenv("VONK_DATABASE_POOL_SIZE", "5")
-    monkeypatch.setenv("VONK_DATABASE_STATEMENT_TIMEOUT_MS", "5000")
-    with pytest.raises(SettingsError, match="lock <= statement <= transaction"):
-        database_wait_budgets()
-
-
 def test_build_engine_sets_every_finite_budget_on_the_server(postgres_engine) -> None:
     """The bounds must reach PostgreSQL, not just the engine's argument list."""
 

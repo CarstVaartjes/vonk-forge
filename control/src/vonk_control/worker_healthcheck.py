@@ -45,12 +45,12 @@ def verify_worker_ready(
 
 def main() -> None:
     from .db import build_engine, session_factory
-    from .settings import WorkerSettings
+    from .settings import Settings
     from .worker import current_worker_instance_id
 
-    worker = WorkerSettings.from_env_and_secrets()
+    settings = Settings.from_env_and_secrets()
     verify_worker_ready(
-        session_factory(build_engine(worker.database_url)),
+        session_factory(build_engine(settings.database_url)),
         process_instance_id=current_worker_instance_id(),
         now=datetime.now(UTC),
     )

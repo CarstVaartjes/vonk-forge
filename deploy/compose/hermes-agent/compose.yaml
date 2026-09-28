@@ -13,23 +13,25 @@ x-hermes-service: &hermes-service
     - no-new-privileges:true
   cap_drop: [ALL]
   cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
-  cpus: ${HERMES_CPUS:-4}
-  mem_limit: ${HERMES_MEMORY_LIMIT:-8g}
-  mem_reservation: ${HERMES_MEMORY_RESERVATION:-4g}
-  shm_size: ${HERMES_SHM_SIZE:-2g}
+  cpus: 4
+  mem_limit: 8g
+  mem_reservation: 4g
+  shm_size: 2g
   tmpfs:
     - /run:size=64m,mode=755,exec
     - /tmp:size=2g,mode=1777
     - /var/tmp:size=1g,mode=1777
   environment: &hermes-environment
-    API_SERVER_CORS_ORIGINS: ${HERMES_DASHBOARD_ORIGIN:-https://hermes-profile-required.invalid}
+    # The entrypoint derives the dashboard origin (svc:hermes-dashboard) from it.
+    VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set the control hostname}
     API_SERVER_ENABLED: "true"
     API_SERVER_HOST: 0.0.0.0
     API_SERVER_MODEL_NAME: hermes-agent
     HERMES_DASHBOARD: "1"
     HERMES_DASHBOARD_BASIC_AUTH_USERNAME: hermes
-    HERMES_GID: ${HERMES_GID:-1100}
-    HERMES_UID: ${HERMES_UID:-1100}
+    # The upstream image runs as the fixed 1100:1100 identity.
+    HERMES_GID: "1100"
+    HERMES_UID: "1100"
     MESSAGING_CWD: /workspace
     OPENAI_BASE_URL: http://caddy:8081/v1
   secrets:
@@ -122,9 +124,9 @@ services:
 
 secrets:
   hermes-api-key:
-    file: ${HERMES_API_KEY_FILE:-/dev/null}
+    file: ../secrets/hermes-api-key
   hermes-litellm-key:
-    file: ${HERMES_LITELLM_KEY_FILE:-/dev/null}
+    file: ../secrets/hermes-litellm-key
 
 networks:
   tailnet-hermes-edge:

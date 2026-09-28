@@ -195,7 +195,6 @@ fn write_runtime_plan(fixtures: &Fixtures, run_id: &str, plan: &CompiledExecutio
     let runtime = OciRuntime {
         runner: &runner,
         data_root: fixtures.directory.path(),
-        huggingface_curl_config: None,
     };
     runtime
         .prepare_start_with_inspection_identity(

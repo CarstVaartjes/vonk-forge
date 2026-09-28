@@ -435,7 +435,6 @@ def test_production_reader_accepts_only_the_signed_release_assets(
     index, row, package = _canonical_package_fixture()
     release = _release_for(index, package)
     client = RecipePackageClient(
-        None,
         api_url="http://127.0.0.1:8083",
         asset_url="http://127.0.0.1:8085",
         cache_root=tmp_path / "packages",
@@ -477,7 +476,6 @@ def test_production_reader_can_hold_an_exact_release_tag(
     index, _, package = _canonical_package_fixture()
     release = _release_for(index, package, tag="v1.0.0")
     client = RecipePackageClient(
-        None,
         api_url="http://127.0.0.1",
         release="v1.0.0",
         cache_root=tmp_path / "packages",
@@ -507,7 +505,6 @@ def test_unsigned_release_is_refused_even_with_a_previous_generation(
     release = _release_for(index, package)
     cache = tmp_path / "packages"
     client = RecipePackageClient(
-        None,
         api_url="http://127.0.0.1",
         cache_root=cache,
         transport=httpx2.MockTransport(release.handler),
@@ -547,7 +544,6 @@ def test_release_assets_must_match_the_signed_manifest(
     elif tamper == "redirect":
         release.redirect_host = "objects.example.invalid"
     client = RecipePackageClient(
-        None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
         transport=httpx2.MockTransport(release.handler),
@@ -564,7 +560,6 @@ def test_restart_offline_reverifies_the_persisted_release(
     release = _release_for(index, package)
     cache = tmp_path / "packages"
     first = RecipePackageClient(
-        None,
         api_url="http://127.0.0.1",
         cache_root=cache,
         transport=httpx2.MockTransport(release.handler),
@@ -577,7 +572,6 @@ def test_restart_offline_reverifies_the_persisted_release(
         raise httpx2.ConnectError("offline", request=request)
 
     restarted = RecipePackageClient(
-        None,
         api_url="http://127.0.0.1",
         cache_root=cache,
         transport=httpx2.MockTransport(offline),
@@ -586,7 +580,9 @@ def test_restart_offline_reverifies_the_persisted_release(
     restarted.prepare(snapshot)
     assert snapshot.commit == SIGNED_COMMIT
     assert signed_releases == [release.assets["SHA256SUMS"]]
-    assert restarted.fetch(snapshot.items[0].uri).package_handle is not None
+    handle = restarted.fetch(snapshot.items[0].uri).package_handle
+    assert handle is not None
+    assert handle.closure_path.is_dir()
     restarted.close()
 
     # A generation cached without its signature material (for example by the
@@ -595,7 +591,6 @@ def test_restart_offline_reverifies_the_persisted_release(
     del persisted["release"]
     (cache / "snapshot.json").write_text(json.dumps(persisted))
     unsigned = RecipePackageClient(
-        None,
         api_url="http://127.0.0.1",
         cache_root=cache,
         transport=httpx2.MockTransport(offline),
@@ -613,7 +608,6 @@ def test_release_network_smoke(tmp_path: Path) -> None:
     if os.environ.get("VONK_RUN_RECIPE_NETWORK_SMOKE") != "1":
         pytest.skip("set VONK_RUN_RECIPE_NETWORK_SMOKE=1 for the public release smoke")
     client = RecipePackageClient(
-        None,
         release=os.environ.get("VONK_RECIPE_LIBRARY_RELEASE", "latest"),
         cache_root=tmp_path / "packages",
         timeout_seconds=60,
@@ -638,7 +632,6 @@ def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(
     index, _, package = _canonical_package_fixture()
     release = _release_for(index, package)
     client = RecipePackageClient(
-        None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
         transport=httpx2.MockTransport(release.handler),
@@ -670,7 +663,6 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
         return state["release"].handler(request)
 
     client = RecipePackageClient(
-        None,
         api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
         transport=httpx2.MockTransport(handler),
@@ -686,79 +678,35 @@ def test_same_recipe_digest_but_changed_package_bytes_are_fetched(
 
 
 def test_failed_candidate_can_retry_against_previous_good_snapshot(
-    tmp_path: Path,
+    tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, row, package = _canonical_package_fixture()
+    bad = b"signed, but not a recipe package"
     bad_row = deepcopy(row)
     bad_package = dict(
         require_mapping(row["package"], "canonical fixture package metadata")
     )
-    bad_package["sha256"] = "0" * 64
-    bad_package["expected_bytes"] = 1
+    bad_package["sha256"] = hashlib.sha256(bad).hexdigest()
+    bad_package["expected_bytes"] = len(bad)
     bad_row["package"] = bad_package
     bad_index = json.loads(index)
     bad_index["recipes"] = [bad_row]
-    state = {"index": index, "package": package}
+    state = {"release": _release_for(index, package)}
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=state["index"],
-            )
-        return httpx2.Response(
-            200,
-            headers={"content-type": "application/octet-stream"},
-            content=state["package"],
-        )
+        return state["release"].handler(request)
 
     client = RecipePackageClient(
-        "http://127.0.0.1",
+        api_url="http://127.0.0.1",
         cache_root=tmp_path / "packages",
         transport=httpx2.MockTransport(handler),
     )
     client.prepare(client.list())
-    state["index"] = _canonical(bad_index) + b"\n"
-    with pytest.raises(RecipePackageError, match="bytes do not match"):
+    state["release"] = _release_for(_canonical(bad_index) + b"\n", bad)
+    with pytest.raises(RecipePackageError, match="extraction failed"):
         client.prepare(client.list())
-    state["index"] = index
+    state["release"] = _release_for(index, package)
     retried = client.list()
     client.prepare(retried)
     assert client.fetch(retried.items[0].uri).package_handle is not None
     client.close()
-
-
-def test_restart_offline_reuses_promoted_snapshot_and_package_closure(
-    tmp_path: Path,
-) -> None:
-    index, _, package = _canonical_package_fixture()
-
-    def online(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith(("catalog-index.json", "index.json")):
-            return httpx2.Response(
-                200, headers={"content-type": "application/json"}, content=index
-            )
-        return httpx2.Response(
-            200, headers={"content-type": "application/octet-stream"}, content=package
-        )
-
-    cache = tmp_path / "packages"
-    first = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(online)
-    )
-    first.prepare(first.list())
-    first.close()
-
-    def offline(request: httpx2.Request) -> httpx2.Response:
-        raise httpx2.ConnectError("offline", request=request)
-
-    restarted = RecipePackageClient(
-        "http://127.0.0.1", cache_root=cache, transport=httpx2.MockTransport(offline)
-    )
-    snapshot = restarted.list()
-    restarted.prepare(snapshot)
-    item = restarted.fetch(snapshot.items[0].uri)
-    assert item.package_handle is not None
-    assert item.package_handle.closure_path.is_dir()
-    restarted.close()

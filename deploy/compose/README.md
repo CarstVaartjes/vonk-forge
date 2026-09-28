@@ -26,7 +26,8 @@ vonk-forge/
 ├── docker-compose.yaml
 ├── .env
 ├── secrets/
-└── backups/
+├── backups/
+└── backups-offhost/
 ```
 
 No Docker daemon, Git checkout, root access, SSH connection, mounted share, or
@@ -34,26 +35,28 @@ repository file is needed on the preparation workstation. Keep the whole
 `vonk-forge/` directory on this computer or move it to another local controller
 host without changing its internal layout. Start `docker-compose.yaml` with the
 host's shell or Docker/Compose application. The Compose file uses relative paths,
-so the four entries must remain together.
+so the entries must remain together.
 
 The `/nas` segment in the public installer URL is historical; it is not a
 hardware restriction.
 
-Lab mode asks for the reserved LAN address and optional Hugging Face token.
-Secure remote asks for:
+Lab mode asks only for the reserved LAN address and the two optional keys
+below. Secure remote also asks for:
 
-- the controller host's LAN address, Spark management/fabric CIDRs, and
-  operator jurisdiction;
-- the control, enrollment, agent, and registry hostnames;
-- Tailscale OAuth credentials;
-- the LiteLLM upstream provider key;
-- whether to enable optional Hermes, plus its values when selected;
-- an optional Hugging Face token in either mode.
+- the control hostname (`vonk-forge.<tailnet>.ts.net`); the enrollment, agent,
+  and registry names are derived from it;
+- the Tailscale OAuth client ID and secret;
+- whether to enable the optional Hermes agent.
 
-Passwords, service tokens, signing keys, database URLs, and a coherent Step CA
-PKI are generated locally in Lab mode. Secure remote also offers existing
-credential imports. Secret values are written only under `secrets/`; `.env` contains non-secret site
-configuration and relative secret paths.
+Both modes offer an optional LiteLLM upstream provider key and an optional
+Hugging Face token. The Spark management CIDRs default to the controller's own
+/24 and the direct fabric CIDRs to `192.168.100.0/24,192.168.101.0/24`; the
+installer prints both, and you can change them in `.env`. Passwords, service
+tokens, signing keys, database URLs, and a coherent Step CA PKI are always
+generated locally (the administrator password is in `secrets/admin-password`).
+Secret values are written only under `secrets/`; `.env` holds the few
+non-secret site values. Rerunning the installer on an existing bundle keeps
+them and regenerates `docker-compose.yaml`.
 
 For gated or private Hugging Face model-cache downloads, see the
 [Hugging Face model-cache authentication guide](../../docs/model-cache-huggingface-auth.md).

@@ -264,31 +264,51 @@ def _provider(
     return provider, material
 
 
+def _helper_key(path: Path) -> Path:
+    path.write_bytes(
+        ed25519.Ed25519PrivateKey.generate().private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    path.chmod(0o600)
+    return path
+
+
+def _sessions(tmp_path: Path) -> sessionmaker:
+    engine = create_engine(f"sqlite:///{tmp_path / 'runtime.sqlite'}")
+    Base.metadata.create_all(engine)
+    return sessionmaker(engine, expire_on_commit=False)
+
+
 def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleNamespace:
     material = _write_material(tmp_path)
     return SimpleNamespace(
-        agent_runtime="enabled",
+        agent_runtime_enabled=True,
         agent_controller_origin="https://agents.example.test:8443",
         agent_enrollment_origin="https://enroll.example.test:8443",
-        agent_controller_address="192.168.1.231",
+        nas_lan_ip="192.168.1.231",
         agent_service_hostnames=(
             "control.example.test",
             "enroll.example.test",
             "agents.example.test",
             "registry.example.test",
         ),
+        install_channel="stable",
         controller_ca_path=material["root_path"],
         agent_intermediate_certificate_path=material["intermediate_path"],
         agent_ca_root_path=material["root_path"],
         agent_ca_credential_path=material["credential_path"],
-        agent_ca_url=CA_URL,
         agent_ca_provisioner_public_jwk_path=material["public_jwk_path"],
-        agent_ca_provisioner_name="vonk-forge-agent",
         agent_ca_provisioner_kid=material["kid"],
-        agent_ca_timeout_seconds=2.0,
-        agent_ca_max_response_bytes=4096,
         agent_ca_certificate_lifetime_seconds=2592000,
         agent_artifact_root=tmp_path / "artifacts",
+        workload_tuf_metadata_root=tmp_path / "tuf/metadata",
+        workload_tuf_target_root=tmp_path / "tuf/targets",
+        package_helper_grant_private_key_path=_helper_key(tmp_path / "grant-key"),
+        package_helper_receipt_private_key_path=_helper_key(tmp_path / "receipt-key"),
+        host_runtime_grant_private_key_path=_helper_key(tmp_path / "host-key"),
         management_cidrs="10.0.0.0/24",
         direct_fabric_cidrs=direct_fabric_cidrs,
     )
@@ -789,12 +809,9 @@ def test_production_agent_service_builder_does_not_block_startup_on_step_ca(
     monkeypatch.setattr(
         "vonk_control.step_ca.StepCertificateAuthority", FakeStepAuthority
     )
-    engine = create_engine(f"sqlite:///{tmp_path / 'runtime.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
     settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
 
-    services = build_agent_services(settings, sessions, lambda: NOW)
+    services = build_agent_services(settings, _sessions(tmp_path), lambda: NOW)
 
     assert isinstance(services, AgentApiServices)
     assert len(calls) == 1
@@ -816,7 +833,7 @@ def test_production_agent_service_builder_always_constructs_step_ca(
         "vonk_control.step_ca.StepCertificateAuthority", DeferredStepAuthority
     )
     settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
-    build_agent_services(settings, object(), lambda: NOW)
+    build_agent_services(settings, _sessions(tmp_path), lambda: NOW)
 
     assert len(calls) == 1
     assert calls[0]["ca_url"] == CA_URL
@@ -838,7 +855,7 @@ def test_production_agent_service_builder_passes_configured_certificate_lifetime
     settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
     settings.agent_ca_certificate_lifetime_seconds = 90
 
-    build_agent_services(settings, object(), lambda: NOW)
+    build_agent_services(settings, _sessions(tmp_path), lambda: NOW)
 
     assert calls[0]["certificate_lifetime_seconds"] == 90
 

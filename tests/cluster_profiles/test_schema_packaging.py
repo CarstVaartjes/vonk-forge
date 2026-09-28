@@ -70,3 +70,8 @@ def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
             "cluster_profiles/resources/custom-recipe-presets.json"
             not in archive.namelist()
         )
+        # The CLI verifies updates with the installer key it ships with.
+        assert (
+            archive.read("cluster_profiles/installer-release-public.pem")
+            == (ROOT / "install/installer-release-public.pem").read_bytes()
+        )

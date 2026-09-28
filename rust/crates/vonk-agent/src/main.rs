@@ -12,7 +12,7 @@ use url::Url;
 use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
     client::AgentHttpClient,
-    config::{AgentConfig, DEFAULT_CONFIG_PATH},
+    config::{AgentConfig, DEFAULT_CONFIG_PATH, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
     executor::{
         ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError,
         run_once_with_claim_hook,
@@ -167,7 +167,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     ensure_startup_identity(
         || active_identity_is_valid(config),
         || rotate_if_due(config, &client),
-        |failures| jittered_backoff(failures, config.poll_min_seconds, config.poll_max_seconds),
+        |failures| jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
     )
     .await?;
     if !matches!(prepare_state_database_reserve(&config.data_dir), Ok(true)) {
@@ -186,8 +186,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
             Ok(state) => break state,
             Err(error) => {
                 failures = failures.saturating_add(1);
-                let delay =
-                    jittered_backoff(failures, config.poll_min_seconds, config.poll_max_seconds);
+                let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
                 eprintln!(
                     "vonk-agent: degraded: local state database unavailable ({error}); retrying in {} seconds",
                     delay.as_secs()
@@ -240,8 +239,8 @@ async fn run_control_lane(
             systemd_notify::progress("Degraded: active certificate expired; control loop idle");
             tokio::time::sleep(jittered_backoff(
                 failures,
-                config.poll_min_seconds,
-                config.poll_max_seconds,
+                POLL_MIN_SECONDS,
+                POLL_MAX_SECONDS,
             ))
             .await;
             continue;
@@ -258,8 +257,8 @@ async fn run_control_lane(
             let inventory = collect_inventory_until_ready(
                 || collector.collect(),
                 &mut failures,
-                config.poll_min_seconds,
-                config.poll_max_seconds,
+                POLL_MIN_SECONDS,
+                POLL_MAX_SECONDS,
             )
             .await;
             if disk_reserve_degraded(inventory.disk_available_bytes)
@@ -283,11 +282,7 @@ async fn run_control_lane(
                 Err(error) if error.fatal() => return Err(error.into()),
                 Err(error) => {
                     failures = failures.saturating_add(1);
-                    let delay = jittered_backoff(
-                        failures,
-                        config.poll_min_seconds,
-                        config.poll_max_seconds,
-                    );
+                    let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
                     eprintln!(
                         "vonk-agent: inventory report failed ({error}); retrying in {} seconds",
                         delay.as_secs()
@@ -311,7 +306,6 @@ async fn run_control_lane(
                 runtime: OciRuntime {
                     runner: &runner,
                     data_root: &config.data_dir,
-                    huggingface_curl_config: config.huggingface_curl_config.as_deref(),
                 },
             },
             upgrades: AgentUpgradeExecutor {
@@ -345,7 +339,7 @@ async fn run_control_lane(
             }
         }
         let wait_seconds = claim_wait_seconds(
-            config.poll_max_seconds,
+            POLL_MAX_SECONDS,
             exact_observation_count,
             readiness_published,
         );
@@ -389,8 +383,7 @@ async fn run_control_lane(
             Err(error) => {
                 failures = failures.saturating_add(1);
                 inventory_reported_at = None;
-                let delay =
-                    jittered_backoff(failures, config.poll_min_seconds, config.poll_max_seconds);
+                let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
                 eprintln!(
                     "vonk-agent: control loop degraded ({error}); retrying in {} seconds",
                     delay.as_secs()
@@ -529,13 +522,13 @@ async fn run_rotation_lane(
     config: AgentConfig,
     client: AgentHttpClient,
 ) -> Result<(), RotationError> {
-    let minimum = config.poll_min_seconds.clamp(1, 5);
+    let minimum = POLL_MIN_SECONDS;
     let interval = Duration::from_secs(minimum);
     loop {
         rotate_until_settled(
             || rotate_if_due(&config, &client),
             || active_identity_is_valid(&config),
-            |failures| jittered_backoff(failures, minimum, config.poll_max_seconds),
+            |failures| jittered_backoff(failures, minimum, POLL_MAX_SECONDS),
         )
         .await?;
         tokio::time::sleep(interval).await;

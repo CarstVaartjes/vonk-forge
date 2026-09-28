@@ -53,9 +53,7 @@ done
 
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/vonk-${kind}-channel.XXXXXX") ||
     fail "cannot create a temporary directory"
-saved_key_tmp=
 cleanup() {
-    if [ -n "$saved_key_tmp" ]; then rm -f -- "$saved_key_tmp"; fi
     rm -rf -- "$temporary"
 }
 trap cleanup EXIT HUP INT TERM
@@ -214,22 +212,9 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
 if identity != {"schema_version": 1, "release_version": sys.argv[2], "source_sha": sys.argv[3]}:
     raise SystemExit(1)
 PY
-    config_root=${XDG_CONFIG_HOME:-${HOME:-}/.config}
-    case "$config_root" in /*) ;; *) fail "the CLI signing key needs an absolute user config directory" ;; esac
-    key_directory="$config_root/vonkforge"
-    mkdir -p "$key_directory" || fail "cannot create the vonkforge user config directory"
-    [ -d "$key_directory" ] && [ ! -L "$key_directory" ] ||
-        fail "the vonkforge user config path is unsafe"
-    chmod 700 "$key_directory" || fail "cannot secure the vonkforge user config directory"
-    public_key_destination="$key_directory/installer-public.pem"
-    saved_key_tmp="$key_directory/.installer-public.pem.$$"
-    cp "$public_key" "$saved_key_tmp" || fail "cannot save the verified release public key"
-    chmod 600 "$saved_key_tmp" || fail "cannot secure the verified release public key"
-    mv -f -- "$saved_key_tmp" "$public_key_destination" || fail "cannot save the verified release public key"
-    saved_key_tmp=
     uv tool install --force --python 3.14 "$wheel" || fail "uv could not install the verified CLI wheel"
     printf '%s\n' "vonkctl $cli_version is installed. Run 'vonkctl --version' to confirm."
-    printf '%s\n' "For signed updates, run: vonkctl update --apply --public-key '$public_key_destination'"
+    printf '%s\n' "For signed updates, run: vonkctl update --apply"
     exit 0
 fi
 case "$kind" in

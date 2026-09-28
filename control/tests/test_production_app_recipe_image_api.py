@@ -7,7 +7,7 @@ from importlib.resources import files
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
-from vonk_control import api, availability_production, route_runtime
+from vonk_control import availability_production, route_runtime
 from vonk_control.api import production_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.models import (
@@ -16,6 +16,7 @@ from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
 )
+from vonk_control.settings import Settings
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
@@ -119,19 +120,20 @@ def test_production_app_recipe_download_auth_and_status(
             )
 
     database_url = postgres_engine.url.render_as_string(hide_password=False)
-    signing_key = tmp_path / "token-signing-key"
+    settings = Settings(
+        database_url=database_url,
+        deployment_mode="test",
+        management_cidrs="127.0.0.1/32",
+        secrets_root=tmp_path / "secrets",
+        state_path=tmp_path / "state",
+        agent_artifact_root=tmp_path / "artifacts",
+        model_cache_root=tmp_path / "model-cache",
+        workload_tuf_metadata_root=tmp_path / "tuf-meta",
+        workload_tuf_target_root=tmp_path / "tuf-targets",
+    )
+    (tmp_path / "secrets").mkdir()
+    signing_key = tmp_path / "secrets" / "token-signing-key"
     signing_key.write_bytes(b"production-api-test-signing-key-32-bytes")
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "test")
-    monkeypatch.setenv("VONK_DISTRIBUTED_START_TIMEOUT_SECONDS", "1800")
-    monkeypatch.setenv("VONK_AGENT_RUNTIME", "disabled")
-    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "127.0.0.1/32")
-    monkeypatch.setenv("VONK_DATABASE_URL", database_url)
-    monkeypatch.setenv("VONK_TOKEN_SIGNING_KEY_FILE", str(signing_key))
-    monkeypatch.setenv("VONK_STATE_PATH", str(tmp_path / "state"))
-    monkeypatch.setenv("VONK_AGENT_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
-    monkeypatch.setenv("VONK_MODEL_CACHE_ROOT", str(tmp_path / "model-cache"))
-    monkeypatch.setenv("VONK_WORKLOAD_TUF_METADATA_ROOT", str(tmp_path / "tuf-meta"))
-    monkeypatch.setenv("VONK_WORKLOAD_TUF_TARGET_ROOT", str(tmp_path / "tuf-targets"))
 
     publisher = route_runtime.AtomicRouteBundlePublisher
     acknowledger = route_runtime.FileSupervisorAcknowledger
@@ -162,17 +164,7 @@ def test_production_app_recipe_download_auth_and_status(
         availability_production, "build_recipe_image_availability", image_only_builder
     )
 
-    lifecycles = []
-    original_lifecycle = api.RecipeOperationService
-
-    class CapturedLifecycle(original_lifecycle):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            lifecycles.append(self)
-
-    monkeypatch.setattr(api, "RecipeOperationService", CapturedLifecycle)
-    app = production_app()
-    assert [item._distributed_start_timeout_seconds for item in lifecycles] == [1800]
+    app = production_app(settings)
     codec = TokenCodec(signing_key.read_bytes())
     operator = codec.issue(
         Actor("operator", "operator"), ttl_seconds=3600, now=int(time.time())

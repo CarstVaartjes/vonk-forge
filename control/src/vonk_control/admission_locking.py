@@ -10,7 +10,7 @@ from sqlalchemy import Select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session
 
-from .settings import database_wait_budgets
+from .settings import DATABASE_WAIT_BUDGETS
 
 _BUSY_SQLSTATES = frozenset({"55P03", "40P01", "40001", "57014"})
 _ROW_LOCK_ORDER = (
@@ -151,9 +151,9 @@ def lock_admission_rows(
 
 
 def _set_local_admission_timeout(session: Session) -> None:
-    """Apply the centrally configured bound to implicit index/FK waits."""
+    """Apply the fixed admission bound to implicit index/FK waits."""
 
-    timeout = database_wait_budgets().admission_lock_timeout_ms
+    timeout = DATABASE_WAIT_BUDGETS.admission_lock_timeout_ms
     session.execute(
         text("SELECT set_config('lock_timeout', :timeout, true)"),
         {"timeout": f"{timeout}ms"},

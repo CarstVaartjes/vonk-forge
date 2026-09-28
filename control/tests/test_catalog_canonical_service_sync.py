@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx2
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
@@ -12,12 +12,13 @@ from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
 from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
-from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
 
 from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 ROOT = recipe_library_root()
+pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
 
 class Reader:
@@ -35,25 +36,8 @@ class Reader:
 
 def test_sync_imports_canonical_models_and_recipe_once(tmp_path: Path) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
-    row = index["recipes"][0]
-    package = (ROOT / row["package"]["path"]).read_bytes()
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        if request.url.path.endswith("index.json"):
-            return httpx2.Response(
-                200,
-                headers={"content-type": "application/json"},
-                content=json.dumps(index).encode(),
-            )
-        return httpx2.Response(
-            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
-        )
-
-    client = RecipePackageClient(
-        "http://127.0.0.1",
-        cache_root=tmp_path / "packages",
-        transport=httpx2.MockTransport(handler),
-    )
+    index["recipes"] = index["recipes"][:1]
+    client = SignedRecipeRelease.from_library(index, ROOT).client(tmp_path / "packages")
     snapshot = client.list()
     item = client.fetch(snapshot.items[0].uri)
     snapshot = RecipeLibrarySnapshot(

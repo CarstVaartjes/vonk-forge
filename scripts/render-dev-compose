@@ -33,16 +33,20 @@ DEV_MUTABLE_IMAGES = {
 }
 
 
+VONK_REPOSITORY_PREFIX = "ghcr.io/carstvaartjes/vonk-forge-"
+
+
 def channel_image(image: str, channel: str) -> str:
-    """Project an image identity onto its deployment channel, without a pin."""
+    """Project a Vonk Forge image onto its channel tag; keep third-party pins.
+
+    Only the Vonk Forge release images follow the channel (:dev or :latest).
+    Third-party images stay on the exact version the release was tested with,
+    so a new upstream major (PostgreSQL in particular) never arrives unasked.
+    """
     repository = image.split("@", 1)[0].rsplit(":", 1)[0]
-    tag = (
-        "dev"
-        if channel == "dev"
-        and repository.startswith("ghcr.io/carstvaartjes/vonk-forge-")
-        else "latest"
-    )
-    return f"{repository}:{tag}"
+    if not repository.startswith(VONK_REPOSITORY_PREFIX):
+        return image
+    return f"{repository}:{'dev' if channel == 'dev' else 'latest'}"
 
 
 TOKENS = {
@@ -71,8 +75,8 @@ def _validate(role: str, image: str, channel: str) -> None:
 
 
 def _rebase_relative_paths(value: object, prefix: str) -> object:
-    if isinstance(value, str) and value.startswith("./"):
-        return f"./{prefix}/{value[2:]}"
+    if isinstance(value, str) and value.startswith(("./", "../")):
+        return "./" + posixpath.normpath(posixpath.join(prefix, value))
     if isinstance(value, dict):
         return {
             key: _rebase_relative_paths(item, prefix) for key, item in value.items()
@@ -263,7 +267,8 @@ def _resolve_runtime_images(
             service["image"] = image
         if channel in {"dev", "stable"}:
             service["image"] = channel_image(image, channel)
-            service["pull_policy"] = "always"
+            if service["image"].startswith(VONK_REPOSITORY_PREFIX):
+                service["pull_policy"] = "always"
             continue
         bare = image.split("@", 1)[0]
         if "@sha256:" not in image and VERSIONED_IMAGE.fullmatch(image) is None:
@@ -278,10 +283,10 @@ def _resolve_extension_images(value: object, channel: str) -> None:
         if isinstance(value.get("image"), str):
             image = value["image"]
             default = DEFAULT_IMAGE.fullmatch(image)
-            value["image"] = channel_image(
-                default.group(1) if default else image, channel
-            )
-            value["pull_policy"] = "always"
+            image = default.group(1) if default else image
+            value["image"] = channel_image(image, channel)
+            if value["image"].startswith(VONK_REPOSITORY_PREFIX):
+                value["pull_policy"] = "always"
         for child in value.values():
             _resolve_extension_images(child, channel)
     elif isinstance(value, list):
@@ -347,7 +352,7 @@ def render(
         _resolve_extension_images(document, channel)
     _embed_runtime_assets(document, template.parent)
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
-    if "VONK_DEPLOYMENT_MODE: production" not in rendered:
+    if "VONK_CONTROL_HOSTNAME" not in rendered:
         raise ValueError("development channel must render the production graph")
     descriptor, staged_name = tempfile.mkstemp(
         prefix=".render-dev-compose-", dir=output.parent

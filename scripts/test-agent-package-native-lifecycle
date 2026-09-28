@@ -205,8 +205,6 @@ if [[ ! -e "$config" && ! -L "$config" ]]; then
     "ca_sha256 = \"$ca_digest\"" \
     "data_dir = \"$data_dir\"" \
     "node_id = \"$node_id\"" \
-    'poll_min_seconds = 2' \
-    'poll_max_seconds = 60' \
     > "$config_new"
   install -m 0600 "$config_new" "$config"
 fi
