@@ -39,15 +39,9 @@ path = "tools/hatch_build.py"
 [tool.hatch.build.targets.wheel.force-include]
 "schemas/install-release-manifest.schema.json" = "cluster_profiles/schemas/install-release-manifest.schema.json"
 "install/installer-release-public.pem" = "cluster_profiles/installer-release-public.pem"
-"src/cluster_profiles/schemas/model-definition-evidence.schema.json" = "cluster_profiles/schemas/model-definition-evidence.schema.json"
-"src/cluster_profiles/schemas/cluster-profile-v2.schema.json" = "cluster_profiles/schemas/cluster-profile-v2.schema.json"
-"src/cluster_profiles/schemas/workload-v2.schema.json" = "cluster_profiles/schemas/workload-v2.schema.json"
 "src/cluster_profiles/schemas/qualification-manifest-v2.schema.json" = "cluster_profiles/schemas/qualification-manifest-v2.schema.json"
-"src/cluster_profiles/schemas/qualification-authority-v4.schema.json" = "cluster_profiles/schemas/qualification-authority-v4.schema.json"
+"src/cluster_profiles/schemas/qualification-authority-v5.schema.json" = "cluster_profiles/schemas/qualification-authority-v5.schema.json"
 "src/cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json" = "cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json"
-"src/cluster_profiles/schemas/recovery-coverage-receipt-v1.schema.json" = "cluster_profiles/schemas/recovery-coverage-receipt-v1.schema.json"
-"src/cluster_profiles/schemas/recovery-coverage-use-v1.schema.json" = "cluster_profiles/schemas/recovery-coverage-use-v1.schema.json"
-"src/cluster_profiles/schemas/recovery-coverage-consumption-v1.schema.json" = "cluster_profiles/schemas/recovery-coverage-consumption-v1.schema.json"
 "src/cluster_profiles/schemas/control-openapi.json" = "cluster_profiles/schemas/control-openapi.json"
 
 [tool.ruff]

@@ -433,7 +433,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
                         return True
                     return False
 
-                recipe = RecipeDefinition.model_validate(json.loads(files("vonk_forge_contracts").joinpath("examples/recipe-image.json").read_text()))
+                recipe = RecipeDefinition.model_validate(json.loads(files("vonk_forge_contracts").joinpath("examples/recipe-source-build.json").read_text()))
                 model = ModelDefinition.model_validate(json.loads(files("vonk_forge_contracts").joinpath("examples/model-definition.json").read_text()))
                 compiled = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
                 empty = DistributionObject.parse({"name": "support/empty.safetensors", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "bytes": 0, "kind": "model"})

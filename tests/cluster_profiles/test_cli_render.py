@@ -40,11 +40,17 @@ def test_library_keeps_canonical_cache_evidence_and_exact_selection(
             ],
             "next_cursor": "cursor-on-page-two",
             "generated_at": "2026-09-22T12:00:00Z",
+            "library": {
+                "version": "2.0.0",
+                "updated_at": "2026-09-20T08:00:00Z",
+                "commit": "a" * 40,
+            },
         },
         "model",
         action="library",
     )
     output = capsys.readouterr().out
+    assert "Recipe library v2.0.0" in output
     assert selector in output
     assert "download" in output and "0 B" in output
     assert "cursor-on-page-two" in output

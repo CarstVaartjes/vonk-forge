@@ -29,7 +29,7 @@ vonk-cluster-profiles = { path = "..", editable = true }
 # Resolve the public contract from the recipe repository's moving main branch.
 # control/packaging/public-contracts.lock records the exact commit consumed by
 # each lock/build update; the image build uses that same commit explicitly.
-vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "feb743311feac3a29a629d031a01e3f3d847f4bd", subdirectory = "contracts" }
+vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "88cc53c34fb32cd81f9ff3b4409dcca1fdd031b5", subdirectory = "contracts" }
 
 # The one locked tool environment for every suite, lint and type check, local
 # and CI alike (docs/testing-and-ci.md). Nothing is added with `uv run --with`

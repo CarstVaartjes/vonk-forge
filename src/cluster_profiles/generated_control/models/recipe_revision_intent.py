@@ -29,7 +29,6 @@ class RecipeRevisionIntent:
             build_input_sha256 (None | str | Unset):
             effective_execution_key (None | str | Unset):
             force (bool | Unset):  Default: False.
-            force_download (bool | Unset):  Default: False.
             force_rebuild (bool | Unset):  Default: False.
             kind (Literal['revision'] | Unset):  Default: 'revision'.
             model_digest (None | str | Unset):
@@ -39,7 +38,6 @@ class RecipeRevisionIntent:
     build_input_sha256: None | str | Unset = UNSET
     effective_execution_key: None | str | Unset = UNSET
     force: bool | Unset = False
-    force_download: bool | Unset = False
     force_rebuild: bool | Unset = False
     kind: Literal['revision'] | Unset = 'revision'
     model_digest: None | str | Unset = UNSET
@@ -65,8 +63,6 @@ class RecipeRevisionIntent:
 
         force = self.force
 
-        force_download = self.force_download
-
         force_rebuild = self.force_rebuild
 
         kind = self.kind
@@ -89,8 +85,6 @@ class RecipeRevisionIntent:
             field_dict["effective_execution_key"] = effective_execution_key
         if force is not UNSET:
             field_dict["force"] = force
-        if force_download is not UNSET:
-            field_dict["force_download"] = force_download
         if force_rebuild is not UNSET:
             field_dict["force_rebuild"] = force_rebuild
         if kind is not UNSET:
@@ -129,8 +123,6 @@ class RecipeRevisionIntent:
 
         force = d.pop("force", UNSET)
 
-        force_download = d.pop("force_download", UNSET)
-
         force_rebuild = d.pop("force_rebuild", UNSET)
 
         kind = cast(Literal['revision'] | Unset , d.pop("kind", UNSET))
@@ -152,7 +144,6 @@ class RecipeRevisionIntent:
             build_input_sha256=build_input_sha256,
             effective_execution_key=effective_execution_key,
             force=force,
-            force_download=force_download,
             force_rebuild=force_rebuild,
             kind=kind,
             model_digest=model_digest,

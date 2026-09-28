@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
@@ -15,11 +14,6 @@ from pydantic import (
 )
 from sqlalchemy import Row, case, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.telemetry import (
-    TelemetryMeasurementKind,
-    TelemetryRunState,
-    TelemetryWorkloadState,
-)
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .auth import CursorError
@@ -29,13 +23,11 @@ from .models import (
     AgentNode,
     AgentNodeProfile,
     AgentPresence,
-    ArtifactJob,
     CatalogDocument,
     CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
-    Job,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -47,17 +39,7 @@ from .recipe_execution_contract import (
     parse_stored_installation_plan,
 )
 from .strict_json import StrictJSONModel
-from .telemetry import (
-    TelemetryDetailsInput,
-    TelemetryRepository,
-    TelemetrySampleView,
-)
-from .telemetry_contract import (
-    TelemetryCapability,
-    TelemetryMetrics,
-    TelemetryRuntime,
-    TelemetryWorkload,
-)
+from .telemetry import TelemetryRepository, TelemetrySampleView
 
 _REVISION_PATTERN = r"^[0-9a-f]{64}$"
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
@@ -74,9 +56,6 @@ _MAX_GROUP_MEMBER_ROWS = 8_192
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 _MAX_SIGNED_INTEGER = 2_147_483_647
 _MAX_TELEMETRY_BYTES = 16 * 1024**4
-_MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
-_MAX_TELEMETRY_RUNS = 32
-_MAX_TELEMETRY_WORKLOADS = 128
 
 
 def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | None:
@@ -114,24 +93,6 @@ def _installation_payload_expectations(plan: object) -> dict[str, int]:
         if node.required_payload_bytes is not None
     }
 
-
-_RUNTIME_CAPABILITY_LEDGER: tuple[tuple[str, str, TelemetryMeasurementKind], ...] = (
-    ("runtime.decode_tokens_per_second", "tokens/s", "derived"),
-    ("runtime.prefill_tokens_per_second", "tokens/s", "derived"),
-    ("runtime.prefill_cached_tokens_per_second", "tokens/s", "derived"),
-    ("runtime.prefill_uncached_tokens_per_second", "tokens/s", "derived"),
-    ("runtime.output_tokens_total", "tokens", "measured"),
-    ("runtime.slots_active", "requests", "measured"),
-    ("runtime.requests_running", "requests", "measured"),
-    ("runtime.requests_waiting", "requests", "measured"),
-    ("runtime.kv_cache_usage_percent", "%", "measured"),
-    ("runtime.preemptions_total", "count", "measured"),
-    ("runtime.prefix_cache_hit_percent", "%", "derived"),
-    ("runtime.mtp_acceptance_percent", "%", "derived"),
-    ("runtime.ttft_p95_ms", "ms", "derived"),
-    ("runtime.e2e_p95_ms", "ms", "derived"),
-    ("runtime.itl_p95_ms", "ms", "derived"),
-)
 
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
@@ -276,11 +237,6 @@ class InventoryState(_StrictModel):
     container_runtime_version: Text256
 
 
-class TelemetryDetails(_StrictModel):
-    accelerator_name: Text256 | None = None
-    accelerator_performance_state: Text32 | None = None
-
-
 class TelemetryPoint(_StrictModel):
     model_config = ConfigDict(regex_engine="python-re")
 
@@ -289,8 +245,6 @@ class TelemetryPoint(_StrictModel):
     boot_id: BootId
     observed_at: datetime
     received_at: datetime
-    cpu_utilization_percent: float | None = Field(default=None, ge=0, le=100)
-    load_average_1m: float | None = Field(default=None, ge=0, le=1_000_000)
     memory_total_bytes: int | None = Field(default=None, ge=0, le=_MAX_TELEMETRY_BYTES)
     memory_available_bytes: int | None = Field(
         default=None, ge=0, le=_MAX_TELEMETRY_BYTES
@@ -304,17 +258,6 @@ class TelemetryPoint(_StrictModel):
     gpu_memory_free_bytes: int | None = Field(
         default=None, ge=0, le=_MAX_TELEMETRY_BYTES
     )
-    temperature_c: float | None = Field(default=None, ge=-100, le=300)
-    power_watts: float | None = Field(default=None, ge=0, le=100_000)
-    network_receive_bytes_per_second: float | None = Field(
-        default=None, ge=0, le=_MAX_TELEMETRY_RATE
-    )
-    network_transmit_bytes_per_second: float | None = Field(
-        default=None, ge=0, le=_MAX_TELEMETRY_RATE
-    )
-    gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    details: TelemetryDetails
-    metrics: TelemetryMetrics
 
 
 class TelemetryState(_StrictModel):
@@ -404,31 +347,12 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
     # The mTLS identity is authoritative for node ownership.  The receive
     # timestamp is assigned by the Controller, so neither can be spoofed by a
     # producer embedded in the report.
-    metrics = TelemetryMetrics.model_validate(
-        {
-            **value.metrics.model_dump(),
-            "series": [
-                {
-                    **series.model_dump(),
-                    "node_id": value.node_id,
-                    "received_at": value.received_at,
-                }
-                for series in value.metrics.series
-            ],
-            "capabilities": [
-                {**capability.model_dump(), "node_id": value.node_id}
-                for capability in value.metrics.capabilities
-            ],
-        }
-    )
     return TelemetryPoint(
         id=value.id,
         node_id=value.node_id,
         boot_id=str(value.boot_id),
         observed_at=value.observed_at,
         received_at=value.received_at,
-        cpu_utilization_percent=value.cpu_utilization_percent,
-        load_average_1m=value.load_average_1m,
         memory_total_bytes=value.memory_total_bytes,
         memory_available_bytes=value.memory_available_bytes,
         disk_total_bytes=value.disk_total_bytes,
@@ -436,20 +360,6 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         gpu_utilization_percent=value.gpu_utilization_percent,
         gpu_memory_total_bytes=value.gpu_memory_total_bytes,
         gpu_memory_free_bytes=value.gpu_memory_free_bytes,
-        temperature_c=value.temperature_c,
-        power_watts=value.power_watts,
-        network_receive_bytes_per_second=value.network_receive_bytes_per_second,
-        network_transmit_bytes_per_second=value.network_transmit_bytes_per_second,
-        gap_samples=value.gap_samples,
-        details=_telemetry_details(value.details),
-        metrics=metrics,
-    )
-
-
-def _telemetry_details(value: TelemetryDetailsInput) -> TelemetryDetails:
-    return TelemetryDetails(
-        accelerator_name=value.accelerator_name,
-        accelerator_performance_state=value.accelerator_performance_state,
     )
 
 
@@ -457,36 +367,6 @@ def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
-
-
-def _run_readiness(run: RecipeRun, nodes: Sequence[RunNode]) -> TelemetryRunState:
-    if run.state == "planned":
-        return "queued"
-    if run.state == "starting":
-        return "starting"
-    if run.state == "running":
-        if nodes and all(node.observation_endpoint_ready is True for node in nodes):
-            return "ready"
-        return "running"
-    if run.state in {"stopping", "stopped"}:
-        return "stopped"
-    if run.state == "failed":
-        return "failed"
-    return "unknown"
-
-
-def _artifact_workload_state(value: str) -> TelemetryWorkloadState:
-    if value in {"draft", "ready", "queued", "waiting-for-operator"}:
-        return "queued"
-    if value in {"running", "cancelling"}:
-        return "running"
-    if value == "succeeded":
-        return "completed"
-    if value == "failed":
-        return "failed"
-    if value == "cancelled":
-        return "cancelled"
-    return "unknown"
 
 
 type RunPresenceRow = Row[
@@ -595,10 +475,6 @@ class FleetProjection:
             certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
             telemetry = self._telemetry.latest_in_session(session, node_ids)
-            telemetry = {
-                node_id: self._telemetry_with_controller(session, node_id, value)
-                for node_id, value in telemetry.items()
-            }
             installation_rows = self._installation_rows(session, node_ids)
             run_rows = self._run_rows(session, node_ids)
             mapping_ids = {row[2].id for row in (*installation_rows, *run_rows)}
@@ -637,239 +513,6 @@ class FleetProjection:
                 )
                 for node_id in node_ids
             ],
-        )
-
-    @staticmethod
-    def _telemetry_run_rows(
-        session: Session, node_id: str
-    ) -> tuple[Row[RunNode, RecipeRun], ...]:
-        selected = (
-            select(RecipeRun.id)
-            .join(RunNode, RunNode.run_id == RecipeRun.id)
-            .where(RunNode.node_id == node_id)
-            .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())
-            .limit(_MAX_TELEMETRY_RUNS)
-        )
-        return tuple(
-            session.execute(
-                select(RunNode, RecipeRun)
-                .join(RecipeRun, RecipeRun.id == RunNode.run_id)
-                .where(RunNode.run_id.in_(selected))
-                .order_by(RunNode.run_id, RunNode.rank)
-                .limit(_MAX_GROUP_MEMBER_ROWS)
-            )
-        )
-
-    def _telemetry_metrics_in_session(
-        self,
-        session: Session,
-        node_id: str,
-        metrics: TelemetryMetrics,
-    ) -> TelemetryMetrics:
-        """Join authenticated run/job placement without reading workload secrets."""
-
-        rows = self._telemetry_run_rows(session, node_id)
-        nodes_by_run: dict[str, list[RunNode]] = {}
-        runs_by_id: dict[str, RecipeRun] = {}
-        for run_node, run in rows:
-            nodes_by_run.setdefault(run.id, []).append(run_node)
-            runs_by_id[run.id] = run
-        incoming_by_run: dict[str, list[TelemetryRuntime]] = {}
-        for runtime in metrics.runtimes:
-            incoming_by_run.setdefault(runtime.run_id, []).append(runtime)
-
-        runtimes: list[TelemetryRuntime] = []
-        for run_id in sorted(runs_by_id):
-            run = runs_by_id[run_id]
-            run_nodes = sorted(
-                nodes_by_run.get(run_id, ()), key=lambda value: value.rank
-            )
-            reports = incoming_by_run.get(run_id, ())
-            report = reports[0] if reports else None
-            adapter = report.adapter if report is not None else "controller-managed"
-            supported = any(item.adapter_supported for item in reports)
-            reason = None if supported else "managed runtime metrics were not reported"
-            runtimes.append(
-                TelemetryRuntime(
-                    run_id=run_id,
-                    engine_id=run_id,
-                    backend=report.backend if report is not None else adapter,
-                    version=report.version if report is not None else None,
-                    endpoint=None,
-                    model=None,
-                    model_version=None,
-                    recipe_revision=None,
-                    context_limit_tokens=None,
-                    serving_node_ids=list(
-                        dict.fromkeys(value.node_id for value in run_nodes)
-                    ),
-                    ranks=list(dict.fromkeys(value.rank for value in run_nodes)),
-                    readiness=_run_readiness(run, run_nodes),
-                    error=(
-                        "recipe run failed"
-                        if run.state == "failed"
-                        else "recipe run observation was lost"
-                        if run.state == "lost"
-                        else None
-                    ),
-                    adapter=adapter,
-                    adapter_version=report.adapter_version
-                    if report is not None
-                    else None,
-                    adapter_supported=supported,
-                    adapter_reason=reason,
-                )
-            )
-        known_run_ids = set(runs_by_id)
-        for run_id, reports in incoming_by_run.items():
-            if run_id in known_run_ids:
-                continue
-            if reports:
-                runtimes.append(reports[0])
-        runtimes = runtimes[:32]
-
-        capabilities = list(metrics.capabilities)
-        capability_ids = {
-            (
-                item.key,
-                item.scope,
-                item.device_id,
-                item.process_id,
-                item.interface_name,
-                item.run_id,
-            )
-            for item in capabilities
-        }
-        for runtime in runtimes[:8]:
-            for key, unit, kind in _RUNTIME_CAPABILITY_LEDGER:
-                identity = (key, "runtime", None, None, None, runtime.run_id)
-                if identity in capability_ids:
-                    continue
-                capabilities.append(
-                    TelemetryCapability(
-                        key=key,
-                        scope="runtime",
-                        run_id=runtime.run_id,
-                        unit=unit,
-                        source="controller-runtime",
-                        measurement_kind=kind,
-                        supported=False,
-                        freshness_threshold_seconds=self._telemetry_live_seconds,
-                        reason="metric was not reported by the managed runtime",
-                    )
-                )
-                capability_ids.add(identity)
-                if len(capabilities) >= 128:
-                    break
-            if len(capabilities) >= 128:
-                break
-
-        run_ids = tuple(runs_by_id)
-        workloads = list(metrics.workloads)
-        if run_ids:
-            artifact_jobs = session.scalars(
-                select(ArtifactJob)
-                .where(ArtifactJob.run_id.in_(run_ids))
-                .order_by(ArtifactJob.updated_at.desc(), ArtifactJob.id.desc())
-                .limit(_MAX_TELEMETRY_WORKLOADS)
-            ).all()
-            operation_ids = tuple(
-                item.operation_id
-                for item in artifact_jobs
-                if item.operation_id is not None
-            )
-            operations = {
-                item.id: item
-                for item in session.scalars(
-                    select(Job).where(Job.id.in_(operation_ids))
-                )
-            }
-            workload_ids = {
-                item.job_id for item in workloads if item.job_id is not None
-            }
-            now = _utc(self._clock())
-            for artifact_job in artifact_jobs:
-                if artifact_job.id in workload_ids:
-                    continue
-                state = _artifact_workload_state(artifact_job.state)
-                operation = (
-                    operations.get(artifact_job.operation_id)
-                    if artifact_job.operation_id is not None
-                    else None
-                )
-                run_nodes = nodes_by_run.get(artifact_job.run_id, ())
-                started_at = (
-                    _utc(artifact_job.submitted_at)
-                    if artifact_job.submitted_at is not None
-                    else None
-                )
-                ended_at = (
-                    _utc(artifact_job.completed_at)
-                    if artifact_job.completed_at is not None
-                    else None
-                )
-                end_for_elapsed = ended_at or (now if state == "running" else None)
-                elapsed = (
-                    max(
-                        0.0,
-                        (
-                            end_for_elapsed - _utc(artifact_job.created_at)
-                        ).total_seconds(),
-                    )
-                    if end_for_elapsed is not None
-                    else None
-                )
-                workloads.append(
-                    TelemetryWorkload(
-                        request_id=(
-                            operation.request_id
-                            if operation is not None
-                            else artifact_job.request_id
-                        ),
-                        job_id=operation.id
-                        if operation is not None
-                        else artifact_job.id,
-                        run_id=artifact_job.run_id,
-                        model=None,
-                        recipe_revision=None,
-                        engine_id=artifact_job.run_id,
-                        state=state,
-                        origin_node_id=None,
-                        executor_node_ids=list(
-                            dict.fromkeys(value.node_id for value in run_nodes)
-                        ),
-                        created_at=_utc(
-                            operation.created_at
-                            if operation is not None
-                            else artifact_job.created_at
-                        ),
-                        started_at=started_at,
-                        ended_at=ended_at,
-                        elapsed_seconds=min(elapsed, 86_400 * 365)
-                        if elapsed is not None
-                        else None,
-                        failure=("artifact job failed" if state == "failed" else None),
-                        title="artifact job",
-                    )
-                )
-                workload_ids.add(artifact_job.id)
-                if len(workloads) >= _MAX_TELEMETRY_WORKLOADS:
-                    break
-        return TelemetryMetrics(
-            schema_version=2,
-            series=list(metrics.series),
-            capabilities=capabilities[:128],
-            runtimes=runtimes,
-            workloads=workloads[:_MAX_TELEMETRY_WORKLOADS],
-            provenance=metrics.provenance,
-        )
-
-    def _telemetry_with_controller(
-        self, session: Session, node_id: str, value: TelemetrySampleView
-    ) -> TelemetrySampleView:
-        return replace(
-            value,
-            metrics=self._telemetry_metrics_in_session(session, node_id, value.metrics),
         )
 
     @staticmethod

@@ -18,8 +18,8 @@ package as `packages/<asset>` together with the package `sha256`,
 `application/vnd.vonk-forge.recipe-package.v2+tar+gzip`.
 
 Each package is a deterministic gzip-compressed tar archive containing
-`manifest.json`, `recipe.json`, `recipe-release.json`, complete authoritative
-`metadata/...` catalog documents, and the `source/...` build closure. The
+`manifest.json`, `recipe.json`, the exact `models/<slug>.json` Model
+documents it references, and its build context and fixtures. The
 manifest pins every member's SHA-256 and byte size and pins the publisher, slug,
 and recipe content digest. The package does not contain the repository commit,
 so unrelated repository changes leave its digest unchanged. Weights and OCI

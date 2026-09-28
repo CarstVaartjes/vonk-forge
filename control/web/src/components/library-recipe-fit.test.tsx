@@ -18,9 +18,9 @@ test("counts only selected files across multiple Models with colliding paths", (
   const fileB = {id: "b", path: "weights/shared.bin", roles: ["weights"], sha256: "b".repeat(64), size_bytes: 20};
   const ignored = {id: "ignored", path: "weights/ignored.bin", roles: ["weights"], sha256: "c".repeat(64), size_bytes: 999};
   first.model_document.files = [fileA];
-  first.selection.files = [{file_id: "a", id: "mount-a", mount: {read_only: true, target: "/models/a"}, roles: ["weights"]}];
+  first.selection.files = [{file_id: "a", id: "mount-a", mount: {target: "/models/a"}, roles: ["weights"]}];
   second.model_document.files = [fileB, ignored];
-  second.selection.files = [{file_id: "b", id: "mount-b", mount: {read_only: true, target: "/models/b"}, roles: ["weights"]}];
+  second.selection.files = [{file_id: "b", id: "mount-b", mount: {target: "/models/b"}, roles: ["weights"]}];
   detail.model_documents = [first, second];
   const selected = selectedRecipeFiles(detail.model_documents);
   expect(selected.unresolved).toEqual([]);

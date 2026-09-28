@@ -18,8 +18,7 @@ use thiserror::Error;
 use vonk_agent_protocol::generated::{
     CompiledExecutionPlan, ConfirmPackageActivationOperation,
     ExecuteContainerRuntimeRequestOperation, HostHelperProcessLogs, InstallVonkDebOperation,
-    RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload, RestartVonkUnitOperation,
-    ScheduleRebootOperation,
+    RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload,
 };
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeReconciliationIdentity,
@@ -32,7 +31,7 @@ use vonk_agent_protocol::{
 };
 use wait_timeout::ChildExt;
 
-use crate::protocol::{ContainerRuntimeAction, HostOperation, RestartUnit, artifact_signing_bytes};
+use crate::protocol::{ContainerRuntimeAction, HostOperation, artifact_signing_bytes};
 
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
@@ -308,8 +307,6 @@ impl CommandRunner for ProcessCommandRunner {
             Some(
                 "/usr/bin/dpkg-deb"
                     | "/usr/bin/dpkg"
-                    | "/usr/bin/systemctl"
-                    | "/usr/bin/systemd-run"
                     | DOCKER_FIREWALL
                     | "/usr/bin/docker"
                     | "/usr/bin/setfacl"
@@ -451,7 +448,6 @@ mod process_command_runner_tests {
 pub struct OperationOutcome {
     pub schema_version: u8,
     pub status: String,
-    pub evidence_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -838,7 +834,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .validate()
             .map_err(|_| OperationError::InvalidOperation)?;
         self.require_directory(&self.roots.data)?;
-        let (status, evidence, exit_code, recipe_run_observation) = match operation {
+        let (status, exit_code, recipe_run_observation) = match operation {
             HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
                 package_sha256,
                 package_signature,
@@ -851,7 +847,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     rollback,
                     observation_node_id.ok_or(OperationError::InvalidOperation)?,
                 )?;
-                ("package-installed", package_sha256.clone(), None, None)
+                ("package-installed", None, None)
             }
             HostOperation::ConfirmPackageActivationOperation(
                 ConfirmPackageActivationOperation {
@@ -867,23 +863,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         attempt_nonce,
                     )
                     .map_err(|_| OperationError::PackagePreflightFailed)?;
-                (
-                    "package-activation-confirmed",
-                    package_sha256.clone(),
-                    None,
-                    None,
-                )
-            }
-            HostOperation::RestartVonkUnitOperation(RestartVonkUnitOperation { unit, .. }) => {
-                let unit_name = self.restart_unit(unit)?;
-                ("unit-restarted", unit_name.to_owned(), None, None)
-            }
-            HostOperation::ScheduleRebootOperation(ScheduleRebootOperation {
-                delay_seconds,
-                ..
-            }) => {
-                self.schedule_reboot(*delay_seconds)?;
-                ("reboot-scheduled", delay_seconds.to_string(), None, None)
+                ("package-activation-confirmed", None, None)
             }
             HostOperation::ExecuteContainerRuntimeRequestOperation(
                 ExecuteContainerRuntimeRequestOperation {
@@ -936,18 +916,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     }
                     Err(error) => return Err(error),
                 };
-                (
-                    status,
-                    request_sha256.clone(),
-                    exit_code,
-                    recipe_run_observation,
-                )
+                (status, exit_code, recipe_run_observation)
             }
         };
         Ok(OperationOutcome {
             schema_version: 1,
             status: status.to_owned(),
-            evidence_sha256: hex_sha256(evidence.as_bytes()),
             exit_code,
             recipe_run_observation,
         })
@@ -1114,69 +1088,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map_err(|_| OperationError::PackageMetadataInvalid)?;
         if !result.success || result.stdout != format!("{expected}\n").as_bytes() {
             return Err(OperationError::PackageMetadataInvalid);
-        }
-        Ok(())
-    }
-
-    fn restart_unit(&self, unit: &RestartUnit) -> Result<&'static str, OperationError> {
-        let unit = match unit {
-            RestartUnit::Agent => "vonk-forge-agent.service",
-            RestartUnit::Helper => "vonk-forge-package-helper.service",
-        };
-        if matches!(unit, "vonk-forge-package-helper.service") {
-            let result = self
-                .runner
-                .run(
-                    Path::new("/usr/bin/systemd-run"),
-                    &[
-                        "--quiet".to_owned(),
-                        "--collect".to_owned(),
-                        "--unit=vonk-forge-helper-restart.service".to_owned(),
-                        "--on-active=1s".to_owned(),
-                        "/usr/bin/systemctl".to_owned(),
-                        "restart".to_owned(),
-                        unit.to_owned(),
-                    ],
-                )
-                .map_err(|_| OperationError::CommandFailed)?;
-            if !result.success {
-                return Err(OperationError::CommandFailed);
-            }
-            return Ok(unit);
-        }
-        let result = self
-            .runner
-            .run(
-                Path::new("/usr/bin/systemctl"),
-                &["restart".to_owned(), unit.to_owned()],
-            )
-            .map_err(|_| OperationError::CommandFailed)?;
-        if !result.success {
-            return Err(OperationError::CommandFailed);
-        }
-        Ok(unit)
-    }
-
-    fn schedule_reboot(&self, delay_seconds: u32) -> Result<(), OperationError> {
-        if !(60..=3600).contains(&delay_seconds) {
-            return Err(OperationError::InvalidOperation);
-        }
-        let result = self
-            .runner
-            .run(
-                Path::new("/usr/bin/systemd-run"),
-                &[
-                    "--quiet".to_owned(),
-                    "--collect".to_owned(),
-                    "--unit=vonk-forge-reboot.service".to_owned(),
-                    format!("--on-active={delay_seconds}s"),
-                    "/usr/bin/systemctl".to_owned(),
-                    "reboot".to_owned(),
-                ],
-            )
-            .map_err(|_| OperationError::CommandFailed)?;
-        if !result.success {
-            return Err(OperationError::CommandFailed);
         }
         Ok(())
     }

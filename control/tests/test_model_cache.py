@@ -760,9 +760,7 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
         }
     ]
     document = ModelDefinition.model_validate(document).model_dump(mode="json")
-    digest = document_sha256(
-        ModelDefinition.model_validate(document).model_dump(mode="json")
-    )
+    digest = document_sha256(document)
     with sessions.begin() as session:
         root = CatalogDocument(
             id="00000000-0000-0000-0000-000000000031",

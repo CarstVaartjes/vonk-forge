@@ -1,8 +1,7 @@
 name: Canonical recipe library
 description: >-
-  Provide the recipe library at the reviewed revision in .recipe-library,
-  together with the qualification-authority source commits the suites
-  validate against. Jobs build its catalog index and packages afterwards with
+  Provide the recipe library at the reviewed revision in .recipe-library.
+  Jobs build its catalog index and packages afterwards with
   scripts/build-recipe-library. It is fetched once per revision and then restored
   from the cache main saved.
 outputs:
@@ -35,10 +34,6 @@ runs:
         ref: ${{ steps.source.outputs.revision }}
         path: .recipe-library
         persist-credentials: false
-    - name: Fetch authority validation sources
-      if: steps.cache.outputs.cache-hit != 'true'
-      shell: bash
-      run: python3 "$GITHUB_ACTION_PATH/fetch_validation_sources.py" .recipe-library
     - name: Save the recipe library for later runs
       if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

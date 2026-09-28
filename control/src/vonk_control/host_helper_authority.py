@@ -31,8 +31,6 @@ from vonk_agent_protocol.host_helper import (
     HostRuntimeRequest,
     InstallVonkDebOperation,
     RecipeReconciliationIdentity,
-    RestartVonkUnitOperation,
-    ScheduleRebootOperation,
     SignedHostHelperGrant,
     SignedRecipeRunObservationReceipt,
     host_helper_grant_signing_bytes,
@@ -218,8 +216,6 @@ class HostHelperGrantIssuer:
                 ExecuteContainerRuntimeRequestOperation,
                 InstallVonkDebOperation,
                 ConfirmPackageActivationOperation,
-                RestartVonkUnitOperation,
-                ScheduleRebootOperation,
             ),
         ):
             raise HostHelperAuthorityError("host helper operation is invalid")

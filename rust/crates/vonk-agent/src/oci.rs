@@ -1522,13 +1522,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 .is_some_and(|status| (200..300).contains(&status))
     }
 
-    pub(crate) fn retained_telemetry_plan(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<CompiledExecutionPlan>, OciError> {
-        Ok(self.load_run_lifecycle(run_id)?.map(|(plan, _, _, _)| plan))
-    }
-
     fn load_run_lifecycle(&self, run_id: &str) -> Result<Option<LoadedRunLifecycle>, OciError> {
         let metadata = self.run_metadata_path(run_id)?;
         let path = metadata.join("lifecycle.json");

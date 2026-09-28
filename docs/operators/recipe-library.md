@@ -24,17 +24,18 @@ download or use.
 
 The `vonk_forge_contracts` package in the recipe repository is the single
 source of truth for Model and Recipe documents; the Controller consumes the
-exact commit pinned in `control/packaging/public-contracts.lock`. New or
-changed models and recipes never need a vonk-forge change: the Controller
-follows the newest signed release at runtime. A contract change is different.
-Within one `schema_version` it must be additive (add an optional field, or make
-a field optional); removing a field, making one required, or changing a
-field's meaning bumps `schema_version` and needs a coordinated vonk-forge
-release. Even an additive change needs the vonk-forge contracts pin bumped,
-because documents are strict (unknown fields are rejected) and
-`content_sha256` hashes the whole normalized document. Until vonk-forge picks
-up the new contract, the Controller skips each document it cannot validate,
-lists it under the sync-status `problems`, and keeps applying the rest.
+exact commit pinned in `control/pyproject.toml`. The library's release version
+is the contract version (`v2.0.0`), so new or changed models and recipes never
+need a vonk-forge change: the recipe repository updates the existing release
+for the current contract in place and records when its recipes last changed
+(`updated_at` in `catalog-index.json`). An additive contract change (a new
+optional field) is published as a new minor release (`v2.1.0`); a breaking one
+as a new major release (`v3.0.0`) that needs a coordinated vonk-forge release.
+
+The Controller reads published documents tolerantly, ignoring fields a newer
+minor release added, and identifies each document by the `document_sha256` of
+its published JSON as recorded in the signed index. A document it still cannot
+read is skipped, listed under the sync-status `problems`, and the rest applies.
 
 ## Development versus production
 
@@ -42,8 +43,13 @@ The catalog index and recipe packages are not committed to the recipe
 repository. Its `publish.yml` workflow builds them from the release commit and
 attaches them to a GitHub release together with `SHA256SUMS` and
 `SHA256SUMS.sigstore.json`, a keyless GitHub artifact attestation over
-`SHA256SUMS`. The Controller follows the newest release by default; set
-`VONK_RECIPE_LIBRARY_RELEASE` to an exact `vMAJOR.MINOR.PATCH` tag to hold one.
+`SHA256SUMS`. The Controller follows the newest published release whose major
+version is its own contract major (drafts are skipped); set
+`VONK_RECIPE_LIBRARY_RELEASE` to an exact `v2.MINOR.PATCH` tag to hold one.
+Sync status (`library_version`, `library_updated_at`), the Library page and
+`vonkctl recipe library` show the release version and when its recipes last
+changed. A release caught mid-update (assets being replaced) just fails that
+sync; the previous verified catalog stays active and the next sync heals it.
 
 Each sync verifies, before importing anything:
 

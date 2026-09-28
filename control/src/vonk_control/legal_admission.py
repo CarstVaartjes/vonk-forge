@@ -13,7 +13,6 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class TerritorialAdmissionDecision:
-    blocker: tuple[str, str] | None
     warning: tuple[str, str] | None
 
 
@@ -33,7 +32,7 @@ def territorial_admission(
         else None
     )
     if restrictions is None:
-        return TerritorialAdmissionDecision(None, None)
+        return TerritorialAdmissionDecision(None)
     if not isinstance(restrictions, Mapping):
         raise TypeError("model territorial restrictions are invalid")
     denied = restrictions.get("denied_jurisdictions")
@@ -48,7 +47,6 @@ def territorial_admission(
         raise TypeError("model territorial restrictions are invalid")
     prefix = f"{operation}.license"
     return TerritorialAdmissionDecision(
-        None,
         (
             f"{prefix}_territorial_restrictions_informational",
             (

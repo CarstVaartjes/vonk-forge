@@ -38,10 +38,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             canonical_generated_json(&value)?
         }
-        "TelemetrySeries" => {
-            let value: generated::TelemetrySeries = serde_json::from_slice(&input)?;
-            canonical_generated_json(&value)?
-        }
         "RecipeStartPayload" => {
             let value: generated::RecipeStartPayload = serde_json::from_slice(&input)?;
             canonical_generated_json(&value)?

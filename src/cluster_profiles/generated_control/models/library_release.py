@@ -8,31 +8,30 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from typing import cast
+import datetime
 
 
 
 
 
 
-T = TypeVar("T", bound="RecipeRelease")
+T = TypeVar("T", bound="LibraryRelease")
 
 
 
 @_attrs_define
-class RecipeRelease:
-    """ The version this recipe runs.
-
-    When the upstream project publishes versions, this is the upstream version
-    and its release date (for example ``1.6`` released 2026-09-17). A recipe
-    whose upstream has no versions carries its own semantic version instead.
-    The recipe library's own version follows the contract, not recipe content.
+class LibraryRelease:
+    """ The recipe library release this Controller last synchronized.
 
         Attributes:
-            released_at (str):
+            commit (str):
+            updated_at (datetime.datetime):
             version (str):
      """
 
-    released_at: str
+    commit: str
+    updated_at: datetime.datetime
     version: str
 
 
@@ -40,7 +39,9 @@ class RecipeRelease:
 
 
     def to_dict(self) -> dict[str, Any]:
-        released_at = self.released_at
+        commit = self.commit
+
+        updated_at = self.updated_at.isoformat()
 
         version = self.version
 
@@ -48,7 +49,8 @@ class RecipeRelease:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "released_at": released_at,
+            "commit": commit,
+            "updated_at": updated_at,
             "version": version,
         })
 
@@ -59,13 +61,19 @@ class RecipeRelease:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        released_at = d.pop("released_at")
+        commit = d.pop("commit")
+
+        updated_at = datetime.datetime.fromisoformat(d.pop("updated_at"))
+
+
+
 
         version = d.pop("version")
 
-        recipe_release = cls(
-            released_at=released_at,
+        library_release = cls(
+            commit=commit,
+            updated_at=updated_at,
             version=version,
         )
 
-        return recipe_release
+        return library_release

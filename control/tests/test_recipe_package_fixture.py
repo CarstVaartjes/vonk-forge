@@ -26,7 +26,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_packages import RecipePackageError, load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_forge_contracts import document_sha256
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
@@ -45,7 +45,6 @@ def _publisher_fixture() -> tuple[Path, Path, dict[str, object]]:
         isinstance(row, dict)
         and isinstance(row.get("document"), dict)
         and row["document"].get("kind") == "model"
-        and row["document"].get("schema_version") == 2
         for row in entities
     )
     assert isinstance(recipes, list) and recipes
@@ -152,9 +151,7 @@ def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
             files[member.name] = stream.read()
     recipe = json.loads(files["recipe.json"])
     recipe["metadata"]["description"] += " (package sync fixture revision)"
-    digest = document_sha256(
-        RecipeDefinition.model_validate(recipe).model_dump(mode="json")
-    )
+    digest = document_sha256(recipe)
     files["recipe.json"] = _canonical(recipe) + b"\n"
     manifest = json.loads(files["manifest.json"])
     manifest["recipe_content_sha256"] = digest
@@ -436,6 +433,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         library_commit=changed_index["source_commit"],
         source_path=current_row["source_path"],
     )
+    assert offline.release is not None
     catalog.import_recipe_library(
         "offline-test",
         library_commit=offline.library_commit,
@@ -443,8 +441,8 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         document=offline.document,
         expected_content_sha256=offline.content_sha256,
         dependency_documents=offline.dependencies,
-        release_version=offline.release_history[0].version,
-        release_released_at=offline.release_history[0].released_at,
+        release_version=offline.release.version,
+        release_released_at=offline.release.released_at,
     )
     with sessions() as session:
         assert len(_active_recipe_state(session)) == expected_recipe_count

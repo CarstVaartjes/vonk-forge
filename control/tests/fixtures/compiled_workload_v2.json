@@ -88,12 +88,6 @@
       "port": 8000,
       "reserved_memory_bytes": 80000000,
       "memory_floor_bytes": 0
-    },
-    "telemetry": {
-      "engine": "vllm",
-      "engine_version": null,
-      "metrics_format": "prometheus",
-      "metrics_path": "/metrics"
     }
   },
   "artifacts": [

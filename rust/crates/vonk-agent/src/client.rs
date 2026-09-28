@@ -1863,8 +1863,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let request = TelemetryRequest {
-            schema_version: 1,
-            samples: samples.iter().map(|sample| sample.wire().clone()).collect(),
+            samples: samples.to_vec(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -4419,35 +4418,13 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "boot_id": "00000000-0000-4000-8000-000000000001",
             "observed_at": "2026-08-15T12:00:01Z",
-            "cpu_utilization_percent": 12.5,
-            "load_average_1m": 1.25,
             "memory_total_bytes": 128000000000_u64,
             "memory_available_bytes": 64000000000_u64,
             "disk_total_bytes": 1000000000000_u64,
             "disk_free_bytes": 750000000000_u64,
             "gpu_utilization_percent": null,
             "gpu_memory_total_bytes": 128000000000_u64,
-            "gpu_memory_free_bytes": 63000000000_u64,
-            "temperature_c": 41.5,
-            "power_watts": 17.25,
-            "network_receive_bytes_per_second": 1024.5,
-            "network_transmit_bytes_per_second": 512.25,
-            "gap_samples": 0,
-            "details": {
-                "accelerator_name": "NVIDIA GB10",
-                "accelerator_performance_state": null
-            },
-            "metrics": {
-                "schema_version": 2,
-                "series": [],
-                "capabilities": [],
-                "runtimes": [],
-                "workloads": [],
-                "provenance": {
-                    "collector": "test",
-                    "collector_version": "1"
-                }
-            }
+            "gpu_memory_free_bytes": 63000000000_u64
         }))
         .unwrap()
     }
@@ -5172,41 +5149,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn telemetry_posts_large_valid_metrics_without_content_loss() {
-        let mut sample = telemetry_sample();
-        sample.metrics.series = (0..143)
-            .map(|index| {
-                serde_json::from_value(json!({
-                    "key": format!("device.metric_{index}"), "scope": "node",
-                    "process_name": "測".repeat(128), "value": "測".repeat(256),
-                    "unit": "state", "source": "native-collector",
-                    "measurement_kind": "measured", "observed_at": sample.observed_at,
-                    "freshness": "fresh", "freshness_threshold_seconds": 6.0,
-                    "support_status": "available", "aggregation": "last"
-                }))
-                .unwrap()
-            })
-            .collect();
-        let (client, server) = observation_client(204);
-        client
-            .report_telemetry(std::slice::from_ref(&sample))
-            .await
-            .unwrap();
-        let request = server.join().unwrap();
-        let index = request
-            .windows(4)
-            .position(|value| value == b"\r\n\r\n")
-            .unwrap()
-            + 4;
-        let body: Value = serde_json::from_slice(&request[index..]).unwrap();
-        assert!(request.len() - index > 64 * 1024);
-        assert_eq!(
-            body["samples"][0]["metrics"]["series"],
-            json!(sample.metrics.series)
-        );
-    }
-
-    #[tokio::test]
     async fn telemetry_posts_current_contract_without_node_identity() {
         let sample = telemetry_sample();
         let (client, server) = observation_client(204);
@@ -5233,9 +5175,8 @@ mod tests {
                 .keys()
                 .cloned()
                 .collect::<Vec<_>>(),
-            ["samples", "schema_version"]
+            ["samples"]
         );
-        assert_eq!(body["schema_version"], 1);
         assert_eq!(body["samples"].as_array().unwrap().len(), 1);
         let sample = body["samples"][0].as_object().unwrap();
         let mut keys = sample.keys().cloned().collect::<Vec<_>>();
@@ -5244,34 +5185,18 @@ mod tests {
             keys,
             [
                 "boot_id",
-                "cpu_utilization_percent",
-                "details",
                 "disk_free_bytes",
                 "disk_total_bytes",
-                "gap_samples",
                 "gpu_memory_free_bytes",
                 "gpu_memory_total_bytes",
                 "gpu_utilization_percent",
-                "load_average_1m",
                 "memory_available_bytes",
                 "memory_total_bytes",
-                "metrics",
-                "network_receive_bytes_per_second",
-                "network_transmit_bytes_per_second",
                 "observed_at",
-                "power_watts",
-                "temperature_c",
             ]
         );
         assert!(!body.to_string().contains("node_id"));
         assert_eq!(sample["gpu_utilization_percent"], serde_json::Value::Null);
-        assert_eq!(
-            sample["details"],
-            serde_json::json!({
-                "accelerator_name": "NVIDIA GB10",
-                "accelerator_performance_state": null
-            })
-        );
     }
 
     #[tokio::test]

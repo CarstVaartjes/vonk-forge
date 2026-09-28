@@ -25,13 +25,9 @@ NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
 def _digest(value: object) -> str:
     if isinstance(value, dict) and value.get("kind") == "model":
-        return document_sha256(
-            ModelDefinition.model_validate(value).model_dump(mode="json")
-        )
+        return document_sha256(value)
     if isinstance(value, dict) and value.get("kind") == "recipe":
-        return document_sha256(
-            RecipeDefinition.model_validate(value).model_dump(mode="json")
-        )
+        return document_sha256(value)
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

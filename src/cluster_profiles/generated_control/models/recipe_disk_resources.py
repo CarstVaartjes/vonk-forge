@@ -23,19 +23,15 @@ class RecipeDiskResources:
     """
         Attributes:
             artifact_bytes (int):
-            cache_bytes (int):
             image_bytes (int):
-            rollback_bytes (int):
             safety_margin_bytes (int):
-            staging_bytes (int):
+            working_bytes (int):
      """
 
     artifact_bytes: int
-    cache_bytes: int
     image_bytes: int
-    rollback_bytes: int
     safety_margin_bytes: int
-    staging_bytes: int
+    working_bytes: int
 
 
 
@@ -44,26 +40,20 @@ class RecipeDiskResources:
     def to_dict(self) -> dict[str, Any]:
         artifact_bytes = self.artifact_bytes
 
-        cache_bytes = self.cache_bytes
-
         image_bytes = self.image_bytes
-
-        rollback_bytes = self.rollback_bytes
 
         safety_margin_bytes = self.safety_margin_bytes
 
-        staging_bytes = self.staging_bytes
+        working_bytes = self.working_bytes
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
             "artifact_bytes": artifact_bytes,
-            "cache_bytes": cache_bytes,
             "image_bytes": image_bytes,
-            "rollback_bytes": rollback_bytes,
             "safety_margin_bytes": safety_margin_bytes,
-            "staging_bytes": staging_bytes,
+            "working_bytes": working_bytes,
         })
 
         return field_dict
@@ -75,23 +65,17 @@ class RecipeDiskResources:
         d = dict(src_dict)
         artifact_bytes = d.pop("artifact_bytes")
 
-        cache_bytes = d.pop("cache_bytes")
-
         image_bytes = d.pop("image_bytes")
-
-        rollback_bytes = d.pop("rollback_bytes")
 
         safety_margin_bytes = d.pop("safety_margin_bytes")
 
-        staging_bytes = d.pop("staging_bytes")
+        working_bytes = d.pop("working_bytes")
 
         recipe_disk_resources = cls(
             artifact_bytes=artifact_bytes,
-            cache_bytes=cache_bytes,
             image_bytes=image_bytes,
-            rollback_bytes=rollback_bytes,
             safety_margin_bytes=safety_margin_bytes,
-            staging_bytes=staging_bytes,
+            working_bytes=working_bytes,
         )
 
         return recipe_disk_resources

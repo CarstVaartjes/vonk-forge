@@ -423,7 +423,7 @@ def _placement(
 
 
 def _bind_runtime_artifacts(
-    runtime_spec: Mapping[str, object], models: Sequence[object]
+    runtime_spec: Mapping[str, object], models: object
 ) -> dict[str, object]:
     """Add exact file bytes from canonical model revisions to harness output."""
 

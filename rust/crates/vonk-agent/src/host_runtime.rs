@@ -597,13 +597,6 @@ fn require_executed_outcome(
         return Err(malformed());
     }
     if response
-        .evidence_sha256
-        .as_deref()
-        .is_none_or(|value| !lower_hex(value, 64))
-    {
-        return Err(malformed());
-    }
-    if response
         .exit_code
         .is_some_and(|code| !(0..=255).contains(&code))
     {
@@ -617,7 +610,6 @@ fn runtime_rejection(response: &HelperResponse, action: HostRuntimeAction) -> Ho
         return HostRuntimeError::HelperProtocol(HelperProtocolCause::RejectionMalformed);
     };
     if response.status != "rejected"
-        || response.evidence_sha256.is_some()
         || response.exit_code.is_some()
         || response.observation_receipt.is_some()
         || !stable_runtime_error_code(code)
@@ -706,10 +698,6 @@ fn require_inspection_receipt(
 ) -> Result<&RecipeRunObservationReceipt, HostRuntimeError> {
     if response.status != "container-runtime-request-executed"
         || response.error_code.is_some()
-        || response
-            .evidence_sha256
-            .as_deref()
-            .is_none_or(|value| !lower_hex(value, 64))
         || response.exit_code.is_some()
     {
         return Err(HostRuntimeError::HelperProtocol(
@@ -870,13 +858,6 @@ fn call_helper(
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::MessageFraming))
 }
 
-fn lower_hex(value: &str, length: usize) -> bool {
-    value.len() == length
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -928,7 +909,7 @@ mod tests {
     #[test]
     fn runtime_rejection_binds_and_redacts_captured_process_logs() {
         let mut response: super::HelperResponse = vonk_agent_protocol::parse_strict(
-            br#"{"schema_version":1,"request_id":null,"status":"rejected","evidence_sha256":null,"error_code":"runtime_process_exited","diagnostic":"ModuleNotFoundError: runtime module\nAPI_TOKEN=private-value\n"}"#,
+            br#"{"schema_version":1,"request_id":null,"status":"rejected","error_code":"runtime_process_exited","diagnostic":"ModuleNotFoundError: runtime module\nAPI_TOKEN=private-value\n"}"#,
         ).unwrap();
         let error = super::runtime_rejection(&response, HostRuntimeAction::RunInspect);
         assert!(error.diagnostic().unwrap().contains("ModuleNotFoundError"));
@@ -970,7 +951,7 @@ mod tests {
         ] {
             let response: super::HelperResponse = vonk_agent_protocol::parse_strict(
                 format!(
-                    r#"{{"schema_version":1,"request_id":null,"status":"rejected","evidence_sha256":null,"error_code":"{code}"}}"#
+                    r#"{{"schema_version":1,"request_id":null,"status":"rejected","error_code":"{code}"}}"#
                 )
                 .as_bytes(),
             )
@@ -988,7 +969,7 @@ mod tests {
         let request_id = "10000000-0000-4000-8000-000000000001";
         let rejected_for_another_request: super::HelperResponse =
             vonk_agent_protocol::parse_strict(
-                br#"{"schema_version":1,"request_id":"20000000-0000-4000-8000-000000000002","status":"rejected","evidence_sha256":null,"error_code":"grant_unauthorized"}"#,
+                br#"{"schema_version":1,"request_id":"20000000-0000-4000-8000-000000000002","status":"rejected","error_code":"grant_unauthorized"}"#,
             )
             .unwrap();
         assert!(super::require_bound_response(&rejected_for_another_request, request_id).is_err());
@@ -1003,7 +984,7 @@ mod tests {
         ] {
             let unbound: super::HelperResponse = vonk_agent_protocol::parse_strict(
                 format!(
-                    r#"{{"schema_version":1,"request_id":null,"status":"rejected","evidence_sha256":null,"error_code":"{code}"}}"#
+                    r#"{{"schema_version":1,"request_id":null,"status":"rejected","error_code":"{code}"}}"#
                 )
                 .as_bytes(),
             )
@@ -1015,7 +996,7 @@ mod tests {
         }
 
         let unbound_success: super::HelperResponse = vonk_agent_protocol::parse_strict(
-            br#"{"schema_version":1,"request_id":null,"status":"container-runtime-request-executed","evidence_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
+            br#"{"schema_version":1,"request_id":null,"status":"container-runtime-request-executed"}"#,
         )
         .unwrap();
         assert!(super::require_bound_response(&unbound_success, request_id).is_err());
@@ -1182,8 +1163,7 @@ mod tests {
         let response: HelperResponse = serde_json::from_value(serde_json::json!({
             "schema_version": 1,
             "request_id": Uuid::new_v4().to_string(),
-            "status": "container-runtime-request-executed",
-            "evidence_sha256": "a".repeat(64)
+            "status": "container-runtime-request-executed"
         }))
         .unwrap();
         assert!(require_inspection_receipt(&response).is_err());
@@ -1318,7 +1298,7 @@ mod tests {
         // `helper_protocol_invalid`.
         let request_id = "10000000-0000-4000-8000-000000000001";
         let mut foreign: super::HelperResponse = vonk_agent_protocol::parse_strict(
-            br#"{"schema_version":1,"request_id":"20000000-0000-4000-8000-000000000002","status":"rejected","evidence_sha256":null,"error_code":"grant_unauthorized"}"#,
+            br#"{"schema_version":1,"request_id":"20000000-0000-4000-8000-000000000002","status":"rejected","error_code":"grant_unauthorized"}"#,
         )
         .unwrap();
         let error = require_bound_response(&foreign, request_id)
@@ -1343,10 +1323,9 @@ mod tests {
         // anything but `(RunInspect, runtime_process_exited)`, collapsed into
         // `helper_protocol_invalid`.
         let request_id = "10000000-0000-4000-8000-000000000001";
-        let digest = "a".repeat(64);
         let baseline: super::HelperResponse = vonk_agent_protocol::parse_strict(
             format!(
-                r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected","evidence_sha256":null,"error_code":"operation_failed"}}"#
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected","error_code":"operation_failed"}}"#
             )
             .as_bytes(),
         )
@@ -1355,18 +1334,15 @@ mod tests {
         // A status other than `rejected`.
         let other_status: super::HelperResponse = vonk_agent_protocol::parse_strict(
             format!(
-                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed","evidence_sha256":null,"error_code":"operation_failed"}}"#
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed","error_code":"operation_failed"}}"#
             )
             .as_bytes(),
         )
         .unwrap();
         assert_rejection_malformed(&other_status, HostRuntimeAction::RunInspect);
 
-        // A rejection never carries execution evidence, an exit code or the
+        // A rejection never carries an exit code or the
         // observation receipt only an executed run owns.
-        let mut response = baseline.clone();
-        response.evidence_sha256 = Some(digest);
-        assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
         let mut response = baseline.clone();
         response.exit_code = Some(0);
         assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
@@ -1403,14 +1379,12 @@ mod tests {
     #[test]
     fn malformed_executed_outcome_names_the_outcome_contract() {
         // Wrong implementation: an executed outcome that carried a diagnostic,
-        // named the wrong status, omitted or mis-spelled its evidence digest, or
-        // reported a non-byte exit code collapsed into
+        // named the wrong status, or reported a non-byte exit code collapsed into
         // `helper_protocol_invalid`.
         let request_id = "10000000-0000-4000-8000-000000000001";
-        let digest = "a".repeat(64);
         let baseline: super::HelperResponse = vonk_agent_protocol::parse_strict(
             format!(
-                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed","evidence_sha256":"{digest}"}}"#
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed"}}"#
             )
             .as_bytes(),
         )
@@ -1423,21 +1397,11 @@ mod tests {
 
         // The status must be the executed one unless it is stop-uncertain.
         let rejected: super::HelperResponse = vonk_agent_protocol::parse_strict(
-            format!(
-                r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected","evidence_sha256":null}}"#
-            )
-            .as_bytes(),
+            format!(r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected"}}"#)
+                .as_bytes(),
         )
         .unwrap();
         assert_outcome_malformed(&rejected);
-
-        // The evidence digest must be present, lowercase and 64 hex characters.
-        let mut response = baseline.clone();
-        response.evidence_sha256 = None;
-        assert_outcome_malformed(&response);
-        let mut response = baseline.clone();
-        response.evidence_sha256 = Some("A".repeat(64));
-        assert_outcome_malformed(&response);
 
         // The exit code must fit a process byte.
         let mut response = baseline.clone();
@@ -1457,7 +1421,7 @@ mod tests {
         // accepted.
         let stop_uncertain: super::HelperResponse = vonk_agent_protocol::parse_strict(
             format!(
-                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-stop-uncertain","evidence_sha256":"{digest}","exit_code":137}}"#
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-stop-uncertain","exit_code":137}}"#
             )
             .as_bytes(),
         )
@@ -1760,10 +1724,9 @@ mod tests {
         // status, unexpected execution evidence, or no signed receipt collapsed
         // into `helper_protocol_invalid`.
         let request_id = "10000000-0000-4000-8000-000000000001";
-        let digest = "a".repeat(64);
         let no_receipt: super::HelperResponse = vonk_agent_protocol::parse_strict(
             format!(
-                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed","evidence_sha256":"{digest}"}}"#
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"container-runtime-request-executed"}}"#
             )
             .as_bytes(),
         )
@@ -1777,7 +1740,7 @@ mod tests {
 
         let rejected: super::HelperResponse = vonk_agent_protocol::parse_strict(
             format!(
-                r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected","evidence_sha256":null,"error_code":"operation_failed"}}"#
+                r#"{{"schema_version":1,"request_id":"{request_id}","status":"rejected","error_code":"operation_failed"}}"#
             )
             .as_bytes(),
         )

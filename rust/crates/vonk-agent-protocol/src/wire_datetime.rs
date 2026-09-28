@@ -31,6 +31,8 @@ pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
     normalize(DateTime::<FixedOffset>::deserialize(deserializer)?).map_err(D::Error::custom)
 }
 
+// Emitted by vonk-wire-codegen only while the wire carries an optional datetime.
+#[allow(dead_code)]
 pub(crate) fn serialize_optional<S: Serializer>(
     value: &Option<DateTime<FixedOffset>>,
     serializer: S,
@@ -41,6 +43,7 @@ pub(crate) fn serialize_optional<S: Serializer>(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn deserialize_optional<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<DateTime<FixedOffset>>, D::Error> {

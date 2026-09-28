@@ -1,8 +1,7 @@
 import type {TelemetryPoint, VisualFleetSnapshot} from "../api/types";
-import {telemetryMetrics} from "../test-fixtures/telemetry";
 import {fleetStreamReducer, initialFleetStreamState} from "./fleet-stream-state";
 
-function snapshot(cursor: number, cpu = 10): VisualFleetSnapshot {
+function snapshot(cursor: number, gpu = 10): VisualFleetSnapshot {
   return {
     event_cursor: cursor,
     generated_at: "2026-08-15T12:00:00Z",
@@ -15,7 +14,7 @@ function snapshot(cursor: number, cpu = 10): VisualFleetSnapshot {
       labels: {},
       connection: {agent_state: "active", certificate_state: "valid", online_state: "online", offline_reason: null, last_seen_at: "2026-08-15T11:59:59Z", last_seen_age_seconds: 1},
       inventory: null,
-      telemetry: {age_seconds: 1, freshness: "live", sample: sample(cpu)},
+      telemetry: {age_seconds: 1, freshness: "live", sample: sample(gpu)},
       installed: [],
       loaded: [],
       reservations: {disk_bytes: 0, unified_memory_bytes: 0, host_memory_bytes: 0, gpu_memory_bytes: 0, port_count: 0},
@@ -37,29 +36,20 @@ function snapshot(cursor: number, cpu = 10): VisualFleetSnapshot {
   };
 }
 
-function sample(cpu: number): TelemetryPoint {
+function sample(gpu: number): TelemetryPoint {
   return {
-    id: `sample-${cpu}`,
+    id: `sample-${gpu}`,
     node_id: "node-a",
     boot_id: "00000000-0000-0000-0000-000000000001",
     observed_at: "2026-08-15T11:59:58Z",
     received_at: "2026-08-15T11:59:59Z",
-    cpu_utilization_percent: cpu,
-    load_average_1m: null,
     memory_total_bytes: null,
     memory_available_bytes: null,
     disk_total_bytes: null,
     disk_free_bytes: null,
-    gpu_utilization_percent: null,
+    gpu_utilization_percent: gpu,
     gpu_memory_total_bytes: null,
     gpu_memory_free_bytes: null,
-    temperature_c: null,
-    power_watts: null,
-    network_receive_bytes_per_second: null,
-    network_transmit_bytes_per_second: null,
-    gap_samples: 0,
-    details: {accelerator_name: null, accelerator_performance_state: null},
-    metrics: telemetryMetrics(),
   };
 }
 
@@ -99,7 +89,7 @@ test("authoritative cursor-ahead reset clears the old sparse timeline", () => {
   expect(reset.snapshot?.event_cursor).toBe(20);
   expect(reset.requiredRefreshCursor).toBeNull();
   expect(nextTimeline.snapshot?.event_cursor).toBe(21);
-  expect(nextTimeline.snapshot?.nodes[0].telemetry?.sample.cpu_utilization_percent).toBe(77);
+  expect(nextTimeline.snapshot?.nodes[0].telemetry?.sample.gpu_utilization_percent).toBe(77);
 });
 
 test("patches one keyed node and ignores stale or duplicate telemetry increments", () => {
@@ -109,7 +99,7 @@ test("patches one keyed node and ignores stale or duplicate telemetry increments
   const patched = fleetStreamReducer(base, {type: "node-telemetry", cursor: 11, nodeId: "node-a", sample: sample(73), receivedAt: new Date("2026-08-15T12:00:00Z")});
   const duplicate = fleetStreamReducer(patched, {type: "node-telemetry", cursor: 11, nodeId: "node-a", sample: sample(99), receivedAt: new Date("2026-08-15T12:00:01Z")});
 
-  expect(patched.snapshot?.nodes[0].telemetry?.sample.cpu_utilization_percent).toBe(73);
+  expect(patched.snapshot?.nodes[0].telemetry?.sample.gpu_utilization_percent).toBe(73);
   expect(patched.snapshot?.nodes[1]).toBe(untouched);
   expect(patched.snapshot?.event_cursor).toBe(11);
   expect(duplicate).toBe(patched);
@@ -197,7 +187,7 @@ test("only clears a sparse refresh requirement after a qualifying snapshot appli
   expect(staleRest).toBe(telemetryAhead);
   expect(staleRest.requiredRefreshCursor).toBe(22);
   expect(reconciled.snapshot?.event_cursor).toBe(24);
-  expect(reconciled.snapshot?.nodes[0].telemetry?.sample.cpu_utilization_percent).toBe(84);
+  expect(reconciled.snapshot?.nodes[0].telemetry?.sample.gpu_utilization_percent).toBe(84);
   expect(reconciled.requiredRefreshCursor).toBeNull();
 });
 

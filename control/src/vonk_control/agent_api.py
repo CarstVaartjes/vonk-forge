@@ -130,11 +130,7 @@ from .runtime_image_preparation import (
 )
 from .source_bundles import SourceBundleError, SourceBundleStoreProtocol
 from .strict_json import ControllerAPIRoute, StrictJSONModel
-from .telemetry import (
-    TelemetryDetailsInput,
-    TelemetryRepository,
-    TelemetrySampleInput,
-)
+from .telemetry import TelemetryRepository, TelemetrySampleInput
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 #: Response header on an observation grant that names a run this Controller
@@ -153,8 +149,6 @@ _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
 _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
-_MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
-_MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
 _MAX_RANGE_BYTES = 8 * 1024 * 1024
 # A distribution refusal is returned as the agent's ``x-vonk-error-code`` so the
@@ -1131,8 +1125,6 @@ def install_agent_routes(
                     TelemetrySampleInput(
                         boot_id=uuid.UUID(sample.boot_id),
                         observed_at=sample.observed_at,
-                        cpu_utilization_percent=sample.cpu_utilization_percent,
-                        load_average_1m=sample.load_average_1m,
                         memory_total_bytes=sample.memory_total_bytes,
                         memory_available_bytes=sample.memory_available_bytes,
                         disk_total_bytes=sample.disk_total_bytes,
@@ -1140,22 +1132,6 @@ def install_agent_routes(
                         gpu_utilization_percent=sample.gpu_utilization_percent,
                         gpu_memory_total_bytes=sample.gpu_memory_total_bytes,
                         gpu_memory_free_bytes=sample.gpu_memory_free_bytes,
-                        temperature_c=sample.temperature_c,
-                        power_watts=sample.power_watts,
-                        network_receive_bytes_per_second=(
-                            sample.network_receive_bytes_per_second
-                        ),
-                        network_transmit_bytes_per_second=(
-                            sample.network_transmit_bytes_per_second
-                        ),
-                        gap_samples=sample.gap_samples,
-                        details=TelemetryDetailsInput(
-                            accelerator_name=sample.details.accelerator_name,
-                            accelerator_performance_state=(
-                                sample.details.accelerator_performance_state
-                            ),
-                        ),
-                        metrics=sample.metrics,
                     )
                     for sample in body.samples
                 ),

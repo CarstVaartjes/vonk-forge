@@ -14,7 +14,6 @@ def test_helper_rejection_keeps_required_nulls_and_omits_unused_diagnostics() ->
         "schema_version": 1,
         "request_id": None,
         "status": "rejected",
-        "evidence_sha256": None,
     }
     model = HostHelperResponse.model_validate(value)
     assert json.loads(canonical_message(model)) == value
@@ -30,11 +29,10 @@ def test_helper_rejection_keeps_required_nulls_and_omits_unused_diagnostics() ->
         )
         == model
     )
-    for field in ("request_id", "evidence_sha256"):
-        missing = dict(value)
-        del missing[field]
-        with pytest.raises(ValidationError):
-            HostHelperResponse.model_validate(missing)
+    missing = dict(value)
+    del missing["request_id"]
+    with pytest.raises(ValidationError):
+        HostHelperResponse.model_validate(missing)
 
 
 @pytest.mark.parametrize(
@@ -42,7 +40,6 @@ def test_helper_rejection_keeps_required_nulls_and_omits_unused_diagnostics() ->
     [
         {"status": "unknown"},
         {"request_id": "unbound-request"},
-        {"evidence_sha256": "A" * 64},
         {"exit_code": True},
         {"exit_code": -1},
         {"exit_code": 256},
@@ -57,7 +54,6 @@ def test_helper_response_rejects_untyped_or_unbounded_fields(changes: dict) -> N
                 "schema_version": 1,
                 "request_id": None,
                 "status": "rejected",
-                "evidence_sha256": None,
             }
             | changes
         )
@@ -74,7 +70,6 @@ def test_helper_runtime_response_carries_the_canonical_signed_receipt() -> None:
             "schema_version": 1,
             "request_id": receipt["claims"]["request_id"],
             "status": "container-runtime-request-executed",
-            "evidence_sha256": "a" * 64,
             "observation_receipt": receipt,
         }
     )

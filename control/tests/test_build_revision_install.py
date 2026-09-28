@@ -40,7 +40,7 @@ from vonk_control.runtime_image_preparation import (
     resolve_persisted_runtime_image_receipt,
 )
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from .preflight_fixtures import record_passing_preflight
 from .test_recipe_builds import (
@@ -239,9 +239,7 @@ def _prepared_successor(tmp_path, *, change="runtime"):
             return resolve_persisted_runtime_image_receipt(
                 session,
                 recipe_revision_id=revision.id,
-                current_content_digest=document_sha256(
-                    RecipeDefinition.model_validate(document).model_dump(mode="json")
-                ),
+                current_content_digest=document_sha256(document),
                 effective_execution_key=runtime_spec["identity"]["execution_sha256"],
                 receipt=current,
             )

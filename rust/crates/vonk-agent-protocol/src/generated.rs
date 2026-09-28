@@ -894,7 +894,6 @@ pub struct CompiledRuntime {
     pub env: ::std::vec::Vec<CompiledEnvironmentEntry>,
     pub executable: ::std::string::String,
     pub placement: CompiledPlacement,
-    pub telemetry: CompiledRuntimeTelemetry,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -906,68 +905,6 @@ pub struct CompiledRuntimeImage {
     pub local_image_config_id: ::std::string::String,
     pub oci_layout_sha256: ::std::string::String,
     pub runtime_interface_label: ::std::string::String,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct CompiledRuntimeTelemetry {
-    pub engine: ::std::string::String,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub engine_version: ::std::option::Option<::std::string::String>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub metrics_format: ::std::option::Option<CompiledRuntimeTelemetryMetricsFormat>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub metrics_path: ::std::option::Option<::std::string::String>,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum CompiledRuntimeTelemetryMetricsFormat {
-    #[serde(rename = "prometheus")]
-    Prometheus,
-    #[serde(rename = "comfyui-queue")]
-    ComfyuiQueue,
-}
-impl ::std::fmt::Display for CompiledRuntimeTelemetryMetricsFormat {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Prometheus => f.write_str("prometheus"),
-            Self::ComfyuiQueue => f.write_str("comfyui-queue"),
-        }
-    }
-}
-impl ::std::str::FromStr for CompiledRuntimeTelemetryMetricsFormat {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "prometheus" => Ok(Self::Prometheus),
-            "comfyui-queue" => Ok(Self::ComfyuiQueue),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for CompiledRuntimeTelemetryMetricsFormat {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for CompiledRuntimeTelemetryMetricsFormat {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1596,8 +1533,6 @@ pub struct HostHelperResponse {
     pub diagnostic: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub error_code: ::std::option::Option<::std::string::String>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub evidence_sha256: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub exit_code: ::std::option::Option<u32>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -1628,10 +1563,6 @@ pub enum HostHelperResponseStatus {
     PackageInstalled,
     #[serde(rename = "package-activation-confirmed")]
     PackageActivationConfirmed,
-    #[serde(rename = "unit-restarted")]
-    UnitRestarted,
-    #[serde(rename = "reboot-scheduled")]
-    RebootScheduled,
     #[serde(rename = "container-runtime-request-executed")]
     ContainerRuntimeRequestExecuted,
     #[serde(rename = "container-runtime-stop-uncertain")]
@@ -1643,8 +1574,6 @@ impl ::std::fmt::Display for HostHelperResponseStatus {
             Self::Rejected => f.write_str("rejected"),
             Self::PackageInstalled => f.write_str("package-installed"),
             Self::PackageActivationConfirmed => f.write_str("package-activation-confirmed"),
-            Self::UnitRestarted => f.write_str("unit-restarted"),
-            Self::RebootScheduled => f.write_str("reboot-scheduled"),
             Self::ContainerRuntimeRequestExecuted => {
                 f.write_str("container-runtime-request-executed")
             }
@@ -1659,8 +1588,6 @@ impl ::std::str::FromStr for HostHelperResponseStatus {
             "rejected" => Ok(Self::Rejected),
             "package-installed" => Ok(Self::PackageInstalled),
             "package-activation-confirmed" => Ok(Self::PackageActivationConfirmed),
-            "unit-restarted" => Ok(Self::UnitRestarted),
-            "reboot-scheduled" => Ok(Self::RebootScheduled),
             "container-runtime-request-executed" => Ok(Self::ContainerRuntimeRequestExecuted),
             "container-runtime-stop-uncertain" => Ok(Self::ContainerRuntimeStopUncertain),
             _ => Err("invalid value".into()),
@@ -1696,8 +1623,6 @@ pub struct HostHelperSignature {
 pub enum HostOperation {
     InstallVonkDebOperation(InstallVonkDebOperation),
     ConfirmPackageActivationOperation(ConfirmPackageActivationOperation),
-    RestartVonkUnitOperation(RestartVonkUnitOperation),
-    ScheduleRebootOperation(ScheduleRebootOperation),
     ExecuteContainerRuntimeRequestOperation(ExecuteContainerRuntimeRequestOperation),
 }
 impl ::std::convert::From<InstallVonkDebOperation> for HostOperation {
@@ -1708,16 +1633,6 @@ impl ::std::convert::From<InstallVonkDebOperation> for HostOperation {
 impl ::std::convert::From<ConfirmPackageActivationOperation> for HostOperation {
     fn from(value: ConfirmPackageActivationOperation) -> Self {
         Self::ConfirmPackageActivationOperation(value)
-    }
-}
-impl ::std::convert::From<RestartVonkUnitOperation> for HostOperation {
-    fn from(value: RestartVonkUnitOperation) -> Self {
-        Self::RestartVonkUnitOperation(value)
-    }
-}
-impl ::std::convert::From<ScheduleRebootOperation> for HostOperation {
-    fn from(value: ScheduleRebootOperation) -> Self {
-        Self::ScheduleRebootOperation(value)
     }
 }
 impl ::std::convert::From<ExecuteContainerRuntimeRequestOperation> for HostOperation {
@@ -3745,64 +3660,6 @@ pub struct RequestValidationProblem {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
-pub struct RestartVonkUnitOperation {
-    #[serde(rename = "type")]
-    pub type_: ::std::string::String,
-    pub unit: RestartVonkUnitOperationUnit,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum RestartVonkUnitOperationUnit {
-    #[serde(rename = "agent")]
-    Agent,
-    #[serde(rename = "helper")]
-    Helper,
-}
-impl ::std::fmt::Display for RestartVonkUnitOperationUnit {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Agent => f.write_str("agent"),
-            Self::Helper => f.write_str("helper"),
-        }
-    }
-}
-impl ::std::str::FromStr for RestartVonkUnitOperationUnit {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "agent" => Ok(Self::Agent),
-            "helper" => Ok(Self::Helper),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for RestartVonkUnitOperationUnit {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for RestartVonkUnitOperationUnit {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
 pub struct RuntimePreflightFinding {
     pub capability: ::std::string::String,
     pub code: ::std::string::String,
@@ -3928,14 +3785,6 @@ pub struct RuntimePreflightResult {
     pub findings: ::std::vec::Vec<RuntimePreflightFinding>,
     pub fingerprint: ::std::string::String,
     pub observed_at: u64,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct ScheduleRebootOperation {
-    pub delay_seconds: u32,
-    #[serde(rename = "type")]
-    pub type_: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -4078,318 +3927,17 @@ impl ::std::convert::TryFrom<::std::string::String> for SupervisorAcknowledgemen
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct TelemetryCapability {
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub device_id: ::std::option::Option<::std::string::String>,
-    pub freshness_threshold_seconds: f64,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub interface_name: ::std::option::Option<::std::string::String>,
-    pub key: ::std::string::String,
-    pub measurement_kind: TelemetryCapabilityMeasurementKind,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub node_id: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub process_id: ::std::option::Option<u32>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub process_name: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub reason: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_id: ::std::option::Option<::std::string::String>,
-    pub scope: TelemetryCapabilityScope,
-    pub source: ::std::string::String,
-    pub supported: bool,
-    pub unit: ::std::string::String,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum TelemetryCapabilityMeasurementKind {
-    #[serde(rename = "measured")]
-    Measured,
-    #[serde(rename = "derived")]
-    Derived,
-    #[serde(rename = "estimated")]
-    Estimated,
-    #[serde(rename = "configured")]
-    Configured,
-}
-impl ::std::fmt::Display for TelemetryCapabilityMeasurementKind {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Measured => f.write_str("measured"),
-            Self::Derived => f.write_str("derived"),
-            Self::Estimated => f.write_str("estimated"),
-            Self::Configured => f.write_str("configured"),
-        }
-    }
-}
-impl ::std::str::FromStr for TelemetryCapabilityMeasurementKind {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "measured" => Ok(Self::Measured),
-            "derived" => Ok(Self::Derived),
-            "estimated" => Ok(Self::Estimated),
-            "configured" => Ok(Self::Configured),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for TelemetryCapabilityMeasurementKind {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for TelemetryCapabilityMeasurementKind {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum TelemetryCapabilityScope {
-    #[serde(rename = "node")]
-    Node,
-    #[serde(rename = "accelerator")]
-    Accelerator,
-    #[serde(rename = "memory")]
-    Memory,
-    #[serde(rename = "storage")]
-    Storage,
-    #[serde(rename = "network")]
-    Network,
-    #[serde(rename = "runtime")]
-    Runtime,
-    #[serde(rename = "workload")]
-    Workload,
-    #[serde(rename = "service")]
-    Service,
-    #[serde(rename = "benchmark")]
-    Benchmark,
-}
-impl ::std::fmt::Display for TelemetryCapabilityScope {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Node => f.write_str("node"),
-            Self::Accelerator => f.write_str("accelerator"),
-            Self::Memory => f.write_str("memory"),
-            Self::Storage => f.write_str("storage"),
-            Self::Network => f.write_str("network"),
-            Self::Runtime => f.write_str("runtime"),
-            Self::Workload => f.write_str("workload"),
-            Self::Service => f.write_str("service"),
-            Self::Benchmark => f.write_str("benchmark"),
-        }
-    }
-}
-impl ::std::str::FromStr for TelemetryCapabilityScope {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "node" => Ok(Self::Node),
-            "accelerator" => Ok(Self::Accelerator),
-            "memory" => Ok(Self::Memory),
-            "storage" => Ok(Self::Storage),
-            "network" => Ok(Self::Network),
-            "runtime" => Ok(Self::Runtime),
-            "workload" => Ok(Self::Workload),
-            "service" => Ok(Self::Service),
-            "benchmark" => Ok(Self::Benchmark),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for TelemetryCapabilityScope {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for TelemetryCapabilityScope {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct TelemetryDetails {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub accelerator_name: ::std::option::Option<::std::string::String>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub accelerator_performance_state: ::std::option::Option<::std::string::String>,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryMetrics {
-    pub capabilities: ::std::vec::Vec<TelemetryCapability>,
-    pub provenance: TelemetryProvenance,
-    pub runtimes: ::std::vec::Vec<TelemetryRuntime>,
-    pub schema_version: u8,
-    pub series: ::std::vec::Vec<TelemetrySeries>,
-    pub workloads: ::std::vec::Vec<TelemetryWorkload>,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct TelemetryProvenance {
-    pub collector: ::std::string::String,
-    pub collector_version: ::std::string::String,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub host_uptime_seconds: ::std::option::Option<u64>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    #[serde(
-        serialize_with = "crate::wire_datetime::serialize_optional",
-        deserialize_with = "crate::wire_datetime::deserialize_optional"
-    )]
-    pub source_observed_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct TelemetryRequest {
     pub samples: ::std::vec::Vec<TelemetrySample>,
-    pub schema_version: u8,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct TelemetryRuntime {
-    pub adapter: ::std::string::String,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub adapter_reason: ::std::option::Option<::std::string::String>,
-    pub adapter_supported: bool,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub adapter_version: ::std::option::Option<::std::string::String>,
-    pub backend: ::std::string::String,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub context_limit_tokens: ::std::option::Option<u64>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub endpoint: ::std::option::Option<::std::string::String>,
-    pub engine_id: ::std::string::String,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub error: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub model: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub model_version: ::std::option::Option<::std::string::String>,
-    pub ranks: ::std::vec::Vec<u32>,
-    pub readiness: TelemetryRuntimeReadiness,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub recipe_revision: ::std::option::Option<::std::string::String>,
-    pub run_id: ::std::string::String,
-    pub serving_node_ids: ::std::vec::Vec<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub version: ::std::option::Option<::std::string::String>,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum TelemetryRuntimeReadiness {
-    #[serde(rename = "starting")]
-    Starting,
-    #[serde(rename = "ready")]
-    Ready,
-    #[serde(rename = "running")]
-    Running,
-    #[serde(rename = "queued")]
-    Queued,
-    #[serde(rename = "stopped")]
-    Stopped,
-    #[serde(rename = "failed")]
-    Failed,
-    #[serde(rename = "unknown")]
-    Unknown,
-}
-impl ::std::fmt::Display for TelemetryRuntimeReadiness {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Starting => f.write_str("starting"),
-            Self::Ready => f.write_str("ready"),
-            Self::Running => f.write_str("running"),
-            Self::Queued => f.write_str("queued"),
-            Self::Stopped => f.write_str("stopped"),
-            Self::Failed => f.write_str("failed"),
-            Self::Unknown => f.write_str("unknown"),
-        }
-    }
-}
-impl ::std::str::FromStr for TelemetryRuntimeReadiness {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "starting" => Ok(Self::Starting),
-            "ready" => Ok(Self::Ready),
-            "running" => Ok(Self::Running),
-            "queued" => Ok(Self::Queued),
-            "stopped" => Ok(Self::Stopped),
-            "failed" => Ok(Self::Failed),
-            "unknown" => Ok(Self::Unknown),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for TelemetryRuntimeReadiness {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for TelemetryRuntimeReadiness {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct TelemetrySample {
     pub boot_id: ::uuid::Uuid,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub cpu_utilization_percent: ::std::option::Option<f64>,
-    pub details: TelemetryDetails,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub disk_free_bytes: ::std::option::Option<u64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub disk_total_bytes: ::std::option::Option<u64>,
-    pub gap_samples: u64,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub gpu_memory_free_bytes: ::std::option::Option<u64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -4397,428 +3945,14 @@ pub struct TelemetrySample {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub gpu_utilization_percent: ::std::option::Option<f64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub load_average_1m: ::std::option::Option<f64>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub memory_available_bytes: ::std::option::Option<u64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub memory_total_bytes: ::std::option::Option<u64>,
-    pub metrics: TelemetryMetrics,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub network_receive_bytes_per_second: ::std::option::Option<f64>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub network_transmit_bytes_per_second: ::std::option::Option<f64>,
     #[serde(
         serialize_with = "crate::wire_datetime::serialize",
         deserialize_with = "crate::wire_datetime::deserialize"
     )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub power_watts: ::std::option::Option<f64>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
-    pub temperature_c: ::std::option::Option<f64>,
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetrySeries {
-    pub aggregation: ::std::string::String,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub device_id: ::std::option::Option<::std::string::String>,
-    pub freshness: TelemetrySeriesFreshness,
-    pub freshness_threshold_seconds: f64,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub interface_name: ::std::option::Option<::std::string::String>,
-    pub key: ::std::string::String,
-    pub measurement_kind: TelemetrySeriesMeasurementKind,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub node_id: ::std::option::Option<::std::string::String>,
-    #[serde(
-        serialize_with = "crate::wire_datetime::serialize",
-        deserialize_with = "crate::wire_datetime::deserialize"
-    )]
-    pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub process_id: ::std::option::Option<u32>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub process_name: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub reason: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    #[serde(
-        serialize_with = "crate::wire_datetime::serialize_optional",
-        deserialize_with = "crate::wire_datetime::deserialize_optional"
-    )]
-    pub received_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_id: ::std::option::Option<::std::string::String>,
-    pub scope: TelemetrySeriesScope,
-    pub source: ::std::string::String,
-    pub support_status: TelemetrySeriesSupportStatus,
-    pub unit: ::std::string::String,
-    pub value: ::serde_json::Value,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum TelemetrySeriesFreshness {
-    #[serde(rename = "fresh")]
-    Fresh,
-    #[serde(rename = "delayed")]
-    Delayed,
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl ::std::fmt::Display for TelemetrySeriesFreshness {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Fresh => f.write_str("fresh"),
-            Self::Delayed => f.write_str("delayed"),
-            Self::Stale => f.write_str("stale"),
-        }
-    }
-}
-impl ::std::str::FromStr for TelemetrySeriesFreshness {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "fresh" => Ok(Self::Fresh),
-            "delayed" => Ok(Self::Delayed),
-            "stale" => Ok(Self::Stale),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for TelemetrySeriesFreshness {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for TelemetrySeriesFreshness {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum TelemetrySeriesMeasurementKind {
-    #[serde(rename = "measured")]
-    Measured,
-    #[serde(rename = "derived")]
-    Derived,
-    #[serde(rename = "estimated")]
-    Estimated,
-    #[serde(rename = "configured")]
-    Configured,
-}
-impl ::std::fmt::Display for TelemetrySeriesMeasurementKind {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Measured => f.write_str("measured"),
-            Self::Derived => f.write_str("derived"),
-            Self::Estimated => f.write_str("estimated"),
-            Self::Configured => f.write_str("configured"),
-        }
-    }
-}
-impl ::std::str::FromStr for TelemetrySeriesMeasurementKind {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "measured" => Ok(Self::Measured),
-            "derived" => Ok(Self::Derived),
-            "estimated" => Ok(Self::Estimated),
-            "configured" => Ok(Self::Configured),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for TelemetrySeriesMeasurementKind {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for TelemetrySeriesMeasurementKind {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum TelemetrySeriesScope {
-    #[serde(rename = "node")]
-    Node,
-    #[serde(rename = "accelerator")]
-    Accelerator,
-    #[serde(rename = "memory")]
-    Memory,
-    #[serde(rename = "storage")]
-    Storage,
-    #[serde(rename = "network")]
-    Network,
-    #[serde(rename = "runtime")]
-    Runtime,
-    #[serde(rename = "workload")]
-    Workload,
-    #[serde(rename = "service")]
-    Service,
-    #[serde(rename = "benchmark")]
-    Benchmark,
-}
-impl ::std::fmt::Display for TelemetrySeriesScope {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Node => f.write_str("node"),
-            Self::Accelerator => f.write_str("accelerator"),
-            Self::Memory => f.write_str("memory"),
-            Self::Storage => f.write_str("storage"),
-            Self::Network => f.write_str("network"),
-            Self::Runtime => f.write_str("runtime"),
-            Self::Workload => f.write_str("workload"),
-            Self::Service => f.write_str("service"),
-            Self::Benchmark => f.write_str("benchmark"),
-        }
-    }
-}
-impl ::std::str::FromStr for TelemetrySeriesScope {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "node" => Ok(Self::Node),
-            "accelerator" => Ok(Self::Accelerator),
-            "memory" => Ok(Self::Memory),
-            "storage" => Ok(Self::Storage),
-            "network" => Ok(Self::Network),
-            "runtime" => Ok(Self::Runtime),
-            "workload" => Ok(Self::Workload),
-            "service" => Ok(Self::Service),
-            "benchmark" => Ok(Self::Benchmark),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for TelemetrySeriesScope {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for TelemetrySeriesScope {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum TelemetrySeriesSupportStatus {
-    #[serde(rename = "available")]
-    Available,
-    #[serde(rename = "unsupported")]
-    Unsupported,
-    #[serde(rename = "unavailable")]
-    Unavailable,
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl ::std::fmt::Display for TelemetrySeriesSupportStatus {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Available => f.write_str("available"),
-            Self::Unsupported => f.write_str("unsupported"),
-            Self::Unavailable => f.write_str("unavailable"),
-            Self::Stale => f.write_str("stale"),
-        }
-    }
-}
-impl ::std::str::FromStr for TelemetrySeriesSupportStatus {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "available" => Ok(Self::Available),
-            "unsupported" => Ok(Self::Unsupported),
-            "unavailable" => Ok(Self::Unavailable),
-            "stale" => Ok(Self::Stale),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for TelemetrySeriesSupportStatus {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for TelemetrySeriesSupportStatus {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryWorkload {
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    #[serde(
-        serialize_with = "crate::wire_datetime::serialize_optional",
-        deserialize_with = "crate::wire_datetime::deserialize_optional"
-    )]
-    pub created_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub elapsed_seconds: ::std::option::Option<f64>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    #[serde(
-        serialize_with = "crate::wire_datetime::serialize_optional",
-        deserialize_with = "crate::wire_datetime::deserialize_optional"
-    )]
-    pub ended_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-    pub engine_id: ::std::string::String,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub eta_seconds: ::std::option::Option<f64>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub eta_source: ::std::option::Option<::std::string::String>,
-    pub executor_node_ids: ::std::vec::Vec<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub failure: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub job_id: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub model: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub origin_node_id: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub progress_max: ::std::option::Option<f64>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub progress_value: ::std::option::Option<f64>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub recipe_revision: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub request_id: ::std::option::Option<::std::string::String>,
-    pub run_id: ::std::string::String,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    #[serde(
-        serialize_with = "crate::wire_datetime::serialize_optional",
-        deserialize_with = "crate::wire_datetime::deserialize_optional"
-    )]
-    pub started_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-    pub state: TelemetryWorkloadState,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub title: ::std::option::Option<::std::string::String>,
-}
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-pub enum TelemetryWorkloadState {
-    #[serde(rename = "queued")]
-    Queued,
-    #[serde(rename = "running")]
-    Running,
-    #[serde(rename = "completed")]
-    Completed,
-    #[serde(rename = "failed")]
-    Failed,
-    #[serde(rename = "cancelled")]
-    Cancelled,
-    #[serde(rename = "unknown")]
-    Unknown,
-}
-impl ::std::fmt::Display for TelemetryWorkloadState {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Queued => f.write_str("queued"),
-            Self::Running => f.write_str("running"),
-            Self::Completed => f.write_str("completed"),
-            Self::Failed => f.write_str("failed"),
-            Self::Cancelled => f.write_str("cancelled"),
-            Self::Unknown => f.write_str("unknown"),
-        }
-    }
-}
-impl ::std::str::FromStr for TelemetryWorkloadState {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "queued" => Ok(Self::Queued),
-            "running" => Ok(Self::Running),
-            "completed" => Ok(Self::Completed),
-            "failed" => Ok(Self::Failed),
-            "cancelled" => Ok(Self::Cancelled),
-            "unknown" => Ok(Self::Unknown),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for TelemetryWorkloadState {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for TelemetryWorkloadState {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -6018,7 +5152,6 @@ impl<'de> ::serde::Deserialize<'de> for CompiledRuntime {
             pub env: ::std::vec::Vec<CompiledEnvironmentEntry>,
             pub executable: ::std::string::String,
             pub placement: CompiledPlacement,
-            pub telemetry: CompiledRuntimeTelemetry,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -6027,7 +5160,6 @@ impl<'de> ::serde::Deserialize<'de> for CompiledRuntime {
             env: raw.env,
             executable: raw.executable,
             placement: raw.placement,
-            telemetry: raw.telemetry,
         })
     }
 }
@@ -6057,57 +5189,6 @@ impl<'de> ::serde::Deserialize<'de> for CompiledRuntimeImage {
             oci_layout_sha256: raw.oci_layout_sha256,
             runtime_interface_label: raw.runtime_interface_label,
         })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for CompiledRuntimeTelemetry {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("CompiledRuntimeTelemetry", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub engine: ::std::string::String,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub engine_version: ::std::option::Option<::std::string::String>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub metrics_format: ::std::option::Option<CompiledRuntimeTelemetryMetricsFormat>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub metrics_path: ::std::option::Option<::std::string::String>,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            engine: raw.engine,
-            engine_version: raw.engine_version,
-            metrics_format: raw.metrics_format,
-            metrics_path: raw.metrics_path,
-        })
-    }
-}
-impl CompiledRuntimeTelemetryMetricsFormat {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Prometheus => "prometheus",
-            Self::ComfyuiQueue => "comfyui-queue",
-        }
-    }
-}
-impl ::std::ops::Deref for CompiledRuntimeTelemetryMetricsFormat {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for CompiledRuntimeTelemetryMetricsFormat {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for CompiledRuntimeTelemetryMetricsFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledSecurity {
@@ -6791,8 +5872,6 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             pub diagnostic: ::std::option::Option<::std::string::String>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub error_code: ::std::option::Option<::std::string::String>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub evidence_sha256: ::std::option::Option<::std::string::String>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub exit_code: ::std::option::Option<u32>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -6809,7 +5888,6 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
         Ok(Self {
             diagnostic: raw.diagnostic,
             error_code: raw.error_code,
-            evidence_sha256: raw.evidence_sha256,
             exit_code: raw.exit_code,
             observation_receipt: raw.observation_receipt,
             process_logs: raw.process_logs,
@@ -6825,8 +5903,6 @@ impl HostHelperResponseStatus {
             Self::Rejected => "rejected",
             Self::PackageInstalled => "package-installed",
             Self::PackageActivationConfirmed => "package-activation-confirmed",
-            Self::UnitRestarted => "unit-restarted",
-            Self::RebootScheduled => "reboot-scheduled",
             Self::ContainerRuntimeRequestExecuted => "container-runtime-request-executed",
             Self::ContainerRuntimeStopUncertain => "container-runtime-stop-uncertain",
         }
@@ -6882,8 +5958,6 @@ impl<'de> ::serde::Deserialize<'de> for HostOperation {
         enum Raw {
             InstallVonkDebOperation(InstallVonkDebOperation),
             ConfirmPackageActivationOperation(ConfirmPackageActivationOperation),
-            RestartVonkUnitOperation(RestartVonkUnitOperation),
-            ScheduleRebootOperation(ScheduleRebootOperation),
             ExecuteContainerRuntimeRequestOperation(ExecuteContainerRuntimeRequestOperation),
         }
         #[allow(unused_variables)]
@@ -6893,8 +5967,6 @@ impl<'de> ::serde::Deserialize<'de> for HostOperation {
             Raw::ConfirmPackageActivationOperation(value0) => {
                 Self::ConfirmPackageActivationOperation(value0)
             }
-            Raw::RestartVonkUnitOperation(value0) => Self::RestartVonkUnitOperation(value0),
-            Raw::ScheduleRebootOperation(value0) => Self::ScheduleRebootOperation(value0),
             Raw::ExecuteContainerRuntimeRequestOperation(value0) => {
                 Self::ExecuteContainerRuntimeRequestOperation(value0)
             }
@@ -9710,51 +8782,6 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
         })
     }
 }
-impl<'de> ::serde::Deserialize<'de> for RestartVonkUnitOperation {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("RestartVonkUnitOperation", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            #[serde(rename = "type")]
-            pub type_: ::std::string::String,
-            pub unit: RestartVonkUnitOperationUnit,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            type_: raw.type_,
-            unit: raw.unit,
-        })
-    }
-}
-impl RestartVonkUnitOperationUnit {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Agent => "agent",
-            Self::Helper => "helper",
-        }
-    }
-}
-impl ::std::ops::Deref for RestartVonkUnitOperationUnit {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for RestartVonkUnitOperationUnit {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for RestartVonkUnitOperationUnit {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
 impl<'de> ::serde::Deserialize<'de> for RuntimePreflightFinding {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -9869,27 +8896,6 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightResult {
             findings: raw.findings,
             fingerprint: raw.fingerprint,
             observed_at: raw.observed_at,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for ScheduleRebootOperation {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("ScheduleRebootOperation", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub delay_seconds: u32,
-            #[serde(rename = "type")]
-            pub type_: ::std::string::String,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            delay_seconds: raw.delay_seconds,
-            type_: raw.type_,
         })
     }
 }
@@ -10066,193 +9072,6 @@ impl ::std::cmp::PartialEq<&str> for SupervisorAcknowledgementState {
         self.as_str() == *other
     }
 }
-impl<'de> ::serde::Deserialize<'de> for TelemetryCapability {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("TelemetryCapability", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        struct Raw {
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub device_id: ::std::option::Option<::std::string::String>,
-            pub freshness_threshold_seconds: f64,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub interface_name: ::std::option::Option<::std::string::String>,
-            pub key: ::std::string::String,
-            pub measurement_kind: TelemetryCapabilityMeasurementKind,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub node_id: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub process_id: ::std::option::Option<u32>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub process_name: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub reason: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_id: ::std::option::Option<::std::string::String>,
-            pub scope: TelemetryCapabilityScope,
-            pub source: ::std::string::String,
-            pub supported: bool,
-            pub unit: ::std::string::String,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            device_id: raw.device_id,
-            freshness_threshold_seconds: raw.freshness_threshold_seconds,
-            interface_name: raw.interface_name,
-            key: raw.key,
-            measurement_kind: raw.measurement_kind,
-            node_id: raw.node_id,
-            process_id: raw.process_id,
-            process_name: raw.process_name,
-            reason: raw.reason,
-            run_id: raw.run_id,
-            scope: raw.scope,
-            source: raw.source,
-            supported: raw.supported,
-            unit: raw.unit,
-        })
-    }
-}
-impl TelemetryCapabilityMeasurementKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Measured => "measured",
-            Self::Derived => "derived",
-            Self::Estimated => "estimated",
-            Self::Configured => "configured",
-        }
-    }
-}
-impl ::std::ops::Deref for TelemetryCapabilityMeasurementKind {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for TelemetryCapabilityMeasurementKind {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for TelemetryCapabilityMeasurementKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl TelemetryCapabilityScope {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Node => "node",
-            Self::Accelerator => "accelerator",
-            Self::Memory => "memory",
-            Self::Storage => "storage",
-            Self::Network => "network",
-            Self::Runtime => "runtime",
-            Self::Workload => "workload",
-            Self::Service => "service",
-            Self::Benchmark => "benchmark",
-        }
-    }
-}
-impl ::std::ops::Deref for TelemetryCapabilityScope {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for TelemetryCapabilityScope {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for TelemetryCapabilityScope {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for TelemetryDetails {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("TelemetryDetails", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub accelerator_name: ::std::option::Option<::std::string::String>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub accelerator_performance_state: ::std::option::Option<::std::string::String>,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            accelerator_name: raw.accelerator_name,
-            accelerator_performance_state: raw.accelerator_performance_state,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for TelemetryMetrics {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("TelemetryMetrics", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        struct Raw {
-            pub capabilities: ::std::vec::Vec<TelemetryCapability>,
-            pub provenance: TelemetryProvenance,
-            pub runtimes: ::std::vec::Vec<TelemetryRuntime>,
-            pub schema_version: u8,
-            pub series: ::std::vec::Vec<TelemetrySeries>,
-            pub workloads: ::std::vec::Vec<TelemetryWorkload>,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            capabilities: raw.capabilities,
-            provenance: raw.provenance,
-            runtimes: raw.runtimes,
-            schema_version: raw.schema_version,
-            series: raw.series,
-            workloads: raw.workloads,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for TelemetryProvenance {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("TelemetryProvenance", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub collector: ::std::string::String,
-            pub collector_version: ::std::string::String,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub host_uptime_seconds: ::std::option::Option<u64>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            #[serde(
-                serialize_with = "crate::wire_datetime::serialize_optional",
-                deserialize_with = "crate::wire_datetime::deserialize_optional"
-            )]
-            pub source_observed_at:
-                ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            collector: raw.collector,
-            collector_version: raw.collector_version,
-            host_uptime_seconds: raw.host_uptime_seconds,
-            source_observed_at: raw.source_observed_at,
-        })
-    }
-}
 impl<'de> ::serde::Deserialize<'de> for TelemetryRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
@@ -10262,102 +9081,12 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryRequest {
         #[serde(deny_unknown_fields)]
         struct Raw {
             pub samples: ::std::vec::Vec<TelemetrySample>,
-            pub schema_version: u8,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             samples: raw.samples,
-            schema_version: raw.schema_version,
         })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for TelemetryRuntime {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("TelemetryRuntime", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            pub adapter: ::std::string::String,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub adapter_reason: ::std::option::Option<::std::string::String>,
-            pub adapter_supported: bool,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub adapter_version: ::std::option::Option<::std::string::String>,
-            pub backend: ::std::string::String,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub context_limit_tokens: ::std::option::Option<u64>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub endpoint: ::std::option::Option<::std::string::String>,
-            pub engine_id: ::std::string::String,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub error: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub model: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub model_version: ::std::option::Option<::std::string::String>,
-            pub ranks: ::std::vec::Vec<u32>,
-            pub readiness: TelemetryRuntimeReadiness,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub recipe_revision: ::std::option::Option<::std::string::String>,
-            pub run_id: ::std::string::String,
-            pub serving_node_ids: ::std::vec::Vec<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub version: ::std::option::Option<::std::string::String>,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            adapter: raw.adapter,
-            adapter_reason: raw.adapter_reason,
-            adapter_supported: raw.adapter_supported,
-            adapter_version: raw.adapter_version,
-            backend: raw.backend,
-            context_limit_tokens: raw.context_limit_tokens,
-            endpoint: raw.endpoint,
-            engine_id: raw.engine_id,
-            error: raw.error,
-            model: raw.model,
-            model_version: raw.model_version,
-            ranks: raw.ranks,
-            readiness: raw.readiness,
-            recipe_revision: raw.recipe_revision,
-            run_id: raw.run_id,
-            serving_node_ids: raw.serving_node_ids,
-            version: raw.version,
-        })
-    }
-}
-impl TelemetryRuntimeReadiness {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Starting => "starting",
-            Self::Ready => "ready",
-            Self::Running => "running",
-            Self::Queued => "queued",
-            Self::Stopped => "stopped",
-            Self::Failed => "failed",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-impl ::std::ops::Deref for TelemetryRuntimeReadiness {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for TelemetryRuntimeReadiness {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for TelemetryRuntimeReadiness {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
@@ -10370,13 +9099,9 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
         struct Raw {
             pub boot_id: ::uuid::Uuid,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub cpu_utilization_percent: ::std::option::Option<f64>,
-            pub details: TelemetryDetails,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub disk_free_bytes: ::std::option::Option<u64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub disk_total_bytes: ::std::option::Option<u64>,
-            pub gap_samples: u64,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub gpu_memory_free_bytes: ::std::option::Option<u64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -10384,333 +9109,28 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub gpu_utilization_percent: ::std::option::Option<f64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub load_average_1m: ::std::option::Option<f64>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub memory_available_bytes: ::std::option::Option<u64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub memory_total_bytes: ::std::option::Option<u64>,
-            pub metrics: TelemetryMetrics,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub network_receive_bytes_per_second: ::std::option::Option<f64>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub network_transmit_bytes_per_second: ::std::option::Option<f64>,
             #[serde(
                 serialize_with = "crate::wire_datetime::serialize",
                 deserialize_with = "crate::wire_datetime::deserialize"
             )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub power_watts: ::std::option::Option<f64>,
-            #[serde(deserialize_with = "::std::option::Option::deserialize")]
-            pub temperature_c: ::std::option::Option<f64>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             boot_id: raw.boot_id,
-            cpu_utilization_percent: raw.cpu_utilization_percent,
-            details: raw.details,
             disk_free_bytes: raw.disk_free_bytes,
             disk_total_bytes: raw.disk_total_bytes,
-            gap_samples: raw.gap_samples,
             gpu_memory_free_bytes: raw.gpu_memory_free_bytes,
             gpu_memory_total_bytes: raw.gpu_memory_total_bytes,
             gpu_utilization_percent: raw.gpu_utilization_percent,
-            load_average_1m: raw.load_average_1m,
             memory_available_bytes: raw.memory_available_bytes,
             memory_total_bytes: raw.memory_total_bytes,
-            metrics: raw.metrics,
-            network_receive_bytes_per_second: raw.network_receive_bytes_per_second,
-            network_transmit_bytes_per_second: raw.network_transmit_bytes_per_second,
             observed_at: raw.observed_at,
-            power_watts: raw.power_watts,
-            temperature_c: raw.temperature_c,
         })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for TelemetrySeries {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("TelemetrySeries", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        struct Raw {
-            pub aggregation: ::std::string::String,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub device_id: ::std::option::Option<::std::string::String>,
-            pub freshness: TelemetrySeriesFreshness,
-            pub freshness_threshold_seconds: f64,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub interface_name: ::std::option::Option<::std::string::String>,
-            pub key: ::std::string::String,
-            pub measurement_kind: TelemetrySeriesMeasurementKind,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub node_id: ::std::option::Option<::std::string::String>,
-            #[serde(
-                serialize_with = "crate::wire_datetime::serialize",
-                deserialize_with = "crate::wire_datetime::deserialize"
-            )]
-            pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub process_id: ::std::option::Option<u32>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub process_name: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub reason: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            #[serde(
-                serialize_with = "crate::wire_datetime::serialize_optional",
-                deserialize_with = "crate::wire_datetime::deserialize_optional"
-            )]
-            pub received_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_id: ::std::option::Option<::std::string::String>,
-            pub scope: TelemetrySeriesScope,
-            pub source: ::std::string::String,
-            pub support_status: TelemetrySeriesSupportStatus,
-            pub unit: ::std::string::String,
-            pub value: ::serde_json::Value,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            aggregation: raw.aggregation,
-            device_id: raw.device_id,
-            freshness: raw.freshness,
-            freshness_threshold_seconds: raw.freshness_threshold_seconds,
-            interface_name: raw.interface_name,
-            key: raw.key,
-            measurement_kind: raw.measurement_kind,
-            node_id: raw.node_id,
-            observed_at: raw.observed_at,
-            process_id: raw.process_id,
-            process_name: raw.process_name,
-            reason: raw.reason,
-            received_at: raw.received_at,
-            run_id: raw.run_id,
-            scope: raw.scope,
-            source: raw.source,
-            support_status: raw.support_status,
-            unit: raw.unit,
-            value: raw.value,
-        })
-    }
-}
-impl TelemetrySeriesFreshness {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Fresh => "fresh",
-            Self::Delayed => "delayed",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl ::std::ops::Deref for TelemetrySeriesFreshness {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for TelemetrySeriesFreshness {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for TelemetrySeriesFreshness {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl TelemetrySeriesMeasurementKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Measured => "measured",
-            Self::Derived => "derived",
-            Self::Estimated => "estimated",
-            Self::Configured => "configured",
-        }
-    }
-}
-impl ::std::ops::Deref for TelemetrySeriesMeasurementKind {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for TelemetrySeriesMeasurementKind {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for TelemetrySeriesMeasurementKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl TelemetrySeriesScope {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Node => "node",
-            Self::Accelerator => "accelerator",
-            Self::Memory => "memory",
-            Self::Storage => "storage",
-            Self::Network => "network",
-            Self::Runtime => "runtime",
-            Self::Workload => "workload",
-            Self::Service => "service",
-            Self::Benchmark => "benchmark",
-        }
-    }
-}
-impl ::std::ops::Deref for TelemetrySeriesScope {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for TelemetrySeriesScope {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for TelemetrySeriesScope {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl TelemetrySeriesSupportStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Available => "available",
-            Self::Unsupported => "unsupported",
-            Self::Unavailable => "unavailable",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl ::std::ops::Deref for TelemetrySeriesSupportStatus {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for TelemetrySeriesSupportStatus {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for TelemetrySeriesSupportStatus {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for TelemetryWorkload {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-        crate::wire_schema::validate_and_materialize("TelemetryWorkload", &mut value)
-            .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        struct Raw {
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            #[serde(
-                serialize_with = "crate::wire_datetime::serialize_optional",
-                deserialize_with = "crate::wire_datetime::deserialize_optional"
-            )]
-            pub created_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub elapsed_seconds: ::std::option::Option<f64>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            #[serde(
-                serialize_with = "crate::wire_datetime::serialize_optional",
-                deserialize_with = "crate::wire_datetime::deserialize_optional"
-            )]
-            pub ended_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-            pub engine_id: ::std::string::String,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub eta_seconds: ::std::option::Option<f64>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub eta_source: ::std::option::Option<::std::string::String>,
-            pub executor_node_ids: ::std::vec::Vec<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub failure: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub job_id: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub model: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub origin_node_id: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub progress_max: ::std::option::Option<f64>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub progress_value: ::std::option::Option<f64>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub recipe_revision: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub request_id: ::std::option::Option<::std::string::String>,
-            pub run_id: ::std::string::String,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            #[serde(
-                serialize_with = "crate::wire_datetime::serialize_optional",
-                deserialize_with = "crate::wire_datetime::deserialize_optional"
-            )]
-            pub started_at: ::std::option::Option<::chrono::DateTime<::chrono::FixedOffset>>,
-            pub state: TelemetryWorkloadState,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub title: ::std::option::Option<::std::string::String>,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            created_at: raw.created_at,
-            elapsed_seconds: raw.elapsed_seconds,
-            ended_at: raw.ended_at,
-            engine_id: raw.engine_id,
-            eta_seconds: raw.eta_seconds,
-            eta_source: raw.eta_source,
-            executor_node_ids: raw.executor_node_ids,
-            failure: raw.failure,
-            job_id: raw.job_id,
-            model: raw.model,
-            origin_node_id: raw.origin_node_id,
-            progress_max: raw.progress_max,
-            progress_value: raw.progress_value,
-            recipe_revision: raw.recipe_revision,
-            request_id: raw.request_id,
-            run_id: raw.run_id,
-            started_at: raw.started_at,
-            state: raw.state,
-            title: raw.title,
-        })
-    }
-}
-impl TelemetryWorkloadState {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-impl ::std::ops::Deref for TelemetryWorkloadState {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for TelemetryWorkloadState {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for TelemetryWorkloadState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
     }
 }
 impl<'de> ::serde::Deserialize<'de> for TensorParallelStartEvidence {

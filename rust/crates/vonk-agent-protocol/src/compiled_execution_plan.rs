@@ -7,7 +7,7 @@ pub use crate::generated::{
     CompiledEnvironmentEntry, CompiledExecutionPlan, CompiledIdentity as CompiledWorkloadIdentity,
     CompiledJob, CompiledJobInput, CompiledJobInputSlot, CompiledLifecycle,
     CompiledModelIdentity as ModelArtifactIdentity, CompiledPlacement as CompiledRuntimePlacement,
-    CompiledRuntime, CompiledRuntimeImage, CompiledRuntimeTelemetry, CompiledSecurity,
+    CompiledRuntime, CompiledRuntimeImage, CompiledSecurity,
     CompiledSecurityMount as MountSpec, CompiledTopology,
 };
 
@@ -67,7 +67,6 @@ pub fn same_installed_workload(
         && installed.runtime.executable == requested.runtime.executable
         && installed.runtime.argv == requested.runtime.argv
         && installed.runtime.env == requested.runtime.env
-        && installed.runtime.telemetry == requested.runtime.telemetry
         && installed.runtime_image == requested.runtime_image
         && installed.security.gpu == requested.security.gpu
         && installed.security.user == requested.security.user
@@ -237,28 +236,6 @@ impl CompiledModelArtifact {
 
 impl CompiledRuntime {
     fn validate(&self) -> Result<(), WorkloadError> {
-        let telemetry = &self.telemetry;
-        if telemetry.engine.is_empty()
-            || telemetry.engine.len() > 64
-            || telemetry.engine.contains('\0')
-            || telemetry
-                .engine_version
-                .as_ref()
-                .is_some_and(|v| v.is_empty() || v.len() > 128 || v.contains('\0'))
-            || telemetry.metrics_format.is_some() != telemetry.metrics_path.is_some()
-            || telemetry
-                .metrics_format
-                .as_deref()
-                .is_some_and(|v| !matches!(v, "prometheus" | "comfyui-queue"))
-            || telemetry.metrics_path.as_ref().is_some_and(|v| {
-                v.len() > 256
-                    || !v.starts_with('/')
-                    || (v != "/" && !valid_model_path(&v[1..]))
-                    || v.contains(['?', '#', '\r', '\n'])
-            })
-        {
-            return Err(WorkloadError::Invalid("compiled telemetry"));
-        }
         if self.executable.is_empty()
             || !self.executable.starts_with('/')
             || self.executable.len() > MAX_ARGV_ITEM_BYTES

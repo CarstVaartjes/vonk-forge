@@ -27,14 +27,12 @@ class ModelLicense:
     """
         Attributes:
             attribution (list[str]):
-            operator_acceptance_required (bool):
             spdx (str):
             url (str):
             territorial_restrictions (ModelTerritorialRestrictions | None | Unset):
      """
 
     attribution: list[str]
-    operator_acceptance_required: bool
     spdx: str
     url: str
     territorial_restrictions: ModelTerritorialRestrictions | None | Unset = UNSET
@@ -48,8 +46,6 @@ class ModelLicense:
         attribution = self.attribution
 
 
-
-        operator_acceptance_required = self.operator_acceptance_required
 
         spdx = self.spdx
 
@@ -68,7 +64,6 @@ class ModelLicense:
 
         field_dict.update({
             "attribution": attribution,
-            "operator_acceptance_required": operator_acceptance_required,
             "spdx": spdx,
             "url": url,
         })
@@ -85,8 +80,6 @@ class ModelLicense:
         d = dict(src_dict)
         attribution = cast(list[str], d.pop("attribution"))
 
-
-        operator_acceptance_required = d.pop("operator_acceptance_required")
 
         spdx = d.pop("spdx")
 
@@ -114,7 +107,6 @@ class ModelLicense:
 
         model_license = cls(
             attribution=attribution,
-            operator_acceptance_required=operator_acceptance_required,
             spdx=spdx,
             url=url,
             territorial_restrictions=territorial_restrictions,

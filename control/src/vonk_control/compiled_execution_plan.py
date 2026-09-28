@@ -446,7 +446,6 @@ class CompiledExecutionPlan(_StrictModel):
                 "argv": argv,
                 "env": environment,
                 "placement": placement_doc,
-                "telemetry": runtime["telemetry"],
             },
             "artifacts": artifacts,
             "runtime_image": self.runtime_image.model_dump(mode="json"),

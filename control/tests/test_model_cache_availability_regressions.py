@@ -508,9 +508,7 @@ def _insert_model_revision(
     sessions, document: dict[str, object], *, created_at: datetime
 ) -> str:
     supersedes = document.pop("_supersedes", None)
-    digest = document_sha256(
-        ModelDefinition.model_validate(document).model_dump(mode="json")
-    )
+    digest = document_sha256(document)
     identity = document["identity"]
     assert isinstance(identity, dict)
     root_id = f"00000000-0000-4000-8000-{digest[:12]}"

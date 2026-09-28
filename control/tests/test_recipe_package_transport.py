@@ -59,7 +59,6 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                     "publisher": "fixture",
                     "slug": "tiny-model",
                     "title": "Tiny Model",
-                    "architecture": "transformer",
                 },
                 "version": "1.0.0",
                 "variant": "default",
@@ -68,17 +67,7 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                 "description": "A deterministic package fixture.",
                 "tags": ["fixture"],
             },
-            "access": {
-                "visibility": "public",
-                "gated": False,
-                "authentication": "none",
-            },
-            "lineage": {
-                "publisher": "fixture",
-                "relation": "official",
-                "source_model": {"publisher": "fixture", "slug": "tiny-model"},
-                "derivation": "Published fixture.",
-            },
+            "requires_token": False,
             "dependencies": [],
             "modalities": ["text"],
             "source": {
@@ -86,22 +75,13 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                 "revision": "a" * 40,
             },
             "format": {
-                "container": "safetensors",
                 "precision": "fp16",
                 "quantization": "none",
-            },
-            "parameters": {"total": 1, "active": 1},
-            "limits": {
-                "context_tokens": 128,
-                "resolution_pixels": None,
-                "frames": None,
-                "sample_rate_hz": None,
             },
             "license": {
                 "spdx": "Apache-2.0",
                 "url": "https://www.apache.org/licenses/LICENSE-2.0",
                 "attribution": [],
-                "operator_acceptance_required": False,
             },
             "files": [
                 {
@@ -112,28 +92,11 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                     "roles": ["weights"],
                 }
             ],
-            "capabilities": {
-                "facts": [
-                    {
-                        "capability": "text-generation",
-                        "support": "supported",
-                        "evidence_status": "declared",
-                    }
-                ],
-                "provenance": {
-                    "source_url": "https://example.invalid/fixture",
-                    "source_revision": "a" * 40,
-                },
-            },
-            "provenance": {
-                "source_url": "https://example.invalid/fixture",
-                "source_revision": "a" * 40,
-                "attribution": [],
-            },
+            "capabilities": ["text-generation"],
         }
     )
-    model_document = model.model_dump(mode="json")
-    model_digest = document_sha256(model.model_dump(mode="json"))
+    model_document = model.model_dump(mode="json", exclude_none=True)
+    model_digest = document_sha256(model_document)
     recipe = RecipeDefinition.model_validate(
         {
             "identity": {"publisher": "fixture", "slug": "tiny-recipe"},
@@ -155,17 +118,18 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                             "id": "weights",
                             "file_id": "weights",
                             "roles": ["worker"],
-                            "mount": {"target": "/models", "read_only": True},
+                            "mount": {"target": "/models"},
                         }
                     ],
                 }
             ],
             "execution": {
-                "mode": "image",
-                "image": {
-                    "repository": "fixture/tiny",
-                    "digest": "d" * 64,
-                    "platform": "linux/arm64",
+                "build": {
+                    "base_image": {"repository": "fixture/tiny", "digest": "d" * 64},
+                    "context": {"path": "build"},
+                    "dockerfile": "build/Dockerfile",
+                    "patches": [],
+                    "network": {"hosts": []},
                 },
             },
             "runtime": {
@@ -173,15 +137,10 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                 "entrypoint": ["serve"],
                 "arguments": [],
                 "environment": [],
-                "lifecycle": {
-                    "pre_start": [],
-                    "post_stop": [],
-                    "stop_timeout_seconds": 30,
-                },
+                "lifecycle": {"stop_timeout_seconds": 30},
             },
             "topology": {
                 "name": "single",
-                "mode": "single",
                 "node_count": 1,
                 "roles": [
                     {
@@ -189,34 +148,23 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                         "count": 1,
                         "endpoint_owner": True,
                         "resources": {
-                            "memory": {
-                                "kind": "unified",
-                                "startup_peak_bytes": 1,
-                                "steady_state_bytes": 1,
-                                "runtime_growth_bytes": 0,
-                                "system_reserve_bytes": 0,
-                            },
+                            "memory": {"peak_bytes": 1, "reserve_bytes": 0},
                             "disk": {
                                 "image_bytes": 1,
                                 "artifact_bytes": 0,
-                                "staging_bytes": 0,
-                                "cache_bytes": 0,
-                                "rollback_bytes": 0,
+                                "working_bytes": 0,
                                 "safety_margin_bytes": 0,
                             },
                         },
                     }
                 ],
                 "parallelism": {
-                    "world_size": 1,
                     "tensor": 1,
                     "pipeline": 1,
                     "data": 1,
                     "backend": "none",
                 },
-                "fabric": {"connectivity": "none", "minimum_bandwidth_mbps": 0},
                 "start_order": ["worker"],
-                "stop_order": ["worker"],
             },
             "interfaces": [
                 {
@@ -227,7 +175,6 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                 }
             ],
             "validation": {
-                "benchmarks": [],
                 "serving": {
                     "interface": "openai",
                     "checks": [
@@ -248,7 +195,6 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                 },
             },
             "provenance": {
-                "source_kind": "global",
                 "source_reference": "fixture",
                 "attribution": [],
             },
@@ -256,23 +202,14 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
                 "kind": "generation",
                 "context_tokens": {"value": 128, "change_effect": "none"},
             },
-            "release": {
-                "version": "1.0.0",
-                "released_at": "2026-01-01",
-                "history": [
-                    {
-                        "version": "1.0.0",
-                        "released_at": "2026-01-01",
-                        "upgrade_effect": "none",
-                        "changes": [{"kind": "initial", "summary": "Initial"}],
-                    }
-                ],
-            },
+            "release": {"version": "1.0.0", "released_at": "2026-01-01"},
         }
     )
-    recipe_document = recipe.model_dump(mode="json")
-    recipe_digest = document_sha256(recipe.model_dump(mode="json"))
+    recipe_document = recipe.model_dump(mode="json", exclude_none=True)
+    recipe_digest = document_sha256(recipe_document)
+    base_image = "fixture/tiny@sha256:" + "d" * 64
     files = {
+        "build/Dockerfile": f"FROM {base_image}\n".encode(),
         "models/tiny-model.json": _canonical(model_document) + b"\n",
         "recipe.json": _canonical(recipe_document) + b"\n",
     }
@@ -289,7 +226,9 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
             }
             for path, content in sorted(files.items())
         ],
-        "build_inputs": [],
+        "build_inputs": [
+            {"kind": "oci-image", "reference": base_image, "platform": "linux/arm64"}
+        ],
     }
     package = _repack({"manifest.json": _canonical(manifest) + b"\n", **files})
     row = {
@@ -308,6 +247,8 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], bytes]:
     index = {
         "schema_version": 2,
         "kind": "recipe-library-index",
+        "contract_version": "2.0.0",
+        "updated_at": "2026-09-28T12:00:00Z",
         "repository": PACKAGE_REPOSITORY,
         "source_commit": "a" * 40,
         "package_contract": {"schema_version": 2, "media_type": PACKAGE_MEDIA_TYPE},
@@ -370,18 +311,27 @@ class _Release:
     def handler(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(str(request.url))
         path = request.url.path
-        if path in {f"{RELEASES}/latest", f"{RELEASES}/tags/{self.tag}"}:
+        release = {
+            "tag_name": self.tag,
+            "draft": False,
+            "assets": [
+                {"id": 7, "name": name, "state": "uploaded"} for name in self.assets
+            ],
+        }
+        if path == RELEASES:
+            # The reader follows the newest non-draft release of its own
+            # contract major, whatever the listing order.
             return httpx2.Response(
                 200,
-                json={
-                    "tag_name": self.tag,
-                    "draft": False,
-                    "assets": [
-                        {"id": 7, "name": name, "state": "uploaded"}
-                        for name in self.assets
-                    ],
-                },
+                json=[
+                    {"tag_name": "v3.0.0", "draft": False, "assets": []},
+                    {"tag_name": "v2.9.0", "draft": True, "assets": []},
+                    release,
+                    {"tag_name": "v2.0.5", "draft": False, "assets": []},
+                ],
             )
+        if path == f"{RELEASES}/tags/{self.tag}":
+            return httpx2.Response(200, json=release)
         download = f"/CarstVaartjes/vonk-forge-recipes/releases/download/{self.tag}/"
         if path.startswith(download) and path[len(download) :] in self.assets:
             name = path[len(download) :]
@@ -422,7 +372,7 @@ def signed_releases(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
     return verified
 
 
-def _release_for(index: bytes, package: bytes, *, tag: str = "v1.2.3") -> _Release:
+def _release_for(index: bytes, package: bytes, *, tag: str = "v2.1.0") -> _Release:
     return _Release(tag, {"catalog-index.json": index, "tiny-recipe.tar.gz": package})
 
 
@@ -441,10 +391,10 @@ def test_production_reader_accepts_only_the_signed_release_assets(
     item = client.fetch(snapshot.items[0].uri)
 
     assert signed_releases == [release.assets["SHA256SUMS"]]
-    download = "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/releases/download/v1.2.3"
+    download = "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/releases/download/v2.1.0"
     asset = "http://127.0.0.1:8085/github-production-release-asset/1336002555"
     assert release.requests == [
-        f"http://127.0.0.1:8083{RELEASES}/latest",
+        f"http://127.0.0.1:8083{RELEASES}?per_page=100",
         *(
             url
             for name in (
@@ -460,6 +410,9 @@ def test_production_reader_accepts_only_the_signed_release_assets(
         row["package"], "canonical fixture package metadata"
     )
     assert snapshot.commit == SIGNED_COMMIT
+    assert snapshot.version == "2.0.0"
+    assert snapshot.updated_at is not None
+    assert snapshot.updated_at.isoformat() == "2026-09-28T12:00:00+00:00"
     assert item.package_handle is not None
     assert item.package_handle.publication_commit == SIGNED_COMMIT
     assert item.package_handle.package_sha256 == package_metadata["sha256"]
@@ -471,10 +424,10 @@ def test_production_reader_can_hold_an_exact_release_tag(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, _, package = _canonical_package_fixture()
-    release = _release_for(index, package, tag="v1.0.0")
+    release = _release_for(index, package, tag="v2.0.0")
     client = RecipePackageClient(
         api_url="http://127.0.0.1",
-        release="v1.0.0",
+        release="v2.0.0",
         cache_root=tmp_path / "packages",
         transport=httpx2.MockTransport(release.handler),
     )
@@ -482,10 +435,10 @@ def test_production_reader_can_hold_an_exact_release_tag(
     # Without a relay the reader downloads from github.com and follows only
     # the redirect to GitHub's release asset origin.
     assert release.requests[:3] == [
-        f"http://127.0.0.1{RELEASES}/tags/v1.0.0",
+        f"http://127.0.0.1{RELEASES}/tags/v2.0.0",
         (
             "https://github.com/CarstVaartjes/vonk-forge-recipes/releases/download/"
-            "v1.0.0/SHA256SUMS"
+            "v2.0.0/SHA256SUMS"
         ),
         (
             "https://release-assets.githubusercontent.com/github-production-release-"

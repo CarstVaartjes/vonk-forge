@@ -8,8 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.runtime_image_receipt_source import check_runtime_image_receipt_source
-from ..models.runtime_image_receipt_source import RuntimeImageReceiptSource
 from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
@@ -35,48 +33,40 @@ class RuntimeImageReceipt:
         Attributes:
             architecture (Literal['linux-arm64']):
             archive_path (str):
-            build_id (None | str):
+            build_id (str):
             distribution_content_sha256 (str):
             distribution_publisher (str):
             distribution_slug (str):
             image_bytes (int):
             image_digest (str):
-            local_image_config_id (None | str):
-            local_image_reference (None | str):
+            local_image_config_id (str):
             oci_archive_sha256 (str):
-            platform_manifest_digest (str):
             recorded_at (str):
-            registry_manifest_digest (None | str):
+            runtime_adapter (str):
+            runtime_adapter_sha256 (str):
             runtime_interface (Literal['vonk.runtime.v1']):
             runtime_interface_label (Literal['v1']):
             schema_version (Literal[2]):
-            source (RuntimeImageReceiptSource):
             build_input_sha256 (None | str | Unset):
-            runtime_adapter (None | str | Unset):
-            runtime_adapter_sha256 (None | str | Unset):
      """
 
     architecture: Literal['linux-arm64']
     archive_path: str
-    build_id: None | str
+    build_id: str
     distribution_content_sha256: str
     distribution_publisher: str
     distribution_slug: str
     image_bytes: int
     image_digest: str
-    local_image_config_id: None | str
-    local_image_reference: None | str
+    local_image_config_id: str
     oci_archive_sha256: str
-    platform_manifest_digest: str
     recorded_at: str
-    registry_manifest_digest: None | str
+    runtime_adapter: str
+    runtime_adapter_sha256: str
     runtime_interface: Literal['vonk.runtime.v1']
     runtime_interface_label: Literal['v1']
     schema_version: Literal[2]
-    source: RuntimeImageReceiptSource
     build_input_sha256: None | str | Unset = UNSET
-    runtime_adapter: None | str | Unset = UNSET
-    runtime_adapter_sha256: None | str | Unset = UNSET
 
 
 
@@ -87,7 +77,6 @@ class RuntimeImageReceipt:
 
         archive_path = self.archive_path
 
-        build_id: None | str
         build_id = self.build_id
 
         distribution_content_sha256 = self.distribution_content_sha256
@@ -100,20 +89,15 @@ class RuntimeImageReceipt:
 
         image_digest = self.image_digest
 
-        local_image_config_id: None | str
         local_image_config_id = self.local_image_config_id
-
-        local_image_reference: None | str
-        local_image_reference = self.local_image_reference
 
         oci_archive_sha256 = self.oci_archive_sha256
 
-        platform_manifest_digest = self.platform_manifest_digest
-
         recorded_at = self.recorded_at
 
-        registry_manifest_digest: None | str
-        registry_manifest_digest = self.registry_manifest_digest
+        runtime_adapter = self.runtime_adapter
+
+        runtime_adapter_sha256 = self.runtime_adapter_sha256
 
         runtime_interface = self.runtime_interface
 
@@ -121,25 +105,11 @@ class RuntimeImageReceipt:
 
         schema_version = self.schema_version
 
-        source: str = self.source
-
         build_input_sha256: None | str | Unset
         if isinstance(self.build_input_sha256, Unset):
             build_input_sha256 = UNSET
         else:
             build_input_sha256 = self.build_input_sha256
-
-        runtime_adapter: None | str | Unset
-        if isinstance(self.runtime_adapter, Unset):
-            runtime_adapter = UNSET
-        else:
-            runtime_adapter = self.runtime_adapter
-
-        runtime_adapter_sha256: None | str | Unset
-        if isinstance(self.runtime_adapter_sha256, Unset):
-            runtime_adapter_sha256 = UNSET
-        else:
-            runtime_adapter_sha256 = self.runtime_adapter_sha256
 
 
         field_dict: dict[str, Any] = {}
@@ -154,22 +124,16 @@ class RuntimeImageReceipt:
             "image_bytes": image_bytes,
             "image_digest": image_digest,
             "local_image_config_id": local_image_config_id,
-            "local_image_reference": local_image_reference,
             "oci_archive_sha256": oci_archive_sha256,
-            "platform_manifest_digest": platform_manifest_digest,
             "recorded_at": recorded_at,
-            "registry_manifest_digest": registry_manifest_digest,
+            "runtime_adapter": runtime_adapter,
+            "runtime_adapter_sha256": runtime_adapter_sha256,
             "runtime_interface": runtime_interface,
             "runtime_interface_label": runtime_interface_label,
             "schema_version": schema_version,
-            "source": source,
         })
         if build_input_sha256 is not UNSET:
             field_dict["build_input_sha256"] = build_input_sha256
-        if runtime_adapter is not UNSET:
-            field_dict["runtime_adapter"] = runtime_adapter
-        if runtime_adapter_sha256 is not UNSET:
-            field_dict["runtime_adapter_sha256"] = runtime_adapter_sha256
 
         return field_dict
 
@@ -184,13 +148,7 @@ class RuntimeImageReceipt:
 
         archive_path = d.pop("archive_path")
 
-        def _parse_build_id(data: object) -> None | str:
-            if data is None:
-                return data
-            return cast(None | str, data)
-
-        build_id = _parse_build_id(d.pop("build_id"))
-
+        build_id = d.pop("build_id")
 
         distribution_content_sha256 = d.pop("distribution_content_sha256")
 
@@ -202,35 +160,15 @@ class RuntimeImageReceipt:
 
         image_digest = d.pop("image_digest")
 
-        def _parse_local_image_config_id(data: object) -> None | str:
-            if data is None:
-                return data
-            return cast(None | str, data)
-
-        local_image_config_id = _parse_local_image_config_id(d.pop("local_image_config_id"))
-
-
-        def _parse_local_image_reference(data: object) -> None | str:
-            if data is None:
-                return data
-            return cast(None | str, data)
-
-        local_image_reference = _parse_local_image_reference(d.pop("local_image_reference"))
-
+        local_image_config_id = d.pop("local_image_config_id")
 
         oci_archive_sha256 = d.pop("oci_archive_sha256")
 
-        platform_manifest_digest = d.pop("platform_manifest_digest")
-
         recorded_at = d.pop("recorded_at")
 
-        def _parse_registry_manifest_digest(data: object) -> None | str:
-            if data is None:
-                return data
-            return cast(None | str, data)
+        runtime_adapter = d.pop("runtime_adapter")
 
-        registry_manifest_digest = _parse_registry_manifest_digest(d.pop("registry_manifest_digest"))
-
+        runtime_adapter_sha256 = d.pop("runtime_adapter_sha256")
 
         runtime_interface = cast(Literal['vonk.runtime.v1'] , d.pop("runtime_interface"))
         if runtime_interface != 'vonk.runtime.v1':
@@ -244,11 +182,6 @@ class RuntimeImageReceipt:
         if schema_version != 2:
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
-        source = check_runtime_image_receipt_source(d.pop("source"))
-
-
-
-
         def _parse_build_input_sha256(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -257,26 +190,6 @@ class RuntimeImageReceipt:
             return cast(None | str | Unset, data)
 
         build_input_sha256 = _parse_build_input_sha256(d.pop("build_input_sha256", UNSET))
-
-
-        def _parse_runtime_adapter(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        runtime_adapter = _parse_runtime_adapter(d.pop("runtime_adapter", UNSET))
-
-
-        def _parse_runtime_adapter_sha256(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        runtime_adapter_sha256 = _parse_runtime_adapter_sha256(d.pop("runtime_adapter_sha256", UNSET))
 
 
         runtime_image_receipt = cls(
@@ -289,18 +202,14 @@ class RuntimeImageReceipt:
             image_bytes=image_bytes,
             image_digest=image_digest,
             local_image_config_id=local_image_config_id,
-            local_image_reference=local_image_reference,
             oci_archive_sha256=oci_archive_sha256,
-            platform_manifest_digest=platform_manifest_digest,
             recorded_at=recorded_at,
-            registry_manifest_digest=registry_manifest_digest,
+            runtime_adapter=runtime_adapter,
+            runtime_adapter_sha256=runtime_adapter_sha256,
             runtime_interface=runtime_interface,
             runtime_interface_label=runtime_interface_label,
             schema_version=schema_version,
-            source=source,
             build_input_sha256=build_input_sha256,
-            runtime_adapter=runtime_adapter,
-            runtime_adapter_sha256=runtime_adapter_sha256,
         )
 
         return runtime_image_receipt

@@ -22,13 +22,11 @@ T = TypeVar("T", bound="ModelRecord")
 class ModelRecord:
     """
         Attributes:
-            architecture (str):
             publisher (str):
             slug (str):
             title (str):
      """
 
-    architecture: str
     publisher: str
     slug: str
     title: str
@@ -38,8 +36,6 @@ class ModelRecord:
 
 
     def to_dict(self) -> dict[str, Any]:
-        architecture = self.architecture
-
         publisher = self.publisher
 
         slug = self.slug
@@ -50,7 +46,6 @@ class ModelRecord:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "architecture": architecture,
             "publisher": publisher,
             "slug": slug,
             "title": title,
@@ -63,8 +58,6 @@ class ModelRecord:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        architecture = d.pop("architecture")
-
         publisher = d.pop("publisher")
 
         slug = d.pop("slug")
@@ -72,7 +65,6 @@ class ModelRecord:
         title = d.pop("title")
 
         model_record = cls(
-            architecture=architecture,
             publisher=publisher,
             slug=slug,
             title=title,

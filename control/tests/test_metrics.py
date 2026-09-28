@@ -14,13 +14,10 @@ from vonk_control.fleet_projection import (
     FleetSnapshot,
     InventoryState,
     NodeConnection,
-    TelemetryDetails,
     TelemetryPoint,
     TelemetryState,
 )
 from vonk_control.metrics import MetricsRegistry, runnable_job_ages
-
-from .telemetry_fixtures import telemetry_metrics
 
 NODE = "spk_00000000000000000000000000000001"
 NOW = datetime(2026, 8, 5, 12, tzinfo=UTC)
@@ -41,9 +38,6 @@ def _fleet_snapshot(
         observed_at=NOW,
         received_at=NOW,
         gpu_utilization_percent=gpu_utilization,
-        gap_samples=0,
-        details=TelemetryDetails(),
-        metrics=telemetry_metrics(),
     )
     return FleetSnapshot(
         event_cursor=1,

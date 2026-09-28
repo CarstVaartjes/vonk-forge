@@ -7,7 +7,7 @@ import json
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol
 
 from sqlalchemy import and_, select
@@ -49,6 +49,8 @@ class CatalogSyncView:
     repository: str
     expected_commit: str | None
     commit: str | None
+    library_version: str | None
+    library_updated_at: datetime | None
     total_count: int
     processed_count: int
     imported_count: int
@@ -478,6 +480,8 @@ class ManagedRecipeCatalogSyncService:
                     "catalog.sync_state_invalid", "managed catalog sync state changed"
                 )
             run.observed_commit = snapshot.commit
+            run.library_version = snapshot.version
+            run.library_updated_at = snapshot.updated_at
             run.total_count = (
                 len(snapshot.items)
                 + len(snapshot.catalog_entities)
@@ -632,6 +636,13 @@ def _view(row: RecipeLibrarySyncRun | None) -> CatalogSyncView:
         repository=row.repository,
         expected_commit=row.expected_commit,
         commit=row.observed_commit,
+        library_version=row.library_version,
+        library_updated_at=(
+            row.library_updated_at.replace(tzinfo=UTC)
+            if row.library_updated_at is not None
+            and row.library_updated_at.tzinfo is None
+            else row.library_updated_at
+        ),
         total_count=row.total_count,
         processed_count=row.processed_count,
         imported_count=row.imported_count,

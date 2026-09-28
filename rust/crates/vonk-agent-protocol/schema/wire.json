@@ -1772,17 +1772,13 @@
         },
         "placement": {
           "$ref": "#/$defs/CompiledPlacement"
-        },
-        "telemetry": {
-          "$ref": "#/$defs/CompiledRuntimeTelemetry"
         }
       },
       "required": [
         "executable",
         "argv",
         "env",
-        "placement",
-        "telemetry"
+        "placement"
       ],
       "title": "CompiledRuntime",
       "type": "object"
@@ -1834,65 +1830,6 @@
         "runtime_interface_label"
       ],
       "title": "CompiledRuntimeImage",
-      "type": "object"
-    },
-    "CompiledRuntimeTelemetry": {
-      "additionalProperties": false,
-      "properties": {
-        "engine": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Engine",
-          "type": "string"
-        },
-        "engine_version": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Engine Version"
-        },
-        "metrics_format": {
-          "anyOf": [
-            {
-              "enum": [
-                "prometheus",
-                "comfyui-queue"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Metrics Format"
-        },
-        "metrics_path": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Metrics Path"
-        }
-      },
-      "required": [
-        "engine",
-        "engine_version",
-        "metrics_format",
-        "metrics_path"
-      ],
-      "title": "CompiledRuntimeTelemetry",
       "type": "object"
     },
     "CompiledSecurity": {
@@ -2808,18 +2745,6 @@
           "default": null,
           "title": "Error Code"
         },
-        "evidence_sha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Evidence Sha256"
-        },
         "exit_code": {
           "anyOf": [
             {
@@ -2878,8 +2803,6 @@
             "rejected",
             "package-installed",
             "package-activation-confirmed",
-            "unit-restarted",
-            "reboot-scheduled",
             "container-runtime-request-executed",
             "container-runtime-stop-uncertain"
           ],
@@ -2890,8 +2813,7 @@
       "required": [
         "schema_version",
         "request_id",
-        "status",
-        "evidence_sha256"
+        "status"
       ],
       "title": "HostHelperResponse",
       "type": "object"
@@ -2928,9 +2850,7 @@
         "mapping": {
           "confirm-package-activation": "#/$defs/ConfirmPackageActivationOperation",
           "execute-container-runtime-request": "#/$defs/ExecuteContainerRuntimeRequestOperation",
-          "install-vonk-deb": "#/$defs/InstallVonkDebOperation",
-          "restart-vonk-unit": "#/$defs/RestartVonkUnitOperation",
-          "schedule-reboot": "#/$defs/ScheduleRebootOperation"
+          "install-vonk-deb": "#/$defs/InstallVonkDebOperation"
         },
         "propertyName": "type"
       },
@@ -2940,12 +2860,6 @@
         },
         {
           "$ref": "#/$defs/ConfirmPackageActivationOperation"
-        },
-        {
-          "$ref": "#/$defs/RestartVonkUnitOperation"
-        },
-        {
-          "$ref": "#/$defs/ScheduleRebootOperation"
         },
         {
           "$ref": "#/$defs/ExecuteContainerRuntimeRequestOperation"
@@ -7776,30 +7690,6 @@
       "title": "RequestValidationProblem",
       "type": "object"
     },
-    "RestartVonkUnitOperation": {
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "restart-vonk-unit",
-          "title": "Type",
-          "type": "string"
-        },
-        "unit": {
-          "enum": [
-            "agent",
-            "helper"
-          ],
-          "title": "Unit",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "unit"
-      ],
-      "title": "RestartVonkUnitOperation",
-      "type": "object"
-    },
     "RuntimePreflightFinding": {
       "additionalProperties": false,
       "properties": {
@@ -7898,28 +7788,6 @@
         "findings"
       ],
       "title": "RuntimePreflightResult",
-      "type": "object"
-    },
-    "ScheduleRebootOperation": {
-      "additionalProperties": false,
-      "properties": {
-        "delay_seconds": {
-          "maximum": 3600,
-          "minimum": 60,
-          "title": "Delay Seconds",
-          "type": "integer"
-        },
-        "type": {
-          "const": "schedule-reboot",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "delay_seconds"
-      ],
-      "title": "ScheduleRebootOperation",
       "type": "object"
     },
     "SignedHostHelperGrant": {
@@ -8133,331 +8001,6 @@
       "title": "SupervisorAcknowledgement",
       "type": "object"
     },
-    "TelemetryCapability": {
-      "additionalProperties": false,
-      "properties": {
-        "device_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Device Id"
-        },
-        "freshness_threshold_seconds": {
-          "exclusiveMinimum": 0,
-          "maximum": 86400,
-          "title": "Freshness Threshold Seconds",
-          "type": "number"
-        },
-        "interface_name": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Interface Name"
-        },
-        "key": {
-          "maxLength": 96,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
-          "title": "Key",
-          "type": "string"
-        },
-        "measurement_kind": {
-          "enum": [
-            "measured",
-            "derived",
-            "estimated",
-            "configured"
-          ],
-          "title": "Measurement Kind",
-          "type": "string"
-        },
-        "node_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Node Id"
-        },
-        "process_id": {
-          "anyOf": [
-            {
-              "maximum": 2147483647,
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Process Id"
-        },
-        "process_name": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Process Name"
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason"
-        },
-        "run_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Run Id"
-        },
-        "scope": {
-          "enum": [
-            "node",
-            "accelerator",
-            "memory",
-            "storage",
-            "network",
-            "runtime",
-            "workload",
-            "service",
-            "benchmark"
-          ],
-          "title": "Scope",
-          "type": "string"
-        },
-        "source": {
-          "maxLength": 128,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
-          "title": "Source",
-          "type": "string"
-        },
-        "supported": {
-          "title": "Supported",
-          "type": "boolean"
-        },
-        "unit": {
-          "maxLength": 32,
-          "minLength": 1,
-          "title": "Unit",
-          "type": "string"
-        }
-      },
-      "required": [
-        "key",
-        "scope",
-        "unit",
-        "source",
-        "measurement_kind",
-        "supported",
-        "freshness_threshold_seconds"
-      ],
-      "title": "TelemetryCapability",
-      "type": "object"
-    },
-    "TelemetryDetails": {
-      "additionalProperties": false,
-      "properties": {
-        "accelerator_name": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Accelerator Name"
-        },
-        "accelerator_performance_state": {
-          "anyOf": [
-            {
-              "maxLength": 32,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Accelerator Performance State"
-        }
-      },
-      "required": [
-        "accelerator_name",
-        "accelerator_performance_state"
-      ],
-      "title": "TelemetryDetails",
-      "type": "object"
-    },
-    "TelemetryMetrics": {
-      "additionalProperties": false,
-      "properties": {
-        "capabilities": {
-          "items": {
-            "$ref": "#/$defs/TelemetryCapability"
-          },
-          "maxItems": 128,
-          "title": "Capabilities",
-          "type": "array"
-        },
-        "provenance": {
-          "$ref": "#/$defs/TelemetryProvenance"
-        },
-        "runtimes": {
-          "items": {
-            "$ref": "#/$defs/TelemetryRuntime"
-          },
-          "maxItems": 32,
-          "title": "Runtimes",
-          "type": "array"
-        },
-        "schema_version": {
-          "const": 2,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "series": {
-          "items": {
-            "$ref": "#/$defs/TelemetrySeries"
-          },
-          "maxItems": 512,
-          "title": "Series",
-          "type": "array"
-        },
-        "workloads": {
-          "items": {
-            "$ref": "#/$defs/TelemetryWorkload"
-          },
-          "maxItems": 128,
-          "title": "Workloads",
-          "type": "array"
-        }
-      },
-      "required": [
-        "schema_version",
-        "series",
-        "capabilities",
-        "runtimes",
-        "workloads",
-        "provenance"
-      ],
-      "title": "TelemetryMetrics",
-      "type": "object"
-    },
-    "TelemetryProvenance": {
-      "additionalProperties": false,
-      "properties": {
-        "collector": {
-          "maxLength": 64,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
-          "title": "Collector",
-          "type": "string"
-        },
-        "collector_version": {
-          "maxLength": 64,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
-          "title": "Collector Version",
-          "type": "string"
-        },
-        "host_uptime_seconds": {
-          "anyOf": [
-            {
-              "maximum": 9223372036854775807,
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Host Uptime Seconds"
-        },
-        "source_observed_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Source Observed At"
-        }
-      },
-      "required": [
-        "collector",
-        "collector_version"
-      ],
-      "title": "TelemetryProvenance",
-      "type": "object"
-    },
     "TelemetryRequest": {
       "additionalProperties": false,
       "properties": {
@@ -8469,222 +8012,12 @@
           "minItems": 1,
           "title": "Samples",
           "type": "array"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
         }
       },
       "required": [
-        "schema_version",
         "samples"
       ],
       "title": "TelemetryRequest",
-      "type": "object"
-    },
-    "TelemetryRuntime": {
-      "additionalProperties": false,
-      "properties": {
-        "adapter": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Adapter",
-          "type": "string"
-        },
-        "adapter_reason": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Adapter Reason"
-        },
-        "adapter_supported": {
-          "title": "Adapter Supported",
-          "type": "boolean"
-        },
-        "adapter_version": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Adapter Version"
-        },
-        "backend": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Backend",
-          "type": "string"
-        },
-        "context_limit_tokens": {
-          "anyOf": [
-            {
-              "maximum": 9223372036854775807,
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Context Limit Tokens"
-        },
-        "endpoint": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Endpoint"
-        },
-        "engine_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Engine Id",
-          "type": "string"
-        },
-        "error": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Error"
-        },
-        "model": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model"
-        },
-        "model_version": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model Version"
-        },
-        "ranks": {
-          "items": {
-            "maximum": 4294967295,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "maxItems": 64,
-          "title": "Ranks",
-          "type": "array"
-        },
-        "readiness": {
-          "enum": [
-            "starting",
-            "ready",
-            "running",
-            "queued",
-            "stopped",
-            "failed",
-            "unknown"
-          ],
-          "title": "Readiness",
-          "type": "string"
-        },
-        "recipe_revision": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Recipe Revision"
-        },
-        "run_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Run Id",
-          "type": "string"
-        },
-        "serving_node_ids": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Serving Node Ids",
-          "type": "array"
-        },
-        "version": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Version"
-        }
-      },
-      "required": [
-        "run_id",
-        "engine_id",
-        "backend",
-        "serving_node_ids",
-        "ranks",
-        "readiness",
-        "adapter",
-        "adapter_supported"
-      ],
-      "title": "TelemetryRuntime",
       "type": "object"
     },
     "TelemetrySample": {
@@ -8694,22 +8027,6 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Boot Id",
           "type": "string"
-        },
-        "cpu_utilization_percent": {
-          "anyOf": [
-            {
-              "maximum": 100,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Cpu Utilization Percent"
-        },
-        "details": {
-          "$ref": "#/$defs/TelemetryDetails"
         },
         "disk_free_bytes": {
           "anyOf": [
@@ -8736,12 +8053,6 @@
             }
           ],
           "title": "Disk Total Bytes"
-        },
-        "gap_samples": {
-          "maximum": 9223372036854775807,
-          "minimum": 0,
-          "title": "Gap Samples",
-          "type": "integer"
         },
         "gpu_memory_free_bytes": {
           "anyOf": [
@@ -8782,19 +8093,6 @@
           ],
           "title": "Gpu Utilization Percent"
         },
-        "load_average_1m": {
-          "anyOf": [
-            {
-              "maximum": 1000000,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Load Average 1M"
-        },
         "memory_available_bytes": {
           "anyOf": [
             {
@@ -8821,587 +8119,24 @@
           ],
           "title": "Memory Total Bytes"
         },
-        "metrics": {
-          "$ref": "#/$defs/TelemetryMetrics"
-        },
-        "network_receive_bytes_per_second": {
-          "anyOf": [
-            {
-              "maximum": 1000000000000000.0,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Network Receive Bytes Per Second"
-        },
-        "network_transmit_bytes_per_second": {
-          "anyOf": [
-            {
-              "maximum": 1000000000000000.0,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Network Transmit Bytes Per Second"
-        },
         "observed_at": {
           "format": "date-time",
           "title": "Observed At",
           "type": "string"
-        },
-        "power_watts": {
-          "anyOf": [
-            {
-              "maximum": 100000,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Power Watts"
-        },
-        "temperature_c": {
-          "anyOf": [
-            {
-              "maximum": 300,
-              "minimum": -100,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Temperature C"
         }
       },
       "required": [
         "boot_id",
         "observed_at",
-        "cpu_utilization_percent",
-        "load_average_1m",
         "memory_total_bytes",
         "memory_available_bytes",
         "disk_total_bytes",
         "disk_free_bytes",
         "gpu_utilization_percent",
         "gpu_memory_total_bytes",
-        "gpu_memory_free_bytes",
-        "temperature_c",
-        "power_watts",
-        "network_receive_bytes_per_second",
-        "network_transmit_bytes_per_second",
-        "gap_samples",
-        "details",
-        "metrics"
+        "gpu_memory_free_bytes"
       ],
       "title": "TelemetrySample",
-      "type": "object"
-    },
-    "TelemetrySeries": {
-      "additionalProperties": false,
-      "properties": {
-        "aggregation": {
-          "maxLength": 32,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
-          "title": "Aggregation",
-          "type": "string"
-        },
-        "device_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Device Id"
-        },
-        "freshness": {
-          "default": "fresh",
-          "enum": [
-            "fresh",
-            "delayed",
-            "stale"
-          ],
-          "title": "Freshness",
-          "type": "string"
-        },
-        "freshness_threshold_seconds": {
-          "exclusiveMinimum": 0,
-          "maximum": 86400,
-          "title": "Freshness Threshold Seconds",
-          "type": "number"
-        },
-        "interface_name": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Interface Name"
-        },
-        "key": {
-          "maxLength": 96,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
-          "title": "Key",
-          "type": "string"
-        },
-        "measurement_kind": {
-          "enum": [
-            "measured",
-            "derived",
-            "estimated",
-            "configured"
-          ],
-          "title": "Measurement Kind",
-          "type": "string"
-        },
-        "node_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Node Id"
-        },
-        "observed_at": {
-          "format": "date-time",
-          "title": "Observed At",
-          "type": "string"
-        },
-        "process_id": {
-          "anyOf": [
-            {
-              "maximum": 2147483647,
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Process Id"
-        },
-        "process_name": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Process Name"
-        },
-        "reason": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reason"
-        },
-        "received_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Received At"
-        },
-        "run_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Run Id"
-        },
-        "scope": {
-          "enum": [
-            "node",
-            "accelerator",
-            "memory",
-            "storage",
-            "network",
-            "runtime",
-            "workload",
-            "service",
-            "benchmark"
-          ],
-          "title": "Scope",
-          "type": "string"
-        },
-        "source": {
-          "maxLength": 128,
-          "minLength": 1,
-          "not": {
-            "pattern": "[\\x00-\\x1f\\x7f]"
-          },
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
-          "title": "Source",
-          "type": "string"
-        },
-        "support_status": {
-          "enum": [
-            "available",
-            "unsupported",
-            "unavailable",
-            "stale"
-          ],
-          "title": "Support Status",
-          "type": "string"
-        },
-        "unit": {
-          "maxLength": 32,
-          "minLength": 1,
-          "title": "Unit",
-          "type": "string"
-        },
-        "value": {
-          "anyOf": [
-            {
-              "maximum": 9223372036854775807,
-              "minimum": -9223372036854775808,
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Value"
-        }
-      },
-      "required": [
-        "key",
-        "scope",
-        "value",
-        "unit",
-        "source",
-        "measurement_kind",
-        "observed_at",
-        "freshness_threshold_seconds",
-        "support_status",
-        "aggregation"
-      ],
-      "title": "TelemetrySeries",
-      "type": "object"
-    },
-    "TelemetryWorkload": {
-      "additionalProperties": false,
-      "properties": {
-        "created_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Created At"
-        },
-        "elapsed_seconds": {
-          "anyOf": [
-            {
-              "maximum": 31536000,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Elapsed Seconds"
-        },
-        "ended_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ended At"
-        },
-        "engine_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Engine Id",
-          "type": "string"
-        },
-        "eta_seconds": {
-          "anyOf": [
-            {
-              "maximum": 31536000,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Eta Seconds"
-        },
-        "eta_source": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Eta Source"
-        },
-        "executor_node_ids": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Executor Node Ids",
-          "type": "array"
-        },
-        "failure": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Failure"
-        },
-        "job_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Job Id"
-        },
-        "model": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model"
-        },
-        "origin_node_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Origin Node Id"
-        },
-        "progress_max": {
-          "anyOf": [
-            {
-              "exclusiveMinimum": 0,
-              "maximum": 1000000,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Progress Max"
-        },
-        "progress_value": {
-          "anyOf": [
-            {
-              "maximum": 1,
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Progress Value"
-        },
-        "recipe_revision": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Recipe Revision"
-        },
-        "request_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Id"
-        },
-        "run_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Run Id",
-          "type": "string"
-        },
-        "started_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Started At"
-        },
-        "state": {
-          "enum": [
-            "queued",
-            "running",
-            "completed",
-            "failed",
-            "cancelled",
-            "unknown"
-          ],
-          "title": "State",
-          "type": "string"
-        },
-        "title": {
-          "anyOf": [
-            {
-              "maxLength": 200,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Title"
-        }
-      },
-      "required": [
-        "run_id",
-        "engine_id",
-        "state",
-        "executor_node_ids"
-      ],
-      "title": "TelemetryWorkload",
       "type": "object"
     },
     "TensorParallelStartEvidence": {
@@ -9584,7 +8319,6 @@
     "CompiledPlacement": "vonk_agent_protocol.compiled_execution_plan.CompiledPlacement",
     "CompiledRuntime": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntime",
     "CompiledRuntimeImage": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntimeImage",
-    "CompiledRuntimeTelemetry": "vonk_agent_protocol.compiled_execution_plan.CompiledRuntimeTelemetry",
     "CompiledSecurity": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurity",
     "CompiledSecurityMount": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurityMount",
     "CompiledTopology": "vonk_agent_protocol.compiled_execution_plan.CompiledTopology",
@@ -9674,26 +8408,17 @@
     "RecipeUninstallResult": "vonk_agent_protocol.recipe_operations.RecipeUninstallResult",
     "RenewRequest": "vonk_agent_protocol.enrollment.RenewRequest",
     "RequestValidationProblem": "vonk_control.operation_api.RequestValidationProblem",
-    "RestartVonkUnitOperation": "vonk_agent_protocol.host_helper.RestartVonkUnitOperation",
     "RuntimePreflightFinding": "vonk_agent_protocol.runtime_preflight.RuntimePreflightFinding",
     "RuntimePreflightRequest": "vonk_agent_protocol.runtime_preflight.RuntimePreflightRequest",
     "RuntimePreflightResult": "vonk_agent_protocol.runtime_preflight.RuntimePreflightResult",
-    "ScheduleRebootOperation": "vonk_agent_protocol.host_helper.ScheduleRebootOperation",
     "SignedHostHelperGrant": "vonk_agent_protocol.host_helper.SignedHostHelperGrant",
     "SignedRecipeRunObservationReceipt": "vonk_agent_protocol.host_helper.SignedRecipeRunObservationReceipt",
     "SourceBundleDigestManifest": "vonk_agent_protocol.source_bundles.SourceBundleDigestManifest",
     "SourceBundleFile": "vonk_agent_protocol.source_bundles.SourceBundleFile",
     "SourceBundleManifest": "vonk_agent_protocol.source_bundles.SourceBundleManifest",
     "SupervisorAcknowledgement": "vonk_agent_protocol.route_activation.SupervisorAcknowledgement",
-    "TelemetryCapability": "vonk_agent_protocol.telemetry.TelemetryCapability",
-    "TelemetryDetails": "vonk_agent_protocol.telemetry.TelemetryDetails",
-    "TelemetryMetrics": "vonk_agent_protocol.telemetry.TelemetryMetrics",
-    "TelemetryProvenance": "vonk_agent_protocol.telemetry.TelemetryProvenance",
     "TelemetryRequest": "vonk_agent_protocol.telemetry.TelemetryRequest",
-    "TelemetryRuntime": "vonk_agent_protocol.telemetry.TelemetryRuntime",
     "TelemetrySample": "vonk_agent_protocol.telemetry.TelemetrySample",
-    "TelemetrySeries": "vonk_agent_protocol.telemetry.TelemetrySeries",
-    "TelemetryWorkload": "vonk_agent_protocol.telemetry.TelemetryWorkload",
     "TensorParallelStartEvidence": "vonk_agent_protocol.contracts.TensorParallelStartEvidence"
   },
   "x-vonk-models": {
@@ -9728,7 +8453,6 @@
     "CompiledPlacement": "#/$defs/CompiledPlacement",
     "CompiledRuntime": "#/$defs/CompiledRuntime",
     "CompiledRuntimeImage": "#/$defs/CompiledRuntimeImage",
-    "CompiledRuntimeTelemetry": "#/$defs/CompiledRuntimeTelemetry",
     "CompiledSecurity": "#/$defs/CompiledSecurity",
     "CompiledSecurityMount": "#/$defs/CompiledSecurityMount",
     "CompiledTopology": "#/$defs/CompiledTopology",
@@ -9818,26 +8542,17 @@
     "RecipeUninstallResult": "#/$defs/RecipeUninstallResult",
     "RenewRequest": "#/$defs/RenewRequest",
     "RequestValidationProblem": "#/$defs/RequestValidationProblem",
-    "RestartVonkUnitOperation": "#/$defs/RestartVonkUnitOperation",
     "RuntimePreflightFinding": "#/$defs/RuntimePreflightFinding",
     "RuntimePreflightRequest": "#/$defs/RuntimePreflightRequest",
     "RuntimePreflightResult": "#/$defs/RuntimePreflightResult",
-    "ScheduleRebootOperation": "#/$defs/ScheduleRebootOperation",
     "SignedHostHelperGrant": "#/$defs/SignedHostHelperGrant",
     "SignedRecipeRunObservationReceipt": "#/$defs/SignedRecipeRunObservationReceipt",
     "SourceBundleDigestManifest": "#/$defs/SourceBundleDigestManifest",
     "SourceBundleFile": "#/$defs/SourceBundleFile",
     "SourceBundleManifest": "#/$defs/SourceBundleManifest",
     "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
-    "TelemetryCapability": "#/$defs/TelemetryCapability",
-    "TelemetryDetails": "#/$defs/TelemetryDetails",
-    "TelemetryMetrics": "#/$defs/TelemetryMetrics",
-    "TelemetryProvenance": "#/$defs/TelemetryProvenance",
     "TelemetryRequest": "#/$defs/TelemetryRequest",
-    "TelemetryRuntime": "#/$defs/TelemetryRuntime",
     "TelemetrySample": "#/$defs/TelemetrySample",
-    "TelemetrySeries": "#/$defs/TelemetrySeries",
-    "TelemetryWorkload": "#/$defs/TelemetryWorkload",
     "TensorParallelStartEvidence": "#/$defs/TensorParallelStartEvidence"
   }
 }

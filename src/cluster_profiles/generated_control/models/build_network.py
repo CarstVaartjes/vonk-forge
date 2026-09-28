@@ -8,8 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.build_network_mode import BuildNetworkMode
-from ..models.build_network_mode import check_build_network_mode
 from typing import cast
 
 
@@ -26,11 +24,9 @@ class BuildNetwork:
     """
         Attributes:
             hosts (list[str]):
-            mode (BuildNetworkMode):
      """
 
     hosts: list[str]
-    mode: BuildNetworkMode
 
 
 
@@ -41,14 +37,11 @@ class BuildNetwork:
 
 
 
-        mode: str = self.mode
-
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
             "hosts": hosts,
-            "mode": mode,
         })
 
         return field_dict
@@ -61,14 +54,8 @@ class BuildNetwork:
         hosts = cast(list[str], d.pop("hosts"))
 
 
-        mode = check_build_network_mode(d.pop("mode"))
-
-
-
-
         build_network = cls(
             hosts=hosts,
-            mode=mode,
         )
 
         return build_network

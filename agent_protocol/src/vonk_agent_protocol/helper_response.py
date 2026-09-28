@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from .failure_evidence import FailureLogTail
-from .host_helper import Digest, SignedRecipeRunObservationReceipt, Uuid4Text
+from .host_helper import SignedRecipeRunObservationReceipt, Uuid4Text
 from .wire_model import ErrorCode, WireModel
 
 
@@ -31,12 +31,9 @@ class HostHelperResponse(WireModel):
         "rejected",
         "package-installed",
         "package-activation-confirmed",
-        "unit-restarted",
-        "reboot-scheduled",
         "container-runtime-request-executed",
         "container-runtime-stop-uncertain",
     ]
-    evidence_sha256: Digest | None
     exit_code: Annotated[int, Field(ge=0, le=255)] | None = None
     error_code: ErrorCode | None = None
     observation_receipt: SignedRecipeRunObservationReceipt | None = None

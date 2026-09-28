@@ -3,7 +3,6 @@ import type {components, paths} from "./generated";
 export type AuthSession = components["schemas"]["AuthSession"];
 export type AvailabilityOperationFailure = components["schemas"]["AvailabilityOperationFailure"];
 export type CliTokenDownload = {expiresAt: string};
-export type FleetTelemetryDetails = components["schemas"]["TelemetryPoint"]["details"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
 export type FleetTelemetryState = components["schemas"]["TelemetryState"];
 export type VisualFleetNode = components["schemas"]["FleetNode"];
@@ -49,7 +48,6 @@ export type LibraryViewRecipe = {
   model_selectors?: string[];
   installations?: unknown[];
   runs?: unknown[];
-  recipe_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
   installation_returned_count?: number;
   installation_total_count?: number;
   installations_truncated?: boolean;
@@ -65,7 +63,7 @@ export type LibraryViewModel = {
   page_local?: boolean;
   model: {kind: "model"; publisher: string; slug: string; content_sha256: string};
   model_document: ModelDefinition;
-  model_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
+  model_capabilities?: string[];
   local: components["schemas"]["LibraryLocalState"];
   // Projected facets, named exactly as the CLI filter flags and the
   // /api/model/library query parameters: --usage --family --version
@@ -81,6 +79,7 @@ export type LibraryViewModel = {
 export type LibraryViewSnapshot = {
   generated_at: string;
   freshness_policy: components["schemas"]["FreshnessPolicy"];
+  library?: components["schemas"]["LibraryRelease"] | null;
   models: LibraryViewModel[];
   unlinked_recipes: LibraryViewRecipe[];
 };
@@ -89,8 +88,6 @@ export type LibraryViewRecipeDetail = {
   definition: RecipeDefinition;
   recipe: LibraryViewRecipe;
   model_documents: LibraryViewRecipeModel[];
-  model_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
-  recipe_capabilities?: {facts: {capability: string; support: string}[]; [key: string]: unknown};
   operational_state: {builds: unknown[]; installations: unknown[]; mappings: unknown[]; runs: unknown[]};
   placement: {recommendations: LibraryViewPlacementGroup[]; rejected_groups: LibraryViewPlacementGroup[]; search_complete: boolean}[];
   reasons: {code: string; severity: string; detail: string}[];
@@ -113,17 +110,6 @@ export type FleetProfilePreview = components["schemas"]["FleetProfilePreview"];
 export type FleetProfileEndpoints = components["schemas"]["FleetProfileEndpointsView"];
 export type FleetProfileApplicationView = components["schemas"]["FleetProfileApplicationView"];
 export type FleetProfileLoadInput = components["schemas"]["FleetProfileLoadRequest"];
-export type TelemetryScope = components["schemas"]["TelemetrySeries"]["scope"];
-export type TelemetrySupport = components["schemas"]["TelemetrySeries"]["support_status"];
-export type TelemetryFreshness = components["schemas"]["TelemetrySeries"]["freshness"];
-export type TelemetryMeasurementKind = components["schemas"]["TelemetrySeries"]["measurement_kind"];
-export type TelemetrySeries = components["schemas"]["TelemetrySeries"];
-export type TelemetryCapability = components["schemas"]["TelemetryCapability"];
-export type TelemetryProvenance = components["schemas"]["TelemetryProvenance"];
-export type TelemetryRuntime = components["schemas"]["TelemetryRuntime"];
-export type TelemetryWorkload = components["schemas"]["TelemetryWorkload"];
-export type TelemetryMetrics = components["schemas"]["TelemetryMetrics"];
-export type RichTelemetryPoint = TelemetryPoint;
 export type FleetSnapshotEvent = components["schemas"]["FleetSnapshotEvent"];
 export type FleetTelemetryEvent = components["schemas"]["FleetTelemetryEvent"];
 export type FleetChangeEvent = components["schemas"]["FleetChangeEvent"];

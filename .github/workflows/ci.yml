@@ -434,8 +434,7 @@ jobs:
             tools/openapi-client \
             src/cluster_profiles/generated_control \
             control/web/src/api/generated.d.ts \
-            src/cluster_profiles/schemas/control-openapi.json \
-            schemas/control-openapi.json; then
+            src/cluster_profiles/schemas/control-openapi.json; then
             run_full=false
           fi
           echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
@@ -457,7 +456,6 @@ jobs:
         run: >-
           git diff --exit-code -- control/openapi.json
           src/cluster_profiles/schemas/control-openapi.json
-          schemas/control-openapi.json
           src/cluster_profiles/generated_control
           control/web/src/api/generated.d.ts
 

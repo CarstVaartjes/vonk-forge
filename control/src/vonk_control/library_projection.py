@@ -27,7 +27,6 @@ from .library_assessment import unassessed
 from .library_contract import (
     _MAX_PAGE_RECIPES,
     FreshnessPolicy,
-    LibraryCapabilityInventory,
     LibraryFacetValues,
     LibraryFilterValues,
     LibraryLocalProgress,
@@ -39,6 +38,7 @@ from .library_contract import (
     LibraryRecipeModel,
     LibraryRecipeProjection,
     LibraryRecipeSummary,
+    LibraryRelease,
     LibraryResourceProjection,
     ModelDetailResponse,
     ModelLibraryResponse,
@@ -55,6 +55,7 @@ from .models import (
     ModelCacheSet,
     RecipeBuild,
     RecipeInstallation,
+    RecipeLibrarySyncRun,
     RecipeRun,
     RunNode,
     RuntimeImageAuthorization,
@@ -268,7 +269,6 @@ def _canonical_recipe_summary(
         run_returned_count=0,
         runs_truncated=False,
         reasons=[],
-        recipe_capabilities=LibraryCapabilityInventory(),
     )
 
 
@@ -656,13 +656,33 @@ class LibraryProjection:
                     local["controller"] = "not_cached"
         return result
 
+    def _library_release(self) -> LibraryRelease | None:
+        with self._sessions() as session:
+            run = session.scalar(
+                select(RecipeLibrarySyncRun)
+                .where(
+                    RecipeLibrarySyncRun.state == "succeeded",
+                    RecipeLibrarySyncRun.library_version.is_not(None),
+                )
+                .order_by(RecipeLibrarySyncRun.completed_at.desc())
+                .limit(1)
+            )
+            if (
+                run is None
+                or run.library_version is None
+                or run.library_updated_at is None
+                or run.observed_commit is None
+            ):
+                return None
+            return LibraryRelease(
+                version=run.library_version,
+                updated_at=_utc(run.library_updated_at),
+                commit=run.observed_commit,
+            )
+
     @staticmethod
     def _model_usage(document: ModelDefinition) -> list[str]:
-        return sorted(
-            fact.capability
-            for fact in document.capabilities.facts
-            if fact.support == "supported"
-        )
+        return sorted(document.capabilities)
 
     @staticmethod
     def _recipe_resources(document: RecipeDefinition) -> LibraryResourceProjection:
@@ -1004,6 +1024,7 @@ class LibraryProjection:
             ]
         response = ModelLibraryResponse(
             generated_at=_utc(self._clock()),
+            library=self._library_release(),
             models=[],
             facets=self._facet_values(entries),
             next_cursor=None,
@@ -1355,6 +1376,7 @@ class LibraryProjection:
             candidates = self._assessed(candidates)
         response = RecipeLibraryResponse(
             generated_at=_utc(self._clock()),
+            library=self._library_release(),
             recipes=[],
             facets=self._recipe_facet_values(model_entries, entries),
             next_cursor=None,
@@ -1523,6 +1545,4 @@ class LibraryProjection:
             placement=[],
             reasons=[],
             model_documents=model_documents,
-            model_capabilities=LibraryCapabilityInventory(),
-            recipe_capabilities=LibraryCapabilityInventory(),
         )

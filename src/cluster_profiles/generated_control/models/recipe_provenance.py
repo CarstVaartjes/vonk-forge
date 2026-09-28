@@ -8,8 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.recipe_provenance_source_kind import check_recipe_provenance_source_kind
-from ..models.recipe_provenance_source_kind import RecipeProvenanceSourceKind
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -27,12 +25,10 @@ class RecipeProvenance:
     """
         Attributes:
             attribution (list[str]):
-            source_kind (RecipeProvenanceSourceKind):
             source_reference (None | str | Unset):
      """
 
     attribution: list[str]
-    source_kind: RecipeProvenanceSourceKind
     source_reference: None | str | Unset = UNSET
 
 
@@ -43,8 +39,6 @@ class RecipeProvenance:
         attribution = self.attribution
 
 
-
-        source_kind: str = self.source_kind
 
         source_reference: None | str | Unset
         if isinstance(self.source_reference, Unset):
@@ -57,7 +51,6 @@ class RecipeProvenance:
 
         field_dict.update({
             "attribution": attribution,
-            "source_kind": source_kind,
         })
         if source_reference is not UNSET:
             field_dict["source_reference"] = source_reference
@@ -72,11 +65,6 @@ class RecipeProvenance:
         attribution = cast(list[str], d.pop("attribution"))
 
 
-        source_kind = check_recipe_provenance_source_kind(d.pop("source_kind"))
-
-
-
-
         def _parse_source_reference(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -89,7 +77,6 @@ class RecipeProvenance:
 
         recipe_provenance = cls(
             attribution=attribution,
-            source_kind=source_kind,
             source_reference=source_reference,
         )
 
