@@ -88,7 +88,7 @@ def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
         "https://install.example/artifacts/release/bootstraps/spark",
         cwd=tmp_path,
         environment=environment,
-        enrollment_url="https://enroll.spark.localhost:8443",
+        enrollment_url="https://enroll.vonk-forge-spark-local.spark.acceptance.invalid:8443",
         ca_sha256="a" * 64,
         pairing_token=token,
         interactive=interactive,
@@ -105,7 +105,9 @@ def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
         "--enroll",
     ]
     answers = [answer for _, answer in observed["responses"]]
-    assert "https://enroll.spark.localhost:8443" in answers
+    assert (
+        "https://enroll.vonk-forge-spark-local.spark.acceptance.invalid:8443" in answers
+    )
     assert "a" * 64 in answers
     assert answers.count(token) == 1
     assert observed["forbidden_values"] == [token]
@@ -176,7 +178,7 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
         "minTLSCertDuration": "90s",
     }
     compose = (bundle / "docker-compose.yaml").read_text()
-    assert "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS: '90'" in compose
+    assert "CERTIFICATE_LIFETIME" not in compose
     assert "127.0.0.1::8080" in compose
     assert "- cluster-egress" in compose
     assert "header_up X-Vonk-Agent-Source 172.31.42.1" in caddy_path.read_text()
@@ -475,13 +477,10 @@ def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.synthetic_fabric_octet = 42
 
-    replacements = run._controller_response_replacements()
+    values = run._controller_site_values()
 
-    assert replacements["Trusted Spark management CIDRs: "] == "172.16.0.0/12"
-    assert (
-        replacements["Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: "]
-        == "198.19.42.0/24"
-    )
+    assert values["VONK_MANAGEMENT_CIDRS"] == "172.16.0.0/12"
+    assert values["VONK_DIRECT_FABRIC_CIDRS"] == "198.19.42.0/24"
 
 
 def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
@@ -513,7 +512,6 @@ def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
 
     assert run.firewall_environment["VONK_NAS_MANAGEMENT_IP"] == "172.31.42.2"
     assert run.firewall_environment["VONK_NODE_MANAGEMENT_IP"] == "172.31.42.1"
-    assert run.firewall_environment["VONK_FABRIC_BANDWIDTH_MBPS"] == "200000"
     assert run.firewall_environment["VONK_NODE_FABRIC_IP"] == "198.19.42.1"
     assert run.firewall_environment["VONK_PEER_FABRIC_IP"] == "198.19.42.2"
     assert len(run.synthetic_interfaces) == 2
@@ -766,17 +764,17 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
     grant = {
         "ca_fingerprint": "a" * 64,
         "controller_address": "127.0.0.1",
-        "controller_endpoint": "https://agents.spark.localhost:8443",
-        "enrollment_endpoint": "https://enroll.spark.localhost:8443",
+        "controller_endpoint": "https://agents.vonk-forge-spark-local.spark.acceptance.invalid:8443",
+        "enrollment_endpoint": "https://enroll.vonk-forge-spark-local.spark.acceptance.invalid:8443",
         "expires_at": "2026-08-22T20:00:00Z",
         "id": "11111111-1111-1111-1111-111111111111",
         "installer_url": "https://install.vonkforge.ai/dev/spark",
         "purpose": "new-node",
         "service_hostnames": [
             "vonk-forge-acceptance.tailnet.example",
-            "enroll.spark.localhost",
-            "agents.spark.localhost",
-            "registry.spark.localhost",
+            "enroll.vonk-forge-spark-local.spark.acceptance.invalid",
+            "agents.vonk-forge-spark-local.spark.acceptance.invalid",
+            "registry.vonk-forge-spark-local.spark.acceptance.invalid",
         ],
         "token": "t" * 43,
     }

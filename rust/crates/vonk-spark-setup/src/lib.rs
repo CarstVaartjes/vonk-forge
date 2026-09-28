@@ -43,10 +43,12 @@ const MONITOR_SERVICE: &str = "vonk-forge-monitor.service";
 const HELPER_SOCKET: &str = "vonk-forge-package-helper.socket";
 const FIREWALL_SERVICE: &str = "vonk-forge-docker-firewall.service";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
-const DEFAULT_ENDPOINT_HOST_PORTS: &str = "8000,8101";
-const DEFAULT_HOST_ENDPOINT_PORTS: &str = "8888";
-const DEFAULT_RENDEZVOUS_PORT: &str = "29500";
-const DEFAULT_FABRIC_BANDWIDTH_MBPS: &str = "200000";
+const ENDPOINT_HOST_PORTS: [u16; 2] = [8000, 8101];
+const HOST_ENDPOINT_PORTS: [u16; 1] = [8888];
+const RENDEZVOUS_PORT: u16 = 29500;
+const FABRIC_BANDWIDTH_MBPS: u64 = 200_000;
+const IP_PATH: &str = "/usr/sbin/ip";
+const RDMA_PATH: &str = "/usr/bin/rdma";
 // A fresh Spark may spend well over a minute bootstrapping its controller
 // connection (especially while systemd starts the helper and inventory
 // dependencies).  Keep the readiness proof strict, but give that startup
@@ -154,6 +156,8 @@ pub struct SetupRequest {
     setup_signature: PathBuf,
     executable: PathBuf,
     controller_address: Option<Ipv4Addr>,
+    enrollment_url: Option<Url>,
+    ca_sha256: Option<String>,
     enroll: bool,
     firewall_inputs: FirewallInputs,
 }
@@ -164,10 +168,6 @@ pub struct FirewallInputs {
     node_management_ip: Option<String>,
     node_fabric_ip: Option<String>,
     peer_fabric_ip: Option<String>,
-    endpoint_host_ports: Option<String>,
-    host_endpoint_ports: Option<String>,
-    rendezvous_port: Option<String>,
-    fabric_bandwidth_mbps: Option<String>,
 }
 
 impl FirewallInputs {
@@ -185,10 +185,6 @@ impl FirewallInputs {
             node_management_ip: optional("VONK_NODE_MANAGEMENT_IP")?,
             node_fabric_ip: optional("VONK_NODE_FABRIC_IP")?,
             peer_fabric_ip: optional("VONK_PEER_FABRIC_IP")?,
-            endpoint_host_ports: optional("VONK_ENDPOINT_HOST_PORTS")?,
-            host_endpoint_ports: optional("VONK_HOST_ENDPOINT_PORTS")?,
-            rendezvous_port: optional("VONK_RENDEZVOUS_PORT")?,
-            fabric_bandwidth_mbps: optional("VONK_FABRIC_BANDWIDTH_MBPS")?,
         })
     }
 }
@@ -491,6 +487,8 @@ impl SetupRequest {
             setup_signature,
             executable,
             controller_address: None,
+            enrollment_url: None,
+            ca_sha256: None,
             enroll: false,
             firewall_inputs: FirewallInputs::default(),
         })
@@ -502,6 +500,33 @@ impl SetupRequest {
                 value
                     .parse::<Ipv4Addr>()
                     .map_err(|_| SetupError::UnsafeInput("controller network address"))
+            })
+            .transpose()?;
+        Ok(self)
+    }
+
+    /// Enrollment values printed by the Controller's Spark command. Each one
+    /// that is absent is asked for interactively instead.
+    pub fn with_enrollment_values(
+        mut self,
+        enrollment_url: Option<&str>,
+        ca_sha256: Option<&str>,
+    ) -> Result<Self, SetupError> {
+        self.enrollment_url = enrollment_url
+            .map(|value| {
+                Url::parse(value)
+                    .ok()
+                    .filter(valid_origin)
+                    .ok_or(SetupError::UnsafeInput("endpoint URL"))
+            })
+            .transpose()?;
+        self.ca_sha256 = ca_sha256
+            .map(|value| {
+                if valid_sha256(value) {
+                    Ok(value.to_owned())
+                } else {
+                    Err(SetupError::UnsafeInput("SHA-256"))
+                }
             })
             .transpose()?;
         Ok(self)
@@ -523,117 +548,99 @@ impl FirewallConfig {
         inputs: &FirewallInputs,
         controller_address: Option<Ipv4Addr>,
         prompt: &mut dyn Prompt,
+        runner: &mut dyn CommandRunner,
     ) -> Result<Self, SetupError> {
-        fn supplied_or_prompted(
-            supplied: Option<&String>,
-            prompt: &mut dyn Prompt,
-            label: &'static str,
-        ) -> Result<String, SetupError> {
-            supplied
-                .cloned()
-                .map(Ok)
-                .unwrap_or_else(|| prompt.value(label).map_err(|_| SetupError::Prompt))
-        }
-
-        fn ipv4(value: String, field: &'static str) -> Result<Ipv4Addr, SetupError> {
-            let address = value
+        fn ipv4(value: &str, field: &'static str) -> Result<Ipv4Addr, SetupError> {
+            value
                 .parse::<Ipv4Addr>()
-                .map_err(|_| SetupError::UnsafeInput(field))?;
-            if !valid_site_ipv4(address) {
-                return Err(SetupError::UnsafeInput(field));
-            }
-            Ok(address)
+                .ok()
+                .filter(|address| valid_site_ipv4(*address))
+                .ok_or(SetupError::UnsafeInput(field))
         }
 
-        fn port(value: &str, field: &'static str) -> Result<u16, SetupError> {
-            let parsed = value
-                .parse::<u16>()
-                .map_err(|_| SetupError::UnsafeInput(field))?;
-            if parsed < 1024 || parsed.to_string() != value {
-                return Err(SetupError::UnsafeInput(field));
+        // An explicit value wins, then this host's own detected address; the
+        // operator is asked only when detection is unavailable or ambiguous.
+        fn resolve(
+            supplied: Option<&String>,
+            detected: Option<Ipv4Addr>,
+            prompt: &mut dyn Prompt,
+            label: &str,
+            field: &'static str,
+        ) -> Result<Ipv4Addr, SetupError> {
+            if let Some(value) = supplied {
+                return ipv4(value, field);
             }
-            Ok(parsed)
+            if let Some(address) = detected {
+                eprintln!("vonk-spark-setup: detected {field} {address}");
+                return Ok(address);
+            }
+            ipv4(&prompt.value(label).map_err(|_| SetupError::Prompt)?, field)
         }
 
-        fn ports(value: &str, field: &'static str, required: bool) -> Result<Vec<u16>, SetupError> {
-            if value.is_empty() {
-                return if required {
-                    Err(SetupError::UnsafeInput(field))
-                } else {
-                    Ok(Vec::new())
-                };
-            }
-            let parsed = value
-                .split(',')
-                .map(|value| port(value, field))
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut unique = parsed.clone();
-            unique.sort_unstable();
-            unique.dedup();
-            if unique.len() != parsed.len() {
-                return Err(SetupError::UnsafeInput(field));
-            }
-            Ok(parsed)
-        }
-
-        let nas_management_ip = inputs
-            .nas_management_ip
-            .clone()
-            .or_else(|| controller_address.map(|value| value.to_string()))
-            .map(Ok)
-            .unwrap_or_else(|| {
-                prompt
+        let nas_management_ip = match (&inputs.nas_management_ip, controller_address) {
+            (Some(value), _) => ipv4(value, "NAS management address")?,
+            (None, Some(address)) => ipv4(&address.to_string(), "NAS management address")?,
+            (None, None) => ipv4(
+                &prompt
                     .value("NAS management IPv4 address")
-                    .map_err(|_| SetupError::Prompt)
-            })?;
-        let endpoint_host_ports = inputs
-            .endpoint_host_ports
-            .as_deref()
-            .unwrap_or(DEFAULT_ENDPOINT_HOST_PORTS);
-        let host_endpoint_ports = inputs
-            .host_endpoint_ports
-            .as_deref()
-            .unwrap_or(DEFAULT_HOST_ENDPOINT_PORTS);
-        let rendezvous_port = inputs
-            .rendezvous_port
-            .as_deref()
-            .unwrap_or(DEFAULT_RENDEZVOUS_PORT);
-        let fabric_bandwidth_mbps = inputs
-            .fabric_bandwidth_mbps
-            .as_deref()
-            .unwrap_or(DEFAULT_FABRIC_BANDWIDTH_MBPS)
-            .parse::<u64>()
-            .map_err(|_| SetupError::UnsafeInput("fabric bandwidth"))?;
+                    .map_err(|_| SetupError::Prompt)?,
+                "NAS management address",
+            )?,
+        };
+        let detected = if inputs.node_management_ip.is_some()
+            && inputs.node_fabric_ip.is_some()
+            && inputs.peer_fabric_ip.is_some()
+        {
+            DetectedAddresses::default()
+        } else {
+            detect_spark_addresses(runner, nas_management_ip)
+        };
+        let node_management_ip = resolve(
+            inputs.node_management_ip.as_ref(),
+            detected.node_management_ip,
+            prompt,
+            "Spark management IPv4 address",
+            "Spark management address",
+        )?;
+        let fabric_label = match detected.fabric_candidates.as_slice() {
+            [] | [_] => "Spark fabric IPv4 address".to_owned(),
+            candidates => format!(
+                "Spark fabric IPv4 address (one of {})",
+                candidates
+                    .iter()
+                    .map(Ipv4Addr::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+        let node_fabric_ip = resolve(
+            inputs.node_fabric_ip.as_ref(),
+            detected.node_fabric_ip,
+            prompt,
+            &fabric_label,
+            "Spark fabric address",
+        )?;
+        let detected_peer = if Some(node_fabric_ip) == detected.node_fabric_ip {
+            detected.peer_fabric_ip
+        } else {
+            None
+        };
+        let peer_fabric_ip = resolve(
+            inputs.peer_fabric_ip.as_ref(),
+            detected_peer,
+            prompt,
+            "Peer Spark fabric IPv4 address",
+            "peer Spark fabric address",
+        )?;
         let config = Self {
-            nas_management_ip: ipv4(nas_management_ip, "NAS management address")?,
-            node_management_ip: ipv4(
-                supplied_or_prompted(
-                    inputs.node_management_ip.as_ref(),
-                    prompt,
-                    "Spark management IPv4 address",
-                )?,
-                "Spark management address",
-            )?,
-            node_fabric_ip: ipv4(
-                supplied_or_prompted(
-                    inputs.node_fabric_ip.as_ref(),
-                    prompt,
-                    "Spark fabric IPv4 address",
-                )?,
-                "Spark fabric address",
-            )?,
-            peer_fabric_ip: ipv4(
-                supplied_or_prompted(
-                    inputs.peer_fabric_ip.as_ref(),
-                    prompt,
-                    "Peer Spark fabric IPv4 address",
-                )?,
-                "peer Spark fabric address",
-            )?,
-            endpoint_host_ports: ports(endpoint_host_ports, "endpoint host ports", true)?,
-            host_endpoint_ports: ports(host_endpoint_ports, "host endpoint ports", false)?,
-            rendezvous_port: port(rendezvous_port, "rendezvous port")?,
-            fabric_bandwidth_mbps,
+            nas_management_ip,
+            node_management_ip,
+            node_fabric_ip,
+            peer_fabric_ip,
+            endpoint_host_ports: ENDPOINT_HOST_PORTS.to_vec(),
+            host_endpoint_ports: HOST_ENDPOINT_PORTS.to_vec(),
+            rendezvous_port: RENDEZVOUS_PORT,
+            fabric_bandwidth_mbps: FABRIC_BANDWIDTH_MBPS,
         };
         if !config.valid() {
             return Err(SetupError::UnsafeInput("Spark network topology"));
@@ -697,6 +704,128 @@ fn valid_unique_ports(values: &[u16]) -> bool {
             .iter()
             .enumerate()
             .all(|(index, value)| !values[index + 1..].contains(value))
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct DetectedAddresses {
+    node_management_ip: Option<Ipv4Addr>,
+    node_fabric_ip: Option<Ipv4Addr>,
+    peer_fabric_ip: Option<Ipv4Addr>,
+    fabric_candidates: Vec<Ipv4Addr>,
+}
+
+/// Read this Spark's own addresses from the kernel. The management address is
+/// the source the kernel uses to reach the NAS; the fabric address is the only
+/// global IPv4 on an active RDMA (RoCE) interface other than the management
+/// one; the peer is the other end of that point-to-point subnet or its only
+/// known neighbour. Anything missing or ambiguous is left for the operator.
+fn detect_spark_addresses(runner: &mut dyn CommandRunner, nas: Ipv4Addr) -> DetectedAddresses {
+    fn json(
+        runner: &mut dyn CommandRunner,
+        program: &str,
+        args: &[&str],
+    ) -> Vec<serde_json::Value> {
+        runner
+            .run(Command::new(program, args.iter().copied()).suppress_stderr())
+            .ok()
+            .filter(|output| output.success)
+            .and_then(|output| serde_json::from_slice(&output.stdout).ok())
+            .unwrap_or_default()
+    }
+    fn site_ipv4(value: Option<&serde_json::Value>) -> Option<Ipv4Addr> {
+        value?
+            .as_str()?
+            .parse::<Ipv4Addr>()
+            .ok()
+            .filter(|address| valid_site_ipv4(*address))
+    }
+
+    let mut detected = DetectedAddresses::default();
+    let nas = nas.to_string();
+    let route = json(runner, IP_PATH, &["-j", "-4", "route", "get", &nas]);
+    let Some(route) = route.first() else {
+        return detected;
+    };
+    let Some(management_device) = route.get("dev").and_then(serde_json::Value::as_str) else {
+        return detected;
+    };
+    let management_device = management_device.to_owned();
+    detected.node_management_ip = site_ipv4(route.get("prefsrc"));
+
+    let rdma_devices = json(runner, RDMA_PATH, &["-j", "link", "show"])
+        .into_iter()
+        .filter(|link| link.get("state").and_then(serde_json::Value::as_str) == Some("ACTIVE"))
+        .filter_map(|link| {
+            link.get("netdev")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    let mut fabric = Vec::new();
+    for interface in json(runner, IP_PATH, &["-j", "-4", "addr", "show"]) {
+        let Some(name) = interface.get("ifname").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let up = interface
+            .get("flags")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|flags| flags.iter().any(|flag| flag == "LOWER_UP"));
+        if name == management_device || !up || !rdma_devices.iter().any(|device| device == name) {
+            continue;
+        }
+        for address in interface
+            .get("addr_info")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let global = address.get("scope").and_then(serde_json::Value::as_str) == Some("global");
+            let prefix = address.get("prefixlen").and_then(serde_json::Value::as_u64);
+            if let (true, Some(local), Some(prefix)) =
+                (global, site_ipv4(address.get("local")), prefix)
+                && !fabric.iter().any(|(existing, _, _)| *existing == local)
+            {
+                fabric.push((local, name.to_owned(), prefix));
+            }
+        }
+    }
+    detected.fabric_candidates = fabric.iter().map(|(address, _, _)| *address).collect();
+    let [(local, device, prefix)] = fabric.as_slice() else {
+        return detected;
+    };
+    detected.node_fabric_ip = Some(*local);
+    let bits = u32::from(*local);
+    detected.peer_fabric_ip = match prefix {
+        31 => Some(Ipv4Addr::from(bits ^ 1)),
+        30 if bits & 3 == 1 || bits & 3 == 2 => Some(Ipv4Addr::from(bits ^ 3)),
+        _ => {
+            let neighbours = json(
+                runner,
+                IP_PATH,
+                &["-j", "-4", "neigh", "show", "dev", device],
+            )
+            .into_iter()
+            .filter(|neighbour| {
+                !neighbour
+                    .get("state")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|states| {
+                        states
+                            .iter()
+                            .any(|state| state == "FAILED" || state == "INCOMPLETE")
+                    })
+            })
+            .filter_map(|neighbour| site_ipv4(neighbour.get("dst")))
+            .filter(|address| address != local)
+            .collect::<Vec<_>>();
+            match neighbours.as_slice() {
+                [peer] => Some(*peer),
+                _ => None,
+            }
+        }
+    }
+    .filter(|peer| valid_site_ipv4(*peer) && peer != local);
+    detected
 }
 
 pub fn handoff_to_root(
@@ -991,8 +1120,14 @@ pub fn prepare_setup_with_authority(
         request.enroll,
     ) {
         (InstallState::Fresh, _) => {
-            let enrollment_url = required_origin(prompt, "Enrollment URL")?;
-            let ca_sha256 = required_sha256(prompt, "Controller CA SHA-256")?;
+            let enrollment_url = match &request.enrollment_url {
+                Some(url) => url.clone(),
+                None => required_origin(prompt, "Enrollment URL")?,
+            };
+            let ca_sha256 = match &request.ca_sha256 {
+                Some(value) => value.clone(),
+                None => required_sha256(prompt, "Controller CA SHA-256")?,
+            };
             let pairing_token = prompt
                 .secret("Pairing token")
                 .map_err(|_| SetupError::Prompt)?;
@@ -1009,6 +1144,7 @@ pub fn prepare_setup_with_authority(
                 &request.firewall_inputs,
                 request.controller_address,
                 prompt,
+                runner,
             )?;
             ApplyOperation::Fresh {
                 enrollment_url: Box::new(enrollment_url),
@@ -2861,7 +2997,7 @@ struct GeneratedConfig {
 impl GeneratedConfig {
     fn to_toml(&self) -> String {
         format!(
-            "enrollment_url = \"{}\"\ncontroller_url = \"{}\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"{DATA_DIR}\"\nnode_id = \"{}\"\npoll_min_seconds = 2\npoll_max_seconds = 60\nfabric_address = \"{}\"\nfabric_bandwidth_mbps = {}\n",
+            "enrollment_url = \"{}\"\ncontroller_url = \"{}\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"{DATA_DIR}\"\nnode_id = \"{}\"\nfabric_address = \"{}\"\nfabric_bandwidth_mbps = {}\n",
             self.enrollment_url,
             self.controller_url,
             self.ca_path.display(),
@@ -2882,8 +3018,6 @@ struct WrittenConfig {
     ca_sha256: String,
     data_dir: PathBuf,
     node_id: String,
-    poll_min_seconds: u64,
-    poll_max_seconds: u64,
     fabric_address: Ipv4Addr,
     fabric_bandwidth_mbps: u64,
 }
@@ -2895,8 +3029,6 @@ fn valid_written_config(config: &WrittenConfig, paths: &InstallPaths) -> bool {
         && config.data_dir == Path::new(DATA_DIR)
         && valid_sha256(&config.ca_sha256)
         && valid_node_id(&config.node_id)
-        && config.poll_min_seconds == 2
-        && config.poll_max_seconds == 60
         && valid_site_ipv4(config.fabric_address)
         && (1..=1_000_000).contains(&config.fabric_bandwidth_mbps)
 }
@@ -3556,7 +3688,7 @@ mod tests {
         fs::write(
             &paths.config,
             format!(
-                "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"{}\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\npoll_min_seconds = 2\npoll_max_seconds = 60\nfabric_address = \"192.168.100.10\"\nfabric_bandwidth_mbps = 200000\n",
+                "enrollment_url = \"https://enroll.example.test/\"\ncontroller_url = \"https://controller.example.test/\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"{}\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\nfabric_address = \"192.168.100.10\"\nfabric_bandwidth_mbps = 200000\n",
                 paths.ca.display(),
                 "0".repeat(64),
                 DATA_DIR,
@@ -3628,10 +3760,90 @@ mod tests {
         ));
     }
 
+    /// Answers the kernel queries of a Spark with one management link and
+    /// one active RoCE fabric link; every other command fails.
+    struct SparkHost {
+        fabric: &'static str,
+        neighbours: &'static str,
+    }
+
+    impl CommandRunner for SparkHost {
+        fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
+            let args = command.args.join(" ");
+            let stdout = match (command.program.to_str(), args.as_str()) {
+                (Some(IP_PATH), "-j -4 route get 192.168.1.231") => {
+                    r#"[{"dst":"192.168.1.231","dev":"enP7s7","prefsrc":"192.168.1.211"}]"#.to_owned()
+                }
+                (Some(RDMA_PATH), "-j link show") => {
+                    r#"[{"ifname":"rocep1s0f1","state":"ACTIVE","netdev":"enp1s0f1np1"},{"ifname":"rocep1s0f0","state":"DOWN","netdev":"enp1s0f0np0"}]"#.to_owned()
+                }
+                (Some(IP_PATH), "-j -4 addr show") => format!(
+                    r#"[{{"ifname":"lo","flags":["LOOPBACK","UP","LOWER_UP"],"addr_info":[{{"local":"127.0.0.1","prefixlen":8,"scope":"host"}}]}},
+                        {{"ifname":"enP7s7","flags":["UP","LOWER_UP"],"addr_info":[{{"local":"192.168.1.211","prefixlen":24,"scope":"global"}}]}},
+                        {{"ifname":"docker0","flags":["UP","LOWER_UP"],"addr_info":[{{"local":"172.17.0.1","prefixlen":16,"scope":"global"}}]}},
+                        {{"ifname":"enp1s0f1np1","flags":["UP","LOWER_UP"],"addr_info":[{}]}}]"#,
+                    self.fabric
+                ),
+                (Some(IP_PATH), "-j -4 neigh show dev enp1s0f1np1") => self.neighbours.to_owned(),
+                _ => return Err("unavailable".to_owned()),
+            };
+            Ok(CommandOutput::success(stdout.into_bytes()))
+        }
+
+        fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+            Ok(())
+        }
+    }
+
+    struct NoHost;
+
+    impl CommandRunner for NoHost {
+        fn run(&mut self, _command: Command) -> Result<CommandOutput, String> {
+            Err("unavailable".to_owned())
+        }
+
+        fn authenticate_sudo(&mut self, _sudo: &Path) -> Result<(), SetupError> {
+            Ok(())
+        }
+    }
+
+    const CANONICAL_FIREWALL: &str = "VONK_NAS_MANAGEMENT_IP=192.168.1.231\nVONK_NODE_MANAGEMENT_IP=192.168.1.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n";
+
     #[test]
-    fn firewall_configuration_defaults_are_canonical_and_controller_bound() {
+    fn spark_addresses_are_detected_without_prompting() {
+        let mut prompt = Values(VecDeque::new());
+        let config = FirewallConfig::collect(
+            &FirewallInputs::default(),
+            Some("192.168.1.231".parse().unwrap()),
+            &mut prompt,
+            &mut SparkHost {
+                fabric: r#"{"local":"192.168.100.10","prefixlen":24,"scope":"global"}"#,
+                neighbours: r#"[{"dst":"192.168.100.11","state":["STALE"]},{"dst":"192.168.100.12","state":["FAILED"]}]"#,
+            },
+        )
+        .unwrap();
+        assert_eq!(config.render(), CANONICAL_FIREWALL);
+        assert_eq!(config.fabric_bandwidth_mbps, 200_000);
+
+        // A point-to-point fabric subnet names the peer without neighbours.
+        let config = FirewallConfig::collect(
+            &FirewallInputs::default(),
+            Some("192.168.1.231".parse().unwrap()),
+            &mut prompt,
+            &mut SparkHost {
+                fabric: r#"{"local":"192.168.100.10","prefixlen":31,"scope":"global"}"#,
+                neighbours: "[]",
+            },
+        )
+        .unwrap();
+        assert_eq!(config.render(), CANONICAL_FIREWALL);
+    }
+
+    #[test]
+    fn ambiguous_or_undetectable_addresses_fall_back_to_prompts() {
+        // Two fabric addresses and no known peer: ask for both.
         let mut prompt = Values(
-            ["192.168.1.211", "192.168.100.10", "192.168.100.11"]
+            ["192.168.100.10", "192.168.100.11"]
                 .map(str::to_owned)
                 .into(),
         );
@@ -3639,40 +3851,44 @@ mod tests {
             &FirewallInputs::default(),
             Some("192.168.1.231".parse().unwrap()),
             &mut prompt,
+            &mut SparkHost {
+                fabric: r#"{"local":"192.168.100.10","prefixlen":24,"scope":"global"},{"local":"192.168.101.10","prefixlen":24,"scope":"global"}"#,
+                neighbours: "[]",
+            },
         )
         .unwrap();
+        assert_eq!(config.render(), CANONICAL_FIREWALL);
+        assert!(prompt.0.is_empty());
 
-        assert_eq!(
-            config.render(),
-            "VONK_NAS_MANAGEMENT_IP=192.168.1.231\nVONK_NODE_MANAGEMENT_IP=192.168.1.211\nVONK_NODE_FABRIC_IP=192.168.100.10\nVONK_PEER_FABRIC_IP=192.168.100.11\nVONK_ENDPOINT_HOST_PORTS=8000,8101\nVONK_HOST_ENDPOINT_PORTS=8888\nVONK_RENDEZVOUS_PORT=29500\n"
+        let mut prompt = Values(
+            [
+                "192.168.1.231",
+                "192.168.1.211",
+                "192.168.100.10",
+                "192.168.100.11",
+            ]
+            .map(str::to_owned)
+            .into(),
         );
-        assert_eq!(config.fabric_bandwidth_mbps, 200_000);
+        let config =
+            FirewallConfig::collect(&FirewallInputs::default(), None, &mut prompt, &mut NoHost)
+                .unwrap();
+        assert_eq!(config.render(), CANONICAL_FIREWALL);
         assert!(prompt.0.is_empty());
     }
 
     #[test]
-    fn firewall_configuration_rejects_ambiguous_topology_and_ports() {
+    fn firewall_configuration_rejects_ambiguous_topology() {
         let base = FirewallInputs {
             nas_management_ip: Some("192.168.1.231".to_owned()),
             node_management_ip: Some("192.168.1.211".to_owned()),
             node_fabric_ip: Some("192.168.100.10".to_owned()),
             peer_fabric_ip: Some("192.168.100.10".to_owned()),
-            ..FirewallInputs::default()
         };
         let mut prompt = Values(VecDeque::new());
         assert!(matches!(
-            FirewallConfig::collect(&base, None, &mut prompt),
+            FirewallConfig::collect(&base, None, &mut prompt, &mut NoHost),
             Err(SetupError::UnsafeInput("Spark network topology"))
-        ));
-
-        let invalid_ports = FirewallInputs {
-            peer_fabric_ip: Some("192.168.100.11".to_owned()),
-            endpoint_host_ports: Some("08000".to_owned()),
-            ..base
-        };
-        assert!(matches!(
-            FirewallConfig::collect(&invalid_ports, None, &mut prompt),
-            Err(SetupError::UnsafeInput("endpoint host ports"))
         ));
     }
 }

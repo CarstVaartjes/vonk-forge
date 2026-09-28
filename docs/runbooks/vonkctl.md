@@ -19,13 +19,12 @@ development channel, use
 `curl -fsSL https://install.vonkforge.ai/dev/vonkctl | sh`.
 
 `uv` resolves the CLI's declared Python dependencies during installation. This
-is a workstation install and does not change the Controller or Sparks. The
-verified release public key is saved as
-`${XDG_CONFIG_HOME:-$HOME/.config}/vonkforge/installer-public.pem`; use it for
-later signed updates:
+is a workstation install and does not change the Controller or Sparks. The CLI
+carries the installer release signing key, so later signed updates need no
+configuration:
 
 ```sh
-vonkctl update --apply --public-key "${XDG_CONFIG_HOME:-$HOME/.config}/vonkforge/installer-public.pem"
+vonkctl update --apply
 ```
 
 `vonkctl` is the local, authenticated CLI for the Controller. It has four

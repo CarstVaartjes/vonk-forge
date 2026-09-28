@@ -600,7 +600,6 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             let runtime = OciRuntime {
                 runner: &self.runner,
                 data_root: &self.paths.store,
-                huggingface_curl_config: None,
             };
             let Ok(Some(plan)) = runtime.retained_telemetry_plan(&run_id) else {
                 continue;

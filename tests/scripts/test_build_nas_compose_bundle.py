@@ -87,131 +87,40 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     assert result.returncode == 0, result.stderr
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 2
-    assert payload["preflight"] == [
-        "Use the operator tailnet only; define and advertise only the exact Services listed below.",
-        "Enable MagicDNS and HTTPS certificates in the Tailscale DNS settings.",
-        "Define svc:vonk-forge with endpoint tcp:443; if enabling Hermes, also define svc:hermes-api and svc:hermes-dashboard.",
-        "Merge the reviewed grants.example.hujson policy, including gateway self-access and exact Service auto-approval.",
-        "Create a machine OAuth client with only auth_keys write scope and only tag:vonk-gateway.",
-        "Keep the raw OAuth client ID and secret ready; the secret is entered with hidden input.",
-    ]
     assert payload["internal_values"] == [
         {"env": "COMPOSE_PROJECT_NAME", "value": "vonk-forge-control"},
         {"env": "VONK_INSTALL_CHANNEL", "value": "stable"},
     ]
-    assert {item["env"] for item in payload["required_values"]} == {
-        "NAS_LAN_IP",
-        "VONK_MANAGEMENT_CIDRS",
-        "VONK_DIRECT_FABRIC_CIDRS",
-        "VONK_CONTROL_HOSTNAME",
-        "VONK_AGENT_ENROLL_HOSTNAME",
-        "VONK_AGENT_HOSTNAME",
-        "VONK_REGISTRY_HOSTNAME",
-    }
-    validators = {
-        item["env"]: item["validation"] for item in payload["required_values"]
-    }
-    assert validators == {
-        "NAS_LAN_IP": "ipv4",
-        "VONK_MANAGEMENT_CIDRS": "cidr_list",
-        "VONK_DIRECT_FABRIC_CIDRS": "optional_cidr_list",
-        "VONK_CONTROL_HOSTNAME": "hostname",
-        "VONK_AGENT_ENROLL_HOSTNAME": "hostname",
-        "VONK_AGENT_HOSTNAME": "hostname",
-        "VONK_REGISTRY_HOSTNAME": "hostname",
-    }
-    defaults = {item["env"]: item["default"] for item in payload["required_values"]}
-    assert defaults["VONK_DIRECT_FABRIC_CIDRS"] == ("192.168.100.0/24,192.168.101.0/24")
-    prompts = {item["env"]: item["prompt"] for item in payload["required_values"]}
-    assert prompts["VONK_AGENT_ENROLL_HOSTNAME"] == (
-        "Agent enrollment hostname (enroll.<tailnet>.ts.net)"
-    )
-    assert prompts["VONK_AGENT_HOSTNAME"] == (
-        "Agent controller hostname (agents.<tailnet>.ts.net)"
-    )
-    assert prompts["VONK_REGISTRY_HOSTNAME"] == (
-        "Registry hostname (registry.<tailnet>.ts.net)"
-    )
+    # Only these lack a fixed default (the management CIDRs then derive from the
+    # NAS address); every other value is defaulted or generated, never asked.
+    assert [
+        item["env"] for item in payload["required_values"] if item["default"] is None
+    ] == ["NAS_LAN_IP", "VONK_MANAGEMENT_CIDRS", "VONK_CONTROL_HOSTNAME"]
     assert {item["file"] for item in payload["secrets"]} == {
-        "admin-password",
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",
         "litellm-upstream-key",
         "hf-token",
     }
-    secret_prompts = {item["file"]: item for item in payload["secrets"]}
-    assert secret_prompts["admin-password"]["generate_bytes"] == 24
-    assert secret_prompts["admin-password"]["generate_in_lab"] is True
-    assert secret_prompts["hf-token"] == {
-        "file": "hf-token",
-        "prompt": "Hugging Face access token (optional; leave blank for public models)",
-        "generate_bytes": None,
-        "optional": True,
-    }
-    for external in (
-        "tailscale-oauth-client-id",
-        "tailscale-oauth-client-secret",
-        "litellm-upstream-key",
-    ):
-        assert secret_prompts[external]["generate_bytes"] is None
-    assert secret_prompts["tailscale-oauth-client-id"]["secure_remote_only"] is True
-    assert secret_prompts["tailscale-oauth-client-secret"]["secure_remote_only"] is True
-    assert secret_prompts["litellm-upstream-key"]["secure_remote_only"] is True
-    assert payload["install_modes"]["default"] == "secure-remote"
-    assert payload["install_modes"]["secure_remote_value"] == "secure-remote"
-    assert [
-        item["env"] for item in payload["install_modes"]["lab_required_values"]
-    ] == ["NAS_LAN_IP"]
+    optional = {item["file"] for item in payload["secrets"] if item.get("optional")}
+    assert optional == {"litellm-upstream-key", "hf-token"}
     assert {item["env"] for item in payload["install_modes"]["lab_values"]} == {
-        "VONK_MANAGEMENT_CIDRS",
-        "VONK_DIRECT_FABRIC_CIDRS",
-        "VONK_CONTROL_HOSTNAME",
-        "VONK_AGENT_ENROLL_HOSTNAME",
-        "VONK_AGENT_HOSTNAME",
-        "VONK_REGISTRY_HOSTNAME",
+        "VONK_CONTROL_HOSTNAME"
     }
     generated = payload["generated_secrets"]
-    assert {item["file"] for item in generated["random_text"]} == {
-        "postgres-password",
-        "litellm-database-password",
-        "token-signing-key",
-        "metrics-token",
-        "litellm-master-key",
-        "grafana-admin-password",
-        "agent-proxy-auth",
-        "hermes-api-key",
-    }
-    assert {item["file"] for item in generated["ed25519_pkcs8_pem"]} == {
-        "package-helper-grant-private-key.pem",
-        "package-helper-receipt-private-key.pem",
-        "host-runtime-grant-private-key.pem",
-    }
-    assert {item["file"] for item in generated["postgres_urls"]} == {
-        "database-url",
-        "litellm-database-url",
-    }
-    assert payload["step_ca_controller"]["kid_env"] == "AGENT_CA_PROVISIONER_KID"
-    assert payload["hermes"] == {
-        "env": "COMPOSE_PROFILES",
-        "prompt": "Enable the optional Hermes agent?",
-        "enabled_value": "hermes",
-        "disabled_value": "",
-        "required_values": [
-            {
-                "env": "HERMES_DASHBOARD_ORIGIN",
-                "prompt": "Hermes dashboard HTTPS origin",
-                "default": None,
-                "validation": "https_origin",
-            }
-        ],
-        "secrets": [
-            {
-                "file": "hermes-litellm-key",
-                "prompt": "Dedicated Hermes LiteLLM client key",
-                "generate_bytes": 32,
-                "prefix": "sk-",
-            }
-        ],
+    assert all("prompt" not in item for group in generated.values() for item in group)
+    hermes_key = next(
+        item
+        for item in generated["random_text"]
+        if item["file"] == "hermes-litellm-key"
+    )
+    assert hermes_key["prefix"] == "sk-"
+    assert payload["step_ca_controller"]["hostname_env"] == "VONK_CONTROL_HOSTNAME"
+    assert set(payload["hermes"]) == {
+        "env",
+        "prompt",
+        "enabled_value",
+        "disabled_value",
     }
     runtime_files = {item["file"]: item for item in payload["runtime_files"]}
     assert len(runtime_files) == len(original_compose["configs"])
@@ -222,15 +131,11 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
             item["file"] for item in payload["generated_secrets"][group]
         )
     installer_secret_files.update(payload["step_ca_controller"]["files"].values())
+
     installer_environment = {item["env"] for item in payload["internal_values"]} | {
         item["env"] for item in payload["required_values"]
     }
-    installer_environment.add(payload["step_ca_controller"]["kid_env"])
     installer_environment.add(payload["hermes"]["env"])
-    installer_environment.update(
-        item["env"] for item in payload["hermes"]["required_values"]
-    )
-    installer_secret_files.update(item["file"] for item in payload["hermes"]["secrets"])
 
     compose_text = payload["docker_compose_yaml"]
     compose = yaml.safe_load(compose_text)
@@ -372,24 +277,23 @@ def test_payload_build_rejects_symlink_input(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("channel", ("dev", "stable"))
-def test_installer_compose_tracks_channel_for_every_image(
+def test_installer_compose_follows_the_channel_and_keeps_third_party_pins(
     tmp_path: Path, channel: str
 ) -> None:
     document = yaml.safe_load(_render(tmp_path).read_text())
     builder = _load(SCRIPT, "channel_bundle_builder")
     payload = builder._payload(document, channel)
     services = yaml.safe_load(payload["docker_compose_yaml"])["services"]
+    lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
     for service in services.values():
         image = service["image"]
-        tag = (
-            "dev"
-            if channel == "dev"
-            and image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
-            else "latest"
-        )
-        assert image.endswith(f":{tag}")
-        assert "@" not in image
-        assert service["pull_policy"] == "always"
+        if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
+            assert image.endswith(":dev" if channel == "dev" else ":latest")
+            assert service["pull_policy"] == "always"
+        else:
+            # A third-party image stays on the version the release was tested
+            # with; a new upstream major never arrives through a channel tag.
+            assert image in lock["images"].values()
 
 
 def test_only_the_configured_postgres_backup_mount_is_allowed(tmp_path: Path) -> None:

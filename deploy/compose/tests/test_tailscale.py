@@ -369,12 +369,11 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
         "TS_SOCKET": "/var/run/tailscale/tailscaled.sock",
         "TS_STATE_DIR": "/var/lib/tailscale",
         "TS_USERSPACE": "true",
-        "VONK_TAILSCALE_EPHEMERAL": "false",
     }
     assert gateway["command"][:3] == ["/bin/sh", "-eu", "-c"]
     bootstrap = gateway["command"][3]
-    assert "printf '?ephemeral=%s&preauthorized=true'" in bootstrap
-    assert '"$${VONK_TAILSCALE_EPHEMERAL}"' in bootstrap
+    # A production gateway is durable: it survives long offline periods.
+    assert "printf '?ephemeral=false&preauthorized=true'" in bootstrap
     assert "TS_CLIENT_SECRET=file:/tmp/tailscale-oauth-client-secret" in bootstrap
     assert "exec env" in bootstrap
     assert "tr -d '\\r\\n'" in bootstrap
@@ -386,43 +385,6 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
         "/run/secrets/tailscale-oauth-client-id",
         "/run/secrets/tailscale-oauth-client-secret",
     }
-
-
-def test_gateway_can_be_ephemeral_for_acceptance() -> None:
-    environment = _environment()
-    environment["VONK_TAILSCALE_EPHEMERAL"] = "true"
-    rendered = _rendered(environment=environment)
-
-    assert (
-        rendered["services"]["tailscale-gateway"]["environment"][
-            "VONK_TAILSCALE_EPHEMERAL"
-        ]
-        == "true"
-    )
-
-
-def test_gateway_hostname_can_be_isolated_for_acceptance() -> None:
-    environment = _environment()
-    environment["VONK_TAILSCALE_GATEWAY_HOSTNAME"] = "vonk-forge-ci-123-1"
-    result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            str(COMPOSE / "compose.yaml"),
-            "config",
-            "--format",
-            "json",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
-
-    gateway = json.loads(result.stdout)["services"]["tailscale-gateway"]
-    assert gateway["hostname"] == "vonk-forge-ci-123-1"
-    assert gateway["environment"]["TS_HOSTNAME"] == "vonk-forge-ci-123-1"
 
 
 def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -> None:
@@ -448,12 +410,6 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
     assert configurator["restart"] == "unless-stopped"
     assert configurator["environment"] == {
         "VONK_SELECTED_PROFILES": "secure-remote",
-        "VONK_TAILSCALE_EPHEMERAL": "false",
-        "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
-        "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
-        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard",
-        "TS_REQUIRE_PRIMARY_ROUTES": "1",
-        "TS_REQUIRE_SERVICE_HOST": "1",
     }
     assert configurator["healthcheck"]["timeout"] == "8s"
     assert configurator["depends_on"] == {
@@ -532,12 +488,6 @@ def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
     configurator = json.loads(result.stdout)["services"]["tailscale-configurator"]
     assert configurator["environment"] == {
         "VONK_SELECTED_PROFILES": "secure-remote,hermes",
-        "VONK_TAILSCALE_EPHEMERAL": "false",
-        "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
-        "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
-        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard",
-        "TS_REQUIRE_PRIMARY_ROUTES": "1",
-        "TS_REQUIRE_SERVICE_HOST": "1",
     }
 
 

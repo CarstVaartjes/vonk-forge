@@ -140,11 +140,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ca_sha256: required(request.ca_sha256, "ca_sha256")?,
         data_dir: request.data_root.clone(),
         node_id: claim.node_id.clone(),
-        poll_min_seconds: 1,
-        poll_max_seconds: 2,
         fabric_address: None,
         fabric_bandwidth_mbps: None,
-        huggingface_curl_config: None,
     };
     let identity = IdentityPaths {
         certificate: required(request.certificate_pem, "certificate_pem")?,
@@ -166,7 +163,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             runtime: OciRuntime {
                 runner: &runner,
                 data_root: &request.data_root,
-                huggingface_curl_config: None,
             },
             runtime_root: &request.data_root,
             observation_receipt_public_key: [0; 32],

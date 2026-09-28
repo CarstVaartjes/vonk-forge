@@ -200,9 +200,7 @@ def test_update_dispatches_before_controller_authentication(
     monkeypatch.setattr(cli, "run_update", check)
     output = StringIO()
     with redirect_stdout(output):
-        status = cli.main(
-            ("update", "--public-key", str(tmp_path / "key.pem"), "--json")
-        )
+        status = cli.main(("update", "--json"))
     assert status == 0
     assert selected == ["dev"]
     assert json.loads(output.getvalue()) == {
@@ -393,8 +391,7 @@ def test_interactive_notice_never_fetches_on_ordinary_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     key, _ = _signed_publication(tmp_path, source_sha="b" * 40)
-    monkeypatch.setenv("VONK_CLI_UPDATE_NOTICES", "1")
-    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(key))
+    monkeypatch.setattr(cli_update, "INSTALLER_PUBLIC_KEY", key)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     monkeypatch.setattr(
         cli_update,
@@ -421,16 +418,18 @@ def test_interactive_notice_never_fetches_on_ordinary_command(
     assert cli_update.interactive_notice() is not None
     (tmp_path / "other").mkdir()
     other_key, _ = _signed_publication(tmp_path / "other", source_sha="d" * 40)
-    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(other_key))
+    monkeypatch.setattr(cli_update, "INSTALLER_PUBLIC_KEY", other_key)
     assert cli_update.interactive_notice() is None
 
 
-def test_opted_in_interactive_command_schedules_without_blocking_controller(
+def test_interactive_command_schedules_without_blocking_controller(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(
+        cli, "begin_interactive_update_check", cli_update.begin_interactive_update_check
+    )
     key, _ = _signed_publication(tmp_path, source_sha="b" * 40)
-    monkeypatch.setenv("VONK_CLI_UPDATE_NOTICES", "1")
-    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(key))
+    monkeypatch.setattr(cli_update, "INSTALLER_PUBLIC_KEY", key)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     seen: list[list[str]] = []
     monkeypatch.setattr(
@@ -474,8 +473,7 @@ def test_background_notice_accepts_only_signed_current_release(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
-    monkeypatch.setenv("VONK_CLI_UPDATE_NOTICES", "1")
-    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(key))
+    monkeypatch.setattr(cli_update, "INSTALLER_PUBLIC_KEY", key)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     monkeypatch.setattr(
         cli_update,
@@ -516,48 +514,20 @@ def test_background_module_checks_configured_channel_and_releases_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     key, objects = _signed_publication(tmp_path, source_sha="b" * 40, channel="dev")
-    monkeypatch.setenv("VONK_CLI_UPDATE_NOTICES", "1")
     monkeypatch.setenv("VONK_CLI_UPDATE_CHANNEL", "dev")
-    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(key))
+    monkeypatch.setattr(cli_update, "INSTALLER_PUBLIC_KEY", key)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     assert cli_update.interactive_notice() is None
     lock = tmp_path / "cache" / "vonkctl" / "update-notice.lock"
     lock.parent.mkdir(parents=True)
     lock.touch()
-
-    transport = tmp_path / "transport"
-    transport.mkdir()
-    (transport / "objects.json").write_text(
-        json.dumps(
-            {url: base64.b64encode(value).decode() for url, value in objects.items()}
-        )
+    monkeypatch.setattr(
+        cli_update, "_download", lambda url, maximum, timeout: objects[url]
     )
-    (transport / "sitecustomize.py").write_text(
-        "import base64, json, pathlib, urllib.request\n"
-        "objects = json.loads(pathlib.Path(__file__).with_name('objects.json').read_text())\n"
-        "class Response:\n"
-        "    status = 200\n"
-        "    def __init__(self, value): self.value = value\n"
-        "    def __enter__(self): return self\n"
-        "    def __exit__(self, *args): return None\n"
-        "    def read(self, maximum): return self.value[:maximum]\n"
-        "class Opener:\n"
-        "    def open(self, request, timeout): return Response(base64.b64decode(objects[request.full_url]))\n"
-        "urllib.request.build_opener = lambda *args: Opener()\n"
+    monkeypatch.setattr(
+        cli_update.sys, "argv", ["cli_update.py", "--background-notice"]
     )
-    environment = os.environ.copy()
-    environment["PYTHONPATH"] = os.pathsep.join(
-        (str(transport), str(Path(__file__).resolve().parents[2] / "src"))
-    )
-    completed = subprocess.run(
-        [sys.executable, "-m", "cluster_profiles.cli_update", "--background-notice"],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
+    assert cli_update._background_main() == 0
     assert not lock.exists()
     assert cli_update.interactive_notice() == (
         "Accepted vonkctl update available; run "
@@ -571,8 +541,7 @@ def test_offline_version_and_json_command_do_not_schedule_notices(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     key, _ = _signed_publication(tmp_path, source_sha="b" * 40)
-    monkeypatch.setenv("VONK_CLI_UPDATE_NOTICES", "1")
-    monkeypatch.setenv("VONK_INSTALLER_PUBLIC_KEY_FILE", str(key))
+    monkeypatch.setattr(cli_update, "INSTALLER_PUBLIC_KEY", key)
     monkeypatch.setattr(
         cli, "begin_interactive_update_check", lambda: pytest.fail("scheduled check")
     )

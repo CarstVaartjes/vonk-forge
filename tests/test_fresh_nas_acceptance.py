@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TypedDict, Unpack
 
 import pytest
+import yaml
 
 from tests.acceptance.runtime import AcceptanceError
 
@@ -78,7 +79,7 @@ def test_canonical_hermes_topology_includes_the_key_provisioner() -> None:
     }
 
 
-def test_hermes_responses_cover_the_dedicated_litellm_key_prompt() -> None:
+def test_nas_responses_answer_only_the_remaining_installer_prompts() -> None:
     acceptance = _acceptance_module()
     arguments = {
         "nas_ip": "192.0.2.10",
@@ -86,55 +87,20 @@ def test_hermes_responses_cover_the_dedicated_litellm_key_prompt() -> None:
         "oauth_client_id": "client-id",
         "oauth_client_secret": "client-secret",
         "upstream_key": "upstream-key",
+        "control_service": "svc:vonk-forge-ci",
     }
 
-    disabled = acceptance.nas_responses(**arguments, hermes=False)
-    enabled = acceptance.nas_responses(**arguments, hermes=True)
-    assert len(enabled) == len(disabled) + 2
-    assert (
-        sum(answer == "" for _, answer in enabled)
-        == sum(answer == "" for _, answer in disabled) + 1
+    disabled = dict(acceptance.nas_responses(**arguments, hermes=False))
+    enabled = dict(acceptance.nas_responses(**arguments, hermes=True))
+    assert set(disabled) == set(enabled)
+    assert {disabled[prompt] for prompt in disabled if "Hermes" in prompt} == {"n"}
+    assert {enabled[prompt] for prompt in enabled if "Hermes" in prompt} == {"y"}
+    answers = set(disabled.values())
+    assert {"secure-remote", "192.0.2.10", "vonk-forge-ci.acceptance.example.test"} <= (
+        answers
     )
-
-
-def test_nas_responses_accept_explicit_spark_service_hostnames() -> None:
-    acceptance = _acceptance_module()
-    responses = acceptance.nas_responses(
-        nas_ip="127.0.0.1",
-        tailnet_suffix="spark.acceptance.invalid",
-        oauth_client_id="disabled",
-        oauth_client_secret="disabled",
-        upstream_key="upstream-key",
-        hermes=False,
-        control_service="svc:vonk-forge-spark-local",
-        enrollment_hostname="enroll.spark.localhost",
-        agent_hostname="agents.spark.localhost",
-        registry_hostname="registry.spark.localhost",
-    )
-
-    answers = {answer for _, answer in responses}
-    assert "secure-remote" in answers
-    assert {
-        "enroll.spark.localhost",
-        "agents.spark.localhost",
-        "registry.spark.localhost",
-    } <= answers
-
-
-def test_nas_responses_preserve_explicit_configuration_values() -> None:
-    acceptance = _acceptance_module()
-    responses = acceptance.nas_responses(
-        nas_ip="192.0.2.10",
-        tailnet_suffix="acceptance.example.test",
-        oauth_client_id="client-id",
-        oauth_client_secret="client-secret",
-        upstream_key="upstream-key",
-        hermes=False,
-    )
-    answers = {answer for _, answer in responses}
-
-    assert {"secure-remote", "192.0.2.10", "192.168.1.0/24"} <= answers
-    assert "192.168.100.0/24,192.168.101.0/24" not in answers
+    # CIDRs, derived hostnames, and every internal secret are never asked.
+    assert not any("CIDR" in prompt or "password" in prompt for prompt in disabled)
 
 
 def test_generate_bundle_allows_the_installer_to_reuse_its_target(
@@ -420,36 +386,64 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
     assert cause == "image pull failed while using <redacted>"
 
 
-def test_acceptance_service_override_accepts_canonical_names_and_matches_hostname(
+def test_acceptance_service_override_edits_only_the_bundle_compose(
     tmp_path: Path,
 ) -> None:
     acceptance = _acceptance_module()
     bundle = tmp_path / "bundle"
     bundle.mkdir()
-    environment = bundle / ".env"
-    environment.write_text("COMPOSE_PROFILES=\n", encoding="utf-8")
-    environment.chmod(0o600)
+    (bundle / ".env").write_text(
+        "VONK_CONTROL_HOSTNAME=vonk-forge.acceptance.example.test\n", encoding="utf-8"
+    )
+    compose = bundle / "docker-compose.yaml"
+    compose.write_text(
+        yaml.safe_dump(
+            {
+                "services": {
+                    "tailscale-gateway": {
+                        "hostname": "vonk-forge-gateway",
+                        "environment": {"TS_HOSTNAME": "vonk-forge-gateway"},
+                        "command": [
+                            "/bin/sh",
+                            "-c",
+                            "printf '?ephemeral=false&preauthorized=true'",
+                        ],
+                    },
+                    "tailscale-configurator": {"environment": {}},
+                    "hermes-agent": {"environment": {}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    compose.chmod(0o640)
 
     acceptance.configure_tailnet_service_names(
         bundle,
         control="svc:vonk-forge",
         gateway_hostname="vonk-forge-ci-123-1",
         hermes_api="svc:hermes-api",
-        hermes_dashboard="svc:hermes-dashboard",
+        hermes_dashboard="svc:hermes-dashboard-ci",
         require_external_tailnet_client=False,
     )
 
-    assert environment.stat().st_mode & 0o777 == 0o600
-    assert environment.read_text(encoding="utf-8").splitlines() == [
-        "COMPOSE_PROFILES=",
-        "VONK_TAILSCALE_CONTROL_SERVICE=svc:vonk-forge",
-        "VONK_TAILSCALE_HERMES_API_SERVICE=svc:hermes-api",
-        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE=svc:hermes-dashboard",
-        "VONK_TAILSCALE_EPHEMERAL=true",
-        "VONK_TAILSCALE_GATEWAY_HOSTNAME=vonk-forge-ci-123-1",
-        "TS_REQUIRE_PRIMARY_ROUTES=0",
-        "TS_REQUIRE_SERVICE_HOST=0",
-    ]
+    assert compose.stat().st_mode & 0o777 == 0o640
+    services = yaml.safe_load(compose.read_text(encoding="utf-8"))["services"]
+    gateway = services["tailscale-gateway"]
+    assert gateway["hostname"] == "vonk-forge-ci-123-1"
+    assert gateway["environment"]["TS_HOSTNAME"] == "vonk-forge-ci-123-1"
+    assert "?ephemeral=true&preauthorized=true" in gateway["command"][-1]
+    assert services["tailscale-configurator"]["environment"] == {
+        "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
+        "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
+        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard-ci",
+        "VONK_TAILSCALE_EPHEMERAL": "true",
+        "TS_REQUIRE_PRIMARY_ROUTES": "0",
+        "TS_REQUIRE_SERVICE_HOST": "0",
+    }
+    assert services["hermes-agent"]["environment"]["API_SERVER_CORS_ORIGINS"] == (
+        "https://hermes-dashboard-ci.acceptance.example.test"
+    )
     assert (
         acceptance.tailscale_service_hostname(
             "svc:vonk-forge", "acceptance.example.test"
@@ -1053,20 +1047,20 @@ def test_routed_service_checks_require_authentication_and_expected_data(
 
 
 @pytest.mark.parametrize(
-    "mutation", [None, "wrong_role", "floating_candidate", "pinned_upstream"]
+    "mutation", [None, "wrong_role", "floating_candidate", "floating_upstream"]
 )
-def test_candidate_overlay_checks_exact_roles_and_floating_upstream(mutation):
+def test_candidate_overlay_checks_exact_roles_and_pinned_upstream(mutation):
     acceptance = _acceptance_module()
     api = "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-x@sha256:" + "a" * 64
     worker = "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-x@sha256:" + "b" * 64
     expected = {"control-api": {"image": api}, "control-worker": {"image": worker}}
-    services = {**expected, "postgres": {"image": "postgres:latest"}}
+    services = {**expected, "postgres": {"image": "postgres:18.6"}}
     if mutation == "wrong_role":
         services["control-api"] = {"image": worker}
     elif mutation == "floating_candidate":
         services["control-api"] = {"image": "ghcr.io/carstvaartjes/vonk-forge-api:dev"}
-    elif mutation == "pinned_upstream":
-        services["postgres"] = {"image": "postgres@sha256:" + "c" * 64}
+    elif mutation == "floating_upstream":
+        services["postgres"] = {"image": "postgres:latest"}
     if mutation:
         with pytest.raises(acceptance.AcceptanceError):
             acceptance.assert_candidate_image_graph(services, expected)

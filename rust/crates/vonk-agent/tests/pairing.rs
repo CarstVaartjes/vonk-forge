@@ -25,8 +25,6 @@ const COMMON: &str = r#"ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
 ca_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 data_dir = "/var/lib/vonk-forge"
 node_id = "spk_0123456789abcdef0123456789abcdef"
-poll_min_seconds = 2
-poll_max_seconds = 60
 "#;
 
 #[test]
@@ -178,11 +176,8 @@ async fn pairing_rejects_controller_url_before_any_identity_material_is_written(
         ca_sha256: hex::encode(Sha256::digest(ca.der())),
         data_dir: data_dir.clone(),
         node_id: NODE_ID.to_owned(),
-        poll_min_seconds: 2,
-        poll_max_seconds: 60,
         fabric_address: None,
         fabric_bandwidth_mbps: None,
-        huggingface_curl_config: None,
     };
     let evidence = EnrollmentEvidence {
         agent_digest: "a".repeat(64),

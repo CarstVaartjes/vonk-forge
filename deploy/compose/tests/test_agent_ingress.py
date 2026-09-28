@@ -16,59 +16,19 @@ DEV_CADDY_IMAGE = "caddy:2.11.4"
 
 def _environment() -> dict[str, str]:
     return os.environ | {
-        "POSTGRES_IMAGE": "postgres:17@sha256:" + "a" * 64,
-        "CADDY_IMAGE": "caddy:2@sha256:" + "b" * 64,
-        "REGISTRY_IMAGE": "registry:3@sha256:" + "9" * 64,
         "CONTROL_API_IMAGE": "example/control-api:1@sha256:" + "c" * 64,
         "CONTROL_WORKER_IMAGE": "example/control-worker:1@sha256:" + "8" * 64,
         "HERMES_AGENT_IMAGE": "example/hermes:1@sha256:" + "7" * 64,
         "LITELLM_IMAGE": "example/litellm:1@sha256:" + "d" * 64,
-        "PROMETHEUS_IMAGE": "prom/prometheus:1@sha256:" + "e" * 64,
-        "GRAFANA_IMAGE": "grafana/grafana:1@sha256:" + "f" * 64,
-        "STEP_CA_IMAGE": "smallstep/step-ca:0.30.2@sha256:" + "1" * 64,
-        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.5",
-        "DATABASE_URL_FILE": "/dev/null",
-        "ADMIN_PASSWORD_FILE": "/dev/null",
-        "POSTGRES_PASSWORD_FILE": "/dev/null",
-        "TOKEN_SIGNING_KEY_FILE": "/dev/null",
-        "METRICS_TOKEN_FILE": "/dev/null",
-        "PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "/dev/null",
-        "PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "/dev/null",
-        "HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "/dev/null",
-        "GRAFANA_ADMIN_PASSWORD_FILE": "/dev/null",
-        "LITELLM_MASTER_KEY_FILE": "/dev/null",
-        "LITELLM_UPSTREAM_KEY_FILE": "/dev/null",
-        "LITELLM_DATABASE_URL_FILE": "/dev/null",
-        "LITELLM_DATABASE_PASSWORD_FILE": "/dev/null",
-        "AGENT_CLIENT_CA_FILE": "/dev/null",
-        "CONTROLLER_CA_FILE": "/dev/null",
-        "CONTROLLER_SERVER_CERTIFICATE_FILE": "/dev/null",
-        "CONTROLLER_SERVER_KEY_FILE": "/dev/null",
-        "AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/dev/null",
-        "AGENT_PROXY_AUTH_FILE": "/dev/null",
-        "AGENT_CA_CREDENTIAL_FILE": "/dev/null",
-        "AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "/dev/null",
-        "AGENT_CA_PROVISIONER_KID": "test-provisioner-kid",
-        "STEP_CA_CONFIG_FILE": "/dev/null",
-        "STEP_CA_INTERMEDIATE_KEY_FILE": "/dev/null",
-        "STEP_CA_PASSWORD_FILE": "/dev/null",
-        "STEP_CA_ROOT_CERTIFICATE_FILE": "/dev/null",
         "VONK_CONTROL_HOSTNAME": "control.test.example",
-        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
-        "VONK_AGENT_HOSTNAME": "agents.test.example",
-        "VONK_REGISTRY_HOSTNAME": "registry.test.example",
-        "VONK_AGENT_PROXY_AUTH": "test-proxy-secret",
         "VONK_MANAGEMENT_CIDRS": "10.0.0.0/24",
         "VONK_DIRECT_FABRIC_CIDRS": "192.168.100.0/24,192.168.101.0/24",
         "NAS_LAN_IP": "10.0.0.2",
-        "VONK_BACKEND_PORT": "8443",
-        "TAILSCALE_OAUTH_CLIENT_ID_FILE": "/dev/null",
-        "TAILSCALE_OAUTH_CLIENT_SECRET_FILE": "/dev/null",
-        "HERMES_UID": "1100",
-        "HERMES_GID": "1100",
-        "HERMES_DATA_ROOT": "/srv/vonk-forge/hermes",
-        "HERMES_API_KEY_FILE": "/dev/null",
-        "HERMES_DASHBOARD_ORIGIN": "https://hermes.test.example",
+        # The names the Caddy entrypoint derives from the control hostname,
+        # for tests that adapt the Caddyfile without the entrypoint.
+        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.control.test.example",
+        "VONK_AGENT_HOSTNAME": "agents.control.test.example",
+        "VONK_REGISTRY_HOSTNAME": "registry.control.test.example",
     }
 
 
@@ -108,13 +68,11 @@ def _adapted_caddy(environment: dict[str, str], caddyfile: str | None = None) ->
             "-e",
             f"VONK_CONTROL_HOSTNAME={environment['VONK_CONTROL_HOSTNAME']}",
             "-e",
-            f"VONK_AGENT_ENROLL_HOSTNAME={environment['VONK_AGENT_ENROLL_HOSTNAME']}",
+            f"VONK_AGENT_ENROLL_HOSTNAME={environment.get('VONK_AGENT_ENROLL_HOSTNAME', 'enroll.' + environment['VONK_CONTROL_HOSTNAME'])}",
             "-e",
-            f"VONK_AGENT_HOSTNAME={environment['VONK_AGENT_HOSTNAME']}",
+            f"VONK_AGENT_HOSTNAME={environment.get('VONK_AGENT_HOSTNAME', 'agents.' + environment['VONK_CONTROL_HOSTNAME'])}",
             "-e",
-            f"VONK_REGISTRY_HOSTNAME={environment['VONK_REGISTRY_HOSTNAME']}",
-            "-e",
-            f"VONK_BACKEND_PORT={environment.get('VONK_BACKEND_PORT', '8443')}",
+            f"VONK_REGISTRY_HOSTNAME={environment.get('VONK_REGISTRY_HOSTNAME', 'registry.' + environment['VONK_CONTROL_HOSTNAME'])}",
             "-e",
             "VONK_AGENT_PROXY_AUTH=test-proxy-secret",
             DEV_CADDY_IMAGE,
@@ -282,12 +240,6 @@ def _entrypoint_result(
     entrypoint_arguments: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     _require_docker_runtime()
-    environment = environment | {
-        "VONK_REGISTRY_HOSTNAME": environment.get(
-            "VONK_REGISTRY_HOSTNAME", "registry.test.example"
-        ),
-        "VONK_BACKEND_PORT": environment.get("VONK_BACKEND_PORT", "8443"),
-    }
     command = ["docker", "run", "--rm"]
     for name, value in environment.items():
         command.extend(("-e", f"{name}={value}"))
@@ -426,21 +378,11 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
     }
 
 
-def test_agent_bootstrap_uses_distinct_https_origins_and_normalized_public_ca() -> None:
+def test_agent_bootstrap_uses_the_normalized_public_ca() -> None:
     rendered = _rendered()
     api = rendered["services"]["control-api"]
-    environment = api["environment"]
     api_secrets = {secret["source"] for secret in api.get("secrets", [])}
 
-    assert environment["VONK_AGENT_CONTROLLER_ORIGIN"] == (
-        "https://agents.test.example:8443"
-    )
-    assert environment["VONK_AGENT_ENROLLMENT_ORIGIN"] == (
-        "https://enroll.test.example:8443"
-    )
-    assert environment["VONK_CONTROLLER_CA_FILE"] == (
-        "/run/vonk-normalized-secrets/controller-ca"
-    )
     assert "controller-ca" in api_secrets
     assert any(
         volume["target"] == "/run/vonk-normalized-secrets" for volume in api["volumes"]
@@ -731,13 +673,13 @@ def test_mtls_image_upload_has_a_dedicated_bound_without_widening_other_edges() 
     environments = (
         (
             _adapted_development_caddy(),
-            "agents.test.example",
-            "enroll.test.example",
+            "agents.control.test.example",
+            "enroll.control.test.example",
         ),
         (
             _adapted_caddy(_environment()),
-            "agents.test.example",
-            "enroll.test.example",
+            "agents.control.test.example",
+            "enroll.control.test.example",
         ),
     )
     upload_match = [
@@ -798,20 +740,9 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     environment = _environment()
     rendered_caddy = _rendered("compose.yaml")["services"]["caddy"]
     caddy_environment = rendered_caddy["environment"]
-    assert {
-        name: caddy_environment[name]
-        for name in (
-            "VONK_CONTROL_HOSTNAME",
-            "VONK_AGENT_ENROLL_HOSTNAME",
-            "VONK_AGENT_HOSTNAME",
-        )
-    } == {
-        name: environment[name]
-        for name in (
-            "VONK_CONTROL_HOSTNAME",
-            "VONK_AGENT_ENROLL_HOSTNAME",
-            "VONK_AGENT_HOSTNAME",
-        )
+    # The entrypoint derives the other SNI names from this one hostname.
+    assert caddy_environment == {
+        "VONK_CONTROL_HOSTNAME": environment["VONK_CONTROL_HOSTNAME"]
     }
     adapted = _adapted_caddy(
         caddy_environment | {"VONK_AGENT_PROXY_AUTH": "test-proxy-secret"}
@@ -845,7 +776,7 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     )
     assert denied < fallback
 
-    enrollment_routes = site("enroll.test.example")["handle"][0]["routes"]
+    enrollment_routes = site("enroll.control.test.example")["handle"][0]["routes"]
     enrollment_proxies = [
         route
         for route in enrollment_routes
@@ -868,11 +799,11 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
         for route in enrollment_routes
     )
 
-    agent_site = site("agents.test.example")
+    agent_site = site("agents.control.test.example")
     client_auth = next(
         policy["client_authentication"]
         for policy in backend_server["tls_connection_policies"]
-        if "agents.test.example" in policy.get("match", {}).get("sni", [])
+        if "agents.control.test.example" in policy.get("match", {}).get("sni", [])
     )
     assert client_auth["mode"] == "require_and_verify"
     assert client_auth["ca"] == {
@@ -951,15 +882,15 @@ def test_tailnet_and_node_backend_routes_are_on_separate_listeners() -> None:
     assert "litellm:4000" in tailnet
     assert "grafana:3000" in tailnet
     for hostname in (
-        "enroll.test.example",
-        "agents.test.example",
-        "registry.test.example",
+        "enroll.control.test.example",
+        "agents.control.test.example",
+        "registry.control.test.example",
     ):
         assert hostname not in tailnet
 
-    assert "enroll.test.example" in backend
-    assert "agents.test.example" in backend
-    assert "registry.test.example" in backend
+    assert "enroll.control.test.example" in backend
+    assert "agents.control.test.example" in backend
+    assert "registry.control.test.example" in backend
     # Lab mode also serves the browser surface on the LAN HTTPS listener.
     # Secure remote browser traffic still enters through the separate tailnet
     # listener above; node-only agent and registry routes remain on 8443.
@@ -987,11 +918,11 @@ def test_caddy_activation_route_is_exposed_only_on_verified_mtls_agent_sni() -> 
     agent_policy = next(
         policy
         for policy in backend_server["tls_connection_policies"]
-        if "agents.test.example" in policy.get("match", {}).get("sni", [])
+        if "agents.control.test.example" in policy.get("match", {}).get("sni", [])
     )
     assert agent_policy["client_authentication"]["mode"] == "require_and_verify"
 
-    agent_routes = site("agents.test.example")["handle"][0]["routes"]
+    agent_routes = site("agents.control.test.example")["handle"][0]["routes"]
     agent_proxy = next(
         route
         for route in agent_routes
@@ -1000,7 +931,7 @@ def test_caddy_activation_route_is_exposed_only_on_verified_mtls_agent_sni() -> 
     agent_path_pattern = agent_proxy["match"][0]["path"][0]
     assert fnmatchcase(activation_path, agent_path_pattern)
 
-    enrollment_routes = site("enroll.test.example")["handle"][0]["routes"]
+    enrollment_routes = site("enroll.control.test.example")["handle"][0]["routes"]
     enrollment_proxy = next(
         route
         for route in enrollment_routes
@@ -1027,70 +958,36 @@ def test_caddy_activation_route_is_exposed_only_on_verified_mtls_agent_sni() -> 
     assert '"status_code": 404' in json.dumps(control_denial, sort_keys=True)
 
 
-def test_caddy_compose_requires_distinct_sni_hostnames_before_startup(
+def test_caddy_requires_a_valid_control_hostname_and_proxy_auth(
     tmp_path: Path,
 ) -> None:
     missing = _environment()
-    missing.pop("VONK_AGENT_HOSTNAME")
-    command = [
-        "docker",
-        "compose",
-        "-f",
-        str(ROOT / "deploy/compose/compose.yaml"),
-        "config",
-        "--quiet",
-    ]
+    missing.pop("VONK_CONTROL_HOSTNAME")
     absent = subprocess.run(
-        command, capture_output=True, text=True, env=missing, check=False
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "deploy/compose/compose.yaml"),
+            "config",
+            "--quiet",
+        ],
+        capture_output=True,
+        text=True,
+        env=missing,
+        check=False,
     )
     assert absent.returncode != 0
-    assert "VONK_AGENT_HOSTNAME" in absent.stderr
+    assert "VONK_CONTROL_HOSTNAME" in absent.stderr
 
-    duplicates = (
-        {
-            "VONK_CONTROL_HOSTNAME": "same.test.example",
-            "VONK_AGENT_ENROLL_HOSTNAME": "same.test.example",
-            "VONK_AGENT_HOSTNAME": "agents.test.example",
-        },
-        {
-            "VONK_CONTROL_HOSTNAME": "same.test.example",
-            "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
-            "VONK_AGENT_HOSTNAME": "same.test.example",
-        },
-        {
-            "VONK_CONTROL_HOSTNAME": "control.test.example",
-            "VONK_AGENT_ENROLL_HOSTNAME": "same.test.example",
-            "VONK_AGENT_HOSTNAME": "same.test.example",
-        },
-        # Case and a trailing dot do not make a hostname distinct.
-        {
-            "VONK_CONTROL_HOSTNAME": "CONTROL.test.example",
-            "VONK_AGENT_ENROLL_HOSTNAME": "control.test.example.",
-            "VONK_AGENT_HOSTNAME": "agents.test.example",
-        },
-        {
-            "VONK_CONTROL_HOSTNAME": "control.test.example",
-            "VONK_AGENT_ENROLL_HOSTNAME": "ENROLL.test.example",
-            "VONK_AGENT_HOSTNAME": "enroll.test.example.",
-        },
-    )
-    malformed = {
-        "VONK_CONTROL_HOSTNAME": "control test.example",
-        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
-        "VONK_AGENT_HOSTNAME": "agents.test.example",
-    }
-    valid = {
-        "VONK_CONTROL_HOSTNAME": "control.test.example",
-        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
-        "VONK_AGENT_HOSTNAME": "agents.test.example",
-    }
+    valid = {"VONK_CONTROL_HOSTNAME": "control.test.example"}
     short_secret = tmp_path / "agent-proxy-auth"
     short_secret.write_text("short-secret")
     # (environment, secret source, expected stderr). Each case is an
     # independent one-shot container, so they run concurrently.
-    cases = [(duplicate, None, "must be distinct") for duplicate in duplicates]
-    cases += [
-        (malformed, None, "invalid"),
+    cases = [
+        ({"VONK_CONTROL_HOSTNAME": "control test.example"}, None, "invalid"),
+        ({"VONK_CONTROL_HOSTNAME": "-control.test.example"}, None, "invalid"),
         (valid, None, "proxy authentication secret"),
         (valid, "/dev/null", "proxy authentication secret"),
         (valid, str(short_secret), "base64url-like"),
@@ -1107,21 +1004,32 @@ def test_caddy_compose_requires_distinct_sni_hostnames_before_startup(
 
 
 def test_caddy_proxy_auth_is_one_canonical_base64url_like_line(tmp_path: Path) -> None:
-    environment = {
-        "VONK_CONTROL_HOSTNAME": "control.test.example",
-        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
-        "VONK_AGENT_HOSTNAME": "agents.test.example",
-    }
+    environment = {"VONK_CONTROL_HOSTNAME": "Control.Test.Example."}
     token = "A" * 30 + "_-"
     valid_secret = tmp_path / "valid-agent-proxy-auth"
     valid_secret.write_bytes(token.encode("ascii") + b"\r\n")
     result = _entrypoint_result(
         environment,
         str(valid_secret),
-        ("/bin/sh", "-c", 'printf "%s" "$VONK_AGENT_PROXY_AUTH"'),
+        (
+            "/bin/sh",
+            "-c",
+            (
+                'printf "%s %s %s %s %s" "$VONK_AGENT_PROXY_AUTH" '
+                '"$VONK_CONTROL_HOSTNAME" "$VONK_AGENT_ENROLL_HOSTNAME" '
+                '"$VONK_AGENT_HOSTNAME" "$VONK_REGISTRY_HOSTNAME"'
+            ),
+        ),
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout == token
+    # One normalized control hostname names every SNI boundary.
+    assert result.stdout.split() == [
+        token,
+        "control.test.example",
+        "enroll.control.test.example",
+        "agents.control.test.example",
+        "registry.control.test.example",
+    ]
 
     invalid_values = (
         b"a" * 31 + b"\n",
@@ -1170,12 +1078,6 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
     assert "agent-ca-credential" in {
         secret["source"] for secret in services["control-api"]["secrets"]
     }
-    assert services["control-api"]["environment"]["VONK_AGENT_CLIENT_CA_FILE"] == (
-        "/run/vonk-normalized-secrets/agent-client-ca"
-    )
-    assert services["control-api"]["environment"]["VONK_AGENT_PROXY_AUTH_FILE"] == (
-        "/run/vonk-normalized-secrets/agent-proxy-auth"
-    )
     assert services["step-ca"].get("secrets", []) == []
     assert services["step-ca"]["command"][-1] == (
         "/run/vonk-normalized-secrets/step-ca/password"
@@ -1219,28 +1121,6 @@ def test_control_api_has_no_repository_or_git_runtime_mounts() -> None:
     )
     assert "VONK_REPOSITORY_PATH" not in api.get("environment", {})
     assert "VONK_GIT_SIGNING_KEY_FILE" not in api.get("environment", {})
-
-
-def test_canonical_runtime_requires_step_ca_secrets() -> None:
-    missing_step_secret = _environment()
-    missing_step_secret.pop("STEP_CA_PASSWORD_FILE")
-    command = [
-        "docker",
-        "compose",
-        "-f",
-        str(ROOT / "deploy/compose/compose.yaml"),
-        "config",
-        "--quiet",
-    ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        env=missing_step_secret,
-        check=False,
-    )
-    assert result.returncode != 0
-    assert "STEP_CA_PASSWORD_FILE" in result.stderr
 
 
 def test_canonical_step_ca_settings_pass_application_guard(tmp_path: Path) -> None:

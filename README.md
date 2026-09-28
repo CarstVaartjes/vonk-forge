@@ -117,7 +117,7 @@ generated command on the Spark before the displayed expiry. The installer asks
 for the one-use pairing token shown with the command. It has this shape:
 
 ```bash
-curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 sh -s -- --enroll
+curl -fsSL https://install.vonkforge.ai/spark | VONK_CONTROLLER_ADDRESS=192.168.1.231 VONK_ENROLLMENT_URL=https://enroll.example.test VONK_CONTROLLER_CA_SHA256=<fingerprint> sh -s -- --enroll
 ```
 
 Use the stable LAN address of your laptop, NAS, or server. The installer verifies

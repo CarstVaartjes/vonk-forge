@@ -121,7 +121,9 @@ def test_running_image_metadata_supplies_source_without_inventing_digest(
 
     metadata = tmp_path / "controller-build.json"
     metadata.write_text('{"source_commit":"' + "a" * 40 + '"}')
-    monkeypatch.delenv("VONK_DEPLOYMENT_OBSERVATIONS_FILE", raising=False)
+    monkeypatch.setattr(
+        provenance, "DEPLOYMENT_OBSERVATIONS_PATH", tmp_path / "absent.json"
+    )
     monkeypatch.setattr(provenance, "CONTROLLER_BUILD_METADATA", metadata)
     observation = local_deployment_observations()
     assert observation.controller is not None
@@ -238,11 +240,12 @@ def test_physical_acceptance_requires_exact_execution_receipt(tmp_path):
 
 
 def test_configured_malformed_evidence_is_not_silently_unknown(tmp_path, monkeypatch):
-    monkeypatch.delenv("VONK_DEPLOYMENT_OBSERVATIONS_FILE", raising=False)
-    assert local_deployment_observations().controller is None
+    from vonk_control import deployment_provenance as provenance
+
     path = tmp_path / "observations.json"
+    monkeypatch.setattr(provenance, "DEPLOYMENT_OBSERVATIONS_PATH", path)
+    assert local_deployment_observations().controller is None
     path.write_text('{"schema_version": 1}')
-    monkeypatch.setenv("VONK_DEPLOYMENT_OBSERVATIONS_FILE", str(path))
     with pytest.raises(ValueError):
         local_deployment_observations()
 
@@ -257,8 +260,8 @@ def test_old_named_volume_controller_is_invalidated_by_runtime_hostname(
     monkeypatch.setattr(provenance, "CONTROLLER_BUILD_METADATA", build_path)
     monkeypatch.setattr(provenance.socket, "gethostname", lambda: "b" * 12)
     monkeypatch.setenv("HOSTNAME", "c" * 12)
-    monkeypatch.setenv(
-        "VONK_DEPLOYMENT_OBSERVATIONS_FILE", str(tmp_path / "observations.json")
+    monkeypatch.setattr(
+        provenance, "DEPLOYMENT_OBSERVATIONS_PATH", tmp_path / "observations.json"
     )
     saved = DeploymentObservations(
         repository=PlatformObservation(

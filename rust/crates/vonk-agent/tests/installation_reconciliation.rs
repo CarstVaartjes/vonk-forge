@@ -49,11 +49,7 @@ impl ProcessRunner for NoProcess {
 }
 
 fn runtime<'a>(data_root: &'a Path, runner: &'a NoProcess) -> OciRuntime<'a, NoProcess> {
-    OciRuntime {
-        runner,
-        data_root,
-        huggingface_curl_config: None,
-    }
+    OciRuntime { runner, data_root }
 }
 
 fn opaque_legacy_spec() -> (Value, String) {

@@ -2627,11 +2627,6 @@ def test_public_cli_endpoint_verifies_the_signed_wheel_before_uv_install(
     assert result.returncode == 0, result.stderr
     assert "vonkctl 1.2.3 is installed" in result.stdout
     assert "tool install --force" in receipt.read_text()
-    signing_public_key = inputs["signing_public_key"]
-    assert isinstance(signing_public_key, Path)
-    assert (
-        tmp_path / "home/.config/vonkforge/installer-public.pem"
-    ).read_bytes() == signing_public_key.read_bytes()
     receipt.unlink()
     cli_artifact = next(destination.glob("artifacts/stable/releases/*/cli/*.whl"))
     cli_artifact.write_bytes(cli_artifact.read_bytes() + b"tampered")

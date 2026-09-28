@@ -4,10 +4,9 @@ The PostgreSQL container writes a compressed SQL dump to `./backups/` beside
 `docker-compose.yaml` after startup, then every 24 hours. Each dump is tested by
 restoring it into a disposable PostgreSQL cluster before it is marked successful.
 The same run archives the `step-ca-data` volume beside the dump with a matching
-timestamp. The newest 7 PostgreSQL dumps and CA archives are retained. Set
-`VONK_BACKUP_INTERVAL_SECONDS` and `VONK_BACKUP_KEEP` in `.env` to change these
-positive values. Failures appear in the PostgreSQL logs and retry after five
-minutes. A failed restore check does not advance the success marker.
+timestamp. The newest 7 PostgreSQL dumps and CA archives are retained.
+Failures appear in the PostgreSQL logs and retry after five minutes; a backup
+problem never stops PostgreSQL itself. A failed restore check does not advance the success marker.
 
 Set `VONK_BACKUP_OFFHOST_PATH` to an already mounted, private host directory to
 copy PostgreSQL dumps and paired CA archives off the NAS. The copy is pruned to

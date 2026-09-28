@@ -43,9 +43,8 @@ limited to your trusted LAN and do not forward port 8443 from the internet.
 
 ## Add a Spark
 
-Create a one-use enrollment grant in **Fleet**. On the Spark, use the generated
-install command and set `VONK_CONTROLLER_ADDRESS` to the NAS LAN address. The
-Spark must resolve the three `enroll`, `agents`, and `registry` hostnames above
+Create a one-use enrollment grant in **Fleet**. On the Spark, run the generated
+install command; it already carries the NAS LAN address. The Spark must resolve the three `enroll`, `agents`, and `registry` hostnames above
 to that same address. Import the local CA certificate on any client that needs
 to connect to the controller or Spark-facing HTTPS endpoints.
 

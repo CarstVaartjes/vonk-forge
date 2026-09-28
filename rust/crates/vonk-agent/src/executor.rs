@@ -4273,7 +4273,6 @@ mod tests {
         let runtime = OciRuntime {
             runner: &NoProcess,
             data_root: data.path(),
-            huggingface_curl_config: None,
         };
         let start = runtime
             .prepare_job_start(
@@ -4673,7 +4672,6 @@ mod tests {
             runtime: OciRuntime {
                 runner: &runner,
                 data_root: data.path(),
-                huggingface_curl_config: None,
             },
             runtime_root: runtime.path(),
             observation_receipt_public_key: [0; 32],
@@ -4708,7 +4706,6 @@ mod tests {
             runtime: OciRuntime {
                 runner: &runner,
                 data_root: data.path(),
-                huggingface_curl_config: None,
             },
             runtime_root: runtime.path(),
             observation_receipt_public_key: [0; 32],
@@ -4748,7 +4745,6 @@ mod tests {
             runtime: OciRuntime {
                 runner: &runner,
                 data_root: data.path(),
-                huggingface_curl_config: None,
             },
             runtime_root: runtime.path(),
             observation_receipt_public_key: [0; 32],
@@ -5075,7 +5071,6 @@ mod tests {
             runtime: OciRuntime {
                 runner: &runner,
                 data_root: data.path(),
-                huggingface_curl_config: None,
             },
             runtime_root: runtime_root.path(),
             observation_receipt_public_key: [0; 32],

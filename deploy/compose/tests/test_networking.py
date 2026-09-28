@@ -6,61 +6,11 @@ from pathlib import Path
 
 def _rendered() -> dict:
     root = Path(__file__).resolve().parents[3]
-    env = os.environ | {
-        "POSTGRES_IMAGE": "postgres:17",
-        "CADDY_IMAGE": "caddy:2",
-        "REGISTRY_IMAGE": "registry:3",
-        "CONTROL_API_IMAGE": "example/control-api:1",
-        "CONTROL_WORKER_IMAGE": "example/control-worker:1",
-        "HERMES_AGENT_IMAGE": "example/hermes:1",
-        "LITELLM_IMAGE": "example/litellm:1",
-        "PROMETHEUS_IMAGE": "prom/prometheus:1",
-        "GRAFANA_IMAGE": "grafana/grafana:1",
-        "DATABASE_URL_FILE": "/dev/null",
-        "HF_TOKEN_FILE": "/dev/null",
-        "ADMIN_PASSWORD_FILE": "/dev/null",
-        "POSTGRES_PASSWORD_FILE": "/dev/null",
-        "TOKEN_SIGNING_KEY_FILE": "/dev/null",
-        "METRICS_TOKEN_FILE": "/dev/null",
-        "PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "/dev/null",
-        "PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "/dev/null",
-        "HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "/dev/null",
-        "GRAFANA_ADMIN_PASSWORD_FILE": "/dev/null",
-        "LITELLM_MASTER_KEY_FILE": "/dev/null",
-        "LITELLM_UPSTREAM_KEY_FILE": "/dev/null",
-        "LITELLM_DATABASE_URL_FILE": "/dev/null",
-        "LITELLM_DATABASE_PASSWORD_FILE": "/dev/null",
-        "STEP_CA_IMAGE": "smallstep/step-ca:0.30.2@sha256:" + "1" * 64,
-        "TAILSCALE_IMAGE": "tailscale/tailscale:v1.102.5",
-        "AGENT_CLIENT_CA_FILE": "/dev/null",
-        "AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/dev/null",
-        "CONTROLLER_CA_FILE": "/dev/null",
-        "CONTROLLER_SERVER_CERTIFICATE_FILE": "/dev/null",
-        "CONTROLLER_SERVER_KEY_FILE": "/dev/null",
-        "AGENT_PROXY_AUTH_FILE": "/dev/null",
-        "AGENT_CA_CREDENTIAL_FILE": "/dev/null",
-        "AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "/dev/null",
-        "AGENT_CA_PROVISIONER_KID": "test-provisioner-kid",
-        "STEP_CA_CONFIG_FILE": "/dev/null",
-        "STEP_CA_ROOT_CERTIFICATE_FILE": "/dev/null",
-        "STEP_CA_INTERMEDIATE_KEY_FILE": "/dev/null",
-        "STEP_CA_PASSWORD_FILE": "/dev/null",
-        "VONK_CONTROL_HOSTNAME": "control.test.example",
-        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test.example",
-        "VONK_AGENT_HOSTNAME": "agents.test.example",
-        "VONK_REGISTRY_HOSTNAME": "registry.test.example",
-        "VONK_MANAGEMENT_CIDRS": "10.0.0.0/24",
-        "VONK_DIRECT_FABRIC_CIDRS": "192.168.100.0/24,192.168.101.0/24",
-        "NAS_LAN_IP": "10.0.0.2",
-        "VONK_BACKEND_PORT": "8443",
-        "TAILSCALE_OAUTH_CLIENT_ID_FILE": "/dev/null",
-        "TAILSCALE_OAUTH_CLIENT_SECRET_FILE": "/dev/null",
-        "HERMES_UID": "1100",
-        "HERMES_GID": "1100",
-        "HERMES_DATA_ROOT": "/srv/vonk-forge/hermes",
-        "HERMES_API_KEY_FILE": "/dev/null",
-        "HERMES_DASHBOARD_ORIGIN": "https://hermes.test.example",
-    }
+    env = os.environ | dict(
+        line.split("=", 1)
+        for line in (root / "deploy/compose/tests/test.env").read_text().splitlines()
+        if line and not line.startswith("#")
+    )
     result = subprocess.run(
         [
             "docker",
@@ -106,7 +56,7 @@ def test_caddy_publishes_only_reserved_nas_backend_listener() -> None:
             "host_ip": "10.0.0.2",
         }
     ]
-    assert caddy["environment"]["VONK_BACKEND_PORT"] == "8443"
+    assert caddy["environment"] == {"VONK_CONTROL_HOSTNAME": "control.test.example"}
 
 
 def test_litellm_has_no_network_path_from_control_services() -> None:
@@ -139,18 +89,15 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "ca",
         "data",
     }
-    assert services["control-api"]["environment"]["VONK_RECIPE_LIBRARY_API_URL"] == (
-        "http://caddy:8083"
-    )
-    # The asset relay is the Controller's built-in default, not configuration.
-    assert "VONK_RECIPE_LIBRARY_ASSET_URL" not in services["control-api"]["environment"]
-    assert (
-        "VONK_RECIPE_LIBRARY_PACKAGE_URL"
-        not in (services["control-api"]["environment"])
-    )
-    assert services["control-api"]["environment"]["VONK_AGENT_RELEASE_API_URL"] == (
-        "http://caddy:8084"
-    )
+    # Relays, secret paths, and tuning are fixed in code, not configuration.
+    assert set(services["control-api"]["environment"]) == {
+        "VONK_CONTROL_HOSTNAME",
+        "VONK_NAS_LAN_IP",
+        "VONK_MANAGEMENT_CIDRS",
+        "VONK_DIRECT_FABRIC_CIDRS",
+        "VONK_INSTALL_CHANNEL",
+        "VONK_RECIPE_LIBRARY_RELEASE",
+    }
     assert rendered["networks"]["ingress"].get("internal", False) is False
     assert set(services["litellm"]["networks"]) == {
         "cluster-egress",
@@ -175,13 +122,11 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         if name not in {"caddy", "litellm", "postgres"}:
             assert litellm_networks.isdisjoint(service.get("networks", {})), name
     assert set(services["prometheus"]["networks"]) == {"application"}
-    for service in ("control-api", "control-worker"):
-        assert services[service]["environment"]["VONK_MANAGEMENT_CIDRS"] == (
-            "10.0.0.0/24"
-        )
-        assert services[service]["environment"]["VONK_DIRECT_FABRIC_CIDRS"] == (
-            "192.168.100.0/24,192.168.101.0/24"
-        )
+    # The worker reads the same site configuration as the API.
+    assert (
+        services["control-worker"]["environment"]
+        == services["control-api"]["environment"]
+    )
 
 
 def test_litellm_runs_the_docker_staged_entrypoint_through_shell() -> None:
@@ -273,7 +218,6 @@ def test_control_api_has_only_the_capabilities_required_by_its_preexec() -> None
 def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> None:
     services = _rendered()["services"]
     api = services["control-api"]
-    worker = services["control-worker"]
 
     assert "control-secret-init" not in services
     assert "control-bootstrap" not in services
@@ -293,26 +237,6 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
     normalized = {volume["target"]: volume for volume in api["volumes"]}
     assert normalized["/normalized"].get("read_only") is not True
     assert normalized["/run/vonk-normalized-secrets"]["read_only"] is True
-    assert api["environment"]["VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE"] == (
-        "/run/vonk-normalized-secrets/package-helper-grant-private-key"
-    )
-    assert api["environment"]["VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE"] == (
-        "/run/vonk-normalized-secrets/host-runtime-grant-private-key"
-    )
-    for variable, name in (
-        ("VONK_DATABASE_URL_FILE", "database-url"),
-        ("VONK_TOKEN_SIGNING_KEY_FILE", "token-signing-key"),
-        ("VONK_METRICS_TOKEN_FILE", "metrics-token"),
-        ("VONK_CONTROLLER_CA_FILE", "controller-ca"),
-        ("VONK_HF_TOKEN_FILE", "hf-token"),
-    ):
-        assert api["environment"][variable] == f"/run/vonk-normalized-secrets/{name}"
-    assert worker["environment"]["VONK_DATABASE_URL_FILE"] == (
-        "/run/vonk-normalized-secrets/database-url"
-    )
-    assert worker["environment"]["VONK_HF_TOKEN_FILE"] == (
-        "/run/vonk-normalized-secrets/hf-token"
-    )
 
 
 def test_retired_runtime_signer_and_agent_update_surfaces_are_absent() -> None:

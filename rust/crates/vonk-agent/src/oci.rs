@@ -110,7 +110,6 @@ impl OciError {
 pub struct OciRuntime<'a, R> {
     pub runner: &'a R,
     pub data_root: &'a Path,
-    pub huggingface_curl_config: Option<&'a Path>,
 }
 
 pub const MAX_MANAGED_RECIPE_RUNS: usize = 64;
@@ -3007,7 +3006,6 @@ mod tests {
         let runtime = OciRuntime {
             runner: &NoProcess,
             data_root: &data_root,
-            huggingface_curl_config: None,
         };
         let progress = runtime.prepare_reconciliation(&identity).unwrap();
         assert_eq!(progress.removed_bytes, expected_bytes);
@@ -3029,7 +3027,6 @@ mod tests {
         let runtime = OciRuntime {
             runner: &NoProcess,
             data_root: &data_root,
-            huggingface_curl_config: None,
         };
         assert!(matches!(
             runtime.prepare_reconciliation(&identity),
@@ -3056,7 +3053,6 @@ mod tests {
             let runtime = OciRuntime {
                 runner: &NoProcess,
                 data_root: &data_root,
-                huggingface_curl_config: None,
             };
             runtime.prepare_reconciliation(&identity).unwrap();
 
@@ -3121,7 +3117,6 @@ mod tests {
         let runtime = OciRuntime {
             runner: &NoProcess,
             data_root: &data_root,
-            huggingface_curl_config: None,
         };
         assert!(runtime.prepare_reconciliation(&identity).is_err());
     }
@@ -3183,7 +3178,6 @@ mod tests {
         let runtime = OciRuntime {
             runner: &Gb10MemoryRunner,
             data_root: directory.path(),
-            huggingface_curl_config: None,
         };
 
         assert!(
@@ -3231,7 +3225,6 @@ mod tests {
                 free_mib: 8_192,
             },
             data_root: directory.path(),
-            huggingface_curl_config: None,
         };
 
         assert!(
@@ -3256,7 +3249,6 @@ mod tests {
                 free_mib: 49_152,
             },
             data_root: directory.path(),
-            huggingface_curl_config: None,
         };
 
         assert!(
@@ -3282,7 +3274,6 @@ mod tests {
         let separate = OciRuntime {
             runner: &separate_runner,
             data_root: directory.path(),
-            huggingface_curl_config: None,
         };
         assert!(matches!(
             separate.ensure_memory_available(17 * 1024_u64.pow(3), 0, "unified", &meminfo),
@@ -3297,7 +3288,6 @@ mod tests {
         let shared = OciRuntime {
             runner: &Gb10MemoryRunner,
             data_root: directory.path(),
-            huggingface_curl_config: None,
         };
         for memory_kind in ["host", "accelerator", "unified"] {
             assert!(
@@ -3471,7 +3461,6 @@ mod tests {
         OciRuntime {
             runner,
             data_root: data,
-            huggingface_curl_config: None,
         }
     }
 

@@ -5,12 +5,12 @@
 commit. Development wheels without a release stamp print `unstamped` as their
 source identity.
 
-To check the accepted stable channel, provide the trusted installer signing
-public key already verified during installer setup:
+To check the accepted stable channel, or install it, with the installer release
+signing public key the CLI ships with (there is no key to configure):
 
 ```sh
-vonkctl update --public-key /path/to/installer-public.pem
-vonkctl update --apply --public-key /path/to/installer-public.pem
+vonkctl update
+vonkctl update --apply
 ```
 
 The command verifies the unexpired signed channel pointer, immutable signed
@@ -24,12 +24,11 @@ It does not update the Controller or Sparks. A failed verification leaves the
 installed CLI intact. The virtual environment must be writable; run the command
 from the environment you intend to update.
 
-Set `VONK_INSTALLER_PUBLIC_KEY_FILE` to the trusted public key to avoid repeating
-`--public-key`. CLI updates default to the `stable` channel. Set
+CLI updates default to the `stable` channel. Set
 `VONK_CLI_UPDATE_CHANNEL=dev` for a CLI installed from the accepted development
-channel; the same channel is used by `vonkctl update` and notices. With the key
-path set, `VONK_CLI_UPDATE_NOTICES=1` opts ordinary interactive commands into a
-short-lived background check of that signed accepted release. The command
+channel; the same channel is used by `vonkctl update` and notices. Ordinary
+interactive commands start a short-lived background check of that signed
+accepted release. The command
 itself does not wait for the network; a newly found update may appear on the
 next interactive command. Verified results are cached for one day under the
 user cache directory, and failed checks retry after 15 minutes. JSON and

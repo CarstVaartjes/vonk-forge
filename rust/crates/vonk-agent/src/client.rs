@@ -3836,7 +3836,6 @@ mod tests {
         let runtime = OciRuntime {
             runner: &runner,
             data_root: root.path(),
-            huggingface_curl_config: None,
         };
         let first_installation = "cb555393-764b-4eb6-8f15-b416d289428f";
         let before_install_hash_reads = crate::oci::test_sha256_open_file_call_count();
