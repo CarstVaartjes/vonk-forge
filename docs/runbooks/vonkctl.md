@@ -29,8 +29,8 @@ vonkctl update --apply
 
 `vonkctl` is the local, authenticated CLI for the Controller. It has four
 singular operator areas: Fleet, Model, Recipe, and Profile. The CLI uses the
-same current Controller routes as the operator API: `/api/fleet`,
-`/api/model`, `/api/recipe`, and `/api/profile`. Machine-facing agent
+same current Controller routes as the operator API: `/api/fleet*`,
+`/api/model/*`, `/api/recipe/*`, and `/api/profile*`. Machine-facing agent
 transport is separate and is not a CLI fallback.
 
 ## Connect
