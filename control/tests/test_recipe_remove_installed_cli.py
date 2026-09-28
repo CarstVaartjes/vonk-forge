@@ -36,6 +36,7 @@ from .test_recipe_image_availability import (
     ARCHIVE_SHA,
     _add_head,
     _add_revision,
+    _build_id,
     _recipe,
     _reference_receipt,
     _runtime,
@@ -62,7 +63,7 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
     recipe = _recipe("recipe-source-build.json")
     revision_id = "rev-cli-rm-263"
     recipe_digest = document_sha256(recipe.model_dump(mode="json"))
-    receipt = _reference_receipt().model_copy(
+    receipt = _reference_receipt(_build_id(revision_id)).model_copy(
         update={
             "distribution_publisher": recipe.identity.publisher,
             "distribution_slug": recipe.identity.slug,

@@ -48,6 +48,7 @@ from .test_recipe_image_availability import (
     ARCHIVE_SHA,
     _add_head,
     _add_revision,
+    _build_id,
     _recipe,
     _reference_receipt,
     _runtime,
@@ -123,7 +124,7 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     )
     now = [datetime.now(UTC)]
     revision_id = "rev-model-remove-001"
-    receipt = _reference_receipt()
+    receipt = _reference_receipt(_build_id(revision_id))
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
         _add_head(session, revision)
@@ -371,7 +372,7 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     recipe = _recipe("recipe-source-build.json")
     revision_id = "rev-review-savepoint-001"
-    receipt = _reference_receipt()
+    receipt = _reference_receipt(_build_id(revision_id))
     with sessions.begin() as session:
         revision = _add_revision(session, revision_id, recipe)
         _add_head(session, revision)
