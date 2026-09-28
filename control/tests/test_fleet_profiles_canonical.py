@@ -60,7 +60,7 @@ def _seed(sessions: sessionmaker) -> None:
     )
     model = ModelDefinition.model_validate(model_document)
     recipe = RecipeDefinition.model_validate(recipe_document)
-    model_digest = document_sha256(model.model_dump(mode="json"))
+    model_digest = document_sha256(model_document)
     assert recipe.models[0].model.content_sha256 == model_digest
     with sessions.begin() as session:
         session.add_all(
@@ -124,7 +124,7 @@ def _seed(sessions: sessionmaker) -> None:
                     revision_number=1,
                     schema_version=2,
                     state="active",
-                    document=model.model_dump(mode="json"),
+                    document=model_document,
                     content_digest=model_digest,
                     artifact_key="a" * 64,
                     created_by="test",
@@ -139,8 +139,8 @@ def _seed(sessions: sessionmaker) -> None:
                     revision_number=1,
                     schema_version=2,
                     state="active",
-                    document=recipe.model_dump(mode="json"),
-                    content_digest=document_sha256(recipe.model_dump(mode="json")),
+                    document=recipe_document,
+                    content_digest=document_sha256(recipe_document),
                     execution_key="b" * 64,
                     created_by="test",
                     created_at=NOW,

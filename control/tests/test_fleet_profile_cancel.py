@@ -1349,19 +1349,15 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
         topology.update(
             {
                 "name": "solo",
-                "mode": "single",
                 "node_count": 1,
                 "parallelism": {
                     "backend": "local",
                     "data": 1,
                     "pipeline": 1,
                     "tensor": 1,
-                    "world_size": 1,
                 },
-                "fabric": {"connectivity": "none", "minimum_bandwidth_mbps": 0},
                 "roles": [entrypoint],
                 "start_order": ["entrypoint"],
-                "stop_order": ["entrypoint"],
             }
         )
         document["models"][0]["files"][0]["roles"] = ["entrypoint"]
