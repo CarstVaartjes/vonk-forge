@@ -123,8 +123,6 @@ _ADMIN_OPERATION_IDS = {
     ("get", "/api/jobs/{job_id}"): "getJob",
     ("get", "/api/operations/{operation_id}"): "getOperation",
     ("post", "/api/jobs/{job_id}/resume"): "resumeJob",
-    ("get", "/api/jobs/{job_id}/logs"): "listJobLogs",
-    ("get", "/api/jobs/{job_id}/logs/{digest}"): "getJobLog",
 }
 
 
@@ -463,11 +461,6 @@ class JobsResponse(StrictModel):
     jobs: list[JobSummary] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=512)
     total: int = Field(ge=0)
-
-
-class JobLogsResponse(StrictModel):
-    job_id: str = Field(min_length=1, max_length=128)
-    digests: list[DigestIdentifier] = Field(max_length=100)
 
 
 @dataclass(frozen=True)

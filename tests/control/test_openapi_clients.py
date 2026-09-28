@@ -67,7 +67,6 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     assert "EnrollmentDecisionResponse" not in schema["components"]["schemas"]
 
     expected_errors = {
-        "getJobLog": {"401", "403", "404", "503"},
         "getPublishedEndpoint": {"401", "404", "503"},
         "resumeJob": {"401", "403", "404", "409", "503"},
     }
@@ -277,9 +276,6 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
     }
     assert "downloadRecipeSourceBundle" not in typescript
     assert not (PYTHON_CLIENT / "api/default/download_recipe_source_bundle.py").exists()
-    assert operations["getJobLog"]["x-vonk-streaming-transport"] is True
-    assert "getJobLog" not in typescript
-    assert not (PYTHON_CLIENT / "api/default/get_job_log.py").exists()
 
 
 def test_admin_schema_is_secret_free() -> None:
@@ -289,7 +285,6 @@ def test_admin_schema_is_secret_free() -> None:
         "/api/fleet",
         "/api/fleet/stream",
         "/api/jobs/{job_id}",
-        "/api/jobs/{job_id}/logs",
         "/api/jobs/{job_id}/resume",
         "/api/fleet/{selector}/metrics/history",
     }
@@ -344,7 +339,6 @@ def test_admin_schema_is_secret_free() -> None:
         "getJob",
         "getFleetMetricsHistory",
         "getPublishedEndpoint",
-        "listJobLogs",
         "listJobs",
         "resumeJob",
     ):
@@ -629,7 +623,6 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
 
     client = Client(base_url="https://control.invalid")
     expected = {
-        "list_job_logs": (401, 403, 404, 503),
         "get_published_endpoint": (401, 404, 503),
         "resume_job": (401, 403, 404, 409, 503),
     }

@@ -187,7 +187,6 @@ class Worker:
         worker_id: str,
         handlers: Mapping[str, Handler],
         *,
-        logs=None,
         housekeeping: Callable[[], object] | None = None,
         artifact_housekeeping: Callable[[], object] | None = None,
         recipes=None,
@@ -199,7 +198,6 @@ class Worker:
         self._jobs = jobs
         self._worker_id = worker_id
         self._handlers = dict(handlers)
-        self._logs = logs
         self._housekeeping = housekeeping
         self._artifact_housekeeping = artifact_housekeeping
         self._recipes = recipes
@@ -305,11 +303,6 @@ class Worker:
         attempt = self._jobs.claim(self._worker_id, 30, kinds=tuple(self._handlers))
         if attempt is None:
             return False
-        if self._logs is not None:
-            self._logs.save(
-                attempt.job_id,
-                f"job {attempt.kind} attempt {attempt.attempt} started".encode(),
-            )
         handler = self._handlers[attempt.kind]
         try:
             result = handler(
@@ -323,15 +316,8 @@ class Worker:
             )
         except _SOURCE_FAILURES as error:
             self._jobs.fail(attempt, f"{type(error).__name__}: {error}")
-            if self._logs is not None:
-                self._logs.save(
-                    attempt.job_id,
-                    f"job failed: {type(error).__name__}: {error}".encode(),
-                )
         else:
             self._jobs.succeed(attempt, result)
-            if self._logs is not None:
-                self._logs.save(attempt.job_id, b"job succeeded")
         return True
 
 

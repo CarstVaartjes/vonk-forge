@@ -52,7 +52,7 @@ from .fleet_projection import (
 )
 from .library_projection import LibrarySelectorAmbiguous
 from .logging import redact_text
-from .models import AgentOperation, AgentOperationAttempt, Job, JobLogEntry
+from .models import AgentOperation, AgentOperationAttempt
 from .operation_api import bounded_error_responses
 from .request_fault import RequestFault
 from .strict_json import StrictJSONModel, stored_document_detail
@@ -325,7 +325,6 @@ class _AgentEnrollmentAdapter:
 _EVIDENCE_RETENTION = EvidenceRetention()
 #: A fixed number of Controller job-log blobs per query, matching the previous
 #: bounded read.
-_JOB_LOG_SCAN_LIMIT = 512
 #: A fixed number of failed agent attempts per query.  Retention, not this
 #: projection, owns how long they stay readable.
 _AGENT_LOG_SCAN_LIMIT = 128
@@ -491,30 +490,26 @@ def _failure_log_entries(
     return entries
 
 
-class ControllerJobLogProvider:
-    """Project retained, redacted Controller and agent evidence for one Spark.
+class AgentFailureLogProvider:
+    """Project retained, redacted agent failure evidence for one Spark.
 
-    Two durable sources are projected.  The Controller job-log store keeps the
-    redacted, content-addressed log lines of Controller-owned jobs.  The agent
-    operation attempts keep the agent's own bounded failure result -- its reason
+    The agent operation attempts keep the agent's own bounded failure result -- its reason
     (which names the stable refusal code), its operation error code and its
     sanitized process-log tails -- which is the narrative a failed
     ``recipe.start`` never reached the log surface with.  An attempt whose lease
     lapsed left no result at all, so the Controller's own record of the wait and
-    the clock that lapsed are projected in its place.  Neither source is a
-    live stream, neither is written here, and neither becomes an authority for
+    the clock that lapsed are projected in its place.  This is not a live
+    stream, nothing is written here, and it never becomes an authority for
     anything.
     """
 
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        job_logs: Any,
         *,
         clock: Any | None = None,
     ) -> None:
         self._sessions = sessions
-        self._job_logs = job_logs
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def list(
@@ -529,9 +524,6 @@ class ControllerJobLogProvider:
     ) -> FleetLogResponse:
         entries: list[FleetLogEntry] = []
         retained = False
-        if source in (None, "job"):
-            entries.extend(self._job_log_entries(node_id, since=since, recipe=recipe))
-            retained = True
         if source in (None, "job", "runtime"):
             entries.extend(self._agent_failure_entries(node_id, since=since))
             retained = True
@@ -548,45 +540,6 @@ class ControllerJobLogProvider:
             # Both projected stores are retained evidence, not live streams.
             follow=False,
         )
-
-    def _job_log_entries(
-        self, node_id: str, *, since: datetime | None, recipe: str | None
-    ) -> list[FleetLogEntry]:
-        with self._sessions() as session:
-            rows = list(
-                session.execute(
-                    select(Job, JobLogEntry)
-                    .join(JobLogEntry, JobLogEntry.job_id == Job.id)
-                    .order_by(JobLogEntry.created_at.desc(), JobLogEntry.digest.desc())
-                    .limit(_JOB_LOG_SCAN_LIMIT)
-                )
-            )
-        entries: list[FleetLogEntry] = []
-        for job, log in rows:
-            if node_id not in job.targets:
-                continue
-            if since is not None and _aware(log.created_at) < _aware(since):
-                continue
-            if recipe is not None:
-                payload = job.payload if isinstance(job.payload, Mapping) else {}
-                recipe_value = payload.get("recipe") or payload.get("recipe_selector")
-                if recipe_value != recipe:
-                    continue
-            content = self._job_logs.read(job.id, log.digest).decode(
-                "utf-8", errors="replace"
-            )
-            for line in content.splitlines():
-                if line:
-                    entries.append(
-                        FleetLogEntry(
-                            observed_at=log.created_at,
-                            source="job",
-                            level="info",
-                            message=line,
-                            evidence_id=log.digest,
-                        )
-                    )
-        return entries
 
     def _agent_failure_entries(
         self, node_id: str, *, since: datetime | None
@@ -692,13 +645,12 @@ def build_fleet_operator_services(
     logs: FleetLogProvider | None = None,
     provenance: FleetProvenanceProvider | None = None,
     sessions: sessionmaker[Session] | None = None,
-    job_logs: Any | None = None,
 ) -> FleetOperatorServices:
     """Build Fleet action adapters from existing Controller authorities.
 
     ``logs`` must return retained authenticated evidence when configured.  If
-    ``sessions`` and the existing ``DatabaseJobLogStore`` are supplied, the
-    helper builds the retained Controller evidence provider itself.  Neither
+    ``sessions`` is supplied, the helper builds the retained Controller
+    evidence provider itself.  Neither
     path synthesizes remote log entries or falls back to SSH.
     """
 
@@ -706,8 +658,8 @@ def build_fleet_operator_services(
         None if agent_services is None else _AgentEnrollmentAdapter(agent_services)
     )
     retained_logs = logs
-    if retained_logs is None and sessions is not None and job_logs is not None:
-        retained_logs = ControllerJobLogProvider(sessions, job_logs)
+    if retained_logs is None and sessions is not None:
+        retained_logs = AgentFailureLogProvider(sessions)
     return FleetOperatorServices(
         enrollment=enrollment,
         upgrades=upgrades,

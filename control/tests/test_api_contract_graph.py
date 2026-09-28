@@ -75,7 +75,6 @@ def test_download_responses_describe_actual_bytes_and_range_support() -> None:
         "/agent/distribution/objects/{sha256}": ("application/octet-stream", True),
         "/agent/workload-tuf/metadata/{name}": ("application/json", False),
         "/agent/workload-tuf/targets/{name}": ("application/octet-stream", False),
-        "/api/jobs/{job_id}/logs/{digest}": ("text/plain", False),
     }
     for path, (media_type, partial) in downloads.items():
         operation = paths[path]["get"]
