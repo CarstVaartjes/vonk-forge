@@ -80,7 +80,6 @@ from vonk_control.models import (
     Job,
     NodeInventorySnapshot,
     NodeTelemetrySample,
-    Observation,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -2354,8 +2353,6 @@ def test_failed_stop_result_never_writes_health_observation(agent_system) -> Non
         ).status_code
         == 204
     )
-    with services.sessions() as session:
-        assert session.scalar(select(Observation)) is None
 
 
 def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) -> None:

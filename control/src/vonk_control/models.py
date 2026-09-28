@@ -150,27 +150,6 @@ class JobLogEntry(Base):
     )
 
 
-class Observation(Base):
-    __tablename__ = "observations"
-    __table_args__ = (
-        Index(
-            "ix_observations_kind_node_observed",
-            "kind",
-            "node_id",
-            "observed_at",
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    kind: Mapped[str] = mapped_column(String(80), nullable=False)
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-
-
 class ControlProcessHeartbeat(Base):
     """A completed scheduler loop bound to one running worker process."""
 

@@ -71,7 +71,6 @@ services:
       - agent-artifacts:/state/agent-artifacts
       - workload-tuf-publication:/workload-tuf
       - route-publications:/routes
-      - deployment-observations:/run/vonk-deployment-observations
       - litellm-supervisor-state:/supervisor
       - normalized-private-keys:/normalized
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
@@ -375,6 +374,5 @@ volumes:
   registry-data: {}
   route-publications: {}
   workload-tuf-publication: {}
-  deployment-observations: {}
   normalized-private-keys: {}
   step-ca-data: {}

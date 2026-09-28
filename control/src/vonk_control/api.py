@@ -74,7 +74,6 @@ from .catalog_sync import (
     catalog_sync_retry_delay,
 )
 from .cluster_mappings import ClusterMappingService
-from .deployment_provenance import DeploymentProvenanceService
 from .distribution_executor import CompositeDistributionPhaseExecutor
 from .download_contract import download_responses
 from .endpoint_contract import EndpointResponse, inference_gateway_api_base
@@ -1795,7 +1794,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             upgrades=agent_upgrades,
             sessions=sessions,
             job_logs=DatabaseJobLogStore(sessions, clock=clock),
-            provenance=DeploymentProvenanceService(sessions),
         ),
         failure_evidence=FailureEvidenceService(sessions),
         agent_upgrades=agent_upgrades,

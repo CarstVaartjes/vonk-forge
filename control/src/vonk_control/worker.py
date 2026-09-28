@@ -704,13 +704,6 @@ if __name__ == "__main__":
         model_cache,
         runtime_image_resolver=resolve_runtime_image_receipt,
     )
-    from .deployment_observer import DeploymentObserver
-
-    deployment_observer = DeploymentObserver(
-        sessions,
-        channel=settings.install_channel,
-        clock=clock,
-    )
     worker = assemble_production_worker(
         distributed_start_timeout_seconds=DISTRIBUTED_START_TIMEOUT_SECONDS,
         jobs=jobs,
@@ -726,8 +719,6 @@ if __name__ == "__main__":
         artifact_job_reconcile_interval_seconds=ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS,
         artifact_job_reconcile_batch_limit=ARTIFACT_JOB_RECONCILE_BATCH_LIMIT,
         model_cache=model_cache,
-        background_services=(deployment_observer.tick,),
-        background_closers=(deployment_observer.close,),
         agent_artifact_root=settings.agent_artifact_root,
         recipe_image_artifact_root=settings.agent_artifact_root,
         recipe_image_parallel_preparations=RECIPE_IMAGE_PARALLEL_PREPARATIONS,

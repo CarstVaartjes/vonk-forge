@@ -6,23 +6,17 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from vonk_control.agent_api import AgentApiServices, EnrollmentGrantResponse
 from vonk_control.agent_upgrades import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
-from vonk_control.deployment_provenance_contract import (
-    DeploymentProvenance,
-    PlatformObservation,
-)
 from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
 from vonk_control.library_api import _error as library_error
 from vonk_control.operator_projection_api import (
-    FleetNodeDetailResponse,
     FleetOperatorServices,
     _AgentEnrollmentAdapter,
-    _deployment_provenance,
     _operator_error,
     build_fleet_operator_services,
     install_operator_projection_routes,
@@ -156,64 +150,8 @@ def test_production_service_builder_does_not_enable_missing_authorities() -> Non
     assert services.upgrades is None
 
 
-def test_configured_provenance_document_that_no_longer_validates_fails_loudly() -> None:
-    """An unconfigured provider is absent; a corrupt document is a fault.
-
-    ``_deployment_provenance`` used to swallow the validation failure and the
-    routes reported ``provenance: null`` for a stored observation that no
-    longer satisfies its contract.
-    """
-
-    assert _deployment_provenance(None) is None
-
-    class _CorruptProvenance:
-        def snapshot(self) -> DeploymentProvenance:
-            # The same ValidationError ``stored_observation`` raises for a
-            # malformed stored observation.
-            PlatformObservation.model_validate({})
-            raise AssertionError("unreachable")
-
-    with pytest.raises(HTTPException) as error:
-        _deployment_provenance(_CorruptProvenance())
-    # A corrupt stored document is the Controller's state, not a bad request,
-    # and the detail names the failing field path without echoing its value.
-    assert error.value.status_code == 503
-    assert str(error.value.detail).startswith("stored document is invalid at ")
-
-
-def test_corrupt_stored_observation_fails_the_fleet_node_detail() -> None:
-    """``/api/fleet/{selector}`` must not report a corrupt observation as absent."""
-
-    from vonk_control.fleet_projection import FleetSnapshot
-
-    from .test_metrics import NODE, _fleet_snapshot
-
-    class _Projection:
-        def read(self) -> FleetSnapshot:
-            return _fleet_snapshot()
-
-    class _CorruptProvenance:
-        def snapshot(self) -> DeploymentProvenance:
-            # The same ValidationError ``stored_observation`` raises for a
-            # malformed stored observation.
-            PlatformObservation.model_validate({})
-            raise AssertionError("unreachable")
-
-    app = FastAPI()
-    install_operator_projection_routes(
-        app,
-        actor_dependency=Depends(lambda: Actor("operator", "operator")),
-        fleet_projection=_Projection(),
-        library_projection=None,
-        fleet_services=FleetOperatorServices(provenance=_CorruptProvenance()),
-    )
-    response = TestClient(app).get(f"/api/fleet/{NODE}")
-    assert response.status_code == 503
-    assert response.json()["detail"].startswith("stored document is invalid at ")
-
-
 def test_fleet_node_detail_preserves_typed_live_observations() -> None:
-    from vonk_control.fleet_projection import FleetSnapshot
+    from vonk_control.fleet_projection import FleetNode, FleetSnapshot
 
     from .test_metrics import NODE, _fleet_snapshot
 
@@ -232,8 +170,8 @@ def test_fleet_node_detail_preserves_typed_live_observations() -> None:
     )
     response = TestClient(app).get(f"/api/fleet/{NODE}")
     assert response.status_code == 200, response.text
-    detail = FleetNodeDetailResponse.model_validate_json(response.content)
-    assert detail.model_dump(exclude={"provenance"}) == snapshot.nodes[0].model_dump()
+    detail = FleetNode.model_validate_json(response.content)
+    assert detail.model_dump() == snapshot.nodes[0].model_dump()
 
 
 def test_node_selection_returns_exact_ids_before_names_and_all_ambiguity_candidates():
@@ -275,7 +213,7 @@ def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> No
     """
 
     try:
-        PlatformObservation.model_validate({})
+        EnrollmentGrantResponse.model_validate({})
     except ValidationError as corrupt:
         stored = corrupt
 
