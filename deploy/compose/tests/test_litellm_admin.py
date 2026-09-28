@@ -45,24 +45,25 @@ def _route_for_path(adapted: dict, *, port: int, path: str) -> dict:
     return next(route for route in routes if path in _path_patterns(route))
 
 
-def _assert_litellm_route_is_lease_authorized(route: dict) -> None:
-    assert _reverse_proxy_dials(route) == ["litellm:4001", "litellm:4000"]
+def _assert_litellm_route_proxies_directly(route: dict) -> None:
+    # No request-time lease gate: a stalled Controller must not darken inference.
+    assert _reverse_proxy_dials(route) == ["litellm:4000"]
 
 
-def test_every_browser_litellm_route_authorizes_before_proxying() -> None:
+def test_every_browser_litellm_route_proxies_without_a_lease_gate() -> None:
     for adapted in (
         _adapted_caddy(_environment()),
         _adapted_development_caddy(),
     ):
-        _assert_litellm_route_is_lease_authorized(
+        _assert_litellm_route_proxies_directly(
             _route_for_path(adapted, port=8080, path="/v1/*")
         )
-        _assert_litellm_route_is_lease_authorized(
+        _assert_litellm_route_proxies_directly(
             _route_for_path(adapted, port=8080, path="/litellm/*")
         )
 
 
-def test_every_caddyfile_has_a_v1_only_internal_lease_edge() -> None:
+def test_every_caddyfile_has_a_v1_only_internal_inference_edge() -> None:
     for adapted in (
         _adapted_caddy(_environment()),
         _adapted_development_caddy(),
@@ -75,7 +76,7 @@ def test_every_caddyfile_has_a_v1_only_internal_lease_edge() -> None:
             [{"path": ["/v1/*"]}],
             None,
         ]
-        _assert_litellm_route_is_lease_authorized(routes[0])
+        _assert_litellm_route_proxies_directly(routes[0])
         assert routes[1]["handle"] == [
             {"handler": "static_response", "status_code": 404}
         ]

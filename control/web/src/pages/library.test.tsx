@@ -1,8 +1,8 @@
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {App} from "../app";
-import {modelLibrary, recipeLibrary} from "../test-fixtures/library";
-import type {ControlApi} from "../api/types";
-import {loadLibraryView} from "./library";
+import {minimalLibraryDetail, modelLibrary, recipeLibrary} from "../test-fixtures/library";
+import type {ControlApi, VisualFleetSnapshot} from "../api/types";
+import {loadLibraryView, withObservedRuns} from "./library";
 import {afterEach, vi} from "vitest";
 import {ApiClient} from "../api/client";
 
@@ -117,4 +117,14 @@ test("reproduces a shared sort and recency link on the first request", async () 
   const age = Date.now() - Date.parse(calls[0]!.updatedSince!);
   expect(age).toBeGreaterThan(30 * 24 * 3_600_000);
   expect(age).toBeLessThan(32 * 24 * 3_600_000);
+});
+
+test("offers artifact jobs the running runs of this exact recipe revision from the fleet", () => {
+  const revision = minimalLibraryDetail.recipe.recipe_revision_id;
+  const presence = (run_id: string, recipe_revision_id: string, run_state: string) => ({run_id, recipe_revision_id, run_state});
+  const fleet = {nodes: [
+    {loaded: [presence("run-a", revision, "running"), presence("run-old", "other-revision", "running")]},
+    {loaded: [presence("run-a", revision, "running"), presence("run-b", revision, "stopping")]},
+  ]} as unknown as VisualFleetSnapshot;
+  expect(withObservedRuns(minimalLibraryDetail, fleet)!.operational_state.runs).toEqual([{run_id: "run-a", state: "running"}]);
 });

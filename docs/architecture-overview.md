@@ -365,7 +365,7 @@ recipe revision digest as their own content identity.
 
 The worker deliberately has no source checkout, Git credentials, Git/OpenSSH
 executable, or GPU node-facing network. It advances durable reconciliations and
-publishes atomic, leased route bundles. It obtains current-head and policy
+publishes atomic route bundles. It obtains current-head and policy
 decisions from the API over a dedicated two-party internal network. Those
 bounded exchanges are nonce-bound, short-lived, HMAC authenticated, and never
 exposed by Caddy.
@@ -386,7 +386,7 @@ fabric recovery, and explicit break-glass inspection.
 | Control worker | Durable reconciliation, dependency waves, compensation, fail-closed withdrawal, and atomic route/LiteLLM publication. |
 | PostgreSQL | Control intent, immutable resolved plans, operation/attempt fences, identity, authorization, reservations, cancellation, audit, and retained telemetry; current artifact bookkeeping awaits the ownership cutover above. |
 | Managed artifact storage | Model files, runnable image archives, and native transfer caches; target owner of typed verification manifests and local recovery checkpoints. |
-| LiteLLM | OpenAI-compatible aliases and quotas generated only from an acknowledged, unexpired publication bundle. |
+| LiteLLM | OpenAI-compatible aliases and quotas generated only from the last published route bundle; LiteLLM keeps serving it while the worker is stalled, and routes leave only through an explicit republish. |
 | Hermes Agent | Persistent tools/UI service that reaches inference only through the Caddy-gated LiteLLM route published by an exact v1 `RecipeRun` named `hermes-agent`. |
 | Prometheus/Grafana | Platform, agent, job, route, node-exporter, and DCGM observability. |
 | Tailscale | Named remote services without placing remote-access software on GPU nodes. |
