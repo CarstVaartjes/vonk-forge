@@ -16,7 +16,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.runtime_preflight import mandatory_capabilities, request_digest
+from vonk_control.runtime_preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
 from .test_recipe_operations import NOW, setup_services
@@ -60,12 +60,8 @@ def _finish(sessions, checkpoint, now, *, failed=None, fingerprint="a" * 64):
                 agent_certificate_serial="serial-0",
                 state="succeeded",
                 result={
-                    "schema_version": 1,
                     "fingerprint": fingerprint,
-                    "request_sha256": request_digest(request),
                     "observed_at": int(now.timestamp()),
-                    "duration_ms": 1,
-                    "cached": False,
                     "findings": [
                         {
                             "capability": capability,
@@ -360,7 +356,7 @@ def test_probe_restart_and_duplicate_dispatch_converge_without_advancing_work(tm
     _finish(sessions, pending, clock.now)
     complete, error = restarted.ensure(**arguments, previous=pending)
     assert error is None and complete.pending_job_id is None
-    assert complete.receipts[node_id].request_sha256
+    assert complete.receipts[node_id].fingerprint
     with sessions() as session:
         assert len(list(session.scalars(select(AgentOperation)))) == 1
 
