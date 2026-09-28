@@ -856,6 +856,7 @@ def test_publication_contention_keeps_skopeo_blob_checkpoint_for_retry(
     assert state == {"blob_fetches": 1, "exports": 1}
 
 
+@pytest.mark.needs_recipe_library
 def test_process_death_after_checkpoint_reuses_export_after_restart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -918,6 +919,7 @@ def test_process_death_after_checkpoint_reuses_export_after_restart(
     assert os.path.samefile(stage, Path(receipt.archive_path))
 
 
+@pytest.mark.needs_recipe_library
 def test_process_death_after_final_link_repairs_receipt_from_checkpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1116,6 +1118,7 @@ def test_nonregular_published_stage_checkpoint_reports_type_refusal(
     )
 
 
+@pytest.mark.needs_recipe_library
 def test_fifo_published_stage_checkpoint_is_rejected_without_blocking(
     tmp_path: Path,
 ) -> None:
