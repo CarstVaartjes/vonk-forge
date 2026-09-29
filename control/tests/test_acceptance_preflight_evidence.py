@@ -17,7 +17,6 @@ def test_preflight_query_projects_only_comparison_fields(
     node_id = "spk_" + "a" * 32
     receipt = {
         "fingerprint": "b" * 64,
-        "request_sha256": "c" * 64,
         "observed_at": 100,
         "findings": [],
         "private": "must-not-appear",
@@ -98,7 +97,7 @@ def test_preflight_query_projects_only_comparison_fields(
         assert evidence[1]["lease_deadline"] == "2026-09-08T12:00:00+00:00"
     assert evidence[0]["current_fingerprint"] == "d" * 64
     assert evidence[0]["receipt_fingerprint"] == "b" * 64
-    assert evidence[0]["payload_sha256"] == evidence[0]["request_sha256"] == "c" * 64
+    assert evidence[0]["payload_sha256"] == "c" * 64
     assert evidence[0]["observed_at"] == 100
     assert evidence[0]["controller_now"] > 100
     assert "must-not-appear" not in json.dumps(evidence)
