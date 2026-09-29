@@ -646,7 +646,9 @@ jobs:
             "$GITHUB_SHA" "$GITHUB_RUN_NUMBER")
           key="$RUNNER_TEMP/throwaway-agent-key.pem"
           openssl genpkey -algorithm ed25519 -out "$key"
-          epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+          # These packages are never published, so their bytes need not be
+          # reproducible: any fixed epoch will do.
+          epoch=1700000000
           lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
           digest() {
             printf '%s\0%s\0%s\0%s\0%s' "$1" "$GITHUB_SHA" linux-arm64 "$lock_digest" "$2" \

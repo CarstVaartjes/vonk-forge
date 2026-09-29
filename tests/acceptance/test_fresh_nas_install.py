@@ -1614,7 +1614,13 @@ def exercise_compose(
             assert_bundle_contract(bundle)
             if tailscale_mode == "disabled":
                 run(
-                    [*reference_compose(), "restart", "--timeout", "30"],
+                    [
+                        *reference_compose(),
+                        "restart",
+                        "--timeout",
+                        "30",
+                        *sorted(expected),
+                    ],
                     cwd=bundle,
                     timeout=180,
                 )
