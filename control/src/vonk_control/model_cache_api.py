@@ -36,6 +36,7 @@ from .operation_api import (
     bounded_error_responses,
 )
 from .operation_contract import AvailabilityOperationFailure
+from .strict_json import read_stored_model
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/operations/{operation_id}"): "getModelOperation",
@@ -51,7 +52,7 @@ def _model_operator_response(
     operation: Any, *, action: ModelCacheOperatorAction, selector: str
 ) -> ModelCacheOperatorResponse:
     raw = project_cache_progress(operation.progress)
-    progress = OperationProgress.model_validate(raw)
+    progress = read_stored_model(OperationProgress, raw)
     result = operation.result
     cancelled = (
         result.cancelled_operations
@@ -82,7 +83,7 @@ def _model_operator_response(
         cancellation=getattr(operation, "cancellation", None),
         result=result,
         failure=(
-            AvailabilityOperationFailure.model_validate(operation.failure)
+            read_stored_model(AvailabilityOperationFailure, operation.failure)
             if isinstance(operation.failure, Mapping)
             else None
         ),

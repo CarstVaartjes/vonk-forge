@@ -82,6 +82,7 @@ from .recovery_policy import (
     kind_for_agent_error,
 )
 from .run_admission import RunAdmissionBusy
+from .strict_json import read_stored_model
 
 _LOGGER = logging.getLogger(__name__)
 AgentFence = str | AgentClaim | AgentProgress | AgentResult
@@ -663,7 +664,8 @@ def retire_exhausted_operations_in_session(
             parse_recipe_lifecycle_result(job.kind, previous)
         # Reuse the lifecycle cancellation contract. Failed + cancelled is the
         # durable retirement handoff; ordinary cancellation uses cancelled state.
-        job.result = RecipeOperationCancellationResult.model_validate_json(
+        job.result = read_stored_model(
+            RecipeOperationCancellationResult,
             canonical_message(
                 {
                     "cancel_requested": True,
@@ -680,7 +682,8 @@ def retire_exhausted_operations_in_session(
                         if key in previous
                     },
                 }
-            )
+            ),
+            from_json=True,
         ).model_dump(mode="json", exclude_none=True)
     _release_retired_owner_in_session(session, job, job_reason, now)
     job.state = "failed"
@@ -970,8 +973,8 @@ def _profile_stop_covers_jobrun_mutations(
 
         parent = ProfileJobRunStopJob.model_validate_parent(current_parent.payload)
         authorization = parent.profile_stop_authorization
-        current_stop = RecipeStopPayload.model_validate_json(
-            canonical_message(current.payload)
+        current_stop = read_stored_model(
+            RecipeStopPayload, canonical_message(current.payload), from_json=True
         )
         current_digest = hashlib.sha256(canonical_message(current_stop)).hexdigest()
         current_targets = [
@@ -1007,8 +1010,8 @@ def _profile_stop_covers_jobrun_mutations(
             ]
             if len(matches) != 1:
                 return False
-            request = RecipeJobRunRequest.model_validate_json(
-                canonical_message(old.payload)
+            request = read_stored_model(
+                RecipeJobRunRequest, canonical_message(old.payload), from_json=True
             )
             expected_stop = stop_payload_from_job_run(
                 request, cancel_pending_start=True
@@ -2777,7 +2780,7 @@ class AgentJobService:
 
                 from vonk_agent_protocol.contracts import AgentUpgradePayload
 
-                payload = AgentUpgradePayload.model_validate(operation.payload)
+                payload = read_stored_model(AgentUpgradePayload, operation.payload)
                 if (
                     runtime_identity.binary_digest
                     != payload.rollback.source.binary_sha256
@@ -2882,7 +2885,7 @@ class AgentJobService:
         receipt = runtime_identity.package_activation
         if operation is None or operation.current_attempt == 0 or receipt is None:
             return
-        payload = AgentUpgradePayload.model_validate(operation.payload)
+        payload = read_stored_model(AgentUpgradePayload, operation.payload)
         if not matches_receipt(receipt, payload, node_id):
             return
         if receipt.phase in {"rolled_back", "rollback_failed"}:

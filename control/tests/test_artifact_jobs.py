@@ -1799,7 +1799,7 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
 
 
 @pytest.mark.parametrize(
-    "damage", ["missing-files", "invalid-file", "wrong-total", "wrong-digest", "extra"]
+    "damage", ["missing-files", "invalid-file", "wrong-total", "wrong-digest"]
 )
 def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
     tmp_path, damage

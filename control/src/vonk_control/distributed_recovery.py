@@ -52,6 +52,7 @@ from .recipe_stop_payloads import (
     RecipeStopAuthorityError,
     durable_run_stop_payloads,
 )
+from .strict_json import read_stored_model
 
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _SINGLETON_RECOVERY_RECHECK_SECONDS = 5
@@ -640,8 +641,10 @@ def _singleton_recovery_authority(
     )
     compiled_plan = accepted_start_payload.get("compiled_execution_plan")
     try:
-        accepted_start = RecipeStartPayload.model_validate_json(
-            canonical_message(accepted_start_payload)
+        accepted_start = read_stored_model(
+            RecipeStartPayload,
+            canonical_message(accepted_start_payload),
+            from_json=True,
         )
     except (TypeError, ValueError) as error:
         raise DistributedLifecycleError("accepted Start payload is invalid") from error
@@ -1163,8 +1166,8 @@ def _accepted_start_authority_payload(
     for item in items:
         child = _accepted_start_child(session, start, node_id, item)
         try:
-            typed = RecipeStartPayload.model_validate_json(
-                canonical_message(child.payload)
+            typed = read_stored_model(
+                RecipeStartPayload, canonical_message(child.payload), from_json=True
             )
         except (TypeError, ValueError) as error:
             raise DistributedLifecycleError(
@@ -1351,8 +1354,8 @@ def _validate_multi_start_payload(
             phase="rank-launch" if deadline is not None else None,
             start_deadline=deadline,
         )
-        expected_typed = RecipeStartPayload.model_validate_json(
-            canonical_message(expected)
+        expected_typed = read_stored_model(
+            RecipeStartPayload, canonical_message(expected), from_json=True
         )
     except (RecipeStartPayloadError, TypeError, ValueError) as error:
         raise DistributedLifecycleError(

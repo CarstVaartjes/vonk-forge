@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal
+from typing import Literal, cast
 
 import httpx2
 import pytest
@@ -3779,15 +3779,10 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     damaged_item = page.items[0]
     assert damaged_item["kind"] == "run-switch-unreadable"
     assert damaged_item["state"] == "unavailable"
-    assert damaged_item["failure"] == {
-        "error_code": "operation_history_unreadable",
-        "summary": "Stored Run/Switch history is malformed",
-        "retryable": False,
-    }
+    assert damaged_item.get("failure") is None
     damaged_detail = operation_detail_response(damaged_item)
     assert damaged_detail.id == unreadable.operation_id
-    assert isinstance(damaged_detail.failure, OperationFailureEvidence)
-    assert damaged_detail.failure.error_code == "operation_history_unreadable"
+    assert damaged_detail.failure is None
     assert page.items[1]["id"] == valid.operation_id
     assert page.items[1]["node_ids"] == list(nodes)
     assert page.items[1].get("failure") is None
@@ -3798,7 +3793,6 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
     tmp_path: Path, failed: bool
 ) -> None:
     from vonk_control.operation_api import operation_detail_response
-    from vonk_control.operation_contract import OperationFailureEvidence
 
     switch = _cold_compile_switch(tmp_path)
     switch.drive()
@@ -5520,3 +5514,40 @@ def test_shared_admission_contention_preserves_operation_for_retry(
                 break
     else:
         pytest.fail("shared admission contention did not schedule a durable retry")
+
+
+def test_stored_run_switch_with_retired_fields_stays_readable_and_new_work_proceeds(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    service = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
+    request = _request(sessions, nodes[0])
+    old = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        job = session.get(Job, old.operation_id)
+        assert job is not None and isinstance(job.payload, dict)
+        payload = dict(job.payload)
+        plan = dict(cast("dict[str, object]", payload["plan"]))
+        # A field a newer Controller retired must not make history unreadable.
+        plan["retired_plan_field"] = {"any": "shape"}
+        payload["plan"] = plan
+        job.payload = payload
+
+    item = (
+        service.activity_provider()
+        .list_operations(
+            OperationQuery(after=None, limit=10, state=None, node_id=nodes[0])
+        )
+        .items[0]
+    )
+
+    assert item["id"] == old.operation_id
+    assert item["kind"] != "run-switch-unreadable"
+    assert service.get(old.operation_id).operation_id == old.operation_id

@@ -68,6 +68,7 @@ from .runtime_image_preparation import (
     SkopeoOCIImageTransport,
     persist_runtime_image_receipt,
 )
+from .strict_json import read_stored_model
 
 _BUILDER_ADMISSION_CODES = frozenset(
     {
@@ -969,8 +970,8 @@ def _build_dependency(payload: Mapping[str, object]) -> RecipeBuildDependency | 
     if value is None:
         return None
     try:
-        return RecipeBuildDependency.model_validate_json(
-            json.dumps(value, allow_nan=False)
+        return read_stored_model(
+            RecipeBuildDependency, json.dumps(value, allow_nan=False), from_json=True
         )
     except (TypeError, ValueError) as error:
         raise RecipeImageAvailabilityError(
@@ -1054,8 +1055,8 @@ def _observe_build(
                 step="build",
             )
         try:
-            failure = AgentFailureResult.model_validate_json(
-                canonical_message(raw_failure)
+            failure = read_stored_model(
+                AgentFailureResult, canonical_message(raw_failure), from_json=True
             )
         except (TypeError, ValueError) as error:
             raise RecipeImageAvailabilityError(
@@ -1110,8 +1111,8 @@ def _observe_build(
             "canonical Recipe build evidence is incomplete",
         )
     try:
-        evidence = RecipeBuildEvidence.model_validate_json(
-            json.dumps(dict(raw_evidence))
+        evidence = read_stored_model(
+            RecipeBuildEvidence, json.dumps(dict(raw_evidence)), from_json=True
         )
     except (TypeError, ValueError) as error:
         raise RecipeImageAvailabilityError(
@@ -1239,4 +1240,4 @@ def _build_progress(
     )
     if document is None:
         return None
-    return OperationProgress.model_validate_json(json.dumps(document))
+    return read_stored_model(OperationProgress, json.dumps(document), from_json=True)
