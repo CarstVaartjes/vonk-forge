@@ -68,6 +68,8 @@ def test_remove_is_the_current_model_eviction_boundary():
     )
     operation.failure = None
     operation.retryable = False
+    operation.blockers = ()
+    operation.next_attempt_at = None
     operation.cancellation = None
     service = Mock()
     service.remove_model_selector.return_value = operation
@@ -151,6 +153,8 @@ def test_model_operation_observation_is_readable_by_any_authenticated_actor():
     )
     operation.failure = None
     operation.retryable = False
+    operation.blockers = ()
+    operation.next_attempt_at = None
     operation.cancellation = None
     service = Mock()
     service.get_operator_operation.return_value = (operation, "remove", "model")
@@ -185,6 +189,8 @@ def test_cancel_route_requires_operator_and_returns_durable_intent():
     operation.result = None
     operation.failure = None
     operation.retryable = False
+    operation.blockers = ()
+    operation.next_attempt_at = None
     operation.cancellation = ModelCacheCancellation(
         request_key=CANCEL_KEY,
         actor="test",

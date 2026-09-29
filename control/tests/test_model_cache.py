@@ -1981,6 +1981,45 @@ def test_transient_download_failures_retry_with_capped_backoff_until_success(
     assert restarted.get_operation(operation.id).state == "succeeded"
 
 
+def test_waiting_download_reports_queued_with_blockers_and_next_attempt(
+    cache, tmp_path: Path, caplog
+) -> None:
+    service, _sessions = cache
+    model = "d" * 64
+    artifact = _artifact(tmp_path, b"waiting payload", model_content_sha256=model)
+    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
+    original = service._open_source
+    failing = True
+
+    def flaky_source(spec, offset):
+        if failing:
+            raise OSError(errno.ETIMEDOUT, "timed out")
+        return original(spec, offset)
+
+    service._open_source = flaky_source
+    operation = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000021",
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256=model,
+        artifacts=[artifact],
+    )
+    with caplog.at_level("INFO"):
+        service.run_pending()
+    waiting = service.get_operation(operation.id)
+    assert waiting.state == "queued"
+    assert [item.severity for item in waiting.blockers] == ["warning"]
+    assert waiting.blockers[0].code == waiting.failure["code"]
+    assert waiting.next_attempt_at is not None
+    assert sum("is waiting" in line for line in caplog.messages) == 1
+
+    failing = False
+    service.run_pending()
+    done = service.get_operation(operation.id)
+    assert done.state == "succeeded"
+    assert done.blockers == () and done.next_attempt_at is None
+
+
 def test_operator_retry_of_a_failed_download_is_always_accepted(
     cache, tmp_path: Path
 ) -> None:

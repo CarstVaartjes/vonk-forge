@@ -118,6 +118,11 @@ def _remaining(expires: object) -> str | None:
     return f"{max(seconds, 1)}s"
 
 
+def _rolling_alias(name: str) -> str:
+    """The alias a rolled key holds until the old key is gone."""
+    return f"{name}.rolling"
+
+
 def _view(item: dict[str, Any]) -> GatewayKeyView | None:
     name = _text(item.get("key_alias")) or _text(item.get("key_name"))
     if name is None:
@@ -221,6 +226,16 @@ class GatewayKeyService:
             raise GatewayKeyConflict(
                 f"key {name} already exists; revoke it first or choose another name"
             )
+        return self._create_under(name, models=models, expires=expires, key=key)
+
+    def _create_under(
+        self,
+        name: str,
+        *,
+        models: list[str] | None = None,
+        expires: str | None = None,
+        key: str | None = None,
+    ) -> GatewayKeyCreated:
         body: dict[str, Any] = {
             "key_alias": name,
             "models": list(models or []),
@@ -238,20 +253,25 @@ class GatewayKeyService:
         view = _view({**body, **payload}) or GatewayKeyView(name=name, models=[])
         return GatewayKeyCreated(**view.model_dump(), key=secret)
 
-    def revoke(self, name: str) -> GatewayKeyRevoked:
-        if not self._exists(name):
-            raise KeyError(name)
+    def _delete_alias(self, name: str) -> None:
         code, _ = self._request("POST", "/key/delete", json={"key_aliases": [name]})
         if code != 200:
             raise GatewayKeyError(f"LiteLLM refused to revoke the key (HTTP {code})")
+
+    def revoke(self, name: str) -> GatewayKeyRevoked:
+        if not self._exists(name):
+            raise KeyError(name)
+        self._delete_alias(name)
         return GatewayKeyRevoked(name=name)
 
     def roll(self, name: str) -> GatewayKeyCreated:
         """Replace one key's secret, keeping its name and model list.
 
-        LiteLLM cannot rotate a secret in place, so the old key is deleted and
-        a new one is created under the same name. The old secret stops working
-        immediately; an unexpired key keeps its remaining lifetime.
+        LiteLLM cannot rotate a secret in place, so the new key is created
+        first under a temporary alias; only once it exists is the old key
+        deleted and the new one renamed to `name`. A failed create leaves the
+        old key untouched and working. An unexpired key keeps its remaining
+        lifetime.
         """
         current = next(
             (item for item in self._raw_keys() if item.get("key_alias") == name), None
@@ -260,10 +280,34 @@ class GatewayKeyService:
             raise KeyError(name)
         view = _view(current)
         models = view.models if view is not None else []
-        self.revoke(name)
-        return self.create(
-            name, models=models, expires=_remaining(current.get("expires"))
+        temporary = _rolling_alias(name)
+        if self._exists(temporary):
+            # An earlier roll stopped between its steps; its leftover is not
+            # in use by anyone, so it is replaced.
+            self._delete_alias(temporary)
+        created = self._create_under(
+            temporary,
+            models=models,
+            expires=_remaining(current.get("expires")),
         )
+        self._delete_alias(name)
+        code, _ = self._request(
+            "POST",
+            "/key/update",
+            json={"key": created.key, "key_alias": name},
+        )
+        if code != 200:
+            # The new key works; it keeps the temporary alias until the next
+            # roll instead of losing the only copy of its secret.
+            _LOGGER.warning(
+                "rolled gateway key %s could not be renamed (HTTP %s); "
+                "it is listed as %s",
+                name,
+                code,
+                temporary,
+            )
+            return created
+        return created.model_copy(update={"name": name})
 
     def ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool:
         """Keep a working `default` key whose secret is in `path`.

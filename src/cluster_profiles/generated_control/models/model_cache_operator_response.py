@@ -20,6 +20,7 @@ if TYPE_CHECKING:
   from ..models.model_cache_cancellation import ModelCacheCancellation
   from ..models.model_cache_download_result import ModelCacheDownloadResult
   from ..models.model_cache_removal_result import ModelCacheRemovalResult
+  from ..models.operation_blocker import OperationBlocker
   from ..models.operation_progress import OperationProgress
 
 
@@ -42,12 +43,14 @@ class ModelCacheOperatorResponse:
             selector (str):
             state (ModelCacheOperatorResponseState):
             transferred_bytes (int):
+            blockers (list[OperationBlocker] | Unset):
             cancellation (ModelCacheCancellation | None | Unset):
             cancelled_operations (list[str] | Unset):
             eta_seconds (float | None | Unset):
             failure (AvailabilityOperationFailure | None | Unset):
             model_content_sha256 (None | str | Unset):
             next_actions (list[str] | Unset):
+            next_attempt_at (None | str | Unset):
             operation_id (None | str | Unset):
             preserved (list[str] | Unset):
             result (ModelCacheDownloadResult | ModelCacheRemovalResult | None | Unset):
@@ -61,12 +64,14 @@ class ModelCacheOperatorResponse:
     selector: str
     state: ModelCacheOperatorResponseState
     transferred_bytes: int
+    blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: ModelCacheCancellation | None | Unset = UNSET
     cancelled_operations: list[str] | Unset = UNSET
     eta_seconds: float | None | Unset = UNSET
     failure: AvailabilityOperationFailure | None | Unset = UNSET
     model_content_sha256: None | str | Unset = UNSET
     next_actions: list[str] | Unset = UNSET
+    next_attempt_at: None | str | Unset = UNSET
     operation_id: None | str | Unset = UNSET
     preserved: list[str] | Unset = UNSET
     result: ModelCacheDownloadResult | ModelCacheRemovalResult | None | Unset = UNSET
@@ -81,6 +86,7 @@ class ModelCacheOperatorResponse:
         from ..models.model_cache_cancellation import ModelCacheCancellation # noqa: PLC0415
         from ..models.model_cache_download_result import ModelCacheDownloadResult # noqa: PLC0415
         from ..models.model_cache_removal_result import ModelCacheRemovalResult # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
         action: str = self.action
 
@@ -95,6 +101,15 @@ class ModelCacheOperatorResponse:
         state: str = self.state
 
         transferred_bytes = self.transferred_bytes
+
+        blockers: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.blockers, Unset):
+            blockers = []
+            for blockers_item_data in self.blockers:
+                blockers_item = blockers_item_data.to_dict()
+                blockers.append(blockers_item)
+
+
 
         cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
@@ -136,6 +151,12 @@ class ModelCacheOperatorResponse:
 
 
 
+        next_attempt_at: None | str | Unset
+        if isinstance(self.next_attempt_at, Unset):
+            next_attempt_at = UNSET
+        else:
+            next_attempt_at = self.next_attempt_at
+
         operation_id: None | str | Unset
         if isinstance(self.operation_id, Unset):
             operation_id = UNSET
@@ -176,6 +197,8 @@ class ModelCacheOperatorResponse:
             "state": state,
             "transferred_bytes": transferred_bytes,
         })
+        if blockers is not UNSET:
+            field_dict["blockers"] = blockers
         if cancellation is not UNSET:
             field_dict["cancellation"] = cancellation
         if cancelled_operations is not UNSET:
@@ -188,6 +211,8 @@ class ModelCacheOperatorResponse:
             field_dict["model_content_sha256"] = model_content_sha256
         if next_actions is not UNSET:
             field_dict["next_actions"] = next_actions
+        if next_attempt_at is not UNSET:
+            field_dict["next_attempt_at"] = next_attempt_at
         if operation_id is not UNSET:
             field_dict["operation_id"] = operation_id
         if preserved is not UNSET:
@@ -207,6 +232,7 @@ class ModelCacheOperatorResponse:
         from ..models.model_cache_cancellation import ModelCacheCancellation # noqa: PLC0415
         from ..models.model_cache_download_result import ModelCacheDownloadResult # noqa: PLC0415
         from ..models.model_cache_removal_result import ModelCacheRemovalResult # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
         d = dict(src_dict)
         action = check_model_cache_operator_response_action(d.pop("action"))
@@ -231,6 +257,18 @@ class ModelCacheOperatorResponse:
 
 
         transferred_bytes = d.pop("transferred_bytes")
+
+        _blockers = d.pop("blockers", UNSET)
+        blockers: list[OperationBlocker] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = OperationBlocker.from_dict(blockers_item_data)
+
+
+
+                blockers.append(blockers_item)
+
 
         def _parse_cancellation(data: object) -> ModelCacheCancellation | None | Unset:
             if data is None:
@@ -298,6 +336,16 @@ class ModelCacheOperatorResponse:
         next_actions = cast(list[str], d.pop("next_actions", UNSET))
 
 
+        def _parse_next_attempt_at(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
+
+
         def _parse_operation_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -359,12 +407,14 @@ class ModelCacheOperatorResponse:
             selector=selector,
             state=state,
             transferred_bytes=transferred_bytes,
+            blockers=blockers,
             cancellation=cancellation,
             cancelled_operations=cancelled_operations,
             eta_seconds=eta_seconds,
             failure=failure,
             model_content_sha256=model_content_sha256,
             next_actions=next_actions,
+            next_attempt_at=next_attempt_at,
             operation_id=operation_id,
             preserved=preserved,
             result=result,

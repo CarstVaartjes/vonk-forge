@@ -87,6 +87,8 @@ def _model_operator_response(
             if isinstance(operation.failure, Mapping)
             else None
         ),
+        blockers=list(operation.blockers),
+        next_attempt_at=operation.next_attempt_at,
     )
 
 
@@ -368,6 +370,8 @@ class ModelCacheOperationProvider:
             "supported_actions": ["retry"] if retryable else [],
             "result": result,
             "failure": operation.failure,
+            "blockers": [item.model_dump(mode="json") for item in operation.blockers],
+            "next_attempt_at": operation.next_attempt_at,
             "owner": {
                 "kind": "model-cache-operation",
                 "id": operation.id,

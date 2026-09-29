@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import type {CacheRemovalReview, ControlApi, ModelCacheOperatorResponse} from "../api/types";
 
 import {CancelOperation} from "./cancel-operation";
+import {WaitingFor} from "./waiting-for";
 import {CacheRemovalProgress} from "./cache-removal-progress";
 import {
   CacheRemovalOutcomeUnknown,
@@ -58,6 +59,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
   const [review, setReview] = useState<CacheRemovalReview | null>(null);
   const [phase, setPhase] = useState("");
   const [operationId, setOperationId] = useState("");
+  const [waiting, setWaiting] = useState<Pick<ModelCacheOperatorResponse, "blockers" | "next_attempt_at">>({});
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
 
@@ -78,9 +80,11 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
     setError("");
     setPhase("queued");
     setOperationId("");
+    setWaiting({});
     try {
       let current = await api.prepareModelCache(selector, crypto.randomUUID(), controller.signal);
       setOperationId(current.operation_id ?? "");
+      setWaiting(current);
       let attempts = 0;
       while (!TERMINAL_STATES.has(current.state) && current.operation_id && attempts < MAX_POLL_ATTEMPTS) {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
@@ -88,9 +92,15 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
         current = await api.modelCacheOperation(current.operation_id, controller.signal);
         attempts += 1;
         setPhase(progressLabel(current));
+        setWaiting(current);
       }
       if (controller.signal.aborted) return;
       setBusy(false);
+      if (!TERMINAL_STATES.has(current.state)) {
+        // Still queued or retrying: the Controller carries on without this page.
+        setPhase("Still preparing; the Controller keeps going in the background.");
+        return;
+      }
       if (current.state === "succeeded") {
         setPhase("");
         onPrepared();
@@ -190,6 +200,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
       {busy || state === "preparing" ? "Downloading…" : state === "failed" ? "Retry download" : "Download model"}
     </button>
     {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
+    {(busy || state === "preparing") && <WaitingFor blockers={waiting.blockers} nextAttemptAt={waiting.next_attempt_at}/>}
     {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." command={`vonkctl model cancel ${operationId}`} cancel={key => api.cancelModelOperation(operationId, key)}/>}
     {error && <span className="library-cache-error" role="alert">{error}</span>}
   </div>;

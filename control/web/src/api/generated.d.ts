@@ -4165,6 +4165,8 @@ export interface components {
              * @enum {string}
              */
             action: "download" | "remove";
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
             cancellation?: components["schemas"]["ModelCacheCancellation"] | null;
             /** Cancelled Operations */
             cancelled_operations?: string[];
@@ -4175,6 +4177,8 @@ export interface components {
             model_content_sha256?: string | null;
             /** Next Actions */
             next_actions?: string[];
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
             /** Operation Id */
             operation_id?: string | null;
             /** Phase */
@@ -6396,6 +6400,8 @@ export interface components {
              * @enum {string}
              */
             action: "install" | "run" | "switch" | "stop" | "cleanup";
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
             /** Cleanup Mode */
             cleanup_mode?: ("uninstall" | "reconcile") | null;
             /** Completed Phases */
@@ -6409,6 +6415,8 @@ export interface components {
              * @enum {string}
              */
             kind: "recipe.run-switch.v2" | "recipe.stop.v2" | "recipe.cleanup.v2";
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
             /** Node Ids */
             node_ids: string[];
             /** Operation Id */
@@ -6432,6 +6440,8 @@ export interface components {
          * @description Exact durable result tree stored in ``Job.result``.
          */
         RunSwitchOperationResult: {
+            /** Blockers */
+            blockers?: components["schemas"]["OperationBlocker"][];
             cancellation?: components["schemas"]["RunSwitchCancellation"] | null;
             /** Child Operation Id */
             child_operation_id?: string | null;

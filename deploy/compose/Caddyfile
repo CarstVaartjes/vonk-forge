@@ -156,7 +156,7 @@ http://:8084 {
 # The Controller manages inference gateway client keys through this relay.
 # Only LiteLLM's key routes pass; LiteLLM still requires its master key.
 http://:8087 {
-	@litellm_key_admin path /key/generate /key/list /key/info /key/delete
+	@litellm_key_admin path /key/generate /key/list /key/info /key/update /key/delete
 	handle @litellm_key_admin {
 		reverse_proxy litellm:4000
 	}

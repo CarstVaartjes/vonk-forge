@@ -21,6 +21,7 @@ from vonk_agent_protocol.inventory import MemoryPool
 from .distribution_assignment import NodeDistributionAssignment
 from .lifecycle_preflight import LifecyclePreflightCheckpoint
 from .model_cache_contract import ModelCacheDownloadResult
+from .operation_blockers import OperationBlocker
 from .preparation_contract import RolloutPreparation
 from .runtime_image_preparation import RuntimeImageReceipt
 from .strict_json import StrictJSONModel
@@ -1185,6 +1186,8 @@ class RunSwitchOperationResult(_StrictModel):
     failed_phase: RunSwitchPhaseKind | None = None
     final_verify_started_at: float | None = Field(default=None, ge=0)
     final_observation: RunSwitchPhaseResult | None = None
+    #: What the operation waits for as of the Controller's latest check.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
     @model_validator(mode="after")
     def total_bytes_state_is_consistent(self) -> RunSwitchOperationResult:
@@ -1210,6 +1213,10 @@ class RunSwitchOperation(_StrictModel):
     progress: RunSwitchProgress
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     result: RunSwitchOperationResult | None = None
+    #: What a waiting or retrying operation waits for; empty once it settles.
+    blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    #: When the Controller checks again; a retry is waiting, never failed.
+    next_attempt_at: datetime | None = None
 
     @model_validator(mode="after")
     def terminal_evidence_is_consistent(self) -> RunSwitchOperation:

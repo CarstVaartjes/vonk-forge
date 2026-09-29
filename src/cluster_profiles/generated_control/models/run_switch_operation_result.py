@@ -22,6 +22,7 @@ import datetime
 
 if TYPE_CHECKING:
   from ..models.lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint
+  from ..models.operation_blocker import OperationBlocker
   from ..models.operation_progress import OperationProgress
   from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult
   from ..models.run_switch_cancellation import RunSwitchCancellation
@@ -58,6 +59,7 @@ class RunSwitchOperationResult:
     """ Exact durable result tree stored in ``Job.result``.
 
         Attributes:
+            blockers (list[OperationBlocker] | Unset):
             cancellation (None | RunSwitchCancellation | Unset):
             child_operation_id (None | str | Unset):
             completed_bytes (int | Unset):  Default: 0.
@@ -101,6 +103,7 @@ class RunSwitchOperationResult:
             workload_intent_ordinal (int | None | Unset):
      """
 
+    blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: None | RunSwitchCancellation | Unset = UNSET
     child_operation_id: None | str | Unset = UNSET
     completed_bytes: int | Unset = 0
@@ -139,6 +142,7 @@ class RunSwitchOperationResult:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
         from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult # noqa: PLC0415
         from ..models.run_switch_cancellation import RunSwitchCancellation # noqa: PLC0415
@@ -161,6 +165,15 @@ class RunSwitchOperationResult:
         from ..models.run_switch_target_transfer_result import RunSwitchTargetTransferResult # noqa: PLC0415
         from ..models.run_switch_uninstall_result import RunSwitchUninstallResult # noqa: PLC0415
         from ..models.run_switch_verify_result import RunSwitchVerifyResult # noqa: PLC0415
+        blockers: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.blockers, Unset):
+            blockers = []
+            for blockers_item_data in self.blockers:
+                blockers_item = blockers_item_data.to_dict()
+                blockers.append(blockers_item)
+
+
+
         cancellation: dict[str, Any] | None | Unset
         if isinstance(self.cancellation, Unset):
             cancellation = UNSET
@@ -426,6 +439,8 @@ class RunSwitchOperationResult:
 
         field_dict.update({
         })
+        if blockers is not UNSET:
+            field_dict["blockers"] = blockers
         if cancellation is not UNSET:
             field_dict["cancellation"] = cancellation
         if child_operation_id is not UNSET:
@@ -496,6 +511,7 @@ class RunSwitchOperationResult:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.lifecycle_preflight_checkpoint import LifecyclePreflightCheckpoint # noqa: PLC0415
+        from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         from ..models.operation_progress import OperationProgress # noqa: PLC0415
         from ..models.run_switch_cached_transfer_result import RunSwitchCachedTransferResult # noqa: PLC0415
         from ..models.run_switch_cancellation import RunSwitchCancellation # noqa: PLC0415
@@ -519,6 +535,18 @@ class RunSwitchOperationResult:
         from ..models.run_switch_uninstall_result import RunSwitchUninstallResult # noqa: PLC0415
         from ..models.run_switch_verify_result import RunSwitchVerifyResult # noqa: PLC0415
         d = dict(src_dict)
+        _blockers = d.pop("blockers", UNSET)
+        blockers: list[OperationBlocker] | Unset = UNSET
+        if _blockers is not UNSET:
+            blockers = []
+            for blockers_item_data in _blockers:
+                blockers_item = OperationBlocker.from_dict(blockers_item_data)
+
+
+
+                blockers.append(blockers_item)
+
+
         def _parse_cancellation(data: object) -> None | RunSwitchCancellation | Unset:
             if data is None:
                 return data
@@ -1237,6 +1265,7 @@ class RunSwitchOperationResult:
 
 
         run_switch_operation_result = cls(
+            blockers=blockers,
             cancellation=cancellation,
             child_operation_id=child_operation_id,
             completed_bytes=completed_bytes,
