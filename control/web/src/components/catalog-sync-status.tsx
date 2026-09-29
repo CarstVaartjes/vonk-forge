@@ -27,7 +27,7 @@ export function CatalogSyncStatusLine({api}: {api: Pick<LibraryApi, "catalogSync
       <span>Recipe library sync </span><StatusPill tone={TONE[status.state]}>{status.state}</StatusPill>
       <> · last run <Time value={at}/></>
       {status.commit && <> · commit <code>{status.commit.slice(0, 12)}</code></>}
-      {status.expected_commit && status.expected_commit !== status.commit && <> · waiting for <code>{status.expected_commit.slice(0, 12)}</code></>}
+      {status.expected_commit && status.expected_commit !== status.commit && <> · expected commit <code>{status.expected_commit.slice(0, 12)}</code></>}
     </p>
     <p>{status.imported_count} imported · {status.updated_count} updated · {status.unchanged_count} unchanged · {status.skipped_count} skipped · {status.withdrawn_count} withdrawn of {status.total_count}</p>
     {(problems.length > 0 || status.stale_recipes.length > 0) && <details open={status.state !== "current"}><summary>{problems.length} problem{problems.length === 1 ? "" : "s"}{status.stale_recipes.length > 0 && ` · ${status.stale_recipes.length} recipe${status.stale_recipes.length === 1 ? "" : "s"} with stale installations or runs`}</summary><ul>{problems.map(item => <li key={item}>{item}</li>)}</ul></details>}

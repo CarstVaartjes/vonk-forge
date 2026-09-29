@@ -4,6 +4,7 @@ import {safeErrorText} from "../lib/error-display";
 import {nodeDisplayName} from "../lib/fleet";
 import {ConfirmPanel} from "./confirm-panel";
 import {EnrollmentGrant} from "./enrollment-grant";
+import {InstallationReconcile} from "./installation-reconcile";
 import {StatusPill} from "./status-pill";
 import {Time} from "./time";
 
@@ -58,6 +59,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
         <div><dt>Recipes</dt><dd>{node.loaded.filter(item => item.healthy).length} running · {node.installed.filter(item => item.complete).length} installed</dd></div>
       </dl>
       {node.warnings.length > 0 && <ul className="spark-warnings" aria-label="Needs attention">{node.warnings.map((warning, index) => <li key={index}><StatusPill tone="warning">{warning.severity}</StatusPill> {warning.detail}</li>)}</ul>}
+      {node.installed.some(item => !item.complete) && <ul className="spark-warnings" aria-label="Incomplete installations">{node.installed.filter(item => !item.complete).map(item => <li key={item.installation_id}><StatusPill tone="warning">{item.group_state}</StatusPill> {item.title} · {item.present_ranks.length} of {item.expected_rank_count} ranks <InstallationReconcile api={api} installationId={item.installation_id}/></li>)}</ul>}
       <div className="button-row">
         <button type="button" className="button secondary" onClick={() => { setName(node.display_name); setAction("rename"); }}>Rename</button>
         <button type="button" className="button secondary" onClick={() => setAction("re-enroll")}>Re-enroll</button>
