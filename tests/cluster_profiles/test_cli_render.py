@@ -636,3 +636,103 @@ def test_an_empty_library_page_names_the_filters_that_emptied_it(capsys):
     )
     output = capsys.readouterr().out
     assert "--" not in output.split("Next:")[0]
+
+
+def test_waiting_operations_show_what_they_wait_for(capsys):
+    spark = "spk_" + "1" * 32
+    blockers = [
+        {
+            "code": "run-switch.inventory-unknown",
+            "detail": "No authenticated Spark inventory is available.",
+            "severity": "error",
+            "node_ids": [spark],
+        },
+        {
+            "code": "recipe_image.preparing",
+            "detail": "Preparing the model and runtime image (prepare).",
+            "severity": "info",
+            "node_ids": [],
+        },
+    ]
+    waiting = {
+        "state": "queued",
+        "blockers": blockers,
+        "next_attempt_at": "2026-09-29T12:00:00+00:00",
+        "progress": {"phase": "prepare", "completed_bytes": 0},
+    }
+
+    render_payload(
+        waiting | {"id": "app", "updated_at": "2026-09-29T11:59:00+00:00"},
+        "profile",
+        action="progress",
+    )
+    application = capsys.readouterr().out
+    render_payload(
+        waiting | {"kind": "recipe.image.availability.v2", "id": "op", "children": []},
+        "recipe",
+        action="progress",
+    )
+    operation = capsys.readouterr().out
+    render_payload(
+        {
+            "operations": [
+                waiting
+                | {
+                    "id": "a",
+                    "kind": "fleet-profile.apply",
+                    "created_at": "2026-09-29T11:00:00+00:00",
+                    "node_ids": [spark],
+                }
+            ],
+            "total": 1,
+            "next_cursor": None,
+        },
+        "fleet",
+        action="activity",
+    )
+    activity = capsys.readouterr().out
+
+    for output in (application, operation, activity):
+        assert "run-switch.inventory-unknown" in output
+        assert spark in output
+        assert "recipe_image.preparing" in output
+        assert "2026-09-29 12:00:00+00:00" in output
+    assert "(waiting: run-switch.inventory-unknown)" in progress_line(waiting)
+
+
+def test_review_lists_preparation_and_says_nothing_is_blocked(capsys):
+    render_payload(
+        {
+            "allowed": False,
+            "waits_for_preparation": True,
+            "plan_digest": "a" * 64,
+            "scope": {"node_ids": [], "idle_node_ids": []},
+            "summary": {},
+            "assignments": [],
+            "steps": [{"index": 0, "label": "Switch profile Fresh", "node_ids": []}],
+            "preparation_steps": [
+                {
+                    "index": 0,
+                    "label": "Download the model files for Qwen",
+                    "node_ids": [],
+                },
+                {
+                    "index": 1,
+                    "label": "Build the runtime image for Qwen",
+                    "node_ids": [],
+                },
+            ],
+            "effects": {"runs": [], "installations": [], "superseded": []},
+            "preparation_decisions": [],
+            "assessments": [],
+            "preparations": [],
+            "reasons": [],
+        },
+        "profile",
+        action="preview",
+    )
+    output = capsys.readouterr().out
+    assert "Ready after preparation" in output
+    assert "Blocked" not in output
+    assert "Prepare 0. Download the model files for Qwen" in output
+    assert "Prepare 1. Build the runtime image for Qwen" in output

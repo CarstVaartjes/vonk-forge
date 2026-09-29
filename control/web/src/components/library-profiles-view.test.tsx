@@ -106,3 +106,16 @@ test("a saved profile shows the cache counts the server reports", async () => {
   render(<LibraryProfilesView api={apiFor({profiles: vi.fn(async () => ({schema_version: 2 as const, generated_at: "2026-09-10T00:00:00Z", profiles: [cached]}))})} entries={[]} onNavigate={vi.fn()}/>);
   expect(await screen.findByText("2 cached · 1 missing")).toBeVisible();
 });
+
+test("a load waiting for preparation is offered, and a waiting application says what it waits for", async () => {
+  const user = userEvent.setup();
+  const waitingPreview = {...preview, allowed: false, waits_for_preparation: true, preparation_steps: [{index: 0, kind: "prepare", label: "Build the runtime image for Qwen Code (skipped when built)", node_ids: [nodeA]}], reasons: [{code: "profile.preparation_unavailable", detail: "Prepare the model first", severity: "error"}]} as unknown as FleetProfilePreview;
+  const waiting = {state: "queued", progress: {}, status_reason: "Waiting to retry", blockers: [{code: "run-switch.inventory-unknown", detail: "No authenticated Spark inventory is available.", severity: "error", node_ids: [nodeA]}], next_attempt_at: "2026-09-29T12:00:00+00:00"} as unknown as FleetProfileApplicationView;
+  const api = apiFor({previewProfile: vi.fn(async () => waitingPreview), loadProfile: vi.fn(async () => waiting)});
+  render(<ToastProvider><LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()}/></ToastProvider>);
+  expect(await screen.findByText(/The Controller prepares this first/)).toBeVisible();
+  await user.click(await screen.findByRole("button", {name: "Load profile"}));
+  const list = await screen.findByRole("list", {name: "Waiting for"});
+  expect(within(list).getByText("run-switch.inventory-unknown")).toBeVisible();
+  expect(within(list).getByText(/Next attempt/)).toBeVisible();
+});
