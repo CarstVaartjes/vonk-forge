@@ -12,12 +12,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import String, cast, func, or_, select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from .auth import CursorCodec
 from .compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
 from .logging import redact_text
 from .models import AgentOperation, Job, JobAttempt
@@ -173,11 +172,9 @@ class JobService:
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime],
-        cursors: CursorCodec | None = None,
     ) -> None:
         self._sessions = sessions
         self._clock = clock
-        self._cursors = cursors
         self._claim_lock = threading.RLock()
 
     def enqueue(
@@ -241,95 +238,6 @@ class JobService:
             job.targets = _canonical_targets(job.targets)
             session.expunge(job)
             return job
-
-    def list(self, *, limit: int = 100) -> list[Job]:
-        page, _, _ = self.list_page(limit=limit)
-        return page
-
-    def list_page(
-        self,
-        *,
-        limit: int = 100,
-        cursor: str | None = None,
-        status: str | None = None,
-        target: str | None = None,
-    ) -> tuple[list[Job], str | None, int]:
-        """Return a stable newest-first keyset page and authoritative total."""
-
-        if not 1 <= limit <= 100:
-            raise ValueError("job list limit is invalid")
-        if status is not None and not status.strip():
-            raise ValueError("job status is invalid")
-        if target is not None and not target.strip():
-            raise ValueError("job target is invalid")
-        normalized_status = None if status is None else status.strip()
-        normalized_target = None if target is None else target.strip()
-        context = {"status": normalized_status, "target": normalized_target}
-        boundary: tuple[datetime, str] | None = None
-        if cursor is not None:
-            try:
-                if self._cursors is None:
-                    raise ValueError
-                decoded = self._cursors.decode(
-                    cursor,
-                    resource="jobs",
-                    order="created-at-desc/id-desc/v1",
-                    context=context,
-                )
-                if (
-                    not isinstance(decoded, list)
-                    or len(decoded) != 2
-                    or not all(isinstance(item, str) for item in decoded)
-                ):
-                    raise ValueError
-                boundary = (datetime.fromisoformat(decoded[0]), decoded[1])
-            except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
-                raise ValueError("job list cursor is invalid") from None
-        with self._sessions() as session:
-            filters = []
-            if normalized_status is not None:
-                filters.append(Job.state == normalized_status)
-            if normalized_target is not None:
-                filters.append(
-                    cast(Job.targets, String).contains(f'"{normalized_target}"')
-                )
-            statement = select(Job).where(*filters)
-            if boundary is not None:
-                created_at, job_id = boundary
-                statement = statement.where(
-                    or_(
-                        Job.created_at < created_at,
-                        (Job.created_at == created_at) & (Job.id < job_id),
-                    )
-                )
-            jobs = list(
-                session.scalars(
-                    statement.order_by(Job.created_at.desc(), Job.id.desc()).limit(
-                        limit + 1
-                    )
-                )
-            )
-            total = int(
-                session.scalar(select(func.count()).select_from(Job).where(*filters))
-                or 0
-            )
-            has_more = len(jobs) > limit
-            jobs = jobs[:limit]
-            for job in jobs:
-                job.targets = _canonical_targets(job.targets)
-                session.expunge(job)
-        next_cursor = None
-        if has_more and jobs:
-            if self._cursors is None:
-                raise RuntimeError("job cursor signer is unavailable")
-            last = jobs[-1]
-            next_cursor = self._cursors.encode(
-                resource="jobs",
-                order="created-at-desc/id-desc/v1",
-                context=context,
-                boundary=[_aware(last.created_at).isoformat(), last.id],
-            )
-        return jobs, next_cursor, total
 
     def enqueue_guarded(
         self,

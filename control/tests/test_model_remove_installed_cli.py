@@ -104,7 +104,7 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
         clock=lambda: _NOW,
     )
     api = create_app(
-        jobs=JobService(sessions, clock=lambda: _NOW, cursors=codec.cursor_codec()),
+        jobs=JobService(sessions, clock=lambda: _NOW),
         tokens=codec,
         library_projection=library,
         model_cache=cache,

@@ -67,7 +67,6 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     assert "EnrollmentDecisionResponse" not in schema["components"]["schemas"]
 
     expected_errors = {
-        "getPublishedEndpoint": {"401", "404", "503"},
         "resumeJob": {"401", "403", "404", "409", "503"},
     }
     for operation_id, statuses in expected_errors.items():
@@ -241,8 +240,9 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
 
 def test_admin_schema_is_secret_free() -> None:
     schema = json.loads(OPENAPI.read_text())
+    assert "/api/endpoints/{alias}" not in schema["paths"]
+    assert "/api/jobs" not in schema["paths"]
     assert set(schema["paths"]) >= {
-        "/api/endpoints/{alias}",
         "/api/fleet",
         "/api/fleet/stream",
         "/api/jobs/{job_id}",
@@ -297,8 +297,6 @@ def test_admin_schema_is_secret_free() -> None:
     for operation_id in (
         "getFleetStatus",
         "getJob",
-        "getPublishedEndpoint",
-        "listJobs",
         "resumeJob",
     ):
         response_schema = next(
@@ -534,7 +532,6 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
 
     client = Client(base_url="https://control.invalid")
     expected = {
-        "get_published_endpoint": (401, 404, 503),
         "resume_job": (401, 403, 404, 409, 503),
     }
     for module_name, status_codes in expected.items():

@@ -10,8 +10,6 @@ export type VisualFleetSnapshot = components["schemas"]["FleetSnapshot"];
 export type EnrollmentGrantResponse = components["schemas"]["EnrollmentGrantResponse"];
 export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
-export type JobSummary = components["schemas"]["JobSummary"];
-export type JobsResponse = components["schemas"]["JobsResponse"];
 export type OperationDetail = components["schemas"]["OperationDetailResponse"];
 export type OperationsResponse = components["schemas"]["OperationsResponse"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
@@ -156,7 +154,6 @@ export interface ControlApi extends LibraryApi {
   profileEndpoints(number: number, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   enrollFleetNode(input: {name: string; request_key: string}, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
-  jobs(cursor?: string): Promise<JobsResponse>;
   operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse>;
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;

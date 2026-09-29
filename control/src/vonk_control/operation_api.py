@@ -109,8 +109,6 @@ _ADMIN_OPERATION_IDS = {
         "get",
         "/api/artifact-jobs/{job_id}/results/{name}/{sha256}",
     ): "downloadArtifactJobResult",
-    ("get", "/api/endpoints/{alias}"): "getPublishedEndpoint",
-    ("get", "/api/jobs"): "listJobs",
     ("get", "/api/operations"): "listOperations",
     ("get", "/api/jobs/{job_id}"): "getJob",
     ("get", "/api/operations/{operation_id}"): "getOperation",
@@ -402,24 +400,10 @@ class JobResumeResponse(StrictModel):
     state: str = Field(pattern=r"^(queued|failed)$")
 
 
-class JobSummary(StrictModel):
-    id: str = Field(min_length=1, max_length=128)
-    state: str = Field(min_length=1, max_length=80)
-    kind: str = Field(min_length=1, max_length=80)
-    created_at: datetime
-
-
-class JobsResponse(StrictModel):
-    jobs: list[JobSummary] = Field(max_length=100)
-    next_cursor: str | None = Field(default=None, max_length=512)
-    total: int = Field(ge=0)
-
-
 @dataclass(frozen=True)
 class OperationApiServices:
     """Optional projections backed by accepted durable control state only."""
 
-    endpoint: Callable[[str, str], Mapping[str, object]]
     agents: Callable[[], Sequence[Mapping[str, object]]]
     job_operations: Callable[[str, str | None, int], OperationPage]
     resume_job: Callable[[str], None]
@@ -1516,19 +1500,6 @@ class _DurableOperationProjection:
         )
         return None if match is None else match.group(1)
 
-    def endpoint(self, alias: str, gateway_api_base: str) -> Mapping[str, object]:
-        with self._sessions() as session:
-            snapshot = self._publication_snapshot(session)
-        active_marker, route_document = self._verified_routes(snapshot)
-        raw = route_document.get(alias)
-        if raw is None:
-            raise KeyError(alias)
-        if not isinstance(raw, Mapping):
-            raise OperationProjectionError("active endpoint is invalid")
-        return self._endpoint_payload(
-            alias, raw, active_marker, gateway_api_base
-        ).model_dump(mode="json")
-
     def profile_endpoint(
         self, number: int, alias: str | None, gateway_api_base: str
     ) -> FleetProfileEndpointsView:
@@ -2227,7 +2198,6 @@ def durable_operation_services(
         projection.retire_job(job_id)
 
     return OperationApiServices(
-        endpoint=projection.endpoint,
         agents=projection.agents,
         job_operations=projection.job_operations,
         resume_job=resume_job,
