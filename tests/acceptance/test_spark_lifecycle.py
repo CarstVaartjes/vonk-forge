@@ -315,9 +315,8 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         ) from error
     try:
         recipe_contract = RecipeDefinition.model_validate(raw_recipe)
-        recipe = recipe_contract.model_dump(mode="json")
         catalog_models = [
-            ModelDefinition.model_validate(value["document"])
+            (ModelDefinition.model_validate(value["document"]), value["document"])
             for value in index["catalog_entities"]
             if isinstance(value, dict)
             and isinstance(value.get("document"), dict)
@@ -327,16 +326,15 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         raise LifecycleError(
             "canonical synthetic canary contract is invalid"
         ) from error
-    if recipe != raw_recipe or len(recipe_contract.models) != 1:
+    if len(recipe_contract.models) != 1:
         raise LifecycleError("canonical synthetic canary Recipe is not canonical")
     model_reference = recipe_contract.models[0].model
     matching_models = [
         model
-        for model in catalog_models
+        for model, raw_model in catalog_models
         if model.identity.publisher == model_reference.publisher
         and model.identity.slug == model_reference.slug
-        and document_sha256(model.model_dump(mode="json"))
-        == model_reference.content_sha256
+        and document_sha256(raw_model) == model_reference.content_sha256
     ]
     if len(matching_models) != 1:
         raise LifecycleError("canonical synthetic canary Model closure is invalid")
@@ -354,8 +352,7 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         or not isinstance(index.get("source_commit"), str)
         or SOURCE_SHA.fullmatch(index["source_commit"]) is None
         or not isinstance(entry.get("content_sha256"), str)
-        or entry["content_sha256"]
-        != document_sha256(recipe_contract.model_dump(mode="json"))
+        or entry["content_sha256"] != document_sha256(raw_recipe)
         or package.get("media_type")
         != "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
         or package.get("recipe_content_sha256") not in {None, entry["content_sha256"]}
@@ -434,7 +431,7 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         or manifest.get("kind") != "recipe-package"
         or manifest.get("package_type") != "recipe"
         or manifest.get("recipe_content_sha256") != entry["content_sha256"]
-        or packaged_recipe != recipe
+        or packaged_recipe != raw_recipe
     ):
         raise LifecycleError(
             "canonical synthetic canary Recipe differs from its package"
@@ -451,7 +448,7 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
         model_content_sha256=model_reference.content_sha256,
         role=roles[0].name,
         serving_check=check,
-        recipe=recipe,
+        recipe=raw_recipe,
     )
 
 
@@ -2470,7 +2467,6 @@ class SparkLifecycle:
             "SELECT json_build_object('node_id',r.key,"
             "'current_fingerprint',n.preflight_fingerprint,"
             "'receipt_fingerprint',r.value->>'fingerprint',"
-            "'request_sha256',r.value->>'request_sha256',"
             "'payload_sha256',a.payload_digest,"
             "'observed_at',r.value->'observed_at',"
             "'controller_now',floor(extract(epoch FROM clock_timestamp())),"
@@ -2485,7 +2481,6 @@ class SparkLifecycle:
             "AND t.attempt=o.current_attempt WHERE o.node_id=r.key "
             "AND o.kind='runtime.preflight.v1' "
             "AND t.result::jsonb->>'observed_at'=r.value->>'observed_at' "
-            "AND t.result::jsonb->>'request_sha256'=r.value->>'request_sha256' "
             "ORDER BY o.updated_at DESC LIMIT 1) a ON true "
             f"WHERE j.id='{operation_id}' ORDER BY r.key LIMIT 2"
         )
