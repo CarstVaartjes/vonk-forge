@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -36,6 +36,9 @@ use crate::protocol::{ContainerRuntimeAction, HostOperation, artifact_signing_by
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
+/// How long a running `vonk-<uuid>` container may stay without a local claim
+/// before the sweep stops it.
+pub const UNCLAIMED_CONTAINER_GRACE: Duration = Duration::from_secs(600);
 /// The byte ceiling on one canonical runtime-request document. Owned by the
 /// wire contract, not by this helper: the agent enforces the same ceiling
 /// before it writes the request file, so the helper's read cannot be stricter
@@ -2799,6 +2802,93 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !removed.success {
             return Err(OperationError::CommandFailed);
         }
+        Ok(())
+    }
+
+    /// Desired state wins: a `vonk-<uuid>` container is claimed only while the
+    /// agent keeps that run's `lifecycle.json`, and the agent removes it when
+    /// the Controller has no record of the run. An unclaimed exited container
+    /// is removed at once; an unclaimed running one is stopped and removed
+    /// after it stayed unclaimed for `grace`. `first_seen` is the caller's
+    /// memory across sweeps; losing it only restarts the grace period.
+    /// Containers with any other name are never touched.
+    pub fn sweep_unclaimed_containers(
+        &self,
+        now: Instant,
+        grace: Duration,
+        first_seen: &mut HashMap<String, Instant>,
+    ) -> Result<(), OperationError> {
+        let listing = self.run_docker_with_timeout(
+            &[
+                "container".to_owned(),
+                "ls".to_owned(),
+                "--all".to_owned(),
+                "--filter".to_owned(),
+                "name=^vonk-".to_owned(),
+                "--format".to_owned(),
+                "{{.State}}\t{{.Names}}".to_owned(),
+            ],
+            Duration::from_secs(15),
+        )?;
+        if !listing.success {
+            return Err(OperationError::CommandFailed);
+        }
+        let rows =
+            std::str::from_utf8(&listing.stdout).map_err(|_| OperationError::InvalidArtifact)?;
+        let mut unclaimed = HashSet::new();
+        for row in rows.lines() {
+            let Some((state, names)) = row.split_once('\t') else {
+                continue;
+            };
+            let Some((name, run_id)) = names.split(',').map(str::trim).find_map(|name| {
+                let id = name.strip_prefix("vonk-")?;
+                (uuid::Uuid::parse_str(id).ok()?.to_string() == id).then_some((name, id))
+            }) else {
+                continue;
+            };
+            let claim = self
+                .roots
+                .agent_data
+                .join("run-metadata")
+                .join(run_id)
+                .join("lifecycle.json");
+            match fs::symlink_metadata(&claim) {
+                Ok(_) => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                // Unknown claim state is never a reason to stop a workload.
+                Err(_) => continue,
+            }
+            let exited = matches!(state, "exited" | "dead" | "created");
+            if !exited {
+                let since = *first_seen.entry(name.to_owned()).or_insert(now);
+                unclaimed.insert(name.to_owned());
+                if now.saturating_duration_since(since) < grace {
+                    continue;
+                }
+                let stopped = self.run_docker_with_timeout(
+                    &[
+                        "stop".to_owned(),
+                        "--timeout".to_owned(),
+                        "30".to_owned(),
+                        name.to_owned(),
+                    ],
+                    Duration::from_secs(60),
+                )?;
+                if !stopped.success {
+                    continue;
+                }
+            }
+            let removed = self.run_docker_with_timeout(
+                &["rm".to_owned(), name.to_owned()],
+                Duration::from_secs(15),
+            )?;
+            if removed.success {
+                eprintln!("vonk-agent-helper: removed unclaimed container {name}");
+                first_seen.remove(name);
+                unclaimed.remove(name);
+            }
+        }
+        first_seen.retain(|name, _| unclaimed.contains(name));
         Ok(())
     }
 
@@ -7754,6 +7844,106 @@ mod tests {
                 Err(OperationError::Io(_))
             ));
             assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
+        }
+    }
+
+    type Calls = Arc<Mutex<Vec<Vec<String>>>>;
+
+    struct ListingRunner {
+        rows: String,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl CommandRunner for ListingRunner {
+        fn run(&self, _: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            let stdout = if arguments.first().map(String::as_str) == Some("container") {
+                self.rows.clone().into_bytes()
+            } else {
+                Vec::new()
+            };
+            Ok(CommandOutput {
+                success: true,
+                stdout,
+                stderr: Vec::new(),
+                exit_code: Some(0),
+            })
+        }
+    }
+
+    const CLAIMED: &str = "50000000-0000-4000-8000-000000000005";
+    const ORPHAN: &str = "60000000-0000-4000-8000-000000000006";
+    const LEFTOVER: &str = "70000000-0000-4000-8000-000000000007";
+
+    fn sweep_fixture() -> (TempDir, OperationExecutor<ListingRunner>, Calls) {
+        let temp = tempfile::tempdir().unwrap();
+        let claim = temp.path().join("run-metadata").join(CLAIMED);
+        fs::create_dir_all(&claim).unwrap();
+        fs::write(claim.join("lifecycle.json"), b"{}").unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let rows = format!(
+            "running\tvonk-{CLAIMED}\nrunning\tvonk-{ORPHAN}\nexited\tvonk-{LEFTOVER}\n\
+             running\tpostgres\nrunning\tvonk-not-a-run\n"
+        );
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            ListingRunner {
+                rows,
+                calls: Arc::clone(&calls),
+            },
+            None,
+        )
+        .unwrap();
+        (temp, executor, calls)
+    }
+
+    #[test]
+    fn unclaimed_running_container_is_stopped_only_after_the_grace_period() {
+        let (_temp, executor, calls) = sweep_fixture();
+        let grace = Duration::from_secs(600);
+        let start = Instant::now();
+        let mut seen = std::collections::HashMap::new();
+
+        executor
+            .sweep_unclaimed_containers(start, grace, &mut seen)
+            .unwrap();
+        let first: Vec<_> = calls.lock().unwrap().drain(..).collect();
+        // The exited leftover is removed at once; the orphan only waits.
+        assert!(first.contains(&vec!["rm".to_owned(), format!("vonk-{LEFTOVER}")]));
+        assert!(!first.iter().any(|call| call[0] == "stop"));
+
+        executor
+            .sweep_unclaimed_containers(start + grace + Duration::from_secs(1), grace, &mut seen)
+            .unwrap();
+        let later: Vec<_> = calls.lock().unwrap().drain(..).collect();
+        assert!(later.iter().any(|call| call[0] == "stop"
+            && call.last().map(String::as_str) == Some(&format!("vonk-{ORPHAN}"))));
+        assert!(later.contains(&vec!["rm".to_owned(), format!("vonk-{ORPHAN}")]));
+    }
+
+    #[test]
+    fn claimed_and_foreign_containers_are_never_touched() {
+        let (_temp, executor, calls) = sweep_fixture();
+        let grace = Duration::from_secs(600);
+        let start = Instant::now();
+        let mut seen = std::collections::HashMap::new();
+        for step in [0, 601, 5000] {
+            executor
+                .sweep_unclaimed_containers(start + Duration::from_secs(step), grace, &mut seen)
+                .unwrap();
+        }
+        for call in calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call[0] != "container")
+        {
+            let target = call.last().unwrap();
+            assert!(
+                *target == format!("vonk-{ORPHAN}") || *target == format!("vonk-{LEFTOVER}"),
+                "unexpected target {target}"
+            );
         }
     }
 }
