@@ -66,6 +66,8 @@ from .memory_reservations import (
 from .model_cache import ModelCacheService
 from .model_cache_contract import ModelCacheDownloadPreviewResponse
 from .models import (
+    ACTIVE_RUN_STATES,
+    STOPPABLE_RUN_STATES,
     AgentNode,
     CatalogDocumentRevision,
     ClusterMapping,
@@ -468,8 +470,6 @@ class _ResourceFits:
         return self.requires_early_stop("run-switch.insufficient-disk")
 
 
-_ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
-_STOPPABLE_RUN_STATES = _ACTIVE_RUN_STATES | {"lost"}
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _OPERATION_KINDS = frozenset(
     {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
@@ -1813,7 +1813,7 @@ class RecipeLifecyclePhaseExecutor:
                     and status.route_state == "withdrawn"
                     and all(rank.state == "stopped" for rank in status.ranks)
                 )
-                waiting = status.state in _ACTIVE_RUN_STATES or status.route_state in {
+                waiting = status.state in ACTIVE_RUN_STATES or status.route_state in {
                     "pending",
                 }
                 status_reason = (
@@ -2036,7 +2036,7 @@ class RecipeLifecyclePhaseExecutor:
                     )
                 )
             )
-            active_runs = sum(run.state in _ACTIVE_RUN_STATES for run in runs)
+            active_runs = sum(run.state in ACTIVE_RUN_STATES for run in runs)
             unwithdrawn_routes = sum(run.route_state != "withdrawn" for run in runs)
             verified = (
                 installation.state == "installed"
@@ -2462,7 +2462,7 @@ class RunSwitchOperationService:
                         plan_digest=stop_digest,
                     )
                 ]
-                if stop_digest is not None and run.state in _STOPPABLE_RUN_STATES
+                if stop_digest is not None and run.state in STOPPABLE_RUN_STATES
                 else []
             )
             # Stopping a live run must remain possible when catalog/cache
@@ -2489,7 +2489,7 @@ class RunSwitchOperationService:
                         node_ids=profile_stop_scope.missing_node_ids,
                     )
                 )
-            if run.state not in _STOPPABLE_RUN_STATES:
+            if run.state not in STOPPABLE_RUN_STATES:
                 blockers.append(
                     _as_reason(
                         "run-switch.run-not-active",
@@ -5093,7 +5093,7 @@ class RunSwitchOperationService:
                     RecipeRun.id.in_(
                         select(RunNode.run_id).where(RunNode.node_id.in_(node_ids))
                     ),
-                    RecipeRun.state.in_(_STOPPABLE_RUN_STATES),
+                    RecipeRun.state.in_(STOPPABLE_RUN_STATES),
                 )
                 .order_by(RecipeRun.created_at, RecipeRun.id)
             )
@@ -8774,7 +8774,7 @@ def _start_still_progressing(
         status: Any = getter(run_id)
     except (KeyError, RuntimeError, TypeError, ValueError):
         return False
-    return status.state in _ACTIVE_RUN_STATES and any(
+    return status.state in ACTIVE_RUN_STATES and any(
         rank.fresh and rank.state in {"planned", "starting", "running"}
         for rank in status.ranks
     )

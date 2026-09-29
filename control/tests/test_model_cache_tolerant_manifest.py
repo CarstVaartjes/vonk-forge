@@ -133,3 +133,104 @@ def test_unreadable_model_revision_resolves_from_newest_readable(tmp_path: Path)
     assert manifest.model_content_sha256 == new_digest
     assert manifest.model_content_digests == (new_digest,)
     assert manifest.artifacts[0].path == "weights/new.safetensors"
+
+
+def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
+    tmp_path: Path,
+):
+    """The live case: an old installation still names an unreadable revision.
+
+    Cache protection reads every installation's recipe while the download
+    preview measures storage; that read must resolve through the newest
+    readable revision instead of failing artifact inspection for every load.
+    """
+
+    from datetime import UTC, datetime
+
+    from vonk_control.models import ModelCacheSet, RecipeInstallation
+    from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
+
+    sessions = _sessions()
+    now = datetime(2026, 9, 29, 12, tzinfo=UTC)
+    file_digest = hashlib.sha256(b"model bytes!").hexdigest()
+    model_document = _model_document(
+        path="weights/model.safetensors", file_digest=file_digest, roles=["weights"]
+    )
+    model_digest = _digest(model_document)
+    recipe_document = _recipe_document(model_digest)
+    with sessions.begin() as session:
+        _add_active(
+            session,
+            root_id=MODEL_DOCUMENT,
+            revision_id="00000000-0000-4000-8000-0000000000b2",
+            kind="model",
+            publisher="owner",
+            slug="model",
+            document=model_document,
+        )
+        old = _add_active(
+            session,
+            root_id=DOCUMENT,
+            revision_id="00000000-0000-4000-8000-0000000000a2",
+            kind="recipe",
+            publisher="owner",
+            slug="recipe",
+            document=recipe_document,
+        )
+        edited = json.loads(json.dumps(recipe_document))
+        edited["metadata"]["description"] = "Updated release description."
+        current = _add_active(
+            session,
+            root_id=DOCUMENT,
+            revision_id="00000000-0000-4000-8000-0000000000a3",
+            kind="recipe",
+            publisher="owner",
+            slug="recipe",
+            document=edited,
+            revision_number=2,
+        )
+        _unreadable(old)
+        session.add(
+            RecipeInstallation(
+                id="00000000-0000-4000-8000-0000000000c1",
+                recipe_revision_id=old.id,
+                mapping_id="00000000-0000-4000-8000-0000000000c2",
+                mapping_generation=1,
+                image_digest="sha256:" + "1" * 64,
+                plan_digest="2" * 64,
+                plan={"kind": "old"},
+                state="installed",
+                actor="admin",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            ModelCacheSet(
+                artifact_set_sha256="3" * 64,
+                model_content_sha256=model_digest,
+                manifest={"kind": "old"},
+                expected_bytes=12,
+                state="incomplete",
+                created_at=now,
+                updated_at=now,
+                last_accessed_at=now,
+            )
+        )
+        current_id = current.id
+
+    cache = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    with sessions() as session:
+        inspection = DatabaseRunSwitchArtifactInspector(cache).inspect(
+            session,
+            model_content_sha256=model_digest,
+            recipe_revision_id=current_id,
+            node_ids=(),
+            retention="keep-cached",
+            now=now,
+        )
+
+    assert inspection.artifact_set_bytes == 12
+    with sessions() as session:
+        row = session.get(ModelCacheSet, "3" * 64)
+        assert row is not None and "recipe-installation" in row.protected_reasons

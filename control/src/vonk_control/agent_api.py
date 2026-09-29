@@ -81,7 +81,6 @@ from .enrollment_contract import EnrollmentId
 from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
-    recipe_run_known,
 )
 from .inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
@@ -89,6 +88,7 @@ from .inventory_repository import (
     InventorySnapshotInput,
 )
 from .models import (
+    STOPPABLE_RUN_STATES,
     AgentCertificate,
     AgentNode,
     AgentOperation,
@@ -1211,27 +1211,28 @@ def install_agent_routes(
         },
     )
     def recipe_run_disposition(run_id: str, request: Request) -> Response:
-        """Say whether this Controller has any record of one local run.
+        """Say whether this Controller still wants one local run.
 
-        A Spark can retain a run this Controller never owned (for example
-        after its database was rebuilt).  No observation of it is ever
-        accepted, so the agent asks once and retires the local lifecycle
-        instead of reporting it forever.
+        Only a run the Controller can still stop is wanted (planned, starting,
+        running, stopping, lost). Any other run, including one this Controller
+        never owned (for example after its database was rebuilt) or one it
+        failed or stopped, is named ``unowned``: it holds no capacity here, so
+        the agent retires its local lifecycle instead of keeping it forever.
         """
 
         helper_identity(request)
         if _CANONICAL_UUID.fullmatch(run_id) is None:
             raise HTTPException(status_code=422, detail="recipe run id is invalid")
         with _require_services(services).sessions() as session:
-            known = recipe_run_known(session, run_id)
-            run = session.get(RecipeRun, run_id) if known else None
+            run = session.get(RecipeRun, run_id)
+            wanted = run is not None and run.state in STOPPABLE_RUN_STATES
             generation = (
                 run.run_generation
                 if run is not None and run.state == "running"
                 else None
             )
         response = Response(status_code=status.HTTP_204_NO_CONTENT)
-        if not known:
+        if not wanted:
             response.headers[RECIPE_RUN_DISPOSITION_HEADER] = RECIPE_RUN_UNOWNED
         elif generation is not None:
             response.headers[RECIPE_RUN_GENERATION_HEADER] = str(generation)

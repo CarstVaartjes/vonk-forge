@@ -137,12 +137,26 @@ CLI is reconnecting; a local watch timeout is not a claim that the Controller's
 operation failed. Offline build information and signed update checks are
 described in [CLI updates](../operators/cli-updates.md).
 
+## Run capacity ownership
+
+Ports, the multi-Spark rendezvous port and memory are held only by a run a
+plan can still stop: planned, starting, running (including one under recovery),
+stopping, or lost. A load that needs such a run's Sparks plans its exact Stop,
+which releases the claims (a lost run planned for a Stop is not an
+unreconciled-rank blocker). The recovery coordinator releases, on every tick,
+the claims of any other run (failed, stopped, or missing), so such a run can
+never block a load. Whatever it may still occupy on a Spark is what that
+Spark's next inventory reports. A run whose stored plan the Controller can
+no longer read (an older contract), or whose Sparks a newer workload intent now
+owns, is settled as failed with its reason instead of being recovered.
+
 ## Runs whose local metadata is unreadable
 
 A retained run whose managed metadata cannot be read (an older agent's format,
 a retired field, no run generation) is settled from its run id and the
-Controller alone. The agent asks for the run's disposition. An unowned run has
-its lifecycle claim retired. A known running run comes back with its accepted
+Controller alone. The agent asks for the run's disposition. The Controller
+names every run it does not want (never owned, failed, or stopped) unowned, and
+the agent retires that run's lifecycle claim. A known running run comes back with its accepted
 generation; when the root helper proves the exact `vonk-<run_id>` container is
 absent or stopped, the agent reports that absence at that generation and the
 Controller recovers the run through its normal singleton recovery. A running

@@ -8214,16 +8214,14 @@ class ModelCacheService:
                 for installation in installations
             ):
                 reasons.add("recipe-installation")
-            running_installation_ids = session.scalars(
-                select(RecipeRun.installation_id).where(
-                    RecipeRun.state.in_(["planned", "starting", "running"]),
-                )
+            running_revision_ids = session.scalars(
+                select(RecipeInstallation.recipe_revision_id)
+                .join(RecipeRun, RecipeRun.installation_id == RecipeInstallation.id)
+                .where(RecipeRun.state.in_(["planned", "starting", "running"]))
             )
             if any(
-                self._recipe_references_cache(
-                    session, installation_id, cache_model_digests
-                )
-                for installation_id in running_installation_ids
+                self._recipe_references_cache(session, revision_id, cache_model_digests)
+                for revision_id in running_revision_ids
             ):
                 reasons.add("running-model")
         for profile in session.scalars(select(FleetProfile)):
@@ -8258,13 +8256,12 @@ class ModelCacheService:
         revision_id: str,
         cache_model_digests: set[str],
     ) -> bool:
-        revision = session.get(CatalogDocumentRevision, revision_id)
-        if revision is None or revision.kind != "recipe" or revision.state != "active":
-            return False
         try:
-            recipe = read_catalog_document(revision)
-            if not isinstance(recipe, RecipeDefinition):
-                raise TypeError("catalog revision is not a recipe")
+            # An unreadable or replaced revision is judged by the newest
+            # readable revision of the same recipe, never raised to callers.
+            recipe, _, _ = self._recipe_document(
+                session, None, revision_id, tolerant=True
+            )
             direct_model_digests = set(_recipe_model_content_digests(recipe))
             if cache_model_digests.intersection(direct_model_digests):
                 return True

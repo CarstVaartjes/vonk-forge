@@ -18,6 +18,7 @@ from .library_contract import (
     _utc,
 )
 from .models import (
+    ACTIVE_RUN_STATES,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
@@ -27,7 +28,6 @@ from .models import (
     RunNode,
 )
 
-_ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _RUN_RANK_FRESH_SECONDS = 300
 
 # The bounded operational collections, named by the contract's own literal set
@@ -280,7 +280,7 @@ def load_placement_operational_evidence(
             )
             .where(
                 RecipeInstallation.recipe_revision_id == recipe_revision_id,
-                RecipeRun.state.in_(_ACTIVE_RUN_STATES),
+                RecipeRun.state.in_(ACTIVE_RUN_STATES),
             )
             .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())
             .limit(_MAX_OPERATIONAL_ROWS + 1)

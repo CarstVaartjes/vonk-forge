@@ -53,8 +53,6 @@ from .models import (
     AgentNode,
     AgentOperationAttempt,
     Job,
-    RecipeRun,
-    RunNode,
 )
 from .models import AgentOperation as StoredAgentOperation
 from .package_activation import matches_receipt
@@ -63,19 +61,6 @@ from .strict_json import read_stored_model
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
-def recipe_run_known(session: Session, run_id: str) -> bool:
-    """Whether this Controller has any record of one recipe run.
-
-    The agent's disposition lookup uses it to learn that a local run has no
-    owner here and can be retired.
-    """
-
-    return session.get(RecipeRun, run_id) is not None or (
-        session.scalar(select(RunNode.id).where(RunNode.run_id == run_id).limit(1))
-        is not None
-    )
 
 
 class HostHelperAuthorityError(RuntimeError):
