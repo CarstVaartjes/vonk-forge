@@ -8390,6 +8390,35 @@ def _require_profile_runtime_image(
         )
 
 
+def _build_serves_revision(
+    session: Session, build: RecipeBuild, revision_id: str | None
+) -> bool:
+    """Whether ``revision_id`` may consume ``build``'s verified artifact.
+
+    A build keeps the revision that produced it. A successor whose executable
+    inputs are unchanged, for instance after a title-only edit, reuses it
+    through its own current authorization for that exact build archive.
+    """
+
+    if revision_id is None:
+        return False
+    if build.recipe_revision_id == revision_id:
+        return True
+    return (
+        session.scalar(
+            select(RuntimeImageAuthorization.id)
+            .where(
+                RuntimeImageAuthorization.recipe_revision_id == revision_id,
+                RuntimeImageAuthorization.state == "authorized",
+                RuntimeImageAuthorization.build_id == build.id,
+                RuntimeImageAuthorization.oci_archive_sha256 == build.oci_layout_sha256,
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
 def _build_receipt_in_session(
     session: Session,
     plan: RunSwitchPlan,
@@ -8406,7 +8435,7 @@ def _build_receipt_in_session(
     build = session.get(RecipeBuild, build_id)
     if (
         build is None
-        or build.recipe_revision_id != plan.recipe_revision_id
+        or not _build_serves_revision(session, build, plan.recipe_revision_id)
         or build.state != "succeeded"
         or build.build_input_sha256 != plan.build.build_input_sha256
         or not _is_oci_digest(build.image_digest)
