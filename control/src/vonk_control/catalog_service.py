@@ -39,6 +39,7 @@ from .models import (
     CatalogDocumentHead,
     RecipeSourceBundle,
 )
+from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import (
     SourceBundleError,
     SourceBundleStoreProtocol,
@@ -77,6 +78,8 @@ class RecipeCatalogLocalRevision:
     revision_number: int
     content_sha256: str | None
     release_version: str | None
+    # Spark count of the active revision; None when it cannot be read.
+    node_count: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +218,7 @@ class CatalogService:
                         revision_number=row.revision_number,
                         content_sha256=row.content_digest,
                         release_version=_release_version(row.document),
+                        node_count=_node_count(row.document),
                     )
         return result
 
@@ -502,6 +506,13 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
         created_by=revision.created_by,
         created_at=revision.created_at,
     )
+
+
+def _node_count(document: Mapping[str, object]) -> int | None:
+    try:
+        return recipe_topology(document).node_count
+    except (RecipeRuntimeSpecError, TypeError, ValueError):
+        return None
 
 
 def _release_version(document: Mapping[str, object]) -> str | None:

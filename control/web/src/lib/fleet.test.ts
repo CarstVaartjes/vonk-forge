@@ -2,6 +2,7 @@ import type {VisualFleetNode} from "../api/types";
 import {
   formatBytes,
   nodeDisplayName,
+  nodeRecipeUpdates,
   nodeSecondaryName,
   nodeStatus,
   offlineReasonLabel,
@@ -126,4 +127,22 @@ test("keeps technical Spark identities out of the primary name", () => {
   const identityHostname = node({...technical, hostname: `${technical.id}.internal`, labels: {role: "inference"}});
   expect(nodeDisplayName(identityHostname)).toBe("Inference Spark");
   expect(nodeSecondaryName(identityHostname)).toBeNull();
+});
+
+describe("recipe update notices", () => {
+  const notice = {code: "recipe.update_available", severity: "info", running_revision_id: "a", newest_revision_id: "b", detail: "Update available: running GLM 1.6.0, newest 1.7.0 (2026-09-28). Reload to apply."} as const;
+  const run = {run_id: "run-1", title: "GLM", recipe_update: notice} as unknown as VisualFleetNode["loaded"][number];
+
+  it("is informational: the Spark stays online and the update is listed once per run", () => {
+    const value = node({
+      loaded: [run, {...run, rank: 1} as VisualFleetNode["loaded"][number]],
+      warnings: [{code: "recipe.update_available", detail: notice.detail, severity: "info"}],
+    });
+    expect(nodeStatus(value, NOW)).toEqual({status: "online", reasons: []});
+    expect(nodeRecipeUpdates(value)).toEqual([{runId: "run-1", title: "GLM", detail: notice.detail}]);
+  });
+
+  it("lists nothing for a run on the newest revision", () => {
+    expect(nodeRecipeUpdates(node({loaded: [{...run, recipe_update: null} as VisualFleetNode["loaded"][number]]}))).toEqual([]);
+  });
 });

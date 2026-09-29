@@ -2574,6 +2574,7 @@ export interface components {
             recipe_id?: string | null;
             /** Recipe Selector */
             recipe_selector: string;
+            recipe_update?: components["schemas"]["RecipeUpdateNotice"] | null;
             /** Required Sparks */
             required_sparks?: number | null;
             /** Resources */
@@ -4775,7 +4776,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "run.degraded" | "cpu.low-clock";
+            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "run.degraded" | "recipe.update_available" | "cpu.low-clock";
             /** Detail */
             detail: string;
             /**
@@ -5716,6 +5717,36 @@ export interface components {
             /** Retryable */
             retryable: boolean;
         };
+        /**
+         * RecipeUpdateNotice
+         * @description A running workload uses an older revision than the newest active one.
+         */
+        RecipeUpdateNotice: {
+            /**
+             * Code
+             * @default recipe.update_available
+             */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Newest Released At */
+            newest_released_at?: string | null;
+            /** Newest Revision Id */
+            newest_revision_id: string;
+            /** Newest Version */
+            newest_version?: string | null;
+            /** Running Released At */
+            running_released_at?: string | null;
+            /** Running Revision Id */
+            running_revision_id: string;
+            /** Running Version */
+            running_version?: string | null;
+            /**
+             * Severity
+             * @default info
+             */
+            severity: string;
+        };
         /** RecipeUpdateRequest */
         RecipeUpdateRequest: {
             /**
@@ -5990,6 +6021,7 @@ export interface components {
             recipe_id: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+            recipe_update?: components["schemas"]["RecipeUpdateNotice"] | null;
             /** Role */
             role: string;
             /**

@@ -44,8 +44,21 @@ export function nodeStatus(node: VisualFleetNode, now: Date): {status: NodeStatu
   const warnings = node.telemetry?.sample
     ? reconcileTelemetryWarnings(node.warnings, telemetryFreshnessAt(node.telemetry.sample.observed_at, now))
     : node.warnings;
-  const reasons = warnings.map(warning => warning.detail);
+  // Informational notices (a newer recipe revision exists) are not attention.
+  const reasons = warnings.filter(warning => warning.severity !== "info").map(warning => warning.detail);
   return {status: reasons.length > 0 ? "needs attention" : "online", reasons};
+}
+
+/** Running workloads on an older recipe revision, once per run; informational and never an error. */
+export function nodeRecipeUpdates(node: VisualFleetNode): {runId: string; title: string; detail: string}[] {
+  const seen = new Set<string>();
+  const updates: {runId: string; title: string; detail: string}[] = [];
+  for (const run of node.loaded) {
+    if (!run.recipe_update || seen.has(run.run_id)) continue;
+    seen.add(run.run_id);
+    updates.push({runId: run.run_id, title: run.title, detail: run.recipe_update.detail});
+  }
+  return updates;
 }
 
 const OFFLINE_REASON_LABELS: Record<NonNullable<VisualFleetNode["connection"]["offline_reason"]>, string> = {

@@ -403,6 +403,7 @@ from .recipe_uninstall_result import RecipeUninstallResult
 from .recipe_update_child import RecipeUpdateChild
 from .recipe_update_child_state import RecipeUpdateChildState
 from .recipe_update_failure import RecipeUpdateFailure
+from .recipe_update_notice import RecipeUpdateNotice
 from .recipe_update_request import RecipeUpdateRequest
 from .recipe_update_response import RecipeUpdateResponse
 from .recipe_update_response_state import RecipeUpdateResponseState
@@ -931,6 +932,7 @@ __all__ = (
     "RecipeUpdateChild",
     "RecipeUpdateChildState",
     "RecipeUpdateFailure",
+    "RecipeUpdateNotice",
     "RecipeUpdateRequest",
     "RecipeUpdateResponse",
     "RecipeUpdateResponseState",
