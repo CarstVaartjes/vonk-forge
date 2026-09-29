@@ -141,12 +141,13 @@ fn retention_rejects_wrong_size_before_publishing_cache() {
 
     let cache = root.path().join("oci-archives");
     assert!(!cache.join(&request.oci_layout_sha256).exists());
-    assert!(
-        fs::read_dir(cache)
-            .unwrap()
-            .flatten()
-            .all(|entry| !entry.file_name().to_string_lossy().contains(".partial."))
-    );
+    if let Ok(entries) = fs::read_dir(cache) {
+        assert!(
+            entries
+                .flatten()
+                .all(|entry| !entry.file_name().to_string_lossy().contains(".partial."))
+        );
+    }
 }
 
 #[test]
