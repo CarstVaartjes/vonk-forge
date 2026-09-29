@@ -660,3 +660,41 @@ def test_failed_candidate_can_retry_against_previous_good_snapshot(
     client.prepare(retried)
     assert client.fetch(retried.items[0].uri).package_handle is not None
     client.close()
+
+
+def test_unchanged_release_is_noticed_cheaply_and_a_new_one_is_fetched(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """Checking for a new recipes release costs one conditional request."""
+
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    conditional: list[str | None] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == RELEASES:
+            conditional.append(request.headers.get("if-none-match"))
+            release.requests.append(str(request.url))
+            if request.headers.get("if-none-match") == f'"{release.tag}"':
+                return httpx2.Response(304)
+            response = release.handler(request)
+            response.headers["etag"] = f'"{release.tag}"'
+            return response
+        return release.handler(request)
+
+    client = RecipePackageClient(
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx2.MockTransport(handler),
+    )
+    first = client.list()
+    downloads = len(release.requests)
+    assert client.list() == first
+    assert conditional == [None, '"v2.1.0"']
+    assert len(release.requests) == downloads + 1  # only the conditional check
+
+    # A new release changes the listing: the check no longer answers 304.
+    release.tag = "v2.1.1"
+    client.list()
+    assert len(release.requests) > downloads + 2
+    client.close()

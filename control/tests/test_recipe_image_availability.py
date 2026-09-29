@@ -3654,3 +3654,63 @@ def test_archive_integrity_failure_builds_the_image_again(tmp_path: Path) -> Non
     assert corrupt == [False]
     assert builds[-1] is True
     assert storage.read_receipt(ARCHIVE_SHA).oci_archive_sha256 == ARCHIVE_SHA
+
+
+def test_newer_revision_is_prepared_at_once_after_the_older_build_failed(
+    tmp_path: Path,
+) -> None:
+    """The quiet period after a failed build only guards the SAME revision."""
+
+    recipe = _recipe("recipe-source-build.json")
+    successor = _successor(recipe, "Successor recipe revision")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        older = _add_revision(session, "revision-older", recipe, built=False)
+        newer = _add_revision(session, "revision-newer", successor, built=False)
+        newer.document_id = older.document_id
+        newer.revision_number = 2
+        _add_head(session, older)
+
+    def builder(*_: object, **__: object) -> dict[str, object]:
+        raise RecipeImageAvailabilityError(
+            "recipe_image.build_failed",
+            "compiler failed at step 4",
+            retryable=False,
+            recovery_actions=("inspect",),
+        )
+
+    service = _service(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe if recipe_revision_id == "revision-older" else successor,
+            _build_runtime(),
+        ),
+        builder=builder,
+        clock=lambda: datetime.now(UTC),
+    )
+    service.ensure_preparation("revision-older", actor="operator")
+    assert service.run_pending() == 1
+    blockers = service.ensure_preparation("revision-older", actor="operator")
+    assert [item.code for item in blockers] == ["recipe_image.build_failed"]
+    assert "asks again after" in blockers[0].detail  # same revision: it waits
+
+    # The recipe syncs a newer revision; no waiting for the retry pause.
+    with sessions.begin() as session:
+        _set_active_head(session, "revision-newer")
+    blockers = service.ensure_preparation("revision-newer", actor="operator")
+
+    assert not any(item.severity == "error" for item in blockers)
+    with sessions() as session:
+        started = tuple(
+            session.scalars(
+                select(Job).where(Job.kind == "recipe.image.availability.v2")
+            )
+        )
+    assert any(
+        job.payload.get("recipe_revision_id") == "revision-newer"
+        and job.state in {"queued", "running"}
+        for job in started
+    ), [(job.kind, job.state, job.payload) for job in started]

@@ -7059,10 +7059,159 @@ class FleetProfileService:
             row.updated_at = _aware(self._clock())
         return fresh
 
+    def _follow_newest_recipe_revisions(self, application_id: str, actor: str) -> bool:
+        """Re-plan a load that has not started anything on the newest recipes.
+
+        A load waiting to be admitted (for example for a runtime image) has
+        touched no Spark yet, so nothing running is swapped by following the
+        recipe: profile loads always use the newest revision.  The saved
+        profile must be the one that was accepted; a changed profile is a new
+        intent and keeps superseding this one.  Returns ``True`` when the
+        application was re-planned against the newest revisions and the current
+        Fleet.
+        """
+
+        try:
+            with self._sessions() as session:
+                row = session.get(FleetProfileApplication, application_id)
+                if row is None:
+                    return False
+                progress = _persisted_profile_progress(row)
+                if (
+                    not _owns_pending_admission(row, progress)
+                    or row.current_operation_id is not None
+                    or row.current_step != 0
+                ):
+                    return False
+                intended = self._intended_profile(row, session=session)
+                profile = session.get(FleetProfile, row.profile_id)
+                if (
+                    profile is None
+                    or _digest(_profile_document(profile)) != intended.profile_digest
+                ):
+                    return False
+                newest = self._execution_assignments(session, profile)
+                accepted = {item.id: item for item in intended.assignments}
+                if set(accepted) != {item.id for item in newest}:
+                    return False
+                moved = [
+                    item
+                    for item in newest
+                    if item.recipe_revision_id != accepted[item.id].recipe_revision_id
+                ]
+                if not moved:
+                    return False
+                versions = []
+                for item in moved:
+                    revision = session.get(
+                        CatalogDocumentRevision, item.recipe_revision_id
+                    )
+                    release = revision.document.get("release") if revision else None
+                    version = (
+                        release.get("version") if isinstance(release, dict) else None
+                    )
+                    versions.append(
+                        f"{item.recipe_title} {version}"
+                        if isinstance(version, str)
+                        else item.recipe_title
+                    )
+                followed = intended.model_copy(
+                    update={"assignments": sorted(newest, key=lambda item: item.id)}
+                )
+                plan = _persisted_profile_plan(row)
+                fresh = self.preview(
+                    row.profile_id,
+                    execution_assignments=tuple(followed.assignments),
+                    profile_name=plan.profile_name,
+                    profile_digest=followed.profile_digest,
+                    accepted_intent=followed,
+                    accepted_profile_revision=plan.profile_revision,
+                    accepted_profile_definition=plan.profile_definition,
+                    excluded_application_id=application_id,
+                )
+        except (FleetProfileConflict, ValidationError, KeyError):
+            # The ordinary admission path reports whatever is unresumable.
+            return False
+        blockers: list[OperationBlocker] = []
+        if not fresh.allowed and _profile_preview_is_waitable(fresh):
+            blockers = _preview_blockers(fresh) + self._request_preparations(
+                fresh, actor=actor
+            )
+        reason = (
+            f"Recipe updated to {', '.join(versions)}; re-planned."
+            if versions
+            else "Recipe updated; re-planned."
+        )
+        now = _aware(self._clock())
+        with self._sessions.begin() as session:
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if row is None:
+                return False
+            progress = _persisted_profile_progress(row)
+            if (
+                not _owns_pending_admission(row, progress)
+                or row.current_operation_id is not None
+                or row.current_step != 0
+                or progress.intended_profile != intended
+            ):
+                return False
+            pending_digest = _digest(
+                {
+                    "schema_version": 2,
+                    "reconciliation_digest": fresh.plan_digest,
+                    "retry_of_application_id": None,
+                    "request_key": row.request_key,
+                }
+            )
+            row.plan = fresh.model_copy(
+                update={"plan_digest": pending_digest}
+            ).model_dump(mode="json")
+            row.plan_digest = pending_digest
+            row.progress = _progress_with_blockers(
+                progress.model_copy(
+                    update={
+                        "intended_profile": followed.model_copy(
+                            update={"reviewed_plan_digest": fresh.plan_digest}
+                        ),
+                        "total_steps": len(fresh.steps),
+                    }
+                ),
+                blockers,
+                admission_pending=True,
+                admission_attempt=0,
+                admission_retry_at=now.isoformat(),
+            )
+            row.state = "queued"
+            row.status_reason = reason[:512]
+            row.updated_at = now
+        return True
+
     def _observe_pending_admissions(self, now: datetime) -> bool:
         """Retry reviewed applications that could not acquire admission locks."""
 
         candidate: tuple[str, str, str, FleetProfilePreview] | None = None
+        # A waiting load follows a newer recipe revision at once, not when its
+        # own retry backoff falls due.
+        with self._sessions() as session:
+            waiting = tuple(
+                session.execute(
+                    select(FleetProfileApplication.id, FleetProfileApplication.actor)
+                    .where(
+                        FleetProfileApplication.state.in_(
+                            ("queued", "waiting-for-operator")
+                        ),
+                        FleetProfileApplication.current_operation_id.is_(None),
+                        FleetProfileApplication.current_step == 0,
+                    )
+                    .order_by(FleetProfileApplication.created_at)
+                    .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
+                )
+            )
+        for waiting_id, waiting_actor in waiting:
+            if self._follow_newest_recipe_revisions(waiting_id, waiting_actor):
+                return True
         with self._sessions() as session:
             progress_document = FleetProfileApplication.progress
             admission_pending = (

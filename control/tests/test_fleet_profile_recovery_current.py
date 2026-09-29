@@ -630,3 +630,139 @@ def test_load_with_a_missing_image_requests_preparation_and_continues_when_ready
         now[0] += timedelta(seconds=30)
         service.tick()
     assert service.application(application.id).state == "running"
+
+
+def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
+    tmp_path: Path,
+) -> None:
+    """A load still waiting for preparation re-plans on the newest revision."""
+
+    import copy
+
+    from vonk_control.models import RecipeBuild
+    from vonk_control.operation_blockers import make_blocker
+    from vonk_forge_contracts import document_sha256
+
+    sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    service = build_production_fleet_profile_service(
+        sessions, clock=lifecycle._clock, run_switch_operations=run_switch
+    )
+    requested: list[str] = []
+
+    def prepare(recipe_revision_id: str, *, actor: str):
+        requested.append(recipe_revision_id)
+        return [
+            make_blocker(
+                "recipe_image.preparing",
+                "Preparing the model and runtime image (prepare).",
+                severity="info",
+            )
+        ]
+
+    service.bind_preparation_starter(prepare)
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Follow newest",
+                "assignments": [
+                    {
+                        "recipe_selector": f"vonk-forge/{revision.slug}",
+                        "spark_ids": list(nodes),
+                        "desired_state": "running",
+                        "assignment_name": "follow-chat",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        for build in session.scalars(select(RecipeBuild)):
+            build.state = "failed"
+    application = service.apply(profile.id, request_key=_uuid(910), actor="admin")
+    assert application.state == "queued"
+    assert requested == [revision.id]
+
+    # While it waits, the recipe gets a newer revision.
+    with sessions.begin() as session:
+        old = session.get(CatalogDocumentRevision, revision.id)
+        assert old is not None
+        document = copy.deepcopy(old.document)
+        metadata = document["metadata"]
+        assert isinstance(metadata, dict)
+        metadata["summary"] = "A newer synced revision"
+        newer = CatalogDocumentRevision(
+            document_id=old.document_id,
+            kind=old.kind,
+            publisher=old.publisher,
+            slug=old.slug,
+            revision_number=old.revision_number + 1,
+            schema_version=old.schema_version,
+            state="active",
+            document=document,
+            content_digest=document_sha256(document),
+            projected=old.projected,
+            execution_key=old.execution_key,
+            artifact_key=old.artifact_key,
+            created_by="admin",
+            created_at=old.created_at,
+        )
+        session.add(newer)
+        session.flush()
+        newer_id = newer.id
+
+    now = [lifecycle._clock()]
+    service._clock = lambda: now[0]
+    now[0] += timedelta(seconds=30)
+    service.tick()
+    waiting = service.application(application.id)
+    assert waiting.state == "queued", waiting.status_reason
+    assert "re-planned" in (waiting.status_reason or "")
+    assert newer_id in requested  # the new revision's preparation is enqueued
+
+    with sessions.begin() as session:
+        for build in tuple(session.scalars(select(RecipeBuild))):
+            build.state = "succeeded"
+            if build.recipe_revision_id == revision.id:
+                # The image of the newest revision is built.
+                session.add(
+                    RecipeBuild(
+                        **{
+                            column.key: getattr(build, column.key)
+                            for column in RecipeBuild.__table__.columns
+                            if column.key not in {"id", "recipe_revision_id"}
+                        },
+                        recipe_revision_id=newer_id,
+                    )
+                )
+    for _ in range(6):
+        now[0] += timedelta(seconds=30)
+        service.tick()
+    final = service.application(application.id)
+    assert final.state == "running", final.status_reason
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        intended = FleetProfileApplicationProgress.model_validate(
+            row.progress
+        ).intended_profile
+        assert intended is not None
+        assert {item.recipe_revision_id for item in intended.assignments} == {newer_id}

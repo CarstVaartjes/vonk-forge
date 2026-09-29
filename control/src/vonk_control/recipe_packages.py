@@ -279,6 +279,11 @@ class RecipePackageClient:
         self._redirect_origin = origin if asset_url else RELEASE_ASSET_ORIGIN
         self._release_selector = release
         self._release: _VerifiedRelease | None = None
+        # The release listing's validator: a conditional GET answers "no new
+        # release" cheaply, so the library can be checked every minute.
+        self._listing_etag: str | None = None
+        self._listing: tuple[str, frozenset[str]] | None = None
+        self._listing_unchanged = False
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
         self._client = httpx2.Client(
@@ -303,7 +308,14 @@ class RecipePackageClient:
 
     def list(self) -> RecipeLibrarySnapshot:
         try:
-            raw, publication, release = self._fetch_release()
+            resolved = self._resolve_release()
+            if (
+                self._listing_unchanged
+                and self._snapshot is not None
+                and self._release is not None
+            ):
+                return self._snapshot  # the publisher says: nothing changed
+            raw, publication, release = self._fetch_release(resolved)
         except (httpx2.HTTPError, OSError) as error:
             persisted = self._read_persisted_snapshot()
             if persisted is not None:
@@ -329,8 +341,10 @@ class RecipePackageClient:
         self._prepared = {}
         return snapshot
 
-    def _fetch_release(self) -> tuple[bytes, str, _VerifiedRelease]:
-        tag, assets = self._resolve_release()
+    def _fetch_release(
+        self, resolved: tuple[str, frozenset[str]]
+    ) -> tuple[bytes, str, _VerifiedRelease]:
+        tag, assets = resolved
         checksums_raw = self._download_asset(
             tag, assets, RELEASE_CHECKSUMS, MAX_CHECKSUMS_BYTES
         )
@@ -363,10 +377,16 @@ class RecipePackageClient:
         else:
             path = f"releases/tags/{self._release_selector}"
             maximum = MAX_RELEASE_BYTES
+        headers = {"Accept": "application/vnd.github+json"}
+        if self._listing_etag is not None and self._listing is not None:
+            headers["If-None-Match"] = self._listing_etag
         response = self._client.get(
-            f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/{path}",
-            headers={"Accept": "application/vnd.github+json"},
+            f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/{path}", headers=headers
         )
+        self._listing_unchanged = False
+        if response.status_code == 304 and self._listing is not None:
+            self._listing_unchanged = True
+            return self._listing
         if response.status_code != 200 or response.is_redirect:
             raise RecipePackageError(
                 "recipe_package.unavailable", "recipe release is unavailable"
@@ -402,7 +422,9 @@ class RecipePackageClient:
                     "recipe release asset identity is invalid",
                 )
             assets.add(asset.name)
-        return release.tag_name, frozenset(assets)
+        self._listing = (release.tag_name, frozenset(assets))
+        self._listing_etag = response.headers.get("etag")
+        return self._listing
 
     def _download_asset(
         self,
