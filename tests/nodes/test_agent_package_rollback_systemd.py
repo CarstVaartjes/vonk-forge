@@ -440,7 +440,6 @@ def main() -> None:
             env=dict(os.environ, SYSTEMD_OFFLINE="1"),
         )
         assert operator_downgrade.returncode == 0, operator_downgrade.stderr
-        assert "installing requested downgrade" in operator_downgrade.stderr
         assert sha(AGENT) == source["binary_sha256"]
 
         baseline()

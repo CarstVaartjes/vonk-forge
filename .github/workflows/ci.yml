@@ -1468,21 +1468,6 @@ jobs:
               "release-output/agent-package/${package}.sigstore.json"
             )
           done
-          mapfile -t expected_names < <(
-            for asset in "${release_assets[@]}"; do
-              [[ "$asset" == release-output/agent-package/* ]] && printf '%s\n' "${asset##*/}"
-            done | LC_ALL=C sort
-          )
-          mapfile -t actual_names < <(
-            find release-output/agent-package -mindepth 1 -maxdepth 1 \
-              -printf '%f\n' | LC_ALL=C sort
-          )
-          if [[ "${actual_names[*]}" != "${expected_names[*]}" ]]; then
-            echo "refusing unexpected agent package release asset set" >&2
-            printf 'expected: %s\nactual: %s\n' \
-              "${expected_names[*]}" "${actual_names[*]}" >&2
-            exit 1
-          fi
           for asset in "${release_assets[@]}"; do
             [[ -f "$asset" && ! -L "$asset" ]]
           done

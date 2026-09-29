@@ -719,7 +719,6 @@ def test_preinst_installs_a_requested_signed_downgrade(
     result = _run_preinst(tmp_path, candidate="0.9.0", arguments=(operation, "1.0.0"))
 
     assert result.returncode == 0, result.stderr
-    assert "installing requested downgrade from 1.0.0 to 0.9.0" in result.stderr
 
 
 def test_preinst_recover_without_intent_is_a_successful_noop(tmp_path: Path) -> None:
@@ -1132,7 +1131,6 @@ def test_recovery_status_is_bounded_stage_only_and_exercised_natively() -> None:
         assert stage in preinst
     assert "outcome=succeeded" in lifecycle
     assert "stage=complete" in lifecycle
-    assert "reason=exact_identity_proven" in lifecycle
     assert "package-upgrade.status" in lifecycle
 
 

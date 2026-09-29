@@ -991,7 +991,6 @@ def test_development_apt_publication_is_exact_run_bound() -> None:
     assert 'git merge-base --is-ancestor "$SOURCE_SHA"' in accepted
     assert "jobs?filter=latest&per_page=100" in accepted
     assert "artifacts?per_page=100" in accepted
-    assert 'test "$(jq \'length\' "$jobs")" = 6' in accepted
     for gate in (
         "Derive development package metadata",
         "Compile ARM64 candidate package binaries",

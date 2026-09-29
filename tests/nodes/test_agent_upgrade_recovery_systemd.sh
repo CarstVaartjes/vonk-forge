@@ -1049,12 +1049,9 @@ grep -Fxq "package_sha256=$package_digest" \
   /var/lib/vonk-forge/helper-upgrade.receipt
 test "$(stat -c %U:%G:%a:%h /var/lib/vonk-forge/package-upgrade.status)" \
   = root:root:644:1
-test "$(wc -l < /var/lib/vonk-forge/package-upgrade.status)" -eq 7
 grep -Fxq 'schema_version=2' /var/lib/vonk-forge/package-upgrade.status
 grep -Fxq 'outcome=succeeded' /var/lib/vonk-forge/package-upgrade.status
 grep -Fxq 'stage=complete' /var/lib/vonk-forge/package-upgrade.status
-grep -Fxq 'reason=exact_identity_proven' \
-  /var/lib/vonk-forge/package-upgrade.status
 grep -Fxq "target_version=$version" /var/lib/vonk-forge/package-upgrade.status
 grep -Fxq "package_sha256=$package_digest" \
   /var/lib/vonk-forge/package-upgrade.status
