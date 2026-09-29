@@ -14,6 +14,7 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
+  from ..models.mapping_selection_option_choices import MappingSelectionOptionChoices
   from ..models.mapping_selection_parameters import MappingSelectionParameters
   from ..models.spark_group_node import SparkGroupNode
 
@@ -35,6 +36,7 @@ class MappingSelection:
             placement_digest (str):
             topology_name (str):
             mapping_generation (int | None | Unset):
+            option_choices (MappingSelectionOptionChoices | Unset):
             parameters (MappingSelectionParameters | Unset):
      """
 
@@ -44,6 +46,7 @@ class MappingSelection:
     placement_digest: str
     topology_name: str
     mapping_generation: int | None | Unset = UNSET
+    option_choices: MappingSelectionOptionChoices | Unset = UNSET
     parameters: MappingSelectionParameters | Unset = UNSET
 
 
@@ -51,6 +54,7 @@ class MappingSelection:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.mapping_selection_option_choices import MappingSelectionOptionChoices # noqa: PLC0415
         from ..models.mapping_selection_parameters import MappingSelectionParameters # noqa: PLC0415
         from ..models.spark_group_node import SparkGroupNode # noqa: PLC0415
         action: str = self.action
@@ -75,6 +79,10 @@ class MappingSelection:
         else:
             mapping_generation = self.mapping_generation
 
+        option_choices: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.option_choices, Unset):
+            option_choices = self.option_choices.to_dict()
+
         parameters: dict[str, Any] | Unset = UNSET
         if not isinstance(self.parameters, Unset):
             parameters = self.parameters.to_dict()
@@ -91,6 +99,8 @@ class MappingSelection:
         })
         if mapping_generation is not UNSET:
             field_dict["mapping_generation"] = mapping_generation
+        if option_choices is not UNSET:
+            field_dict["option_choices"] = option_choices
         if parameters is not UNSET:
             field_dict["parameters"] = parameters
 
@@ -100,6 +110,7 @@ class MappingSelection:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.mapping_selection_option_choices import MappingSelectionOptionChoices # noqa: PLC0415
         from ..models.mapping_selection_parameters import MappingSelectionParameters # noqa: PLC0415
         from ..models.spark_group_node import SparkGroupNode # noqa: PLC0415
         d = dict(src_dict)
@@ -140,6 +151,16 @@ class MappingSelection:
         mapping_generation = _parse_mapping_generation(d.pop("mapping_generation", UNSET))
 
 
+        _option_choices = d.pop("option_choices", UNSET)
+        option_choices: MappingSelectionOptionChoices | Unset
+        if isinstance(_option_choices,  Unset):
+            option_choices = UNSET
+        else:
+            option_choices = MappingSelectionOptionChoices.from_dict(_option_choices)
+
+
+
+
         _parameters = d.pop("parameters", UNSET)
         parameters: MappingSelectionParameters | Unset
         if isinstance(_parameters,  Unset):
@@ -157,6 +178,7 @@ class MappingSelection:
             placement_digest=placement_digest,
             topology_name=topology_name,
             mapping_generation=mapping_generation,
+            option_choices=option_choices,
             parameters=parameters,
         )
 

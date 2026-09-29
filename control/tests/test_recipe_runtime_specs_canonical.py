@@ -801,3 +801,104 @@ def test_runtime_compiler_rejects_retired_member_paths(
         package["paths"] = ["context.tar", "Dockerfile"]
     with pytest.raises(RecipeRuntimeSpecError, match="retired member_paths"):
         _compile(recipe, model, package_handle=package, role="entrypoint", rank=0)
+
+
+def _recipe_with_options(model: dict[str, object]) -> dict[str, object]:
+    raw = _example("recipe-source-build.json")
+    runtime = _raw_runtime(raw)
+    runtime["arguments"] = [{"name": "verify", "value": "all"}]
+    runtime["environment"] = [{"name": "MODE", "value": "off"}]
+    raw["options"] = [
+        {
+            "name": "verification",
+            "label": "Verification",
+            "help": "How drafted tokens are verified.",
+            "choices": [
+                {
+                    "value": "standard",
+                    "label": "Standard",
+                    "help": "Verify every token.",
+                    "default": True,
+                },
+                {
+                    "value": "adaptive",
+                    "label": "Adaptive",
+                    "help": "Verify a per-step prefix.",
+                    "args": [
+                        {"name": "verify", "value": "prefix"},
+                        {"name": "extra-flag", "value": True},
+                    ],
+                    "env": {"MODE": "adaptive"},
+                },
+            ],
+        }
+    ]
+    return raw
+
+
+def test_chosen_recipe_options_reach_every_rank_and_default_when_unset(
+    model: dict[str, object],
+) -> None:
+    raw = _recipe_with_options(model)
+    recipe = contracts.read_recipe(raw)
+    ranks = [
+        (role.name, rank)
+        for rank, role in enumerate(
+            role for role in recipe.topology.roles for _ in range(role.count)
+        )
+    ]
+    assert ranks
+
+    def launch(parameters: dict[str, object] | None, role: str, rank: int) -> Any:
+        parsed = {contracts.document_sha256(model): contracts.read_model(model)}
+        spec = compile_runtime_spec(
+            recipe,
+            models=parsed,
+            recipe_digest=contracts.document_sha256(raw),
+            package_handle=_BUILT_IMAGE,
+            parameters=parameters,
+            role=role,
+            rank=rank,
+        )
+        env = {
+            item["name"]: item["value"]
+            for item in _mappings(_runtime(spec)["environment"], "environment")
+        }
+        return list(_argv(spec)), env
+
+    for role, rank in ranks:
+        chosen_argv, chosen_env = launch(
+            {"option_choices": {"verification": "adaptive"}}, role, rank
+        )
+        assert chosen_argv.count("--verify") == 1
+        assert chosen_argv[chosen_argv.index("--verify") + 1] == "prefix"
+        assert "--extra-flag" in chosen_argv
+        assert chosen_env["MODE"] == "adaptive"
+        default_argv, default_env = launch(None, role, rank)
+        assert default_argv[default_argv.index("--verify") + 1] == "all"
+        assert "--extra-flag" not in default_argv
+        assert default_env["MODE"] == "off"
+
+    with pytest.raises(RecipeRuntimeSpecError, match="verification"):
+        launch({"option_choices": {"verification": "nope"}}, *ranks[0])
+
+
+def test_a_recipe_option_cannot_reach_platform_owned_environment(
+    model: dict[str, object],
+) -> None:
+    raw = _recipe_with_options(model)
+    options = _raw_sequence(raw["options"], "options")
+    choices = _raw_mappings(_raw_object(options[0], "option")["choices"], "choices")
+    choices[1]["env"] = {"HOME": "/tmp"}
+    recipe = contracts.read_recipe(raw)
+    parsed = {contracts.document_sha256(model): contracts.read_model(model)}
+    with pytest.raises(RecipeRuntimeSpecError, match="platform-owned"):
+        compile_runtime_spec(
+            recipe,
+            models=parsed,
+            recipe_digest=contracts.document_sha256(raw),
+            package_handle=_BUILT_IMAGE,
+            parameters={"option_choices": {"verification": "adaptive"}},
+            role="entrypoint",
+            rank=0,
+        )

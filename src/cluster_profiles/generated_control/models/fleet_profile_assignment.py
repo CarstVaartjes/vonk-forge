@@ -14,6 +14,7 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
+  from ..models.fleet_profile_assignment_option_choices import FleetProfileAssignmentOptionChoices
   from ..models.fleet_profile_node import FleetProfileNode
 
 
@@ -37,6 +38,7 @@ class FleetProfileAssignment:
             topology_name (str):
             alias (None | str | Unset):
             model_title (None | str | Unset):
+            option_choices (FleetProfileAssignmentOptionChoices | Unset):
      """
 
     desired_state: FleetProfileAssignmentDesiredState
@@ -48,12 +50,14 @@ class FleetProfileAssignment:
     topology_name: str
     alias: None | str | Unset = UNSET
     model_title: None | str | Unset = UNSET
+    option_choices: FleetProfileAssignmentOptionChoices | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_profile_assignment_option_choices import FleetProfileAssignmentOptionChoices # noqa: PLC0415
         from ..models.fleet_profile_node import FleetProfileNode # noqa: PLC0415
         desired_state: str = self.desired_state
 
@@ -86,6 +90,10 @@ class FleetProfileAssignment:
         else:
             model_title = self.model_title
 
+        option_choices: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.option_choices, Unset):
+            option_choices = self.option_choices.to_dict()
+
 
         field_dict: dict[str, Any] = {}
 
@@ -102,6 +110,8 @@ class FleetProfileAssignment:
             field_dict["alias"] = alias
         if model_title is not UNSET:
             field_dict["model_title"] = model_title
+        if option_choices is not UNSET:
+            field_dict["option_choices"] = option_choices
 
         return field_dict
 
@@ -109,6 +119,7 @@ class FleetProfileAssignment:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_profile_assignment_option_choices import FleetProfileAssignmentOptionChoices # noqa: PLC0415
         from ..models.fleet_profile_node import FleetProfileNode # noqa: PLC0415
         d = dict(src_dict)
         desired_state = check_fleet_profile_assignment_desired_state(d.pop("desired_state"))
@@ -156,6 +167,16 @@ class FleetProfileAssignment:
         model_title = _parse_model_title(d.pop("model_title", UNSET))
 
 
+        _option_choices = d.pop("option_choices", UNSET)
+        option_choices: FleetProfileAssignmentOptionChoices | Unset
+        if isinstance(_option_choices,  Unset):
+            option_choices = UNSET
+        else:
+            option_choices = FleetProfileAssignmentOptionChoices.from_dict(_option_choices)
+
+
+
+
         fleet_profile_assignment = cls(
             desired_state=desired_state,
             id=id,
@@ -166,6 +187,7 @@ class FleetProfileAssignment:
             topology_name=topology_name,
             alias=alias,
             model_title=model_title,
+            option_choices=option_choices,
         )
 
         return fleet_profile_assignment

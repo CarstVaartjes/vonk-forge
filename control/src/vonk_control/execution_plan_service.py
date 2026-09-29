@@ -25,6 +25,7 @@ from .compiled_execution_plan import (
 from .distribution import ModelCacheVerifiedObjectSource
 from .models import CatalogDocumentRevision, ClusterMappingNode, RecipeBuild
 from .recipe_runtime_specs import (
+    OPTION_CHOICES_KEY,
     RecipeRuntimeSpecError,
     compile_runtime_spec,
     resolve_recipe_entities,
@@ -41,6 +42,7 @@ def compile_job_invocation(
     parameters: Mapping[str, object],
     timeout_seconds: int,
     memory_floor_bytes: int,
+    option_choices: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Compile invocation settings against the installation's exact receipts."""
     from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
@@ -70,7 +72,12 @@ def compile_job_invocation(
         recipe_digest=revision.content_digest,
         models=models,
         package_handle=_build_package(build),
-        parameters=parameters,
+        # The job runs with the recipe options its installation was made with.
+        parameters=(
+            {**parameters, OPTION_CHOICES_KEY: dict(option_choices)}
+            if option_choices
+            else parameters
+        ),
         role=plan.runtime.placement.role,
         rank=plan.runtime.placement.rank,
     )

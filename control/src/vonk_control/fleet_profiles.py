@@ -20,6 +20,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, object_session, sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_forge_contracts import RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology
 
 from .admission_locking import (
@@ -38,6 +39,7 @@ from .artifact_reference_scan import require_model_sets_open
 from .auth import MUTATION_ROLES, Actor
 from .bounded_json import integer, require_mapping, sequence
 from .catalog_revision_contract import read_catalog_document
+from .cluster_mappings import mapping_option_choices
 from .failure_classification import error_code, is_security_failure
 from .fleet_profile_contract import (
     FleetProfileAction,
@@ -579,6 +581,10 @@ _PROFILE_PHASE_BY_RUN_PHASE = {
 
 class FleetProfileConflict(RuntimeError):
     """A Fleet profile is invalid, stale, or cannot be safely applied."""
+
+
+class FleetProfileInvalidChoice(ValueError):
+    """A saved recipe option names an option or value the recipe does not offer."""
 
 
 class FleetProfileAdmissionBusy(FleetProfileConflict):
@@ -1165,6 +1171,7 @@ class RunSwitchFleetProfileAdapter:
             alias=alias,
             action=action,
             retention="retain-cached",
+            option_choices=dict(assignment.option_choices),
             plan_digest=None,
             request_key=request_key,
         )
@@ -2615,6 +2622,47 @@ def _validate_remaining_effects(
         )
 
 
+def _effective_option_choices(
+    document: Mapping[str, object],
+    stored: Mapping[str, str],
+    *,
+    strict: bool,
+) -> tuple[dict[str, str], list[str]]:
+    """The choice for every option the recipe declares, defaults filled in.
+
+    Saving is strict: an unknown option or value is refused with the choices
+    listed. Reading a saved profile is tolerant, because a newer recipe
+    revision may no longer offer a stored value: that option falls back to the
+    default and the second result names what was replaced, so it is shown
+    rather than blocking the profile.
+    """
+
+    try:
+        recipe = read_recipe(document)
+    except ValueError:
+        return dict(stored), []
+    try:
+        return recipe.resolve_options(stored), []
+    except RecipeOptionError as error:
+        if strict:
+            raise FleetProfileInvalidChoice(str(error)) from error
+    declared = {option.name: option for option in recipe.options}
+    kept: dict[str, str] = {}
+    notes: list[str] = []
+    for name, value in stored.items():
+        option = declared.get(name)
+        if option is None:
+            notes.append(f"Option {name} is no longer offered by the recipe")
+        elif value not in {choice.value for choice in option.choices}:
+            notes.append(
+                f"Option {name}: {value} is no longer offered; using "
+                f"{option.default_value}"
+            )
+        else:
+            kept[name] = value
+    return recipe.resolve_options(kept), notes
+
+
 def _choice_id(value: FleetProfileAssignmentInput) -> str:
     identity = ":".join(
         (
@@ -3093,6 +3141,9 @@ class FleetProfileService:
         for choice in self._choices(row):
             document, revision, _cache = self._resolve_choice(session, choice)
             topology = recipe_topology(revision.document)
+            option_choices, _notes = _effective_option_choices(
+                revision.document, choice.option_choices, strict=False
+            )
             roles = _expanded_roles(topology)
             nodes = [
                 FleetProfileNode(
@@ -3116,6 +3167,7 @@ class FleetProfileService:
                     desired_state=choice.desired_state,
                     alias=alias,
                     nodes=nodes,
+                    option_choices=option_choices,
                     recipe_id=document.id,
                     recipe_title=document.title,
                     model_title=self._model_title(session, revision.document),
@@ -3836,6 +3888,7 @@ class FleetProfileService:
                         desired_state=assignment.desired_state,
                         current_state=state.current_state,
                         node_ids=[node.node_id for node in assignment.nodes],
+                        option_choices=dict(assignment.option_choices),
                         actions=actions,
                         reasons=item_reasons,
                     )
@@ -7653,11 +7706,19 @@ class FleetProfileService:
     ) -> list[dict[str, object]]:
         assignments: list[dict[str, object]] = []
         for value in values:
-            document, _revision = self._recipe_document(session, value.recipe_selector)
+            document, revision = self._recipe_document(session, value.recipe_selector)
+            # Every option is saved with an explicit value: the operator's
+            # choice, or the recipe default where none was made.
+            choices, _notes = _effective_option_choices(
+                revision.document, value.option_choices, strict=True
+            )
             # Save the canonical catalog selector.  This is a logical recipe
             # choice; its active revision is deliberately resolved later.
             normalized = value.model_copy(
-                update={"recipe_selector": self._recipe_selector(document)}
+                update={
+                    "recipe_selector": self._recipe_selector(document),
+                    "option_choices": choices,
+                }
             )
             assignments.append(json.loads(canonical_message(normalized)))
         return assignments
@@ -7865,6 +7926,12 @@ class FleetProfileService:
                 model_selector = f"{model.publisher}/{model.slug}"
                 model_name = self._model_title(session, revision.document)
             assignment_selector = self._assignment_selector(choice)
+            effective_choices, choice_notes = _effective_option_choices(
+                revision.document, choice.option_choices, strict=False
+            )
+            warnings.extend(
+                f"{recipe.publisher}/{recipe.slug}: {note}" for note in choice_notes
+            )
             assignments.append(
                 FleetProfileAssignmentView(
                     selector=assignment_selector,
@@ -7892,6 +7959,7 @@ class FleetProfileService:
                         "revision_id": revision.id,
                     },
                     resources=resources,
+                    option_choices=effective_choices,
                     observed_state=self._observed_assignment_state(
                         session,
                         loaded_assignments,
@@ -8145,8 +8213,22 @@ class FleetProfileService:
             (node.node_id, node.rank, node.role, node.endpoint_owner)
             for node in assignment.nodes
         }
+        recipe_revision = session.get(
+            CatalogDocumentRevision, assignment.recipe_revision_id
+        )
+        # An installation and run made with other option choices are not this
+        # assignment's, even for the same recipe revision and Sparks.
+        wanted_choices = (
+            _effective_option_choices(
+                recipe_revision.document, assignment.option_choices, strict=False
+            )[0]
+            if recipe_revision is not None
+            else dict(assignment.option_choices)
+        )
         mapping = None
         for candidate in mappings:
+            if mapping_option_choices(candidate.parameters) != wanted_choices:
+                continue
             members = tuple(
                 session.scalars(
                     select(ClusterMappingNode).where(

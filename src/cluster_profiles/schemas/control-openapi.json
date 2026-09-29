@@ -4539,6 +4539,23 @@
             "title": "Nodes",
             "type": "array"
           },
+          "option_choices": {
+            "maxProperties": 16,
+            "patternProperties": {
+              "^[a-z][a-z0-9_-]*$": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_-]*$",
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Option Choices",
+            "type": "object"
+          },
           "recipe_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Id",
@@ -4677,6 +4694,23 @@
               }
             ],
             "title": "Model Variant"
+          },
+          "option_choices": {
+            "maxProperties": 16,
+            "patternProperties": {
+              "^[a-z][a-z0-9_-]*$": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_-]*$",
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Option Choices",
+            "type": "object"
           },
           "recipe_selector": {
             "maxLength": 127,
@@ -4830,6 +4864,23 @@
             "default": "Not loaded",
             "title": "Observed State",
             "type": "string"
+          },
+          "option_choices": {
+            "maxProperties": 16,
+            "patternProperties": {
+              "^[a-z][a-z0-9_-]*$": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_-]*$",
+                "type": "string"
+              }
+            },
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Option Choices",
+            "type": "object"
           },
           "recipe": {
             "additionalProperties": true,
@@ -9416,6 +9467,14 @@
             "title": "Nodes",
             "type": "array"
           },
+          "option_choices": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 16,
+            "title": "Option Choices",
+            "type": "object"
+          },
           "parameters": {
             "additionalProperties": true,
             "maxProperties": 128,
@@ -12025,6 +12084,14 @@
             "title": "Models",
             "type": "array"
           },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeOption"
+            },
+            "maxItems": 16,
+            "title": "Options",
+            "type": "array"
+          },
           "provenance": {
             "$ref": "#/components/schemas/RecipeProvenance"
           },
@@ -13898,6 +13965,114 @@
         "title": "RecipeOperatorResponse",
         "type": "object"
       },
+      "RecipeOption": {
+        "additionalProperties": false,
+        "description": "A recipe-declared setting with a fixed set of named values.\n\nUsers pick one of the enumerated choices; there are no free-form values.\nExactly one choice is the default and applies whenever nothing is chosen.",
+        "properties": {
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeOptionChoice"
+            },
+            "maxItems": 16,
+            "minItems": 2,
+            "title": "Choices",
+            "type": "array"
+          },
+          "help": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Help",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "help",
+          "choices"
+        ],
+        "title": "RecipeOption",
+        "type": "object"
+      },
+      "RecipeOptionChoice": {
+        "additionalProperties": false,
+        "description": "One named value of an option, with the runtime changes it selects.\n\n``args`` replace a base runtime argument of the same name in place, or are\nappended after the base arguments; ``env`` does the same for environment\nvariables. Both go through the checks of ``runtime.arguments`` and\n``runtime.environment``, and the platform applies its own security, mount\nand port rules to the merged result.",
+        "properties": {
+          "args": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeRuntimeArgument"
+            },
+            "maxItems": 32,
+            "title": "Args",
+            "type": "array"
+          },
+          "default": {
+            "default": false,
+            "title": "Default",
+            "type": "boolean"
+          },
+          "env": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "maxProperties": 32,
+            "title": "Env",
+            "type": "object"
+          },
+          "help": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Help",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label",
+          "help"
+        ],
+        "title": "RecipeOptionChoice",
+        "type": "object"
+      },
       "RecipeOutputSlot": {
         "additionalProperties": false,
         "properties": {
@@ -15714,6 +15889,20 @@
             "maxItems": 500,
             "title": "Member Node Ids",
             "type": "array"
+          },
+          "option_choices": {
+            "additionalProperties": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxProperties": 16,
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Option Choices",
+            "type": "object"
           },
           "present_ranks": {
             "items": {

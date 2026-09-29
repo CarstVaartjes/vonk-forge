@@ -13,6 +13,7 @@ from typing import cast
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel
+  from ..models.fleet_profile_assignment_view_option_choices import FleetProfileAssignmentViewOptionChoices
   from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe
   from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources
 
@@ -36,6 +37,7 @@ class FleetProfileAssignmentView:
             spark_ids (list[str]):
             model (FleetProfileAssignmentViewModel | Unset):
             observed_state (str | Unset):  Default: 'Not loaded'.
+            option_choices (FleetProfileAssignmentViewOptionChoices | Unset):
             recipe (FleetProfileAssignmentViewRecipe | Unset):
             recipe_id (None | str | Unset):
             required_sparks (int | None | Unset):
@@ -49,6 +51,7 @@ class FleetProfileAssignmentView:
     spark_ids: list[str]
     model: FleetProfileAssignmentViewModel | Unset = UNSET
     observed_state: str | Unset = 'Not loaded'
+    option_choices: FleetProfileAssignmentViewOptionChoices | Unset = UNSET
     recipe: FleetProfileAssignmentViewRecipe | Unset = UNSET
     recipe_id: None | str | Unset = UNSET
     required_sparks: int | None | Unset = UNSET
@@ -60,6 +63,7 @@ class FleetProfileAssignmentView:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel # noqa: PLC0415
+        from ..models.fleet_profile_assignment_view_option_choices import FleetProfileAssignmentViewOptionChoices # noqa: PLC0415
         from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe # noqa: PLC0415
         from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources # noqa: PLC0415
         assigned_sparks = self.assigned_sparks
@@ -79,6 +83,10 @@ class FleetProfileAssignmentView:
             model = self.model.to_dict()
 
         observed_state = self.observed_state
+
+        option_choices: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.option_choices, Unset):
+            option_choices = self.option_choices.to_dict()
 
         recipe: dict[str, Any] | Unset = UNSET
         if not isinstance(self.recipe, Unset):
@@ -114,6 +122,8 @@ class FleetProfileAssignmentView:
             field_dict["model"] = model
         if observed_state is not UNSET:
             field_dict["observed_state"] = observed_state
+        if option_choices is not UNSET:
+            field_dict["option_choices"] = option_choices
         if recipe is not UNSET:
             field_dict["recipe"] = recipe
         if recipe_id is not UNSET:
@@ -130,6 +140,7 @@ class FleetProfileAssignmentView:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.fleet_profile_assignment_view_model import FleetProfileAssignmentViewModel # noqa: PLC0415
+        from ..models.fleet_profile_assignment_view_option_choices import FleetProfileAssignmentViewOptionChoices # noqa: PLC0415
         from ..models.fleet_profile_assignment_view_recipe import FleetProfileAssignmentViewRecipe # noqa: PLC0415
         from ..models.fleet_profile_assignment_view_resources import FleetProfileAssignmentViewResources # noqa: PLC0415
         d = dict(src_dict)
@@ -155,6 +166,16 @@ class FleetProfileAssignmentView:
 
 
         observed_state = d.pop("observed_state", UNSET)
+
+        _option_choices = d.pop("option_choices", UNSET)
+        option_choices: FleetProfileAssignmentViewOptionChoices | Unset
+        if isinstance(_option_choices,  Unset):
+            option_choices = UNSET
+        else:
+            option_choices = FleetProfileAssignmentViewOptionChoices.from_dict(_option_choices)
+
+
+
 
         _recipe = d.pop("recipe", UNSET)
         recipe: FleetProfileAssignmentViewRecipe | Unset
@@ -204,6 +225,7 @@ class FleetProfileAssignmentView:
             spark_ids=spark_ids,
             model=model,
             observed_state=observed_state,
+            option_choices=option_choices,
             recipe=recipe,
             recipe_id=recipe_id,
             required_sparks=required_sparks,

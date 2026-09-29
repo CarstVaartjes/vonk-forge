@@ -33,7 +33,32 @@ RECIPE_DOCUMENT_ID = "00000000-0000-4000-8000-000000000020"
 RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
-def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
+RECIPE_OPTIONS = [
+    {
+        "name": "verification",
+        "label": "Verification",
+        "help": "How drafted tokens are verified.",
+        "choices": [
+            {
+                "value": "standard",
+                "label": "Standard",
+                "help": "Verify every token.",
+                "default": True,
+            },
+            {
+                "value": "adaptive",
+                "label": "Adaptive",
+                "help": "Verify a prefix.",
+                "env": {"VERIFY_MODE": "adaptive"},
+            },
+        ],
+    }
+]
+
+
+def _canonical_catalog_documents(
+    *, options: bool = False
+) -> tuple[ModelDefinition, RecipeDefinition]:
     model = ModelDefinition.model_validate(
         json.loads(
             files("vonk_forge_contracts")
@@ -47,6 +72,8 @@ def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
         .read_text(encoding="utf-8")
     )
     raw_recipe["identity"]["slug"] = "glm-5-2-triple"
+    if options:
+        raw_recipe["options"] = copy.deepcopy(RECIPE_OPTIONS)
     raw_recipe["settings"]["knobs"]["max_model_len"] = {
         "value": 32768,
         "change_effect": "restart",
@@ -70,9 +97,9 @@ def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
 
 
 def _seed_canonical_catalog(
-    sessions: sessionmaker, now: datetime
+    sessions: sessionmaker, now: datetime, *, options: bool = False
 ) -> CatalogDocumentRevision:
-    model, recipe = _canonical_catalog_documents()
+    model, recipe = _canonical_catalog_documents(options=options)
     model_digest = document_sha256(model.model_dump(mode="json"))
     recipe_digest = document_sha256(recipe.model_dump(mode="json"))
     with sessions.begin() as session:
@@ -165,7 +192,7 @@ def _seed_canonical_catalog(
         return session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
 
 
-def setup(tmp_path: Path):
+def setup(tmp_path: Path, *, options: bool = False):
     engine = create_engine(f"sqlite:///{tmp_path / 'mapping.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -203,7 +230,7 @@ def setup(tmp_path: Path):
                 memory_pool="shared",
             )
         )
-    revision = _seed_canonical_catalog(sessions, now)
+    revision = _seed_canonical_catalog(sessions, now, options=options)
     return sessions, now, node_ids, revision
 
 
@@ -251,6 +278,33 @@ def test_mapping_plan_binds_effective_parameters(tmp_path: Path) -> None:
 
     assert plan.parameters["max_model_len"] == 65536
     assert len(plan.placement_digest) == 64
+
+
+def test_recipe_option_choices_make_a_distinct_mapping_and_default_when_unset(
+    tmp_path: Path,
+) -> None:
+    from vonk_control.cluster_mappings import mapping_option_choices
+
+    sessions, now, node_ids, revision = setup(tmp_path, options=True)
+    service = ClusterMappingService(sessions)
+
+    default = service.preview(revision.id, node_ids, {}, "admin")
+    chosen = service.preview(
+        revision.id,
+        node_ids,
+        {"option_choices": {"verification": "adaptive"}},
+        "admin",
+    )
+    assert mapping_option_choices(default.parameters) == {"verification": "standard"}
+    assert mapping_option_choices(chosen.parameters) == {"verification": "adaptive"}
+    assert default.placement_digest != chosen.placement_digest
+    first = service.materialize(default, actor="admin", now=now)
+    second = service.materialize(chosen, actor="admin", now=now)
+    assert first != second
+    with pytest.raises(ClusterMappingError, match="standard, adaptive"):
+        service.preview(
+            revision.id, node_ids, {"option_choices": {"verification": "x"}}, "admin"
+        )
 
 
 def test_mapping_preview_is_actor_bound_and_ready_nodes_are_immutable(

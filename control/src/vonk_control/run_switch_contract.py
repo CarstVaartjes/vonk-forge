@@ -226,6 +226,9 @@ class RunSwitchPreviewRequest(_StrictModel):
     alias: Alias
     action: RunSwitchPlacementAction = "run"
     retention: RunSwitchRetention = "retain-cached"
+    # Recipe option name -> chosen value. An option left out takes the
+    # recipe's default; an unknown name or value is refused.
+    option_choices: dict[str, str] = Field(default_factory=dict, max_length=16)
     invocation: InvocationMetadata = Field(default_factory=InvocationMetadata)
 
 
@@ -491,6 +494,9 @@ class MappingSelection(_StrictModel):
     mapping_generation: int | None = Field(default=None, ge=1)
     topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     parameters: dict[str, object] = Field(default_factory=dict, max_length=128)
+    # The effective recipe-option choices this mapping runs with (also inside
+    # ``parameters``); empty for a recipe without options.
+    option_choices: dict[str, str] = Field(default_factory=dict, max_length=16)
     placement_digest: Digest
     action: Literal["reuse", "create"]
     nodes: list[SparkGroupNode] = Field(min_length=1, max_length=32)

@@ -49,6 +49,8 @@ from .cluster_mappings import (
     ClusterMappingPlan,
     ClusterMappingService,
     candidate_placements,
+    effective_option_choices,
+    mapping_option_choices,
     validate_mapping_parameters,
 )
 from .disk_reservations import outstanding_disk_reservation_bytes
@@ -133,6 +135,7 @@ from .recipe_operations import (
     RecipeReconciliationBlocked,
 )
 from .recipe_runtime_specs import (
+    OPTION_CHOICES_KEY,
     RUNTIME_INTERFACE,
     RecipeRuntimeSpecError,
     recipe_topology,
@@ -3574,6 +3577,7 @@ class RunSwitchOperationService:
                 revision,
                 group,
                 actor=actor,
+                option_choices=request.option_choices,
             )
             blockers.extend(mapping_blockers)
             placement_blockers = tuple(blockers)
@@ -4061,11 +4065,26 @@ class RunSwitchOperationService:
         group: SparkGroup,
         *,
         actor: str,
+        option_choices: Mapping[str, str],
     ) -> tuple[
         ClusterMapping | None,
         MappingSelection | None,
         list[RunSwitchReason],
     ]:
+        try:
+            wanted_choices = effective_option_choices(revision.document, option_choices)
+        except ClusterMappingError as error:
+            return (
+                None,
+                None,
+                [
+                    _as_reason(
+                        "run-switch.option_invalid",
+                        str(error),
+                        scope="mapping",
+                    )
+                ],
+            )
         desired = tuple(
             (node.node_id, node.rank, node.role, node.endpoint_owner)
             for node in group.nodes
@@ -4095,9 +4114,18 @@ class RunSwitchOperationService:
             )
             if actual != desired:
                 continue
+            # A different choice of recipe options is a different mapping (and
+            # so a new installation and run) over the same cached model and image.
+            if mapping_option_choices(mapping.parameters) != wanted_choices:
+                continue
             return mapping, self._mapping_selection(mapping, nodes), []
         try:
-            plan = self._mappings.preview(revision.id, desired_ids, {}, actor)
+            plan = self._mappings.preview(
+                revision.id,
+                desired_ids,
+                {OPTION_CHOICES_KEY: wanted_choices} if wanted_choices else {},
+                actor,
+            )
         except (
             ClusterMappingError,
             KeyError,
@@ -4141,6 +4169,7 @@ class RunSwitchOperationService:
                 mapping_generation=plan.generation,
                 topology_name=plan.topology_name,
                 parameters=dict(plan.parameters),
+                option_choices=mapping_option_choices(plan.parameters),
                 placement_digest=plan.placement_digest,
                 action="create",
                 nodes=[
@@ -6167,6 +6196,7 @@ class RunSwitchOperationService:
             mapping_generation=mapping.generation,
             topology_name=mapping.topology_name,
             parameters=validate_mapping_parameters(mapping.parameters),
+            option_choices=mapping_option_choices(mapping.parameters),
             placement_digest=mapping.placement_digest,
             action="reuse",
             nodes=[

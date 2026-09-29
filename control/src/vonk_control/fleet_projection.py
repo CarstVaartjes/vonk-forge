@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .auth import CursorError
+from .cluster_mappings import mapping_option_choices
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .models import (
     AgentCertificate,
@@ -303,6 +304,9 @@ class RunPresence(_StrictModel):
     group_state: Literal["healthy", "degraded"]
     healthy: bool
     degraded_reason: RunDegradedReason | None = None
+    # The recipe option choices this run was started with; empty when the
+    # recipe declares none.
+    option_choices: dict[Text64, Text64] = Field(default_factory=dict, max_length=16)
 
 
 class CapacityReservations(_StrictModel):
@@ -869,6 +873,7 @@ class FleetProjection:
                         group_state="healthy" if reason is None else "degraded",
                         healthy=reason is None,
                         degraded_reason=reason,
+                        option_choices=mapping_option_choices(mapping.parameters),
                     )
                 )
         return {

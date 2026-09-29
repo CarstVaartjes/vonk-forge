@@ -22,6 +22,7 @@ if TYPE_CHECKING:
   from ..models.recipe_metadata import RecipeMetadata
   from ..models.recipe_model_selection import RecipeModelSelection
   from ..models.recipe_open_ai_interface import RecipeOpenAIInterface
+  from ..models.recipe_option import RecipeOption
   from ..models.recipe_provenance import RecipeProvenance
   from ..models.recipe_release import RecipeRelease
   from ..models.recipe_runtime import RecipeRuntime
@@ -62,6 +63,7 @@ class RecipeDefinition:
                 entrypoint, and stopping always starts with the endpoint owner.
             validation (RecipeValidation):
             kind (Literal['recipe'] | Unset):  Default: 'recipe'.
+            options (list[RecipeOption] | Unset):
      """
 
     execution: RecipeExecution
@@ -76,6 +78,7 @@ class RecipeDefinition:
     topology: RecipeTopology
     validation: RecipeValidation
     kind: Literal['recipe'] | Unset = 'recipe'
+    options: list[RecipeOption] | Unset = UNSET
 
 
 
@@ -91,6 +94,7 @@ class RecipeDefinition:
         from ..models.recipe_metadata import RecipeMetadata # noqa: PLC0415
         from ..models.recipe_model_selection import RecipeModelSelection # noqa: PLC0415
         from ..models.recipe_open_ai_interface import RecipeOpenAIInterface # noqa: PLC0415
+        from ..models.recipe_option import RecipeOption # noqa: PLC0415
         from ..models.recipe_provenance import RecipeProvenance # noqa: PLC0415
         from ..models.recipe_release import RecipeRelease # noqa: PLC0415
         from ..models.recipe_runtime import RecipeRuntime # noqa: PLC0415
@@ -142,6 +146,15 @@ class RecipeDefinition:
 
         kind = self.kind
 
+        options: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.options, Unset):
+            options = []
+            for options_item_data in self.options:
+                options_item = options_item_data.to_dict()
+                options.append(options_item)
+
+
+
 
         field_dict: dict[str, Any] = {}
 
@@ -160,6 +173,8 @@ class RecipeDefinition:
         })
         if kind is not UNSET:
             field_dict["kind"] = kind
+        if options is not UNSET:
+            field_dict["options"] = options
 
         return field_dict
 
@@ -176,6 +191,7 @@ class RecipeDefinition:
         from ..models.recipe_metadata import RecipeMetadata # noqa: PLC0415
         from ..models.recipe_model_selection import RecipeModelSelection # noqa: PLC0415
         from ..models.recipe_open_ai_interface import RecipeOpenAIInterface # noqa: PLC0415
+        from ..models.recipe_option import RecipeOption # noqa: PLC0415
         from ..models.recipe_provenance import RecipeProvenance # noqa: PLC0415
         from ..models.recipe_release import RecipeRelease # noqa: PLC0415
         from ..models.recipe_runtime import RecipeRuntime # noqa: PLC0415
@@ -295,6 +311,18 @@ class RecipeDefinition:
         if kind != 'recipe' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'recipe', got '{kind}'")
 
+        _options = d.pop("options", UNSET)
+        options: list[RecipeOption] | Unset = UNSET
+        if _options is not UNSET:
+            options = []
+            for options_item_data in _options:
+                options_item = RecipeOption.from_dict(options_item_data)
+
+
+
+                options.append(options_item)
+
+
         recipe_definition = cls(
             execution=execution,
             identity=identity,
@@ -308,6 +336,7 @@ class RecipeDefinition:
             topology=topology,
             validation=validation,
             kind=kind,
+            options=options,
         )
 
         return recipe_definition

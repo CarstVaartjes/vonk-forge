@@ -35,6 +35,7 @@ from .artifact_blob_store import (
     ArtifactBlobStoreError,
     StoredArtifactBlob,
 )
+from .cluster_mappings import mapping_option_choices
 from .compiled_artifact_contract import (
     CompiledArtifactContract,
     compile_artifact_contract,
@@ -48,6 +49,7 @@ from .models import (
     ArtifactJobBlob,
     ArtifactJobFile,
     CatalogDocumentRevision,
+    ClusterMapping,
     Job,
     RecipeBuild,
     RecipeInstallation,
@@ -1175,6 +1177,11 @@ class ArtifactJobService:
                 raise ArtifactJobError(
                     "stored artifact job parameters are invalid"
                 ) from error
+            mapping = (
+                session.get(ClusterMapping, run.mapping_id)
+                if run.mapping_id is not None
+                else None
+            )
             invocation = compile_job_invocation(
                 session,
                 revision=revision,
@@ -1189,6 +1196,9 @@ class ArtifactJobService:
                 parameters=parameters,
                 timeout_seconds=artifact_job.timeout_seconds,
                 memory_floor_bytes=planned_node.memory_floor_bytes,
+                option_choices=mapping_option_choices(
+                    mapping.parameters if mapping is not None else {}
+                ),
             )
             raw_files = _input_manifest(artifact_job).model_dump(mode="json")["files"]
             payload = {
