@@ -320,6 +320,9 @@ from .preparation_reason_severity import PreparationReasonSeverity
 from .projection_reason import ProjectionReason
 from .projection_reason_code import ProjectionReasonCode
 from .projection_reason_severity import ProjectionReasonSeverity
+from .recipe_alternative import RecipeAlternative
+from .recipe_alternative_cache import RecipeAlternativeCache
+from .recipe_alternative_fits_fleet import RecipeAlternativeFitsFleet
 from .recipe_build_cleanup_evidence import RecipeBuildCleanupEvidence
 from .recipe_build_definition import RecipeBuildDefinition
 from .recipe_build_evidence import RecipeBuildEvidence
@@ -858,6 +861,9 @@ __all__ = (
     "ProjectionReason",
     "ProjectionReasonCode",
     "ProjectionReasonSeverity",
+    "RecipeAlternative",
+    "RecipeAlternativeCache",
+    "RecipeAlternativeFitsFleet",
     "RecipeBuildCleanupEvidence",
     "RecipeBuildDefinition",
     "RecipeBuildEvidence",

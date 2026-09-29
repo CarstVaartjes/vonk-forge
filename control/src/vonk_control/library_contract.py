@@ -190,6 +190,9 @@ class LibraryFacetValues(_StrictModel):
     publisher: list[Text128] = Field(default_factory=list, max_length=_MAX_PAGE_RECIPES)
     alignment: list[Text64] = Field(default_factory=list, max_length=64)
     sparks: list[int] = Field(default_factory=list, max_length=64)
+    # Recipe-only facets: the runtime engine and the upstream creator.
+    engine: list[Text64] = Field(default_factory=list, max_length=64)
+    creator: list[Text128] = Field(default_factory=list, max_length=_MAX_PAGE_RECIPES)
 
 
 class LibraryFilterValues(_StrictModel):
@@ -208,6 +211,8 @@ class LibraryFilterValues(_StrictModel):
     publisher: list[Text128] = Field(default_factory=list, max_length=64)
     alignment: list[Text64] = Field(default_factory=list, max_length=64)
     sparks: list[int] = Field(default_factory=list, max_length=64)
+    engine: list[Text64] = Field(default_factory=list, max_length=64)
+    creator: list[Text128] = Field(default_factory=list, max_length=64)
     search: Text256 | None = None
     updated_since: Text64 | None = None
     sort: Literal["updated", "name"] | None = None
@@ -267,6 +272,9 @@ class LibraryRecipeProjection(_StrictModel):
     updated_at: datetime
     alignment: Text64 | None = None
     node_count: int = Field(ge=1)
+    engine: Text64
+    # The upstream creator: owner of the source reference, else first attribution.
+    creator: Text128 | None = None
     assessment: RecipeReadiness | None = None
 
 
@@ -511,8 +519,24 @@ class LibraryRecipeModel(_StrictModel):
     model_document: ModelDefinition
 
 
+class RecipeAlternative(_StrictModel):
+    """One other recipe serving the same model, for a one-line comparison."""
+
+    selector: Text256
+    title: Text200
+    engine: Text64
+    creator: Text128 | None = None
+    node_count: int = Field(ge=1)
+    version: Text128
+    cache: Literal["cached", "preparing", "not_cached", "failed", "unknown"]
+    fits_fleet: Literal["ready", "blocked", "unavailable"]
+
+
 class RecipeDetailResponse(LibraryRecipeProjection):
     model_documents: list[LibraryRecipeModel] = Field(max_length=32)
+    alternatives: list[RecipeAlternative] = Field(
+        default_factory=list, max_length=_MAX_PAGE_RECIPES
+    )
 
 
 class LibraryRecipeAuthoringDetail(_StrictModel):

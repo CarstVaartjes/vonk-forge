@@ -1,7 +1,7 @@
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {vi} from "vitest";
 import type {ControlApi} from "../api/types";
-import {activeFilterSummary, buildLibraryRecipeRecords, filterLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS, LibraryWorkcell} from "./library-workcell";
+import {activeFilterSummary, buildLibraryRecipeRecords, filterLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS, libraryFiltersFromSearch, libraryFiltersToSearch, LibraryWorkcell, recipeEngine} from "./library-workcell";
 import {cacheRemovalReview} from "../test-fixtures/cache-removal";
 import {libraryViewSnapshot} from "../test-fixtures/library";
 import {modelKey} from "../lib/library-route";
@@ -132,4 +132,36 @@ test("keeps same-Model Recipe variants together and shows creator attribution", 
   expect(pane).toHaveTextContent(records[0]!.recipe!.recipe_document.provenance.attribution[0]!);
   expect(pane).toHaveTextContent(records[0]!.recipe!.recipe_document.runtime.engine);
   expect(pane).toHaveTextContent(records[1]!.recipe!.recipe_document.runtime.engine);
+});
+
+test("engine and creator narrow recipes, are read from the URL, and show as badges", () => {
+  const records = buildLibraryRecipeRecords(libraryViewSnapshot).filter(record => record.recipe);
+  const recipe = records[0]!.recipe!;
+  const engine = recipeEngine(recipe);
+  const creator = "MiaAI-Lab";
+  const tagged = records.map((record, index) => index % 2 === 0 ? {...record, recipe: {...record.recipe!, creator}} : {...record, recipe: {...record.recipe!, creator: "tonyd2wild", engine: "sglang"}});
+  const byCreator = filterLibraryRecipeRecords(tagged, {...EMPTY_LIBRARY_WORKCELL_FILTERS, creator: "miaai-lab"}, "");
+  expect(byCreator.length).toBe(Math.ceil(tagged.length / 2));
+  expect(byCreator.every(record => record.recipe!.creator === creator)).toBe(true);
+  const byEngine = filterLibraryRecipeRecords(tagged, {...EMPTY_LIBRARY_WORKCELL_FILTERS, engine: "sglang"}, "");
+  expect(byEngine.every(record => recipeEngine(record.recipe!) === "sglang")).toBe(true);
+  expect(byEngine.length).toBeGreaterThan(0);
+  expect(filterLibraryRecipeRecords(tagged, {...EMPTY_LIBRARY_WORKCELL_FILTERS, creator, engine: "sglang"}, "").every(record => record.recipe!.creator === creator && recipeEngine(record.recipe!) === "sglang")).toBe(true);
+  expect(engine).toBeTruthy();
+
+  const filters = libraryFiltersFromSearch(new URLSearchParams("engine=vllm&creator=MiaAI-Lab"));
+  expect(filters).toMatchObject({engine: "vllm", creator: "MiaAI-Lab"});
+  expect(libraryFiltersToSearch(filters).toString()).toBe("engine=vllm&creator=MiaAI-Lab");
+  expect(activeFilterSummary(filters, "")).toEqual(["engine: vllm", "creator: MiaAI-Lab"]);
+});
+
+test("a recipe row shows engine, creator and Spark count badges", () => {
+  const base = libraryViewSnapshot.models.find(entry => entry.recipes.length > 0)!;
+  const snapshot = {...libraryViewSnapshot, models: libraryViewSnapshot.models.map(entry => entry === base ? {...entry, recipes: entry.recipes.map(recipe => ({...recipe, creator: "MiaAI-Lab"}))} : entry)};
+  render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: modelKey(base.model)}} snapshot={snapshot}/>);
+  const pane = screen.getByLabelText("Recipes matching selected Model");
+  expect(pane.querySelector('[data-badge="engine"]')).toBeTruthy();
+  expect(pane.querySelector('[data-badge="creator"]')).toHaveTextContent("MiaAI-Lab");
+  expect(pane.querySelector('[data-badge="sparks"]')).toHaveTextContent(/^\d+ Sparks?$/);
+  expect(screen.getByRole("combobox", {name: "Filter engine"})).toBeVisible();
 });

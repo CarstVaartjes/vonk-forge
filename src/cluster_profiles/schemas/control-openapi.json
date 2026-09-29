@@ -8290,6 +8290,26 @@
             "title": "Alignment",
             "type": "array"
           },
+          "creator": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 512,
+            "title": "Creator",
+            "type": "array"
+          },
+          "engine": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Engine",
+            "type": "array"
+          },
           "family": {
             "items": {
               "maxLength": 128,
@@ -8382,6 +8402,26 @@
               }
             ],
             "title": "Cached"
+          },
+          "creator": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Creator",
+            "type": "array"
+          },
+          "engine": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Engine",
+            "type": "array"
           },
           "family": {
             "items": {
@@ -8848,8 +8888,27 @@
               }
             ]
           },
+          "creator": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creator"
+          },
           "document": {
             "$ref": "#/components/schemas/RecipeDefinition"
+          },
+          "engine": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Engine",
+            "type": "string"
           },
           "identity": {
             "$ref": "#/components/schemas/LibraryRecipeIdentity"
@@ -8907,7 +8966,8 @@
           "resources",
           "local",
           "updated_at",
-          "node_count"
+          "node_count",
+          "engine"
         ],
         "title": "LibraryRecipeProjection",
         "type": "object"
@@ -11964,6 +12024,85 @@
         "title": "ProjectionReason",
         "type": "object"
       },
+      "RecipeAlternative": {
+        "additionalProperties": false,
+        "description": "One other recipe serving the same model, for a one-line comparison.",
+        "properties": {
+          "cache": {
+            "enum": [
+              "cached",
+              "preparing",
+              "not_cached",
+              "failed",
+              "unknown"
+            ],
+            "title": "Cache",
+            "type": "string"
+          },
+          "creator": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creator"
+          },
+          "engine": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Engine",
+            "type": "string"
+          },
+          "fits_fleet": {
+            "enum": [
+              "ready",
+              "blocked",
+              "unavailable"
+            ],
+            "title": "Fits Fleet",
+            "type": "string"
+          },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "selector": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Selector",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "title",
+          "engine",
+          "node_count",
+          "version",
+          "cache",
+          "fits_fleet"
+        ],
+        "title": "RecipeAlternative",
+        "type": "object"
+      },
       "RecipeBuildCleanupEvidence": {
         "additionalProperties": false,
         "description": "The build service is stopped; the fenced attempt is the whole answer.",
@@ -12191,6 +12330,14 @@
             ],
             "title": "Alignment"
           },
+          "alternatives": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeAlternative"
+            },
+            "maxItems": 512,
+            "title": "Alternatives",
+            "type": "array"
+          },
           "assessment": {
             "anyOf": [
               {
@@ -12201,8 +12348,27 @@
               }
             ]
           },
+          "creator": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creator"
+          },
           "document": {
             "$ref": "#/components/schemas/RecipeDefinition"
+          },
+          "engine": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Engine",
+            "type": "string"
           },
           "identity": {
             "$ref": "#/components/schemas/LibraryRecipeIdentity"
@@ -12269,6 +12435,7 @@
           "local",
           "updated_at",
           "node_count",
+          "engine",
           "model_documents"
         ],
         "title": "RecipeDetailResponse",
@@ -25883,6 +26050,46 @@
                 }
               ],
               "title": "Sparks"
+            }
+          },
+          {
+            "in": "query",
+            "name": "engine",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 64,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Engine"
+            }
+          },
+          {
+            "in": "query",
+            "name": "creator",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 64,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Creator"
             }
           },
           {

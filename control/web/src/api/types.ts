@@ -28,6 +28,7 @@ export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
 export type ModelLibrary = components["schemas"]["ModelLibraryResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
+export type RecipeAlternative = components["schemas"]["RecipeAlternative"];
 export type CacheRemovalReview = components["schemas"]["CacheRemovalReview"];
 export type ModelCacheOperatorResponse = components["schemas"]["ModelCacheOperatorResponse"];
 export type RecipeImageAvailabilityResponse = components["schemas"]["RecipeImageAvailabilityResponse"];
@@ -53,6 +54,9 @@ export type LibraryViewRecipe = {
   slug: string;
   title: string;
   topology_name: string;
+  // Projected by the Controller; the same names as vonkctl --engine/--creator.
+  engine?: string;
+  creator?: string | null;
   model_selectors?: string[];
   installations?: unknown[];
   runs?: unknown[];
@@ -100,6 +104,8 @@ export type LibraryViewRecipeDetail = {
   placement: {recommendations: LibraryViewPlacementGroup[]; rejected_groups: LibraryViewPlacementGroup[]; search_complete: boolean}[];
   reasons: {code: string; severity: string; detail: string}[];
   topology: RecipeDefinition["topology"];
+  // Other recipes for the same model, excluding this one.
+  alternatives?: RecipeAlternative[];
 };
 export type LibraryViewPlacementGroup = {eligible: boolean; node_ids: string[]; nodes: {node_id: string; memory_free_after_bytes: number}[]; topology_name: string; load_state: string; install_state: string};
 export type ArtifactJobInterface = components["schemas"]["ArtifactJobResponse"]["interface"];

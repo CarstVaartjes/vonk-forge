@@ -3687,6 +3687,10 @@ export interface components {
         LibraryFacetValues: {
             /** Alignment */
             alignment?: string[];
+            /** Creator */
+            creator?: string[];
+            /** Engine */
+            engine?: string[];
             /** Family */
             family: string[];
             /** Publisher */
@@ -3713,6 +3717,10 @@ export interface components {
             alignment?: string[];
             /** Cached */
             cached?: boolean | null;
+            /** Creator */
+            creator?: string[];
+            /** Engine */
+            engine?: string[];
             /** Family */
             family?: string[];
             /** Fits Fleet */
@@ -3851,7 +3859,11 @@ export interface components {
             /** Alignment */
             alignment?: string | null;
             assessment?: components["schemas"]["RecipeReadiness"] | null;
+            /** Creator */
+            creator?: string | null;
             document: components["schemas"]["RecipeDefinition"];
+            /** Engine */
+            engine: string;
             identity: components["schemas"]["LibraryRecipeIdentity"];
             local: components["schemas"]["LibraryLocalState"];
             /** Model Selectors */
@@ -4806,6 +4818,34 @@ export interface components {
             severity: "info" | "warning" | "error";
         };
         /**
+         * RecipeAlternative
+         * @description One other recipe serving the same model, for a one-line comparison.
+         */
+        RecipeAlternative: {
+            /**
+             * Cache
+             * @enum {string}
+             */
+            cache: "cached" | "preparing" | "not_cached" | "failed" | "unknown";
+            /** Creator */
+            creator?: string | null;
+            /** Engine */
+            engine: string;
+            /**
+             * Fits Fleet
+             * @enum {string}
+             */
+            fits_fleet: "ready" | "blocked" | "unavailable";
+            /** Node Count */
+            node_count: number;
+            /** Selector */
+            selector: string;
+            /** Title */
+            title: string;
+            /** Version */
+            version: string;
+        };
+        /**
          * RecipeBuildCleanupEvidence
          * @description The build service is stopped; the fenced attempt is the whole answer.
          */
@@ -4868,8 +4908,14 @@ export interface components {
         RecipeDetailResponse: {
             /** Alignment */
             alignment?: string | null;
+            /** Alternatives */
+            alternatives?: components["schemas"]["RecipeAlternative"][];
             assessment?: components["schemas"]["RecipeReadiness"] | null;
+            /** Creator */
+            creator?: string | null;
             document: components["schemas"]["RecipeDefinition"];
+            /** Engine */
+            engine: string;
             identity: components["schemas"]["LibraryRecipeIdentity"];
             local: components["schemas"]["LibraryLocalState"];
             /** Model Documents */
@@ -10874,6 +10920,8 @@ export interface operations {
                 publisher?: string[] | null;
                 alignment?: string[] | null;
                 sparks?: number[] | null;
+                engine?: string[] | null;
+                creator?: string[] | null;
                 search?: string | null;
                 updated_since?: string | null;
                 sort?: "updated" | "name";

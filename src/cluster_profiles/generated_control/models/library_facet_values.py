@@ -29,6 +29,8 @@ class LibraryFacetValues:
             usage (list[str]):
             version (list[str]):
             alignment (list[str] | Unset):
+            creator (list[str] | Unset):
+            engine (list[str] | Unset):
             publisher (list[str] | Unset):
             sparks (list[int] | Unset):
      """
@@ -38,6 +40,8 @@ class LibraryFacetValues:
     usage: list[str]
     version: list[str]
     alignment: list[str] | Unset = UNSET
+    creator: list[str] | Unset = UNSET
+    engine: list[str] | Unset = UNSET
     publisher: list[str] | Unset = UNSET
     sparks: list[int] | Unset = UNSET
 
@@ -68,6 +72,18 @@ class LibraryFacetValues:
 
 
 
+        creator: list[str] | Unset = UNSET
+        if not isinstance(self.creator, Unset):
+            creator = self.creator
+
+
+
+        engine: list[str] | Unset = UNSET
+        if not isinstance(self.engine, Unset):
+            engine = self.engine
+
+
+
         publisher: list[str] | Unset = UNSET
         if not isinstance(self.publisher, Unset):
             publisher = self.publisher
@@ -91,6 +107,10 @@ class LibraryFacetValues:
         })
         if alignment is not UNSET:
             field_dict["alignment"] = alignment
+        if creator is not UNSET:
+            field_dict["creator"] = creator
+        if engine is not UNSET:
+            field_dict["engine"] = engine
         if publisher is not UNSET:
             field_dict["publisher"] = publisher
         if sparks is not UNSET:
@@ -118,6 +138,12 @@ class LibraryFacetValues:
         alignment = cast(list[str], d.pop("alignment", UNSET))
 
 
+        creator = cast(list[str], d.pop("creator", UNSET))
+
+
+        engine = cast(list[str], d.pop("engine", UNSET))
+
+
         publisher = cast(list[str], d.pop("publisher", UNSET))
 
 
@@ -130,6 +156,8 @@ class LibraryFacetValues:
             usage=usage,
             version=version,
             alignment=alignment,
+            creator=creator,
+            engine=engine,
             publisher=publisher,
             sparks=sparks,
         )
