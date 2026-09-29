@@ -26,7 +26,6 @@ export type OperationsResponse = components["schemas"]["OperationsResponse"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
 export type ModelLibrary = components["schemas"]["ModelLibraryResponse"];
-export type ModelDetail = components["schemas"]["ModelDetailResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
 export type CacheRemovalReview = components["schemas"]["CacheRemovalReview"];
@@ -126,10 +125,8 @@ export type FleetStreamEvent = components["schemas"]["FleetStreamEvent"];
 export interface LibraryApi {
   catalogSyncStatus(signal?: AbortSignal): Promise<CatalogSyncStatus | null>;
   modelLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<ModelLibrary>;
-  modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail>;
   recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary>;
   recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail>;
-  libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
   artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList>;
   artifactJobByRequestId(requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities>;

@@ -36,7 +36,6 @@ import type {
   ArtifactJobList,
   ArtifactTransferProgress,
   LibrarySort,
-  ModelDetail,
   ModelLibrary,
   ModelCacheOperatorResponse,
   CacheRemovalReview,
@@ -376,13 +375,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async modelDetail(selector: string, signal?: AbortSignal): Promise<ModelDetail> {
-    return resultData(await this.generated.GET("/api/model/{selector}", {
-      params: {path: {selector}},
-      signal,
-    }));
-  }
-
   async recipeLibrary(cursor?: string, sort?: LibrarySort, updatedSince?: string, signal?: AbortSignal): Promise<RecipeLibrary> {
     return resultData(await this.generated.GET("/api/recipe/library", {
       params: {query: {cursor, limit: 100, all_models: true, sort, updated_since: updatedSince}},
@@ -393,13 +385,6 @@ export class ApiClient implements ControlApi {
   async recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail> {
     return resultData(await this.generated.GET("/api/recipe/{selector}", {
       params: {path: {selector}},
-      signal,
-    }));
-  }
-
-  async libraryJobProgress(jobId: string, signal?: AbortSignal) {
-    return resultData(await this.generated.GET("/api/jobs/{job_id}", {
-      params: {path: {job_id: jobId}, query: {}},
       signal,
     }));
   }
