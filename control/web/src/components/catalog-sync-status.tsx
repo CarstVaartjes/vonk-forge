@@ -1,6 +1,6 @@
 import {useEffect, useState} from "react";
 import type {CatalogSyncStatus, LibraryApi} from "../api/types";
-import {exactTime, relativeTime} from "../lib/time";
+import {Time} from "./time";
 import {StatusPill} from "./status-pill";
 import type {StatusTone} from "./status-pill";
 
@@ -21,12 +21,11 @@ export function CatalogSyncStatusLine({api}: {api: Pick<LibraryApi, "catalogSync
   if (status === undefined) return null;
   if (status === null) return <p className="library-sync" role="status">Recipe library sync has not run yet. The Controller syncs automatically.</p>;
   const at = status.completed_at ?? status.created_at;
-  const when = relativeTime(at, new Date());
   const problems = [...status.problems.map(item => `${item.code}: ${item.detail}`), ...(status.last_error ? [`${status.last_error.code}: ${status.last_error.detail}`] : [])];
   return <div className="library-sync" role="status">
     <p>
       <span>Recipe library sync </span><StatusPill tone={TONE[status.state]}>{status.state}</StatusPill>
-      {when && <> · last run <time dateTime={at} title={exactTime(at) ?? undefined}>{when}</time></>}
+      <> · last run <Time value={at}/></>
       {status.commit && <> · commit <code>{status.commit.slice(0, 12)}</code></>}
       {status.expected_commit && status.expected_commit !== status.commit && <> · waiting for <code>{status.expected_commit.slice(0, 12)}</code></>}
     </p>
