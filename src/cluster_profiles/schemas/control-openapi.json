@@ -10780,11 +10780,11 @@
             "type": "string"
           },
           "node_ids": {
-            "default": [],
             "items": {
               "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
+            "maxItems": 32,
             "title": "Node Ids",
             "type": "array"
           },

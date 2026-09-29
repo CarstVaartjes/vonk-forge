@@ -4486,11 +4486,8 @@ export interface components {
             code: string;
             /** Detail */
             detail: string;
-            /**
-             * Node Ids
-             * @default []
-             */
-            node_ids: string[];
+            /** Node Ids */
+            node_ids?: string[];
             /**
              * Severity
              * @enum {string}
