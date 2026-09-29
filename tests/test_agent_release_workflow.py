@@ -673,7 +673,7 @@ def test_development_cancels_only_stale_keyless_and_package_build_work() -> None
     assert "cancel-in-progress: true" in package
     assert "group: vonk-forge-agent-development-security" in security
     assert "cancel-in-progress: true" in security
-    assert "concurrency:" not in native
+    assert "cancel-in-progress: true" in native
     assert "group: vonk-forge-agent-apt-dev" in publisher
     assert "cancel-in-progress: false" in publisher
 

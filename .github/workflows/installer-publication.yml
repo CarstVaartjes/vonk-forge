@@ -312,9 +312,26 @@ jobs:
       cancel-in-progress: false
       queue: max
     permissions:
-      actions: read
+      actions: write
       contents: read
     steps:
+      - name: Stop when main has moved past this development generation
+        if: needs.authority.outputs.channel == 'dev'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          # Runs before any R2 write or promotion of this job's work. A newer
+          # main generation is promoted by its own run or the scheduled
+          # re-evaluation, so this superseded run is cancelled as a whole.
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [[ "$tip" != "$SOURCE_SHA" ]]; then
+            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+            sleep 120
+            exit 1
+          fi
       - name: Check out exact accepted publication tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -547,8 +564,26 @@ jobs:
     timeout-minutes: 60
     environment: installer-canary-${{ needs.authority.outputs.channel }}
     permissions:
+      actions: write
       contents: read
     steps:
+      - name: Stop when main has moved past this development generation
+        if: needs.authority.outputs.channel == 'dev'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          # Runs before any R2 write or promotion of this job's work. A newer
+          # main generation is promoted by its own run or the scheduled
+          # re-evaluation, so this superseded run is cancelled as a whole.
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [[ "$tip" != "$SOURCE_SHA" ]]; then
+            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+            sleep 120
+            exit 1
+          fi
       - name: Check out exact candidate acceptance suite
         timeout-minutes: 5
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -857,11 +892,29 @@ jobs:
     timeout-minutes: 45
     environment: installer-canary-${{ needs.authority.outputs.channel }}
     permissions:
+      actions: write
       contents: read
     env:
       VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
       VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
     steps:
+      - name: Stop when main has moved past this development generation
+        if: needs.authority.outputs.channel == 'dev'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          # Runs before any R2 write or promotion of this job's work. A newer
+          # main generation is promoted by its own run or the scheduled
+          # re-evaluation, so this superseded run is cancelled as a whole.
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [[ "$tip" != "$SOURCE_SHA" ]]; then
+            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+            sleep 120
+            exit 1
+          fi
       - name: Check out exact candidate acceptance suite
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

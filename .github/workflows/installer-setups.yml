@@ -15,9 +15,12 @@ on:
 permissions:
   contents: read
 
+# Only this workflow's own push to main is cancelled by a newer main push.
+# github.workflow is the caller's name when CI reuses this workflow, so
+# called runs keep the per-commit group and are never cancelled from here.
 concurrency:
-  group: vonk-forge-installer-setups-${{ github.sha }}
-  cancel-in-progress: false
+  group: vonk-forge-installer-setups-${{ (github.workflow == 'Installer setup programs' && github.event_name == 'push') && 'main' || github.sha }}
+  cancel-in-progress: ${{ github.workflow == 'Installer setup programs' && github.event_name == 'push' }}
 
 jobs:
   build-and-test:

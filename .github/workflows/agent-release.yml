@@ -250,6 +250,9 @@ jobs:
     needs: [package-metadata, build-test-sign]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
+    concurrency:
+      group: vonk-forge-agent-development-native-lifecycle
+      cancel-in-progress: true
     permissions:
       contents: read
     steps:
