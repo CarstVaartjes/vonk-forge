@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from pydantic import ValidationError
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
@@ -3942,6 +3942,17 @@ class RecipeImageAvailabilityService:
             # live lease is left alone because the active revision may reuse its
             # shared build inputs.
             self._cancel_superseded_by_active_head(session, now=now)
+            if session.get_bind().dialect.name == "postgresql":
+                # Serialize count-then-claim across control workers so two
+                # simultaneous claims cannot both take the last build slot.
+                # The transaction-scoped lock ends with this short transaction;
+                # the active-slot count below then sees every earlier commit.
+                session.execute(
+                    text(
+                        "SELECT pg_advisory_xact_lock("
+                        "hashtextextended('recipe-image-availability-claim', 0))"
+                    )
+                )
             active_rows = list(
                 session.scalars(
                     select(Job)
