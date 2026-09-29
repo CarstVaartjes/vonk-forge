@@ -12,6 +12,9 @@ on:
   schedule:
     # Refresh only re-signs the already published immutable generation.
     - cron: '17 3 * * *'
+    # Re-evaluate the current main tip when the last producer was not yet
+    # visible as successful at its own completion, so nothing re-triggers.
+    - cron: '7,37 * * * *'
   workflow_dispatch:
     inputs:
       tailnet_cleanup:
@@ -56,18 +59,25 @@ jobs:
     # the branch is still required to be main, and the resolver below still binds
     # the exact changed paths and the exact source commit, so a dispatched main
     # producer can re-establish evidence for the current tip and nothing else.
+    # The frequent schedule and a manual dispatch on main re-evaluate the
+    # current main tip through the development path only.
     if: >-
-      (github.event.workflow_run.event == 'push' ||
-       github.event.workflow_run.event == 'workflow_dispatch') &&
-      ((github.event.workflow_run.name == 'Installer publication source' &&
-       github.event.workflow_run.head_branch == 'main') ||
-       github.event.workflow_run.name == 'CI' ||
-       (github.event.workflow_run.name == 'Rust Vonk Forge agent development' &&
+      (github.event_name == 'schedule' &&
+       github.event.schedule == '7,37 * * * *') ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main' &&
+       inputs.tailnet_cleanup != true) ||
+      ((github.event.workflow_run.event == 'push' ||
+        github.event.workflow_run.event == 'workflow_dispatch') &&
+       ((github.event.workflow_run.name == 'Installer publication source' &&
         github.event.workflow_run.head_branch == 'main') ||
-       (github.event.workflow_run.name == 'Development images' &&
-        github.event.workflow_run.head_branch == 'main') ||
-       (github.event.workflow_run.name == 'Installer setup programs' &&
-        github.event.workflow_run.head_branch == 'main'))
+        github.event.workflow_run.name == 'CI' ||
+        (github.event.workflow_run.name == 'Rust Vonk Forge agent development' &&
+         github.event.workflow_run.head_branch == 'main') ||
+        (github.event.workflow_run.name == 'Development images' &&
+         github.event.workflow_run.head_branch == 'main') ||
+        (github.event.workflow_run.name == 'Installer setup programs' &&
+         github.event.workflow_run.head_branch == 'main')))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -97,7 +107,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Install readiness runtime
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -111,10 +121,10 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
-          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          TRIGGER_NAME: ${{ github.event.workflow_run.name }}
-          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion || 'success' }}
+          TRIGGER_NAME: ${{ github.event.workflow_run.name || 'Scheduled main evaluation' }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
         run: |
           set -euo pipefail
           not_ready() {
@@ -142,7 +152,7 @@ jobs:
           git fetch --force --tags origin
 
           case "$TRIGGER_NAME" in
-            'Installer publication source'|'Rust Vonk Forge agent development'|'Development images'|'Installer setup programs')
+            'Installer publication source'|'Rust Vonk Forge agent development'|'Development images'|'Installer setup programs'|'Scheduled main evaluation')
               channel=dev
               authority_ref=refs/heads/main
               tag_oid=
@@ -151,6 +161,23 @@ jobs:
               # ancestor reuse still requires unchanged producer inputs.
               SOURCE_SHA=$(git rev-parse --verify refs/remotes/origin/main^{commit})
               git checkout --detach "$SOURCE_SHA"
+              # A scheduled or dispatched evaluation only heals a missed
+              # producer event; skip a tip an earlier run already promoted.
+              if [[ "$TRIGGER_NAME" == 'Scheduled main evaluation' ]]; then
+                promoted=$(
+                  gh run list --workflow installer-publication.yml \
+                    --commit "$SOURCE_SHA" --status completed \
+                    --json databaseId --jq '.[].databaseId' \
+                  | while read -r run_id; do
+                    gh api --paginate \
+                      "/repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
+                      --jq '.jobs[] | select(
+                        (.name | startswith("Promote accepted dev ")) and
+                        .conclusion == "success") | .id'
+                  done
+                )
+                if [[ -n "$promoted" ]]; then not_ready; fi
+              fi
               development_run agent-release.yml package_evidence
               IFS=$'\t' read -r package_run_id package_run_number package_source_sha \
                 <<< "$package_evidence"
@@ -1146,7 +1173,7 @@ jobs:
 
   refresh:
     name: Refresh signed ${{ matrix.channel }} installer manifest
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '17 3 * * *'
     strategy:
       fail-fast: false
       matrix:
