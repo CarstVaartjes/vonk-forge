@@ -576,9 +576,9 @@ export class ApiClient implements ControlApi {
     return `/api/artifact-jobs/${encodedJobId}/results/${encodedName}/${sha256}`;
   }
 
-  async operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse> {
+  async operations(cursor?: string, signal?: AbortSignal, filters: ActivityFilters = {}): Promise<OperationsResponse> {
     return resultData(await this.generated.GET("/api/operations", {
-      params: {query: {cursor, limit: 20}}, signal,
+      params: {query: {cursor, limit: 20, state: filters.state, node_id: filters.target, request_id: filters.requestId}}, signal,
     }));
   }
 

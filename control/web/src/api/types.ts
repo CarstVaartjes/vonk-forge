@@ -181,7 +181,7 @@ export interface ControlApi extends LibraryApi {
   gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList>;
   createGatewayKey(name: string, models: string[], expires?: string): Promise<GatewayKeyCreated>;
   revokeGatewayKey(name: string): Promise<GatewayKeyRevoked>;
-  operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse>;
+  operations(cursor?: string, signal?: AbortSignal, filters?: ActivityFilters): Promise<OperationsResponse>;
   operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;

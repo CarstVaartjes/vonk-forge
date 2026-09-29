@@ -2,7 +2,7 @@ import {availabilityProgress, LibraryAvailabilityProgress} from "../components/l
 import {availabilityFailure, LibraryAvailabilityFeedback} from "../components/library-availability-feedback";
 import {useCallback, useEffect, useId, useMemo, useRef, useState} from "react";
 import type {SyntheticEvent} from "react";
-import type {ControlApi, JobDetail, OperationDetail, VisualFleetSnapshot} from "../api/types";
+import type {ActivityFilters, ControlApi, JobDetail, OperationDetail, VisualFleetSnapshot} from "../api/types";
 import {StatusPill} from "../components/status-pill";
 import {nodeDisplayName} from "../lib/fleet";
 import {exactTime, relativeTime} from "../lib/time";
@@ -117,6 +117,24 @@ function statusTone(status: ActivityStatus): "neutral" | "healthy" | "warning" |
   if (status === "in_progress") return "info";
   if (status === "unknown") return "neutral";
   return "healthy";
+}
+
+const OPERATION_STATES = ["queued", "running", "waiting", "waiting-for-operator", "compensating", "uncertain", "failed", "cancelled", "succeeded"];
+const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/** Filters live in the URL so a filtered view can be linked and reloaded, like `vonkctl fleet activity --state --target --request-id`. */
+function readFilters(): ActivityFilters {
+  const params = new URLSearchParams(location.search);
+  return {state: params.get("state") || undefined, target: params.get("target") || undefined, requestId: params.get("request_id") || undefined};
+}
+
+function writeFilters(filters: ActivityFilters): void {
+  const params = new URLSearchParams(location.search);
+  for (const [key, value] of [["state", filters.state], ["target", filters.target], ["request_id", filters.requestId]] as const) {
+    if (value) params.set(key, value); else params.delete(key);
+  }
+  const query = params.toString();
+  history.replaceState(history.state, "", `${location.pathname}${query ? `?${query}` : ""}`);
 }
 
 function readViewPreference(): ActivityView {
@@ -523,6 +541,8 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
   const [category, setCategory] = useState("");
   const [actor, setActor] = useState("");
   const [status, setStatus] = useState<ActivityStatus | "">("");
+  const [filters, setFilters] = useState<ActivityFilters>(readFilters);
+  const [requestText, setRequestText] = useState(() => readFilters().requestId ?? "");
   const [view, setView] = useState<ActivityView>(readViewPreference);
   const [sort, setSort] = useState<"recent" | "attention">("recent");
   const [targetNames, setTargetNames] = useState(new Map<string, string>());
@@ -543,7 +563,7 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     setError("");
     const controller = new AbortController();
     void Promise.allSettled([
-      api.operations(undefined, controller.signal),
+      api.operations(undefined, controller.signal, filters),
       api.visualFleet(controller.signal).catch(() => null),
     ]).then(([canonicalResult, fleetResult]) => {
       if (!active) return;
@@ -576,14 +596,14 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
       controller.abort();
       if (requestGeneration.current === generation) requestGeneration.current += 1;
     };
-  }, [api, attempt]);
+  }, [api, attempt, filters]);
 
   async function loadMoreOperations(): Promise<void> {
     if (!canonicalCursor || loading || loadingMore) return;
     const generation = requestGeneration.current;
     setLoadingMore(true);
     setPaginationError("");
-    const [canonicalResult] = await Promise.allSettled([api.operations(canonicalCursor)]);
+    const [canonicalResult] = await Promise.allSettled([api.operations(canonicalCursor, undefined, filters)]);
     if (requestGeneration.current !== generation) return;
     const additional: ActivityRecord[] = [];
     const errors: string[] = [];
@@ -642,14 +662,21 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     try { localStorage.setItem(VIEW_PREFERENCE_KEY, next); } catch { /* Preferences are optional. */ }
   }
 
+  function changeFilters(next: ActivityFilters): void {
+    setFilters(next);
+    writeFilters(next);
+  }
+
   function clearFilters(): void {
     setQuery("");
     setCategory("");
     setActor("");
     setStatus("");
+    setRequestText("");
+    changeFilters({});
   }
 
-  const filtering = Boolean(query.trim() || category || actor || status);
+  const filtering = Boolean(query.trim() || category || actor || status || filters.state || filters.target || filters.requestId);
   return <div className="activity-page">
     <header className="activity-hero">
       <div><h1 tabIndex={-1}>Activity</h1><p>Understand meaningful control-plane changes without exposing technical identifiers by default.</p></div>
@@ -672,6 +699,9 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
         <label><span>Area</span><select value={category} onChange={event => setCategory(event.target.value)}><option value="">All areas</option>{categories.map(value => <option key={value}>{value}</option>)}</select></label>
         <label><span>Operator</span><select value={actor} onChange={event => setActor(event.target.value)}><option value="">All operators</option>{actors.map(value => <option key={value}>{value}</option>)}</select></label>
         <label><span>Status</span><select value={status} onChange={event => setStatus(event.target.value as ActivityStatus | "")}><option value="">All statuses</option><option value="recorded">Recorded</option><option value="in_progress">In progress</option><option value="attention">Needs review</option><option value="unsuccessful">Unsuccessful</option><option value="unknown">Unknown state</option></select></label>
+        <label><span>Operation state</span><select value={filters.state ?? ""} onChange={event => changeFilters({...filters, state: event.target.value || undefined})}><option value="">All states</option>{OPERATION_STATES.map(value => <option key={value} value={value}>{activityStateLabel(value)}</option>)}</select></label>
+        <label><span>Spark</span><select value={filters.target ?? ""} onChange={event => changeFilters({...filters, target: event.target.value || undefined})}><option value="">All Sparks</option>{[...targetNames].map(([id, name]) => <option key={id} value={id}>{name || id}</option>)}</select></label>
+        <label><span>Request ID</span><input value={requestText} placeholder="Full request ID" aria-invalid={requestText !== "" && !REQUEST_ID.test(requestText.trim())} onChange={event => { const value = event.target.value; setRequestText(value); const id = value.trim().toLowerCase(); if (REQUEST_ID.test(id)) changeFilters({...filters, requestId: id}); else if (!value.trim() && filters.requestId) changeFilters({...filters, requestId: undefined}); }}/></label>
         <label><span>Sort</span><select value={sort} onChange={event => setSort(event.target.value as "recent" | "attention")}><option value="recent">Most recent first</option><option value="attention">Needs attention first</option></select></label>
       </div>
       <div className="activity-control-footer">
@@ -686,7 +716,8 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
 
     {loading && !events && <section className="activity-state" role="status"><strong>Loading activity…</strong><p>Reading the latest operator and system events.</p></section>}
     {error && <section className="activity-state is-error" role="alert"><div><strong>Activity unavailable</strong><p>{error}</p></div><button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => setAttempt(value => value + 1)}>Try again</button></section>}
-    {!loading && !error && events?.length === 0 && <section className="activity-state"><strong>No activity in the loaded window</strong><p>No operation records were returned by the current API window.</p></section>}
+    {!loading && !error && events?.length === 0 && filtering && <section className="activity-state"><strong>No matching activity</strong><p>No operation matches these filters. Remove one or more filters.</p><button type="button" className="button secondary" onClick={clearFilters}>Clear filters</button></section>}
+    {!loading && !error && events?.length === 0 && !filtering && <section className="activity-state"><strong>No activity in the loaded window</strong><p>No operation records were returned by the current API window.</p></section>}
     {events && filtered.length === 0 && events.length > 0 && <section className="activity-state"><strong>No matching activity</strong><p>Try a broader search or remove one or more filters.</p><button type="button" className="button secondary" onClick={clearFilters}>Clear filters</button></section>}
     {displayed.length > 0 && (view === "timeline" ? <ActivityTimeline api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} targetNames={targetNames}/> : <ActivityTable api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} targetNames={targetNames}/>)}
   </div>;
