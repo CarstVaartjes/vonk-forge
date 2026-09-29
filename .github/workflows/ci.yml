@@ -675,15 +675,9 @@ jobs:
             echo "VERSION=$version"
             echo "BASELINE_VERSION=$baseline_version"
           } >> "$GITHUB_ENV"
-      - name: Run the native package lifecycle
-        run: |
-          set -euo pipefail
-          sudo scripts/test-agent-package-native-lifecycle linux-arm64 \
-            "$(realpath "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb")" \
-            "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
-            "$BASELINE_VERSION" "$VERSION"
       - name: Run the systemd upgrade-recovery fixtures
-        # The release gate runs these too; without them here a fixture race or
+        # Runs before the lifecycle script, which leaves host state the
+        # fixtures refuse to start over. The release gate runs these too; without them here a fixture race or
         # regression only surfaces on main.
         run: |
           set -euo pipefail
@@ -701,6 +695,13 @@ jobs:
               BUILD_EGRESS_BINARY="$build_egress" VERSION="$VERSION" \
               CRASH_MODE="$mode" tests/nodes/test_agent_upgrade_recovery_systemd.sh
           done
+      - name: Run the native package lifecycle
+        run: |
+          set -euo pipefail
+          sudo scripts/test-agent-package-native-lifecycle linux-arm64 \
+            "$(realpath "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb")" \
+            "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
+            "$BASELINE_VERSION" "$VERSION"
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})

@@ -439,7 +439,7 @@ Requires=$socket_unit
 After=$socket_unit
 
 [Service]
-# Type=exec: `systemctl start` returns only after execve, so the
+# Type=exec: systemctl start returns only after execve, so the
 # RuntimeDirectory below exists (Type=simple returns at fork, a race).
 Type=exec
 ExecStart=$test_root/old-helper
