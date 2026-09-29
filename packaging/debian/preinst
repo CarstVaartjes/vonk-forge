@@ -274,7 +274,7 @@ safe_agent_blocker() {
 discard_own_state() {
     discard_path=$1
     if [ -L "$discard_path" ] || [ -f "$discard_path" ]; then
-        echo "vonk-forge-agent: discarded malformed package state $discard_path" >&2
+        echo "vonk-forge-agent: retired package state $discard_path" >&2
         /usr/bin/rm -f -- "$discard_path" || return 1
         /usr/bin/sync -f "$(/usr/bin/dirname "$discard_path")" || true
     fi

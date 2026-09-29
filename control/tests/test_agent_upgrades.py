@@ -1121,6 +1121,61 @@ def test_exact_identity_reconciles_a_retrying_spark_while_the_next_one_upgrades(
     assert set(_operation_nodes(sessions, job.id)) == {NODE_A, NODE_B}
 
 
+def test_failed_upgrade_on_a_spark_already_at_target_resolves_to_succeeded(
+    tmp_path,
+) -> None:
+    """A failed install whose build is running never waits for a receipt.
+
+    Seen live: the helper restarted mid-install, the agent reported the helper
+    unavailable, and the target build was installed anyway.  Catches an
+    implementation that needs a package receipt or an operator to settle it.
+    """
+
+    clock = Clock()
+    sessions, operations, _upgrades, job = _rollout(
+        tmp_path, "failed-then-at-target", clock=clock
+    )
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    operations.fail(first, "agent upgrade helper is unavailable")
+    without_receipt = {
+        key: value for key, value in NEW_IDENTITY.items() if key != "package_activation"
+    }
+    for _ in range(2):  # contact is recorded first; the next poll converges
+        operations.claim(NODE_A, "serial-a", runtime_identity=without_receipt)
+    with sessions() as session:
+        operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
+        assert operation is not None and operation.state == "succeeded"
+        assert operation.retry_due_at is None
+        assert operation.retry_disposition is None
+    _upgrade_node(operations, NODE_B, "serial-b")
+    with sessions() as session:
+        parent = session.get(Job, job.id)
+        assert parent is not None and parent.state == "succeeded"
+
+
+def test_failed_upgrade_retries_by_itself_and_names_the_failure(tmp_path) -> None:
+    """The parked order shows why it failed and never needs an operator."""
+
+    clock = Clock()
+    sessions, operations, _upgrades, _job = _rollout(
+        tmp_path, "failed-detail", clock=clock
+    )
+    first = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    operations.fail(first, "agent upgrade helper is unavailable")
+    with sessions() as session:
+        operation = session.get(AgentOperation, fenced_operation(sessions, first).id)
+        assert operation is not None
+        assert operation.retry_disposition == "retry"
+        assert operation.retry_due_at is not None
+        assert operation.status_reason is not None
+        assert "agent upgrade helper is unavailable" in operation.status_reason
+        assert "retries automatically" in operation.status_reason
+    clock.advance(seconds=960)
+    retry = operations.claim(NODE_A, "serial-a", runtime_identity=OLD_IDENTITY)
+    assert retry is not None
+    assert fenced_attempt(sessions, retry).attempt == 2
+
+
 def test_queued_exact_target_contact_settles_without_inventing_an_install_attempt(
     tmp_path,
 ) -> None:

@@ -2793,9 +2793,14 @@ class AgentJobService:
                         runtime_identity.binary_digest == payload.target_binary_digest
                         and runtime_identity.build_digest == payload.target_build_digest
                     )
-                    # ``cancelled``, not ``succeeded``: no install happened, so
-                    # no package receipt may be derived from this order.
-                    operation.state = "cancelled" if at_target else "failed"
+                    # ``cancelled`` when this order never attempted an install:
+                    # no package receipt may be derived from it.  A previously
+                    # attempted install is proven by the target build.
+                    operation.state = (
+                        ("succeeded" if operation.current_attempt >= 1 else "cancelled")
+                        if at_target
+                        else "failed"
+                    )
                     operation.status_reason = (
                         "Spark already runs the requested agent build"
                         if at_target
