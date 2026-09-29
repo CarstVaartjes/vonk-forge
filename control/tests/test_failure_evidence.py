@@ -399,7 +399,6 @@ def test_composed_controller_exposes_exact_download_on_operation_projection(serv
         raise AssertionError("job operations are not projected in this test")
 
     operations = OperationApiServices(
-        endpoint=lambda _alias, _gateway: {},
         agents=list,
         job_operations=job_operations,
         resume_job=lambda _: None,

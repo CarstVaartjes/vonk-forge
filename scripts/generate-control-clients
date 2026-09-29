@@ -35,21 +35,6 @@ class _SchemaJobs:
     def get(self, job_id: str) -> object:
         raise KeyError(job_id)
 
-    def list(self, *, limit: int = 100) -> list[object]:
-        del limit
-        return []
-
-    def list_page(
-        self,
-        *,
-        limit: int = 100,
-        cursor: str | None = None,
-        status: str | None = None,
-        target: str | None = None,
-    ) -> tuple[list[object], str | None, int]:
-        del limit, cursor, status, target
-        return [], None, 0
-
 
 def _schema(*, include_browser_auth: bool) -> dict[str, object]:
     from sqlalchemy.orm import sessionmaker

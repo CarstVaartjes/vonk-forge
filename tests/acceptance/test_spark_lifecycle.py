@@ -2644,30 +2644,6 @@ class SparkLifecycle:
                 if self.control is not None:
                     parts: list[str] = []
                     try:
-                        _, listed = self.control.request(
-                            "GET", "/api/jobs", query={"target": node_id, "limit": 5}
-                        )
-                        rows = require_object(listed, "stalled job list").get("jobs")
-                        if isinstance(rows, list):
-                            for row in rows:
-                                job = require_object(row, "stalled job")
-                                parts.append(
-                                    f"{job.get('id')} {job.get('kind')}"
-                                    f"={job.get('state')}"
-                                    f" progress={json.dumps(job.get('progress'), sort_keys=True)[:160]}"
-                                )
-                    except (
-                        KeyError,
-                        OSError,
-                        SliceError,
-                        TypeError,
-                        ValueError,
-                    ) as error:
-                        parts.append(
-                            "jobs unavailable: "
-                            + self._redact_diagnostics(str(error), limit=200)
-                        )
-                    try:
                         _, node_operations = self.control.request(
                             "GET",
                             "/api/operations",
