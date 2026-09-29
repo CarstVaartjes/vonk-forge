@@ -4,22 +4,26 @@ import json
 import uuid
 from copy import deepcopy
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 import vonk_control.catalog_entities as catalog_entities_module
+import vonk_control.catalog_sync as catalog_sync_module
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_api import ManagedCatalogSyncResponse, _managed_sync
 from vonk_control.catalog_queries import active_head_revision
 from vonk_control.catalog_revision_contract import (
-    CatalogRevisionContractError,
     read_catalog_projection,
 )
 from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync import (
+    CatalogSyncError,
+    ManagedRecipeCatalogSyncService,
+    _empty_result,
+)
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -292,8 +296,8 @@ def test_unchanged_catalog_refreshes_build_policy_without_refetching_recipe(
                 )
                 .values(projected=stored)
             )
-        with pytest.raises(CatalogRevisionContractError):
-            sync.automatic()
+        # An unreadable revision is skipped, never a reason to stop syncing.
+        sync.automatic()
         return
 
     refreshed = sync.automatic()
@@ -884,3 +888,63 @@ def test_automatic_read_failure_is_visible_until_a_sync_succeeds(
     assert status is not None
     assert status.id == recovered.id
     assert status.last_error is None
+
+
+def test_sync_reruns_for_the_same_commit_after_a_controller_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions, service, reader, _item = _fixture(tmp_path)
+    sync = _sync(sessions, service, reader)
+    first = sync.automatic()
+    assert sync.automatic().id == first.id
+
+    # Documents this Controller could not read before are read after an upgrade.
+    monkeypatch.setattr(
+        catalog_sync_module, "_controller_marker", lambda: "vonk-control=next"
+    )
+    again = sync.automatic()
+    assert again.id != first.id
+    assert again.commit == first.commit
+
+
+def test_stale_running_sync_never_blocks_a_new_sync(tmp_path: Path) -> None:
+    sessions, service, reader, _item = _fixture(tmp_path)
+    sync = _sync(sessions, service, reader)
+    now = datetime(2026, 9, 5, tzinfo=UTC)
+
+    def running(started: datetime) -> str:
+        with sessions.begin() as session:
+            row = RecipeLibrarySyncRun(
+                request_key=str(uuid.uuid4()),
+                trigger="automatic",
+                state="running",
+                active_slot="managed-recipes",
+                repository="CarstVaartjes/vonk-forge-recipes",
+                total_count=0,
+                processed_count=0,
+                imported_count=0,
+                updated_count=0,
+                current_count=0,
+                conflict_count=0,
+                missing_count=0,
+                result=_empty_result(),
+                actor="test",
+                created_at=started,
+                started_at=started,
+            )
+            session.add(row)
+            session.flush()
+            return row.id
+
+    live = running(now - timedelta(minutes=1))
+    with pytest.raises(CatalogSyncError, match="already running"):
+        sync.automatic()
+    with sessions.begin() as session:
+        session.delete(session.get(RecipeLibrarySyncRun, live))
+
+    dead = running(now - timedelta(hours=1))
+    assert sync.automatic().state == "current"
+    with sessions() as session:
+        row = session.get(RecipeLibrarySyncRun, dead)
+        assert row is not None
+        assert (row.state, row.error_code) == ("failed", "catalog.sync_lease_expired")

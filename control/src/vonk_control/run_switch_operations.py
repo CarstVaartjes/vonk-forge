@@ -212,6 +212,7 @@ from .runtime_image_preparation import (
 from .runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
+from .strict_json import read_stored_document
 
 # Persisted progress and catalog documents arrive as decoded JSON, so the
 # contract's closed value sets are read back through the declared alias instead
@@ -8417,8 +8418,11 @@ def _parse_persisted_result(value: object) -> RunSwitchOperationResult | None:
     if value is None:
         return None
     try:
-        return RunSwitchOperationResult.model_validate_json(
-            json.dumps(value), strict=True
+        return read_stored_document(
+            lambda document: RunSwitchOperationResult.model_validate_json(
+                json.dumps(document), strict=True
+            ),
+            value,
         )
     except (TypeError, ValueError) as error:
         raise RunSwitchOperationConflict(
@@ -9463,7 +9467,12 @@ def _load_plan(value: object) -> RunSwitchPlan:
     # Job.payload is JSON, so strict validation must permit the RFC3339
     # timestamp representation when a worker restarts and reloads a plan.
     try:
-        return RunSwitchPlan.model_validate_json(json.dumps(value), strict=True)
+        return read_stored_document(
+            lambda document: RunSwitchPlan.model_validate_json(
+                json.dumps(document), strict=True
+            ),
+            value,
+        )
     except (TypeError, ValueError) as error:
         raise RunSwitchOperationConflict(
             "run-switch persisted plan is invalid"

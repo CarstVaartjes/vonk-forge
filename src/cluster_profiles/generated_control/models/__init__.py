@@ -250,7 +250,6 @@ from .list_recipe_library_sort import ListRecipeLibrarySort
 from .managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
 from .managed_catalog_sync_failure import ManagedCatalogSyncFailure
 from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
-from .managed_catalog_sync_request import ManagedCatalogSyncRequest
 from .managed_catalog_sync_response import ManagedCatalogSyncResponse
 from .managed_catalog_sync_response_state import ManagedCatalogSyncResponseState
 from .managed_catalog_sync_response_trigger import ManagedCatalogSyncResponseTrigger
@@ -776,7 +775,6 @@ __all__ = (
     "ManagedCatalogStaleRecipe",
     "ManagedCatalogSyncFailure",
     "ManagedCatalogSyncProblem",
-    "ManagedCatalogSyncRequest",
     "ManagedCatalogSyncResponse",
     "ManagedCatalogSyncResponseState",
     "ManagedCatalogSyncResponseTrigger",

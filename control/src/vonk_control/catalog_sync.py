@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from importlib import metadata
 from typing import Protocol
 
 from sqlalchemy import and_, select
@@ -16,7 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
 from .bounded_json import require_integer, require_sequence
-from .catalog_service import CatalogError, CatalogService
+from .catalog_service import CatalogService
 from .catalog_sync_contract import ManagedCatalogSyncResult
 from .models import RecipeLibrarySyncRun
 from .recipe_library_types import (
@@ -25,7 +27,22 @@ from .recipe_library_types import (
     RecipeLibrarySnapshot,
 )
 
+_LOGGER = logging.getLogger(__name__)
 _MAX_RESULT_ITEMS = 256
+# A running sync that has made no progress for this long is dead (crashed
+# Controller, lost thread); the next sync replaces it.
+_SYNC_LEASE = timedelta(minutes=10)
+
+
+def _controller_marker() -> str:
+    """Identify what this Controller can read, so an upgrade re-syncs the catalog."""
+    parts = []
+    for package in ("vonk-control", "vonk-forge-public-contracts"):
+        try:
+            parts.append(f"{package}={metadata.version(package)}")
+        except metadata.PackageNotFoundError:
+            parts.append(f"{package}=unknown")
+    return ";".join(parts)[:128]
 
 
 class RecipeLibrarySyncReader(Protocol):
@@ -133,8 +150,10 @@ class ManagedRecipeCatalogSyncService:
             error_code=None,
             error_detail=None,
             actor=actor,
+            controller_marker=_controller_marker(),
             created_at=self._clock(),
             started_at=self._clock(),
+            heartbeat_at=self._clock(),
             completed_at=None,
         )
         try:
@@ -144,6 +163,15 @@ class ManagedRecipeCatalogSyncService:
                         RecipeLibrarySyncRun.state == "running"
                     )
                 )
+                if active is not None and self._expired(active):
+                    _LOGGER.warning(
+                        "replacing managed catalog sync %s: no progress since %s",
+                        active.id,
+                        active.heartbeat_at or active.started_at,
+                    )
+                    self._expire(active)
+                    session.flush()
+                    active = None
                 if active is not None:
                     raise CatalogSyncError(
                         "catalog.sync_in_progress",
@@ -174,12 +202,30 @@ class ManagedRecipeCatalogSyncService:
                 prepare(snapshot)
             self._initialize(run.id, snapshot)
             self._finish(run.id, self._apply(run.id, snapshot, actor=actor))
-        except (CatalogError, RecipeLibraryError, CatalogSyncError) as error:
+        except Exception as error:
+            # Whatever went wrong, never leave the run "running": it would
+            # block every later sync until its lease expired.
             code = str(getattr(error, "code", "catalog.sync_failed"))
-            detail = str(getattr(error, "detail", str(error)))
+            detail = str(getattr(error, "detail", str(error))) or type(error).__name__
             self._fail(run.id, code, detail)
             raise
         return self.get(run.id)
+
+    def _expired(self, run: RecipeLibrarySyncRun) -> bool:
+        last = run.heartbeat_at or run.started_at
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        return self._clock() - last > _SYNC_LEASE
+
+    def _expire(self, run: RecipeLibrarySyncRun) -> None:
+        failed = json.loads(canonical_message(_result(run.result)))
+        failed["state"] = "failed"
+        run.state = "failed"
+        run.active_slot = None
+        run.result = json.loads(canonical_message(_result(failed)))
+        run.error_code = "catalog.sync_lease_expired"
+        run.error_detail = "managed catalog sync made no progress and was replaced"
+        run.completed_at = self._clock()
 
     def latest(self) -> CatalogSyncView | None:
         with self._sessions() as session:
@@ -270,7 +316,11 @@ class ManagedRecipeCatalogSyncService:
             # commit was completely applied; partial results must be retried so
             # successful immutable imports are reused while failed entries are
             # fetched again.
-            if current is not None and _result(current.result).state == "current":
+            if (
+                current is not None
+                and _result(current.result).state == "current"
+                and current.controller_marker == _controller_marker()
+            ):
                 return _view(current)
         return self.sync(
             request_key=str(uuid.uuid4()),
@@ -479,6 +529,7 @@ class ManagedRecipeCatalogSyncService:
                 raise CatalogSyncError(
                     "catalog.sync_state_invalid", "managed catalog sync state changed"
                 )
+            run.heartbeat_at = self._clock()
             run.observed_commit = snapshot.commit
             run.library_version = snapshot.version
             run.library_updated_at = snapshot.updated_at
@@ -496,6 +547,7 @@ class ManagedRecipeCatalogSyncService:
                     "catalog.sync_state_invalid", "managed catalog sync state changed"
                 )
             parsed = _result(result)
+            run.heartbeat_at = self._clock()
             run.processed_count += 1
             run.imported_count = parsed.imported_count
             run.updated_count = parsed.updated_count

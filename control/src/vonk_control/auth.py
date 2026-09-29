@@ -77,7 +77,6 @@ MUTATION_ROLES = {
     ("POST", "/api/profile/applications/{application_id}/cancel"): frozenset(
         {"administrator"}
     ),
-    ("POST", "/api/catalog/managed-recipes/sync"): frozenset({"administrator"}),
     ("POST", "/api/key"): frozenset({"administrator"}),
     ("POST", "/api/key/{name}/revoke"): frozenset({"administrator"}),
     ("POST", "/api/recipe/runs/{run_id}/artifact-jobs"): frozenset(

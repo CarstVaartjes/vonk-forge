@@ -78,7 +78,10 @@ from .cache_removal_review import (
 )
 from .cached_file_verification import verified_files
 from .catalog_queries import active_head_revision
-from .catalog_revision_contract import read_catalog_document
+from .catalog_revision_contract import (
+    CatalogRevisionContractError,
+    read_catalog_document,
+)
 from .failure_classification import is_security_failure
 from .logging import log_event, redact_text
 from .model_cache_contract import (
@@ -1691,7 +1694,11 @@ class ModelCacheService:
             def compatible_model(
                 revision: CatalogDocumentRevision,
             ) -> tuple[str, str | None]:
-                recipe = read_catalog_document(revision)
+                try:
+                    recipe = read_catalog_document(revision)
+                except CatalogRevisionContractError:
+                    # Written under another contract; not usable, not fatal.
+                    return "", None
                 if not isinstance(recipe, RecipeDefinition):
                     raise ModelCacheResolutionError(
                         "model_cache.recipe_invalid", "recipe revision is not canonical"
@@ -1714,7 +1721,10 @@ class ModelCacheService:
                     )
                     if model_revision is None:
                         continue
-                    model = read_catalog_document(model_revision)
+                    try:
+                        model = read_catalog_document(model_revision)
+                    except CatalogRevisionContractError:
+                        continue
                     if not isinstance(model, ModelDefinition):
                         continue
                     variant = model.identity.variant
@@ -8202,7 +8212,10 @@ class ModelCacheService:
             )
         if current is None:
             return None, []
-        current_document = read_catalog_document(current)
+        try:
+            current_document = read_catalog_document(current)
+        except CatalogRevisionContractError:
+            return None, []
         if not isinstance(current_document, ModelDefinition):
             return None, []
         current_signature = _model_lineage_signature(current_document)
@@ -8215,7 +8228,10 @@ class ModelCacheService:
         ):
             if candidate.content_digest == current.content_digest:
                 continue
-            candidate_document = read_catalog_document(candidate)
+            try:
+                candidate_document = read_catalog_document(candidate)
+            except CatalogRevisionContractError:
+                continue
             if not isinstance(candidate_document, ModelDefinition):
                 continue
             if _model_lineage_signature(candidate_document) != current_signature:

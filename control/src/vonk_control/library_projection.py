@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Literal, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import (
@@ -209,6 +210,32 @@ def _filter_digest(filters: Mapping[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+_LOGGER = logging.getLogger(__name__)
+_LOGGED_UNREADABLE: set[str] = set()
+
+
+def _readable(revision: CatalogDocumentRevision) -> bool:
+    """Whether this Controller can read the revision; log an unreadable one once."""
+
+    try:
+        _canonical_document(
+            revision, ModelDefinition if revision.kind == "model" else RecipeDefinition
+        )
+    except LibraryProjectionError as error:
+        if revision.id not in _LOGGED_UNREADABLE:
+            _LOGGED_UNREADABLE.add(revision.id)
+            _LOGGER.warning(
+                "skipping unreadable %s revision %s (%s/%s): %s",
+                revision.kind,
+                revision.id,
+                revision.publisher,
+                revision.slug,
+                error.__cause__ or error,
+            )
+        return False
+    return True
+
+
 def _canonical_document(
     revision: CatalogDocumentRevision,
     document_type: type[ModelDefinition | RecipeDefinition],
@@ -216,7 +243,7 @@ def _canonical_document(
     try:
         reader = read_model if document_type is ModelDefinition else read_recipe
         return reader(revision.document)
-    except ValidationError as error:
+    except (TypeError, ValueError) as error:
         raise LibraryProjectionError(
             f"active {revision.kind} document is not canonical"
         ) from error
@@ -819,7 +846,7 @@ class LibraryProjection:
                     CatalogDocumentRevision.content_digest.in_(local_digests),
                 ),
             )
-            return list(session.scalars(query))
+            return [row for row in session.scalars(query) if _readable(row)]
 
     def _documents_for_snapshot(
         self, snapshot: Mapping[str, Mapping[str, object]]
